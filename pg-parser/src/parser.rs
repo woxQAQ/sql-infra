@@ -1,26 +1,17 @@
+use crate::TokenKind;
 use crate::ast::*;
-use crate::lexer::{LexError, Token, TokenKind, TokenValue, lex};
+use crate::lexer::{LexError, Token, TokenValue, lex};
 
-type StdString = std::string::String;
 type PResult<T> = Result<T, ParseError>;
-
-macro_rules! node {
-    ($ty:ident) => {
-        Node::$ty($ty {
-            node_tag: NodeTag::$ty,
-            ..$ty::default()
-        })
-    };
-}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
-    pub message: StdString,
+    pub message: std::string::String,
     pub location: usize,
 }
 
 impl ParseError {
-    fn new(location: usize, message: impl Into<StdString>) -> Self {
+    fn new(location: usize, message: impl Into<std::string::String>) -> Self {
         Self {
             location,
             message: message.into(),
@@ -1358,7 +1349,6 @@ impl Parser {
                 node_tag: NodeTag::CreateEnumStmt,
                 type_name,
                 vals,
-                ..CreateEnumStmt::default()
             }))
         } else if self.consume(TokenKind::Range) {
             self.skip_rest();
@@ -1378,7 +1368,6 @@ impl Parser {
                 node_tag: NodeTag::CompositeTypeStmt,
                 typevar: Some(Box::new(range_var_from_parts(list_to_names(&type_name), 0))),
                 coldeflist,
-                ..CompositeTypeStmt::default()
             }))
         }
     }
@@ -2366,12 +2355,8 @@ impl Parser {
             self.peek_kind(),
             TokenKind::Column | TokenKind::Constraint | TokenKind::Attribute
         ) {
-            let subtype = self.advance().kind;
-            if subtype == TokenKind::Column {
-                subname = self.consume_name();
-            } else {
-                subname = self.consume_name();
-            }
+            self.advance();
+            subname = self.consume_name();
         }
         self.skip_until_top_level(&[TokenKind::To, TokenKind::Char(';'), TokenKind::Eof]);
         let newname = if self.consume(TokenKind::To) {
@@ -2465,7 +2450,7 @@ impl Parser {
     fn parse_drop(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Drop)?;
         let concurrent = self.consume(TokenKind::Concurrently);
-        let node = match self.peek_kind() {
+        match self.peek_kind() {
             TokenKind::Database => self.parse_drop_database(),
             TokenKind::Cast => Ok(self.parse_drop_special(ObjectType::Cast, concurrent)),
             TokenKind::Transform => Ok(self.parse_drop_special(ObjectType::Transform, concurrent)),
@@ -2483,8 +2468,7 @@ impl Parser {
             TokenKind::Tablespace => self.parse_drop_tablespace(),
             TokenKind::Subscription => self.parse_drop_subscription(),
             _ => Ok(self.parse_drop_stmt(concurrent)),
-        };
-        node
+        }
     }
 
     fn parse_drop_stmt(&mut self, concurrent: bool) -> Node {
@@ -2682,8 +2666,6 @@ impl Parser {
             } else {
                 VariableSetKind::Reset
             }
-        } else if self.peek_kind() == TokenKind::Char('=') || self.peek_kind() == TokenKind::To {
-            VariableSetKind::SetValue
         } else {
             VariableSetKind::SetValue
         };
@@ -2903,7 +2885,10 @@ impl Parser {
     fn parse_checkpoint(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Checkpoint)?;
         self.skip_rest();
-        Ok(node!(CheckPointStmt))
+        Ok(Node::CheckPointStmt(CheckPointStmt {
+            node_tag: NodeTag::CheckPointStmt,
+            ..CheckPointStmt::default()
+        }))
     }
 
     fn parse_discard(&mut self) -> PResult<Node> {
@@ -4248,7 +4233,7 @@ impl Parser {
             return None;
         }
         let args = if self.consume(TokenKind::Char('(')) {
-            let args = if self.consume(TokenKind::Char('*')) {
+            if self.consume(TokenKind::Char('*')) {
                 self.consume(TokenKind::Char(')'));
                 vec![Node::AStar(AStar {
                     node_tag: NodeTag::AStar,
@@ -4257,8 +4242,7 @@ impl Parser {
                 let args = self.parse_expr_list_until(&[TokenKind::Char(')')]);
                 self.consume(TokenKind::Char(')'));
                 args
-            };
-            args
+            }
         } else {
             Vec::new()
         };
@@ -4358,7 +4342,7 @@ impl Parser {
         }
     }
 
-    fn consume_name_parts(&mut self) -> Vec<StdString> {
+    fn consume_name_parts(&mut self) -> Vec<std::string::String> {
         let mut parts = Vec::new();
         let Some(first) = self.consume_name() else {
             return parts;
@@ -4750,7 +4734,7 @@ impl Parser {
         }
     }
 
-    fn consume_setting_name(&mut self) -> Option<StdString> {
+    fn consume_setting_name(&mut self) -> Option<std::string::String> {
         let mut parts = Vec::new();
         while !self.at_any(&[
             TokenKind::To,
@@ -4774,7 +4758,7 @@ impl Parser {
         }
     }
 
-    fn consume_name(&mut self) -> Option<StdString> {
+    fn consume_name(&mut self) -> Option<std::string::String> {
         let token = self.peek().clone();
         let name = token_name(&token)?;
         if matches!(
@@ -4793,7 +4777,7 @@ impl Parser {
         }
     }
 
-    fn consume_string_like(&mut self) -> Option<StdString> {
+    fn consume_string_like(&mut self) -> Option<std::string::String> {
         match self.peek().value.clone() {
             Some(TokenValue::String(value)) => {
                 self.advance();
@@ -5305,7 +5289,7 @@ impl Parser {
             .unwrap_or(self.location())
     }
 
-    fn error_here(&self, message: impl Into<StdString>) -> ParseError {
+    fn error_here(&self, message: impl Into<std::string::String>) -> ParseError {
         ParseError::new(self.location(), message)
     }
 }
@@ -5369,7 +5353,7 @@ fn make_aexpr<I, S>(
 ) -> Node
 where
     I: IntoIterator<Item = S>,
-    S: Into<StdString>,
+    S: Into<std::string::String>,
 {
     Node::AExpr(AExpr {
         node_tag: NodeTag::AExpr,
@@ -5462,16 +5446,16 @@ fn expression_boundary(kind: TokenKind) -> bool {
     )
 }
 
-fn split_alias(tokens: Vec<Token>) -> (Option<StdString>, Vec<Token>) {
-    if let Some(index) = tokens.iter().position(|token| token.kind == TokenKind::As) {
-        if let Some(name) = tokens.get(index + 1).and_then(token_name) {
-            return (Some(name), tokens[..index].to_vec());
-        }
+fn split_alias(tokens: Vec<Token>) -> (Option<std::string::String>, Vec<Token>) {
+    if let Some(index) = tokens.iter().position(|token| token.kind == TokenKind::As)
+        && let Some(name) = tokens.get(index + 1).and_then(token_name)
+    {
+        return (Some(name), tokens[..index].to_vec());
     }
     (None, tokens)
 }
 
-fn token_name(token: &Token) -> Option<StdString> {
+fn token_name(token: &Token) -> Option<std::string::String> {
     match &token.value {
         Some(TokenValue::String(value)) => Some(value.clone()),
         Some(TokenValue::Keyword(value)) => Some((*value).to_owned()),
@@ -5483,7 +5467,7 @@ fn token_name(token: &Token) -> Option<StdString> {
     }
 }
 
-fn token_text(token: &Token) -> StdString {
+fn token_text(token: &Token) -> std::string::String {
     token_name(token).unwrap_or_else(|| match token.kind {
         TokenKind::Char(ch) => ch.to_string(),
         other => format!("{:?}", other).to_ascii_lowercase(),
@@ -6390,15 +6374,15 @@ fn find_matching_close(tokens: &[Token], open: usize) -> Option<usize> {
     None
 }
 
-fn tokens_to_text(tokens: &[Token]) -> StdString {
+fn tokens_to_text(tokens: &[Token]) -> std::string::String {
     tokens.iter().map(token_text).collect::<Vec<_>>().join(" ")
 }
 
-fn make_string_node(value: impl Into<StdString>) -> Node {
+fn make_string_node(value: impl Into<std::string::String>) -> Node {
     Node::String(String::new(value))
 }
 
-fn range_var_from_parts(parts: Vec<StdString>, location: usize) -> RangeVar {
+fn range_var_from_parts(parts: Vec<std::string::String>, location: usize) -> RangeVar {
     let mut range = RangeVar {
         node_tag: NodeTag::RangeVar,
         inh: true,
@@ -6421,7 +6405,7 @@ fn range_var_from_parts(parts: Vec<StdString>, location: usize) -> RangeVar {
     range
 }
 
-fn list_to_names(list: &[Node]) -> Vec<StdString> {
+fn list_to_names(list: &[Node]) -> Vec<std::string::String> {
     list.iter()
         .filter_map(|node| match node {
             Node::String(value) => value.sval.clone(),
