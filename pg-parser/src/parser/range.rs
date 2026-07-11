@@ -1,0 +1,328 @@
+use super::*;
+
+impl Parser {
+    pub(super) fn parse_from_clause_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+        let mut items = Vec::new();
+        while !self.at_any(stops) {
+            items.push(self.parse_from_item(stops)?);
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+            if self.at_any(stops) {
+                return Err(self.error_here("expected a FROM item after ','"));
+            }
+        }
+        if items.is_empty() {
+            return Err(self.error_here("FROM requires at least one table reference"));
+        }
+        Ok(items)
+    }
+
+    pub(super) fn parse_from_item(&mut self, stops: &[TokenKind]) -> PResult<Node> {
+        let lateral = self.consume(TokenKind::LateralP);
+        let mut base = if self.at(TokenKind::GraphTable) {
+            if lateral {
+                return Err(self.error_here("LATERAL is not allowed before GRAPH_TABLE"));
+            }
+            Node::RangeGraphTable(self.parse_graph_table()?)
+        } else if self.at(TokenKind::Xmltable) {
+            Node::RangeTableFunc(self.parse_xmltable(lateral)?)
+        } else if self.at(TokenKind::JsonTable) {
+            Node::JsonTable(self.parse_json_table(lateral)?)
+        } else if self.at(TokenKind::Rows) && self.peek_kind_n(1) == TokenKind::From {
+            Node::RangeFunction(self.parse_rows_from(lateral)?)
+        } else if self.at(TokenKind::Only) {
+            if lateral {
+                return Err(self.error_here("LATERAL requires a function or subquery"));
+            }
+            Node::RangeVar(self.parse_relation_expr(true)?)
+        } else if self.consume(TokenKind::Char('(')) {
+            let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            self.expect(TokenKind::Char(')'))?;
+            if matches!(
+                inner.first().map(|token| token.kind),
+                Some(TokenKind::With | TokenKind::Select | TokenKind::Values | TokenKind::Table)
+            ) {
+                let subquery = parse_select_statement_tokens(inner)?;
+                Node::RangeSubselect(RangeSubselect {
+                    node_tag: NodeTag::RangeSubselect,
+                    lateral,
+                    subquery: Some(Box::new(subquery)),
+                    alias: self.parse_optional_alias_clause()?,
+                })
+            } else {
+                let item_location = inner
+                    .first()
+                    .map_or(self.location(), |token| token.location);
+                let location = inner.last().map_or(self.location(), |token| token.location);
+                let mut tokens = inner;
+                tokens.push(Token {
+                    kind: TokenKind::Eof,
+                    location,
+                    value: None,
+                });
+                let mut nested = Parser { tokens, pos: 0 };
+                let mut item = nested.parse_from_item(&[TokenKind::Eof])?;
+                if !nested.at(TokenKind::Eof) {
+                    return Err(ParseError::new(
+                        nested.location(),
+                        "unexpected token in parenthesized FROM item",
+                    ));
+                }
+                if !matches!(item, Node::JoinExpr(_) | Node::RangeSubselect(_)) {
+                    return Err(ParseError::new(
+                        item_location,
+                        "parenthesized FROM item must be a joined table or subquery",
+                    ));
+                }
+                if lateral {
+                    match &mut item {
+                        Node::RangeSubselect(range) => range.lateral = true,
+                        Node::JoinExpr(_) => {
+                            return Err(self.error_here("LATERAL requires a function or subquery"));
+                        }
+                        _ => unreachable!("parenthesized FROM item shape was checked above"),
+                    }
+                }
+                if let Some(alias) = self.parse_optional_alias_clause()? {
+                    match &mut item {
+                        Node::JoinExpr(join) => join.alias = Some(alias),
+                        Node::RangeSubselect(range) => range.alias = Some(alias),
+                        _ => unreachable!("parenthesized FROM item shape was checked above"),
+                    }
+                }
+                item
+            }
+        } else {
+            let save = self.pos;
+            let mut name_stops = vec![
+                TokenKind::Char('('),
+                TokenKind::As,
+                TokenKind::Char(','),
+                TokenKind::Join,
+                TokenKind::InnerP,
+                TokenKind::Left,
+                TokenKind::Right,
+                TokenKind::Full,
+                TokenKind::Cross,
+                TokenKind::Natural,
+                TokenKind::On,
+                TokenKind::Using,
+                TokenKind::Tablesample,
+                TokenKind::Char(';'),
+                TokenKind::Eof,
+            ];
+            for stop in stops {
+                if !name_stops.contains(stop) {
+                    name_stops.push(*stop);
+                }
+            }
+            let name_tokens = self.take_until_top_level(&name_stops);
+            let looks_like_function_name = self.at(TokenKind::Char('('))
+                && !name_tokens.is_empty()
+                && parse_qualified_type_names(&name_tokens).is_ok();
+            if looks_like_function_name {
+                self.pos = save;
+                let function = self.parse_function_expression()?;
+                let ordinality = if self.consume(TokenKind::With) {
+                    self.expect(TokenKind::Ordinality)?;
+                    true
+                } else {
+                    false
+                };
+                let (alias, coldeflist) = self.parse_function_alias_clause()?;
+                Node::RangeFunction(RangeFunction {
+                    node_tag: NodeTag::RangeFunction,
+                    lateral,
+                    ordinality,
+                    functions: vec![name_list_node(vec![function, name_list_node(Vec::new())])],
+                    alias,
+                    coldeflist,
+                    ..RangeFunction::default()
+                })
+            } else {
+                self.pos = save;
+                if lateral {
+                    return Err(self.error_here("LATERAL requires a function or subquery"));
+                }
+                Node::RangeVar(self.parse_relation_expr(true)?)
+            }
+        };
+        if self.consume(TokenKind::Tablesample) {
+            if !matches!(base, Node::RangeVar(_)) {
+                return Err(self.error_here("TABLESAMPLE requires a relation"));
+            }
+            let location = self.location();
+            let method = self.parse_name_list();
+            if method.is_empty() {
+                return Err(self.error_here("TABLESAMPLE requires a sampling method"));
+            }
+            self.expect(TokenKind::Char('('))?;
+            let args = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            if args.is_empty() {
+                return Err(self.error_here("TABLESAMPLE requires at least one argument"));
+            }
+            self.expect(TokenKind::Char(')'))?;
+            let repeatable = if self.consume(TokenKind::Repeatable) {
+                self.expect(TokenKind::Char('('))?;
+                let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+                self.expect(TokenKind::Char(')'))?;
+                Some(expr)
+            } else {
+                None
+            };
+            base = Node::RangeTableSample(RangeTableSample {
+                node_tag: NodeTag::RangeTableSample,
+                relation: Some(Box::new(base)),
+                method,
+                args,
+                repeatable,
+                location: location as ParseLoc,
+            });
+        }
+        while !self.at_any(&extend_stops(stops, TokenKind::Char(','))) {
+            if matches!(
+                self.peek_kind(),
+                TokenKind::Join
+                    | TokenKind::InnerP
+                    | TokenKind::Left
+                    | TokenKind::Right
+                    | TokenKind::Full
+                    | TokenKind::Cross
+                    | TokenKind::Natural
+            ) {
+                base = self.parse_join_tail(base, stops)?;
+            } else {
+                break;
+            }
+        }
+        Ok(base)
+    }
+
+    pub(super) fn parse_rows_from(&mut self, lateral: bool) -> PResult<RangeFunction> {
+        self.expect(TokenKind::Rows)?;
+        self.expect(TokenKind::From)?;
+        self.expect(TokenKind::Char('('))?;
+        let mut functions = Vec::new();
+        loop {
+            let expression_tokens = self.take_until_top_level(&[
+                TokenKind::As,
+                TokenKind::Char(','),
+                TokenKind::Char(')'),
+            ]);
+            let expression = parse_expression_tokens(expression_tokens)?;
+            if !is_function_expression_node(&expression) {
+                return Err(self.error_here("ROWS FROM items must be function expressions"));
+            }
+            let coldeflist = if self.consume(TokenKind::As) {
+                self.expect(TokenKind::Char('('))?;
+                let definitions = self.parse_table_func_element_list_body()?;
+                self.expect(TokenKind::Char(')'))?;
+                definitions
+            } else {
+                Vec::new()
+            };
+            functions.push(name_list_node(vec![expression, name_list_node(coldeflist)]));
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+            if self.at(TokenKind::Char(')')) {
+                return Err(self.error_here("expected a ROWS FROM item after ','"));
+            }
+        }
+        self.expect(TokenKind::Char(')'))?;
+        let ordinality = if self.consume(TokenKind::With) {
+            self.expect(TokenKind::Ordinality)?;
+            true
+        } else {
+            false
+        };
+        let (alias, coldeflist) = self.parse_function_alias_clause()?;
+        Ok(RangeFunction {
+            node_tag: NodeTag::RangeFunction,
+            lateral,
+            ordinality,
+            is_rowsfrom: true,
+            functions,
+            alias,
+            coldeflist,
+        })
+    }
+
+    pub(super) fn parse_function_alias_clause(
+        &mut self,
+    ) -> PResult<(Option<Box<Alias>>, NodeList)> {
+        let has_as = self.consume(TokenKind::As);
+        if has_as && self.consume(TokenKind::Char('(')) {
+            let coldeflist = self.parse_table_func_element_list_body()?;
+            self.expect(TokenKind::Char(')'))?;
+            return Ok((None, coldeflist));
+        }
+        let aliasname = if has_as {
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("expected a function alias"))?
+        } else {
+            let Some(aliasname) = self.consume_col_id() else {
+                return Ok((None, Vec::new()));
+            };
+            aliasname
+        };
+        let mut alias = Box::new(Alias {
+            node_tag: NodeTag::Alias,
+            aliasname: Some(aliasname),
+            ..Alias::default()
+        });
+        if !self.at(TokenKind::Char('(')) {
+            return Ok((Some(alias), Vec::new()));
+        }
+
+        let save = self.pos;
+        self.advance();
+        let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+        self.pos = save;
+        let chunks = split_top_level_commas(inner);
+        let is_alias_column_list = !chunks.is_empty()
+            && chunks.iter().all(|chunk| {
+                chunk.len() == 1
+                    && chunk.first().is_some_and(|token| {
+                        token_name_in_categories(
+                            token,
+                            &[KeywordCategory::Unreserved, KeywordCategory::ColName],
+                        )
+                        .is_some()
+                    })
+            });
+        self.expect(TokenKind::Char('('))?;
+        if is_alias_column_list {
+            alias.colnames = self.parse_parenthesized_name_list_body()?;
+            self.expect(TokenKind::Char(')'))?;
+            Ok((Some(alias), Vec::new()))
+        } else {
+            let coldeflist = self.parse_table_func_element_list_body()?;
+            self.expect(TokenKind::Char(')'))?;
+            Ok((Some(alias), coldeflist))
+        }
+    }
+
+    pub(super) fn parse_table_func_element_list_body(&mut self) -> PResult<NodeList> {
+        let mut definitions = Vec::new();
+        if self.at(TokenKind::Char(')')) {
+            return Err(self.error_here("column definition list cannot be empty"));
+        }
+        loop {
+            definitions.push(
+                *self.parse_table_func_element_until(&[
+                    TokenKind::Char(','),
+                    TokenKind::Char(')'),
+                ])?,
+            );
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+            if self.at(TokenKind::Char(')')) {
+                return Err(self.error_here("expected a column definition after ','"));
+            }
+        }
+        Ok(definitions)
+    }
+}

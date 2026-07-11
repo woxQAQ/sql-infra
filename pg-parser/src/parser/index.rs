@@ -1,0 +1,226 @@
+use super::*;
+
+impl Parser {
+    pub(super) fn parse_index(&mut self, unique_seen: bool) -> PResult<Node> {
+        let unique = unique_seen || self.consume(TokenKind::Unique);
+        self.expect(TokenKind::Index)?;
+        let concurrent = self.consume(TokenKind::Concurrently);
+        let if_not_exists = self.consume_if_not_exists()?;
+        let idxname = if self.peek_kind() != TokenKind::On {
+            self.consume_col_id()
+        } else {
+            None
+        };
+        if if_not_exists && idxname.is_none() {
+            return Err(self.error_here("CREATE INDEX IF NOT EXISTS requires an index name"));
+        }
+        self.expect(TokenKind::On)?;
+        let relation = Some(Box::new(
+            self.try_parse_qualified_range_var()
+                .ok_or_else(|| self.error_here("CREATE INDEX requires a relation"))?,
+        ));
+        let access_method = if self.consume(TokenKind::Using) {
+            Some(
+                self.consume_col_id()
+                    .ok_or_else(|| self.error_here("USING requires an access method"))?,
+            )
+        } else {
+            Some("btree".to_owned())
+        };
+        self.expect(TokenKind::Char('('))?;
+        let index_params = self.parse_index_elem_list_body()?;
+        self.expect(TokenKind::Char(')'))?;
+
+        let index_including_params = if self.consume(TokenKind::Include) {
+            self.expect(TokenKind::Char('('))?;
+            let columns = self.parse_index_elem_list_body()?;
+            self.expect(TokenKind::Char(')'))?;
+            columns
+        } else {
+            Vec::new()
+        };
+        let nulls_not_distinct = if self.consume(TokenKind::NullsP) {
+            let not_distinct = self.consume(TokenKind::Not);
+            self.expect(TokenKind::Distinct)?;
+            not_distinct
+        } else {
+            false
+        };
+        let options = if self.consume(TokenKind::With) {
+            let options = self.parse_parenthesized_reloptions()?;
+            if options.is_empty() {
+                return Err(self.error_here("CREATE INDEX WITH requires an option list"));
+            }
+            options
+        } else {
+            Vec::new()
+        };
+        let table_space = if self.consume(TokenKind::Tablespace) {
+            Some(
+                self.consume_col_id()
+                    .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?,
+            )
+        } else {
+            None
+        };
+        let where_clause = if self.consume(TokenKind::Where) {
+            Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?)
+        } else {
+            None
+        };
+        Ok(Node::IndexStmt(IndexStmt {
+            node_tag: NodeTag::IndexStmt,
+            idxname,
+            relation,
+            access_method,
+            table_space,
+            index_params,
+            index_including_params,
+            options,
+            where_clause,
+            unique,
+            nulls_not_distinct,
+            concurrent,
+            if_not_exists,
+            ..IndexStmt::default()
+        }))
+    }
+
+    fn parse_index_elem_list_body(&mut self) -> PResult<NodeList> {
+        if self.at(TokenKind::Char(')')) {
+            return Err(self.error_here("index element list cannot be empty"));
+        }
+        let mut elements = Vec::new();
+        loop {
+            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let location = tokens
+                .first()
+                .map_or(self.location(), |token| token.location);
+            let starts_parenthesized =
+                tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
+            let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
+            let element = parse_index_elem_tokens(tokens)?;
+            if let Some(expression) = element.expr.as_deref()
+                && !starts_parenthesized
+                && !is_windowless_function_expression_node(expression, starts_with_cast)
+            {
+                return Err(ParseError::new(
+                    location,
+                    "index expressions must be parenthesized unless they are function calls",
+                ));
+            }
+            elements.push(Node::IndexElem(element));
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+            if self.at(TokenKind::Char(')')) {
+                return Err(self.error_here("expected an index element after ','"));
+            }
+        }
+        Ok(elements)
+    }
+}
+pub(super) fn node_to_index_elem(node: Node) -> Node {
+    match node {
+        Node::ColumnRef(ColumnRef {
+            fields, location, ..
+        }) if fields.len() == 1 => Node::IndexElem(IndexElem {
+            node_tag: NodeTag::IndexElem,
+            name: fields.first().and_then(|field| match field {
+                Node::String(value) => value.sval.clone(),
+                _ => None,
+            }),
+            location,
+            ..IndexElem::default()
+        }),
+        expr => Node::IndexElem(IndexElem {
+            node_tag: NodeTag::IndexElem,
+            expr: Some(Box::new(expr)),
+            ..IndexElem::default()
+        }),
+    }
+}
+
+pub(super) fn parse_index_elem_tokens(tokens: Vec<Token>) -> PResult<IndexElem> {
+    let location = tokens.first().map_or(0, |token| token.location);
+    if tokens.is_empty() {
+        return Err(ParseError::new(location, "expected an index element"));
+    }
+    let collate_index = find_top_level_token(&tokens, TokenKind::Collate);
+    let (expression, suffix_start) = if let Some(index) = collate_index {
+        if index == 0 {
+            return Err(ParseError::new(
+                location,
+                "COLLATE requires an index expression",
+            ));
+        }
+        (parse_expression_tokens(tokens[..index].to_vec())?, index)
+    } else {
+        let mut parser = ExprParser::new(tokens.clone());
+        let expression = parser.parse_expr(0).ok_or_else(|| {
+            parser
+                .error
+                .take()
+                .unwrap_or_else(|| ParseError::new(location, "invalid index expression"))
+        })?;
+        (expression, parser.pos)
+    };
+    let Node::IndexElem(mut element) = node_to_index_elem(expression) else {
+        unreachable!("node_to_index_elem always returns IndexElem");
+    };
+    element.location = location as ParseLoc;
+
+    let mut suffix_tokens = tokens[suffix_start..].to_vec();
+    let end_location = suffix_tokens
+        .last()
+        .map_or(location, |token| token.location);
+    suffix_tokens.push(Token {
+        kind: TokenKind::Eof,
+        location: end_location,
+        value: None,
+    });
+    let mut suffix = Parser {
+        tokens: suffix_tokens,
+        pos: 0,
+    };
+    if suffix.consume(TokenKind::Collate) {
+        element.collation = suffix.parse_name_list();
+        if element.collation.is_empty() {
+            return Err(suffix.error_here("COLLATE requires a collation name"));
+        }
+    }
+    if !suffix.at_any(&[
+        TokenKind::Asc,
+        TokenKind::Desc,
+        TokenKind::NullsP,
+        TokenKind::Eof,
+    ]) {
+        element.opclass = suffix.parse_name_list();
+        if element.opclass.is_empty() {
+            return Err(suffix.error_here("expected an operator class name"));
+        }
+        if suffix.at(TokenKind::Char('(')) {
+            element.opclassopts = suffix.parse_parenthesized_reloptions()?;
+        }
+    }
+    element.ordering = if suffix.consume(TokenKind::Asc) {
+        SortByDir::Asc
+    } else if suffix.consume(TokenKind::Desc) {
+        SortByDir::Desc
+    } else {
+        SortByDir::Default
+    };
+    if suffix.consume(TokenKind::NullsP) {
+        element.nulls_ordering = if suffix.consume(TokenKind::FirstP) {
+            SortByNulls::First
+        } else if suffix.consume(TokenKind::LastP) {
+            SortByNulls::Last
+        } else {
+            return Err(suffix.error_here("NULLS requires FIRST or LAST"));
+        };
+    }
+    if !suffix.at(TokenKind::Eof) {
+        return Err(suffix.error_here("unexpected token after index element options"));
+    }
+    Ok(element)
+}

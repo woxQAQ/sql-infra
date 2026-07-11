@@ -1977,7 +1977,7 @@ pub struct FuncExpr {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NamedArgExpr {
     pub xpr: Expr,
-    pub arg: Option<Box<Expr>>,
+    pub arg: Option<Box<Node>>,
     pub name: Option<std::string::String>,
     pub argnumber: i32,
     pub location: ParseLoc,
@@ -2117,16 +2117,16 @@ pub struct CaseExpr {
     pub xpr: Expr,
     pub casetype: Oid,
     pub casecollid: Oid,
-    pub arg: Option<Box<Expr>>,
+    pub arg: Option<Box<Node>>,
     pub args: NodeList,
-    pub defresult: Option<Box<Expr>>,
+    pub defresult: Option<Box<Node>>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CaseWhen {
     pub xpr: Expr,
-    pub expr: Option<Box<Expr>>,
-    pub result: Option<Box<Expr>>,
+    pub expr: Option<Box<Node>>,
+    pub result: Option<Box<Node>>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2224,8 +2224,8 @@ pub struct JsonReturning {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonValueExpr {
     pub node_tag: NodeTag,
-    pub raw_expr: Option<Box<Expr>>,
-    pub formatted_expr: Option<Box<Expr>>,
+    pub raw_expr: Option<Box<Node>>,
+    pub formatted_expr: Option<Box<Node>>,
     pub format: Option<Box<JsonFormat>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2307,7 +2307,7 @@ pub struct JsonTableSiblingJoin {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NullTest {
     pub xpr: Expr,
-    pub arg: Option<Box<Expr>>,
+    pub arg: Option<Box<Node>>,
     pub nulltesttype: NullTestType,
     pub argisrow: bool,
     pub location: ParseLoc,
@@ -2315,7 +2315,7 @@ pub struct NullTest {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BooleanTest {
     pub xpr: Expr,
-    pub arg: Option<Box<Expr>>,
+    pub arg: Option<Box<Node>>,
     pub booltesttype: BoolTestType,
     pub location: ParseLoc,
 }
@@ -3121,7 +3121,7 @@ pub struct JsonTableColumn {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonKeyValue {
     pub node_tag: NodeTag,
-    pub key: Option<Box<Expr>>,
+    pub key: Option<Box<Node>>,
     pub value: Option<Box<JsonValueExpr>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3135,7 +3135,7 @@ pub struct JsonParseExpr {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonScalarExpr {
     pub node_tag: NodeTag,
-    pub expr: Option<Box<Expr>>,
+    pub expr: Option<Box<Node>>,
     pub output: Option<Box<JsonOutput>>,
     pub location: ParseLoc,
 }
@@ -3374,7 +3374,7 @@ pub struct GrantStmt {
 pub struct ObjectWithArgs {
     pub node_tag: NodeTag,
     pub objname: NodeList,
-    pub objargs: NodeList,
+    pub objargs: Vec<Option<Node>>,
     pub objfuncargs: NodeList,
     pub args_unspecified: bool,
 }

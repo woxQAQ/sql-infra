@@ -1,0 +1,189 @@
+use super::*;
+
+impl Parser {
+    pub(super) fn parse_drop(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Drop)?;
+        match self.peek_kind() {
+            TokenKind::Database => self.parse_drop_database(),
+            TokenKind::Cast => self.parse_drop_special(ObjectType::Cast),
+            TokenKind::Transform => self.parse_drop_special(ObjectType::Transform),
+            TokenKind::Operator if self.peek_kind_n(1) == TokenKind::Class => {
+                self.parse_drop_operator_family(ObjectType::Opclass)
+            }
+            TokenKind::Operator if self.peek_kind_n(1) == TokenKind::Family => {
+                self.parse_drop_operator_family(ObjectType::Opfamily)
+            }
+            TokenKind::User if self.peek_kind_n(1) == TokenKind::Mapping => {
+                self.parse_drop_user_mapping()
+            }
+            TokenKind::Role | TokenKind::User | TokenKind::GroupP => self.parse_drop_role(),
+            TokenKind::Owned => self.parse_drop_owned(),
+            TokenKind::Tablespace => self.parse_drop_tablespace(),
+            TokenKind::Subscription => self.parse_drop_subscription(),
+            _ => self.parse_drop_stmt(),
+        }
+    }
+
+    fn parse_drop_stmt(&mut self) -> PResult<Node> {
+        let remove_type = self
+            .consume_object_type()
+            .ok_or_else(|| self.error_here("DROP requires an object type"))?;
+        let concurrent = if remove_type == ObjectType::Index {
+            self.consume(TokenKind::Concurrently)
+        } else {
+            false
+        };
+        let missing_ok = self.consume_if_exists()?;
+        let stops = [
+            TokenKind::Cascade,
+            TokenKind::Restrict,
+            TokenKind::Char(';'),
+            TokenKind::Eof,
+        ];
+        let objects = if matches!(
+            remove_type,
+            ObjectType::Policy | ObjectType::Rule | ObjectType::Trigger
+        ) {
+            let object_name = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("DROP requires an object name"))?;
+            self.expect(TokenKind::On)?;
+            let mut parts = self.consume_name_parts();
+            if parts.is_empty() {
+                return Err(self.error_here("ON requires an object name"));
+            }
+            parts.push(object_name);
+            vec![name_list_node(
+                parts.into_iter().map(make_string_node).collect(),
+            )]
+        } else if remove_type == ObjectType::Operator {
+            self.parse_operator_with_args_list_until(&stops)?
+        } else if remove_type == ObjectType::Aggregate {
+            self.parse_aggregate_with_args_list_until(&stops)?
+        } else if matches!(
+            remove_type,
+            ObjectType::Function | ObjectType::Procedure | ObjectType::Routine
+        ) {
+            self.parse_object_with_args_list_until(&stops)?
+        } else if matches!(remove_type, ObjectType::Type | ObjectType::Domain) {
+            let tokens = self.take_until_top_level(&stops);
+            parse_type_node_list(tokens)?
+        } else if matches!(
+            remove_type,
+            ObjectType::AccessMethod
+                | ObjectType::EventTrigger
+                | ObjectType::Extension
+                | ObjectType::Fdw
+                | ObjectType::Language
+                | ObjectType::Publication
+                | ObjectType::Schema
+                | ObjectType::ForeignServer
+        ) {
+            self.parse_simple_name_list_until(&stops)?
+        } else {
+            self.parse_any_name_list_until(&stops)?
+        };
+        if objects.is_empty() {
+            return Err(self.error_here("DROP requires at least one object name"));
+        }
+        let behavior = self.parse_drop_behavior();
+        Ok(Node::DropStmt(DropStmt {
+            node_tag: NodeTag::DropStmt,
+            objects,
+            remove_type,
+            behavior,
+            missing_ok,
+            concurrent,
+        }))
+    }
+
+    fn parse_drop_special(&mut self, remove_type: ObjectType) -> PResult<Node> {
+        self.advance();
+        let missing_ok = self.consume_if_exists()?;
+        let object = if remove_type == ObjectType::Cast {
+            self.expect(TokenKind::Char('('))?;
+            let source = self
+                .parse_type_name_until(&[TokenKind::As])
+                .ok_or_else(|| self.error_here("DROP CAST requires a source type"))?;
+            self.expect(TokenKind::As)?;
+            let target = self
+                .parse_type_name_until(&[TokenKind::Char(')')])
+                .ok_or_else(|| self.error_here("DROP CAST requires a target type"))?;
+            self.expect(TokenKind::Char(')'))?;
+            name_list_node(vec![Node::TypeName(source), Node::TypeName(target)])
+        } else {
+            self.expect(TokenKind::For)?;
+            let type_name = self
+                .parse_type_name_until(&[TokenKind::Language])
+                .ok_or_else(|| self.error_here("DROP TRANSFORM FOR requires a type"))?;
+            self.expect(TokenKind::Language)?;
+            let language = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("LANGUAGE requires a name"))?;
+            name_list_node(vec![Node::TypeName(type_name), make_string_node(language)])
+        };
+        let behavior = self.parse_drop_behavior();
+        self.expect_statement_end()?;
+        Ok(Node::DropStmt(DropStmt {
+            node_tag: NodeTag::DropStmt,
+            objects: vec![object],
+            remove_type,
+            behavior,
+            missing_ok,
+            concurrent: false,
+        }))
+    }
+
+    fn parse_drop_operator_family(&mut self, remove_type: ObjectType) -> PResult<Node> {
+        self.expect(TokenKind::Operator)?;
+        if remove_type == ObjectType::Opclass {
+            self.expect(TokenKind::Class)?;
+        } else {
+            self.expect(TokenKind::Family)?;
+        }
+        let missing_ok = self.consume_if_exists()?;
+        let mut names = self.parse_name_list_until_keywords(&[TokenKind::Using]);
+        if names.is_empty() {
+            return Err(self.error_here("operator class or family requires a name"));
+        }
+        self.expect(TokenKind::Using)?;
+        let amname = self
+            .consume_col_id()
+            .ok_or_else(|| self.error_here("USING requires an access method"))?;
+        names.insert(0, make_string_node(amname));
+        let objects = vec![name_list_node(names)];
+        let behavior = self.parse_drop_behavior();
+        self.expect_statement_end()?;
+        Ok(Node::DropStmt(DropStmt {
+            node_tag: NodeTag::DropStmt,
+            objects,
+            remove_type,
+            behavior,
+            missing_ok,
+            concurrent: false,
+        }))
+    }
+
+    fn parse_drop_user_mapping(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::User)?;
+        self.expect(TokenKind::Mapping)?;
+        let missing_ok = self.consume_if_exists()?;
+        self.expect(TokenKind::For)?;
+        let user =
+            Some(Box::new(self.consume_auth_ident().ok_or_else(|| {
+                self.error_here("DROP USER MAPPING requires a user")
+            })?));
+        self.expect(TokenKind::Server)?;
+        let servername = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("SERVER requires a name"))?,
+        );
+        self.expect_statement_end()?;
+        Ok(Node::DropUserMappingStmt(DropUserMappingStmt {
+            node_tag: NodeTag::DropUserMappingStmt,
+            user,
+            servername,
+            missing_ok,
+        }))
+    }
+}

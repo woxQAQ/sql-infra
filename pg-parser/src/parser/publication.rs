@@ -1,0 +1,412 @@
+use super::*;
+
+impl Parser {
+    pub(super) fn parse_create_subscription(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Subscription)?;
+        let subname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("CREATE SUBSCRIPTION requires a name"))?,
+        );
+        let (servername, conninfo) = if self.consume(TokenKind::Connection) {
+            if !self.at(TokenKind::SConst) {
+                return Err(self.error_here("CONNECTION requires a string"));
+            }
+            (None, self.consume_string_like())
+        } else if self.consume(TokenKind::Server) {
+            (
+                Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("SERVER requires a name"))?,
+                ),
+                None,
+            )
+        } else {
+            return Err(self.error_here("CREATE SUBSCRIPTION requires CONNECTION or SERVER"));
+        };
+        self.expect(TokenKind::Publication)?;
+        let publication = self.parse_publication_name_list()?;
+        let options = if self.consume(TokenKind::With) {
+            self.parse_parenthesized_def_elem_list_strict()?
+        } else {
+            Vec::new()
+        };
+        Ok(Node::CreateSubscriptionStmt(CreateSubscriptionStmt {
+            node_tag: NodeTag::CreateSubscriptionStmt,
+            subname,
+            servername,
+            conninfo,
+            publication,
+            options,
+        }))
+    }
+    pub(super) fn parse_alter_publication(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Publication)?;
+        let pubname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("ALTER PUBLICATION requires a name"))?,
+        );
+        let action = if self.consume(TokenKind::AddP) {
+            AlterPublicationAction::AddObjects
+        } else if self.consume(TokenKind::Drop) {
+            AlterPublicationAction::DropObjects
+        } else {
+            self.expect(TokenKind::Set)?;
+            AlterPublicationAction::SetObjects
+        };
+        let (pubobjects, for_all_tables, for_all_sequences, options) = if self
+            .at(TokenKind::Char('('))
+        {
+            if action != AlterPublicationAction::SetObjects {
+                return Err(self.error_here("only ALTER PUBLICATION SET accepts options"));
+            }
+            (Vec::new(), false, false, self.parse_def_elem_list()?)
+        } else {
+            let (objects, all_tables, all_sequences) = self.parse_publication_objects()?;
+            if action != AlterPublicationAction::SetObjects && (all_tables || all_sequences) {
+                return Err(self
+                    .error_here("ALL TABLES/SEQUENCES is only valid with ALTER PUBLICATION SET"));
+            }
+            (objects, all_tables, all_sequences, Vec::new())
+        };
+        Ok(Node::AlterPublicationStmt(AlterPublicationStmt {
+            node_tag: NodeTag::AlterPublicationStmt,
+            pubname,
+            options,
+            pubobjects,
+            action,
+            for_all_tables,
+            for_all_sequences,
+        }))
+    }
+
+    pub(super) fn parse_alter_subscription(&mut self) -> PResult<Node> {
+        let alter_location = self.previous_location();
+        self.expect(TokenKind::Subscription)?;
+        let subname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("ALTER SUBSCRIPTION requires a name"))?,
+        );
+        let mut stmt = AlterSubscriptionStmt {
+            node_tag: NodeTag::AlterSubscriptionStmt,
+            subname,
+            ..AlterSubscriptionStmt::default()
+        };
+        stmt.kind = match self.peek_kind() {
+            TokenKind::Connection => {
+                self.advance();
+                stmt.conninfo =
+                    Some(self.consume_required_string("CONNECTION requires a string literal")?);
+                AlterSubscriptionType::Connection
+            }
+            TokenKind::Server => {
+                self.advance();
+                stmt.servername = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("SERVER requires a server name"))?,
+                );
+                AlterSubscriptionType::Server
+            }
+            TokenKind::Set if self.peek_kind_n(1) == TokenKind::Char('(') => {
+                self.advance();
+                stmt.options = self.parse_parenthesized_def_elem_list_strict()?;
+                AlterSubscriptionType::Options
+            }
+            TokenKind::Set if self.peek_kind_n(1) == TokenKind::Publication => {
+                self.advance();
+                self.advance();
+                stmt.publication = self.parse_publication_name_list()?;
+                AlterSubscriptionType::SetPublication
+            }
+            TokenKind::AddP => {
+                self.advance();
+                self.expect(TokenKind::Publication)?;
+                stmt.publication = self.parse_publication_name_list()?;
+                AlterSubscriptionType::AddPublication
+            }
+            TokenKind::Drop => {
+                self.advance();
+                self.expect(TokenKind::Publication)?;
+                stmt.publication = self.parse_publication_name_list()?;
+                AlterSubscriptionType::DropPublication
+            }
+            TokenKind::Refresh => {
+                self.advance();
+                if self.consume(TokenKind::Publication) {
+                    AlterSubscriptionType::RefreshPublication
+                } else if self.consume(TokenKind::Sequences) {
+                    AlterSubscriptionType::RefreshSequences
+                } else {
+                    return Err(self.error_here("REFRESH requires PUBLICATION or SEQUENCES"));
+                }
+            }
+            TokenKind::EnableP => {
+                self.advance();
+                stmt.options.push(make_def_elem(
+                    "enabled",
+                    Some(Node::Boolean(Boolean::new(true))),
+                    alter_location,
+                ));
+                AlterSubscriptionType::Enabled
+            }
+            TokenKind::DisableP => {
+                self.advance();
+                stmt.options.push(make_def_elem(
+                    "enabled",
+                    Some(Node::Boolean(Boolean::new(false))),
+                    alter_location,
+                ));
+                AlterSubscriptionType::Enabled
+            }
+            TokenKind::Skip => {
+                self.advance();
+                stmt.options = self.parse_parenthesized_def_elem_list_strict()?;
+                AlterSubscriptionType::Skip
+            }
+            _ => return Err(self.error_here("unsupported ALTER SUBSCRIPTION action")),
+        };
+        if matches!(
+            stmt.kind,
+            AlterSubscriptionType::SetPublication
+                | AlterSubscriptionType::AddPublication
+                | AlterSubscriptionType::DropPublication
+                | AlterSubscriptionType::RefreshPublication
+        ) && self.consume(TokenKind::With)
+        {
+            stmt.options = self.parse_parenthesized_def_elem_list_strict()?;
+        }
+        self.expect_statement_end()?;
+        Ok(Node::AlterSubscriptionStmt(stmt))
+    }
+
+    pub(super) fn parse_drop_subscription(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Subscription)?;
+        let missing_ok = self.consume_if_exists()?;
+        let subname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("DROP SUBSCRIPTION requires a name"))?,
+        );
+        let behavior = self.parse_drop_behavior();
+        self.expect_statement_end()?;
+        Ok(Node::DropSubscriptionStmt(DropSubscriptionStmt {
+            node_tag: NodeTag::DropSubscriptionStmt,
+            subname,
+            missing_ok,
+            behavior,
+        }))
+    }
+
+    pub(super) fn parse_create_publication(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Publication)?;
+        let pubname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("CREATE PUBLICATION requires a name"))?,
+        );
+        let mut for_all_tables = false;
+        let mut for_all_sequences = false;
+        let mut pubobjects = Vec::new();
+        if self.consume(TokenKind::For) {
+            (pubobjects, for_all_tables, for_all_sequences) = self.parse_publication_objects()?;
+        }
+        let options = if self.consume(TokenKind::With) {
+            self.parse_def_elem_list()?
+        } else {
+            Vec::new()
+        };
+        Ok(Node::CreatePublicationStmt(CreatePublicationStmt {
+            node_tag: NodeTag::CreatePublicationStmt,
+            pubname,
+            options,
+            pubobjects,
+            for_all_tables,
+            for_all_sequences,
+        }))
+    }
+
+    pub(super) fn parse_publication_objects(&mut self) -> PResult<(NodeList, bool, bool)> {
+        let mut objects = Vec::new();
+        let mut for_all_tables = false;
+        let mut for_all_sequences = false;
+        let mut all_objects_mode = None;
+        let mut continuation = None;
+        loop {
+            let location = self.location();
+            if self.consume(TokenKind::All) {
+                if all_objects_mode == Some(false) {
+                    return Err(self.error_here(
+                        "ALL TABLES/SEQUENCES cannot be mixed with publication object lists",
+                    ));
+                }
+                all_objects_mode = Some(true);
+                let except_tables = if self.consume(TokenKind::Tables) {
+                    if for_all_tables {
+                        return Err(self.error_here("ALL TABLES can be specified only once"));
+                    }
+                    for_all_tables = true;
+                    if self.consume(TokenKind::Except) {
+                        self.expect(TokenKind::Char('('))?;
+                        self.expect(TokenKind::Table)?;
+                        let mut tables = Vec::new();
+                        loop {
+                            self.consume(TokenKind::Table);
+                            let table_location = self.location();
+                            let relation = self.parse_relation_expr(false)?;
+                            tables.push(Node::PublicationObjSpec(PublicationObjSpec {
+                                node_tag: NodeTag::PublicationObjSpec,
+                                pubobjtype: PublicationObjSpecType::ExceptTable,
+                                pubtable: Some(Box::new(PublicationTable {
+                                    node_tag: NodeTag::PublicationTable,
+                                    relation: Some(Box::new(relation)),
+                                    except: true,
+                                    ..PublicationTable::default()
+                                })),
+                                location: table_location as ParseLoc,
+                                ..PublicationObjSpec::default()
+                            }));
+                            if !self.consume(TokenKind::Char(',')) {
+                                break;
+                            }
+                        }
+                        self.expect(TokenKind::Char(')'))?;
+                        tables
+                    } else {
+                        Vec::new()
+                    }
+                } else if self.consume(TokenKind::Sequences) {
+                    if for_all_sequences {
+                        return Err(self.error_here("ALL SEQUENCES can be specified only once"));
+                    }
+                    for_all_sequences = true;
+                    Vec::new()
+                } else {
+                    return Err(self.error_here("expected TABLES or SEQUENCES after ALL"));
+                };
+                objects.extend(except_tables);
+            } else if self.consume(TokenKind::Tables) {
+                if all_objects_mode == Some(true) {
+                    return Err(self.error_here(
+                        "publication object lists cannot be mixed with ALL TABLES/SEQUENCES",
+                    ));
+                }
+                all_objects_mode = Some(false);
+                self.expect(TokenKind::InP)?;
+                self.expect(TokenKind::Schema)?;
+                let location = self.location();
+                let current = self.consume(TokenKind::CurrentSchema);
+                let name = if current {
+                    None
+                } else {
+                    Some(
+                        self.consume_col_id()
+                            .ok_or_else(|| self.error_here("expected a schema name"))?,
+                    )
+                };
+                continuation = Some(PublicationObjSpecType::TablesInSchema);
+                objects.push(Node::PublicationObjSpec(PublicationObjSpec {
+                    node_tag: NodeTag::PublicationObjSpec,
+                    pubobjtype: if current {
+                        PublicationObjSpecType::TablesInCurSchema
+                    } else {
+                        PublicationObjSpecType::TablesInSchema
+                    },
+                    name,
+                    location: location as ParseLoc,
+                    ..PublicationObjSpec::default()
+                }));
+            } else {
+                if all_objects_mode == Some(true) {
+                    return Err(self.error_here("expected ALL TABLES or ALL SEQUENCES"));
+                }
+                all_objects_mode = Some(false);
+                let explicit_table = self.consume(TokenKind::Table);
+                if !explicit_table && continuation.is_none() {
+                    return Err(self.error_here(
+                        "TABLE or TABLES IN SCHEMA must precede a publication object",
+                    ));
+                }
+                if !explicit_table && continuation == Some(PublicationObjSpecType::TablesInSchema) {
+                    let current = self.consume(TokenKind::CurrentSchema);
+                    let name = if current {
+                        None
+                    } else {
+                        Some(self.consume_col_id().ok_or_else(|| {
+                            self.error_here("expected a schema name in publication object list")
+                        })?)
+                    };
+                    objects.push(Node::PublicationObjSpec(PublicationObjSpec {
+                        node_tag: NodeTag::PublicationObjSpec,
+                        pubobjtype: if current {
+                            PublicationObjSpecType::TablesInCurSchema
+                        } else {
+                            PublicationObjSpecType::TablesInSchema
+                        },
+                        name,
+                        location: location as ParseLoc,
+                        ..PublicationObjSpec::default()
+                    }));
+                    if !self.consume(TokenKind::Char(',')) {
+                        break;
+                    }
+                    continue;
+                }
+                let relation = self.parse_relation_expr(false)?;
+                let columns = self.parse_optional_column_name_list()?;
+                let where_clause = if self.consume(TokenKind::Where) {
+                    self.expect(TokenKind::Char('('))?;
+                    let expression = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+                    self.expect(TokenKind::Char(')'))?;
+                    Some(expression)
+                } else {
+                    None
+                };
+                continuation = Some(PublicationObjSpecType::Table);
+                objects.push(Node::PublicationObjSpec(PublicationObjSpec {
+                    node_tag: NodeTag::PublicationObjSpec,
+                    pubobjtype: PublicationObjSpecType::Table,
+                    pubtable: Some(Box::new(PublicationTable {
+                        node_tag: NodeTag::PublicationTable,
+                        relation: Some(Box::new(relation)),
+                        where_clause,
+                        columns,
+                        ..PublicationTable::default()
+                    })),
+                    location: if explicit_table {
+                        0
+                    } else {
+                        location as ParseLoc
+                    },
+                    ..PublicationObjSpec::default()
+                }));
+            }
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+        }
+        if objects.is_empty() {
+            return Err(self.error_here("expected a publication object"));
+        }
+        Ok((objects, for_all_tables, for_all_sequences))
+    }
+
+    pub(super) fn parse_publication_name_list(&mut self) -> PResult<NodeList> {
+        let mut publications = Vec::new();
+        loop {
+            if self.at_any(&[TokenKind::With, TokenKind::Char(';'), TokenKind::Eof]) {
+                break;
+            }
+            let name = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("expected a publication name"))?;
+            publications.push(make_string_node(name));
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+            if self.at_any(&[TokenKind::With, TokenKind::Char(';'), TokenKind::Eof]) {
+                return Err(self.error_here("expected a publication name after ','"));
+            }
+        }
+        if publications.is_empty() {
+            return Err(self.error_here("PUBLICATION requires at least one name"));
+        }
+        Ok(publications)
+    }
+}

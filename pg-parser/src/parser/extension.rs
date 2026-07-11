@@ -1,0 +1,281 @@
+use super::*;
+
+impl Parser {
+    pub(super) fn parse_create_extension(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Extension)?;
+        let if_not_exists = self.consume_if_not_exists()?;
+        let extname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("CREATE EXTENSION requires a name"))?,
+        );
+        self.consume(TokenKind::With);
+        let mut options = Vec::new();
+        while !self.at_statement_end() {
+            let location = self.location();
+            if self.consume(TokenKind::Schema) {
+                let schema = self
+                    .consume_col_id()
+                    .ok_or_else(|| self.error_here("SCHEMA requires a name"))?;
+                options.push(make_def_elem(
+                    "schema",
+                    Some(make_string_node(schema)),
+                    location,
+                ));
+            } else if self.consume(TokenKind::VersionP) {
+                let version = self
+                    .consume_non_reserved_word_or_sconst()
+                    .ok_or_else(|| self.error_here("VERSION requires a value"))?;
+                options.push(make_def_elem(
+                    "new_version",
+                    Some(make_string_node(version)),
+                    location,
+                ));
+            } else if self.consume(TokenKind::Cascade) {
+                options.push(make_def_elem(
+                    "cascade",
+                    Some(Node::Boolean(Boolean::new(true))),
+                    location,
+                ));
+            } else if self.consume(TokenKind::From) {
+                return Err(self.error_here("CREATE EXTENSION FROM is no longer supported"));
+            } else {
+                return Err(self.error_here("invalid CREATE EXTENSION option"));
+            }
+        }
+        Ok(Node::CreateExtensionStmt(CreateExtensionStmt {
+            node_tag: NodeTag::CreateExtensionStmt,
+            extname,
+            if_not_exists,
+            options,
+        }))
+    }
+
+    pub(super) fn parse_alter_extension(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Extension)?;
+        let extname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("ALTER EXTENSION requires a name"))?,
+        );
+        if matches!(self.peek_kind(), TokenKind::AddP | TokenKind::Drop) {
+            let action = if self.consume(TokenKind::AddP) {
+                1
+            } else {
+                self.expect(TokenKind::Drop)?;
+                -1
+            };
+            let (objtype, object) = self.parse_extension_member_object()?;
+            self.expect_statement_end()?;
+            Ok(Node::AlterExtensionContentsStmt(
+                AlterExtensionContentsStmt {
+                    node_tag: NodeTag::AlterExtensionContentsStmt,
+                    extname,
+                    action,
+                    objtype,
+                    object: Some(Box::new(object)),
+                },
+            ))
+        } else {
+            self.expect(TokenKind::Update)?;
+            let mut options = Vec::new();
+            while self.consume(TokenKind::To) {
+                let location = self.previous_location();
+                let version = self
+                    .consume_non_reserved_word_or_sconst()
+                    .ok_or_else(|| self.error_here("TO requires an extension version"))?;
+                options.push(make_def_elem(
+                    "new_version",
+                    Some(make_string_node(version)),
+                    location,
+                ));
+            }
+            self.expect_statement_end()?;
+            Ok(Node::AlterExtensionStmt(AlterExtensionStmt {
+                node_tag: NodeTag::AlterExtensionStmt,
+                extname,
+                options,
+            }))
+        }
+    }
+
+    fn parse_extension_member_object(&mut self) -> PResult<(ObjectType, Node)> {
+        let function_type = match self.peek_kind() {
+            TokenKind::Aggregate => Some(ObjectType::Aggregate),
+            TokenKind::Function => Some(ObjectType::Function),
+            TokenKind::Procedure => Some(ObjectType::Procedure),
+            TokenKind::Routine => Some(ObjectType::Routine),
+            TokenKind::Operator
+                if self.peek_kind_n(1) != TokenKind::Class
+                    && self.peek_kind_n(1) != TokenKind::Family =>
+            {
+                Some(ObjectType::Operator)
+            }
+            _ => None,
+        };
+        if let Some(objtype) = function_type {
+            self.advance();
+            let object = if objtype == ObjectType::Operator {
+                self.parse_operator_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?
+            } else if objtype == ObjectType::Aggregate {
+                self.parse_aggregate_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?
+            } else {
+                self.parse_object_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?
+            };
+            return Ok((objtype, Node::ObjectWithArgs(object)));
+        }
+
+        if self.consume(TokenKind::Cast) {
+            self.expect(TokenKind::Char('('))?;
+            let source = self
+                .parse_type_name_until(&[TokenKind::As])
+                .ok_or_else(|| self.error_here("CAST requires a source type"))?;
+            self.expect(TokenKind::As)?;
+            let target = self
+                .parse_type_name_until(&[TokenKind::Char(')')])
+                .ok_or_else(|| self.error_here("CAST requires a target type"))?;
+            self.expect(TokenKind::Char(')'))?;
+            return Ok((
+                ObjectType::Cast,
+                name_list_node(vec![Node::TypeName(source), Node::TypeName(target)]),
+            ));
+        }
+        if self.consume(TokenKind::DomainP) || self.consume(TokenKind::TypeP) {
+            let objtype = if self.tokens[self.pos.saturating_sub(1)].kind == TokenKind::DomainP {
+                ObjectType::Domain
+            } else {
+                ObjectType::Type
+            };
+            let type_name = self
+                .parse_type_name_until(&[TokenKind::Char(';'), TokenKind::Eof])
+                .ok_or_else(|| self.error_here("object requires a type name"))?;
+            return Ok((objtype, Node::TypeName(type_name)));
+        }
+        if self.consume(TokenKind::Transform) {
+            self.expect(TokenKind::For)?;
+            let type_name = self
+                .parse_type_name_until(&[TokenKind::Language])
+                .ok_or_else(|| self.error_here("TRANSFORM FOR requires a type"))?;
+            self.expect(TokenKind::Language)?;
+            let language = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("LANGUAGE requires a name"))?;
+            return Ok((
+                ObjectType::Transform,
+                name_list_node(vec![Node::TypeName(type_name), make_string_node(language)]),
+            ));
+        }
+        if self.consume(TokenKind::Operator) {
+            let objtype = if self.consume(TokenKind::Class) {
+                ObjectType::Opclass
+            } else {
+                self.expect(TokenKind::Family)?;
+                ObjectType::Opfamily
+            };
+            let mut names = self.parse_name_list_until_keywords(&[
+                TokenKind::Using,
+                TokenKind::Char(';'),
+                TokenKind::Eof,
+            ]);
+            if names.is_empty() {
+                return Err(self.error_here("operator class or family requires a name"));
+            }
+            self.expect(TokenKind::Using)?;
+            let amname = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("USING requires an access method"))?;
+            names.insert(0, make_string_node(amname));
+            return Ok((objtype, name_list_node(names)));
+        }
+
+        let objtype = if self.consume(TokenKind::Access) {
+            self.expect(TokenKind::Method)?;
+            ObjectType::AccessMethod
+        } else if self.consume(TokenKind::Event) {
+            self.expect(TokenKind::Trigger)?;
+            ObjectType::EventTrigger
+        } else if self.consume(TokenKind::Foreign) {
+            if self.consume(TokenKind::DataP) {
+                self.expect(TokenKind::Wrapper)?;
+                ObjectType::Fdw
+            } else {
+                self.expect(TokenKind::Table)?;
+                ObjectType::ForeignTable
+            }
+        } else if self.consume(TokenKind::Procedural) {
+            self.expect(TokenKind::Language)?;
+            ObjectType::Language
+        } else if self.consume(TokenKind::Language) {
+            ObjectType::Language
+        } else if self.consume(TokenKind::Materialized) {
+            self.expect(TokenKind::View)?;
+            ObjectType::Matview
+        } else if self.consume(TokenKind::Property) {
+            self.expect(TokenKind::Graph)?;
+            ObjectType::Propgraph
+        } else if self.consume(TokenKind::TextP) {
+            self.expect(TokenKind::Search)?;
+            match self.advance().kind {
+                TokenKind::Parser => ObjectType::Tsparser,
+                TokenKind::Dictionary => ObjectType::Tsdictionary,
+                TokenKind::Template => ObjectType::Tstemplate,
+                TokenKind::Configuration => ObjectType::Tsconfiguration,
+                _ => return Err(self.error_here("invalid TEXT SEARCH object type")),
+            }
+        } else {
+            let objtype = self
+                .consume_object_type()
+                .ok_or_else(|| self.error_here("unsupported extension member object type"))?;
+            if !matches!(
+                objtype,
+                ObjectType::Table
+                    | ObjectType::Sequence
+                    | ObjectType::View
+                    | ObjectType::Index
+                    | ObjectType::Collation
+                    | ObjectType::Conversion
+                    | ObjectType::StatisticExt
+                    | ObjectType::Database
+                    | ObjectType::Role
+                    | ObjectType::Subscription
+                    | ObjectType::Extension
+                    | ObjectType::Publication
+                    | ObjectType::Schema
+                    | ObjectType::ForeignServer
+                    | ObjectType::Tablespace
+            ) {
+                return Err(self.error_here("unsupported extension member object type"));
+            }
+            objtype
+        };
+
+        let uses_any_name = matches!(
+            objtype,
+            ObjectType::Table
+                | ObjectType::Sequence
+                | ObjectType::View
+                | ObjectType::Matview
+                | ObjectType::Index
+                | ObjectType::ForeignTable
+                | ObjectType::Propgraph
+                | ObjectType::Collation
+                | ObjectType::Conversion
+                | ObjectType::StatisticExt
+                | ObjectType::Tsparser
+                | ObjectType::Tsdictionary
+                | ObjectType::Tstemplate
+                | ObjectType::Tsconfiguration
+        );
+        if uses_any_name {
+            let names =
+                self.parse_name_list_until_keywords(&[TokenKind::Char(';'), TokenKind::Eof]);
+            if names.is_empty() {
+                return Err(self.error_here("extension member requires an object name"));
+            }
+            Ok((objtype, name_list_node(names)))
+        } else {
+            let name = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("extension member requires an object name"))?;
+            Ok((objtype, make_string_node(name)))
+        }
+    }
+}

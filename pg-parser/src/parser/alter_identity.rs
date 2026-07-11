@@ -1,0 +1,558 @@
+use super::*;
+
+#[derive(Default)]
+struct AlterIdentity {
+    object_type: ObjectType,
+    relation: Option<Box<RangeVar>>,
+    object: Option<Box<Node>>,
+    subname: Option<std::string::String>,
+    missing_ok: bool,
+    location: usize,
+}
+
+impl Parser {
+    fn parse_alter_object_kind(&mut self) -> PResult<ObjectType> {
+        let kind = match self.peek_kind() {
+            TokenKind::Access if self.peek_kind_n(1) == TokenKind::Method => {
+                self.advance();
+                self.advance();
+                ObjectType::AccessMethod
+            }
+            TokenKind::Aggregate => ObjectType::Aggregate,
+            TokenKind::Collation => ObjectType::Collation,
+            TokenKind::ConversionP => ObjectType::Conversion,
+            TokenKind::Database => ObjectType::Database,
+            TokenKind::DomainP => ObjectType::Domain,
+            TokenKind::Event if self.peek_kind_n(1) == TokenKind::Trigger => {
+                self.advance();
+                self.advance();
+                ObjectType::EventTrigger
+            }
+            TokenKind::Extension => ObjectType::Extension,
+            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::DataP => {
+                self.advance();
+                self.expect(TokenKind::DataP)?;
+                self.expect(TokenKind::Wrapper)?;
+                ObjectType::Fdw
+            }
+            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::Table => {
+                self.advance();
+                self.advance();
+                ObjectType::ForeignTable
+            }
+            TokenKind::Function => ObjectType::Function,
+            TokenKind::GroupP | TokenKind::Role | TokenKind::User => ObjectType::Role,
+            TokenKind::Index => ObjectType::Index,
+            TokenKind::Language => {
+                self.advance();
+                ObjectType::Language
+            }
+            TokenKind::LargeP if self.peek_kind_n(1) == TokenKind::ObjectP => {
+                self.advance();
+                self.advance();
+                ObjectType::Largeobject
+            }
+            TokenKind::Materialized if self.peek_kind_n(1) == TokenKind::View => {
+                self.advance();
+                self.advance();
+                ObjectType::Matview
+            }
+            TokenKind::Operator if self.peek_kind_n(1) == TokenKind::Class => {
+                self.advance();
+                self.advance();
+                ObjectType::Opclass
+            }
+            TokenKind::Operator if self.peek_kind_n(1) == TokenKind::Family => {
+                self.advance();
+                self.advance();
+                ObjectType::Opfamily
+            }
+            TokenKind::Operator => ObjectType::Operator,
+            TokenKind::Policy => ObjectType::Policy,
+            TokenKind::Procedure => ObjectType::Procedure,
+            TokenKind::Property if self.peek_kind_n(1) == TokenKind::Graph => {
+                self.advance();
+                self.advance();
+                ObjectType::Propgraph
+            }
+            TokenKind::Publication => ObjectType::Publication,
+            TokenKind::Routine => ObjectType::Routine,
+            TokenKind::Rule => ObjectType::Rule,
+            TokenKind::Schema => ObjectType::Schema,
+            TokenKind::Sequence => ObjectType::Sequence,
+            TokenKind::Server => ObjectType::ForeignServer,
+            TokenKind::Statistics => ObjectType::StatisticExt,
+            TokenKind::Subscription => ObjectType::Subscription,
+            TokenKind::Table => ObjectType::Table,
+            TokenKind::Tablespace => ObjectType::Tablespace,
+            TokenKind::TextP if self.peek_kind_n(1) == TokenKind::Search => {
+                self.advance();
+                self.advance();
+                match self.advance().kind {
+                    TokenKind::Parser => ObjectType::Tsparser,
+                    TokenKind::Dictionary => ObjectType::Tsdictionary,
+                    TokenKind::Template => ObjectType::Tstemplate,
+                    TokenKind::Configuration => ObjectType::Tsconfiguration,
+                    _ => return Err(self.error_here("invalid TEXT SEARCH object type")),
+                }
+            }
+            TokenKind::Trigger => ObjectType::Trigger,
+            TokenKind::TypeP => ObjectType::Type,
+            TokenKind::View => ObjectType::View,
+            TokenKind::Procedural => {
+                self.advance();
+                self.expect(TokenKind::Language)?;
+                ObjectType::Language
+            }
+            other => {
+                return Err(self.error_here(format!("unsupported ALTER object type {other:?}")));
+            }
+        };
+        if !matches!(
+            kind,
+            ObjectType::AccessMethod
+                | ObjectType::EventTrigger
+                | ObjectType::Fdw
+                | ObjectType::ForeignTable
+                | ObjectType::Largeobject
+                | ObjectType::Matview
+                | ObjectType::Opclass
+                | ObjectType::Opfamily
+                | ObjectType::Propgraph
+                | ObjectType::Tsparser
+                | ObjectType::Tsdictionary
+                | ObjectType::Tstemplate
+                | ObjectType::Tsconfiguration
+                | ObjectType::Language
+        ) {
+            self.advance();
+        }
+        Ok(kind)
+    }
+
+    fn parse_alter_identity(&mut self, action_stops: &[TokenKind]) -> PResult<AlterIdentity> {
+        let object_type = self.parse_alter_object_kind()?;
+        let missing_ok = self.consume_if_exists()?;
+        let mut identity = AlterIdentity {
+            object_type,
+            missing_ok,
+            location: self.location(),
+            ..AlterIdentity::default()
+        };
+        if relation_object_type(object_type) {
+            let relation = if matches!(object_type, ObjectType::Table | ObjectType::ForeignTable) {
+                self.parse_relation_expr(false)?
+            } else {
+                self.try_parse_qualified_range_var()
+                    .ok_or_else(|| self.error_here("ALTER object requires a relation name"))?
+            };
+            identity.relation = Some(Box::new(relation));
+            return Ok(identity);
+        }
+        if matches!(
+            object_type,
+            ObjectType::Policy | ObjectType::Rule | ObjectType::Trigger
+        ) {
+            let name = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("ALTER object requires a name"))?;
+            self.expect(TokenKind::On)?;
+            identity.relation = Some(Box::new(
+                self.try_parse_qualified_range_var()
+                    .ok_or_else(|| self.error_here("ON requires a relation name"))?,
+            ));
+            identity.subname = Some(name.clone());
+            identity.object = Some(Box::new(name_list_node(vec![make_string_node(name)])));
+            return Ok(identity);
+        }
+        if matches!(
+            object_type,
+            ObjectType::Aggregate
+                | ObjectType::Function
+                | ObjectType::Procedure
+                | ObjectType::Routine
+                | ObjectType::Operator
+        ) {
+            let object = if object_type == ObjectType::Operator {
+                self.parse_operator_with_args_until(action_stops)?
+            } else if object_type == ObjectType::Aggregate {
+                self.parse_aggregate_with_args_until(action_stops)?
+            } else {
+                self.parse_object_with_args_until(action_stops)?
+            };
+            identity.object = Some(Box::new(Node::ObjectWithArgs(object)));
+            return Ok(identity);
+        }
+        if matches!(object_type, ObjectType::Opclass | ObjectType::Opfamily) {
+            let mut names = self.parse_name_list_until_keywords(&[TokenKind::Using]);
+            if names.is_empty() {
+                return Err(self.error_here("operator class or family requires a name"));
+            }
+            self.expect(TokenKind::Using)?;
+            let amname = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("USING requires an access method"))?;
+            names.insert(0, make_string_node(amname));
+            identity.object = Some(Box::new(name_list_node(names)));
+            return Ok(identity);
+        }
+        if object_type == ObjectType::Largeobject {
+            identity.object = Some(Box::new(self.parse_numeric_only()?));
+            return Ok(identity);
+        }
+        if object_type == ObjectType::Role {
+            let name = self
+                .consume_role_id()?
+                .ok_or_else(|| self.error_here("ALTER ROLE requires a role name"))?;
+            identity.object = Some(Box::new(make_string_node(name.clone())));
+            identity.subname = Some(name);
+            return Ok(identity);
+        }
+        if matches!(
+            object_type,
+            ObjectType::Collation
+                | ObjectType::Conversion
+                | ObjectType::Domain
+                | ObjectType::StatisticExt
+                | ObjectType::Tsparser
+                | ObjectType::Tsdictionary
+                | ObjectType::Tstemplate
+                | ObjectType::Tsconfiguration
+                | ObjectType::Type
+        ) {
+            let names = self.parse_name_list_until_keywords(action_stops);
+            if names.is_empty() {
+                return Err(self.error_here("ALTER object requires a qualified name"));
+            }
+            identity.object = Some(Box::new(name_list_node(names)));
+            return Ok(identity);
+        }
+        let name = self
+            .consume_col_id()
+            .ok_or_else(|| self.error_here("ALTER object requires a name"))?;
+        identity.object = Some(Box::new(make_string_node(name.clone())));
+        if matches!(
+            object_type,
+            ObjectType::Database | ObjectType::Role | ObjectType::Schema | ObjectType::Tablespace
+        ) {
+            identity.subname = Some(name);
+        }
+        Ok(identity)
+    }
+
+    pub(super) fn parse_rename(&mut self) -> PResult<Node> {
+        let mut identity = self.parse_alter_identity(&[TokenKind::Rename])?;
+        if !matches!(
+            identity.object_type,
+            ObjectType::Aggregate
+                | ObjectType::Collation
+                | ObjectType::Conversion
+                | ObjectType::Database
+                | ObjectType::Domain
+                | ObjectType::Fdw
+                | ObjectType::Function
+                | ObjectType::Role
+                | ObjectType::Language
+                | ObjectType::Opclass
+                | ObjectType::Opfamily
+                | ObjectType::Policy
+                | ObjectType::Procedure
+                | ObjectType::Propgraph
+                | ObjectType::Publication
+                | ObjectType::Routine
+                | ObjectType::Schema
+                | ObjectType::ForeignServer
+                | ObjectType::Subscription
+                | ObjectType::Table
+                | ObjectType::Sequence
+                | ObjectType::View
+                | ObjectType::Matview
+                | ObjectType::Index
+                | ObjectType::ForeignTable
+                | ObjectType::Rule
+                | ObjectType::Trigger
+                | ObjectType::EventTrigger
+                | ObjectType::Tablespace
+                | ObjectType::StatisticExt
+                | ObjectType::Tsparser
+                | ObjectType::Tsdictionary
+                | ObjectType::Tstemplate
+                | ObjectType::Tsconfiguration
+                | ObjectType::Type
+        ) {
+            return Err(self.error_here("this object type does not support RENAME"));
+        }
+        if identity.missing_ok
+            && !matches!(
+                identity.object_type,
+                ObjectType::Table
+                    | ObjectType::Sequence
+                    | ObjectType::View
+                    | ObjectType::Matview
+                    | ObjectType::Index
+                    | ObjectType::ForeignTable
+                    | ObjectType::Policy
+            )
+        {
+            return Err(self.error_here("IF EXISTS is not supported for this RENAME object"));
+        }
+        self.expect(TokenKind::Rename)?;
+        let mut relation_type = ObjectType::default();
+        let mut rename_type = identity.object_type;
+        let mut behavior = DropBehavior::Restrict;
+        if self.consume(TokenKind::Column) {
+            if !matches!(
+                identity.object_type,
+                ObjectType::Table
+                    | ObjectType::View
+                    | ObjectType::Matview
+                    | ObjectType::ForeignTable
+            ) {
+                return Err(self.error_here("RENAME COLUMN is not valid for this object type"));
+            }
+            rename_type = ObjectType::Column;
+            relation_type = identity.object_type;
+            identity.subname = Some(
+                self.consume_col_id()
+                    .ok_or_else(|| self.error_here("RENAME COLUMN requires a column name"))?,
+            );
+        } else if self.consume(TokenKind::Constraint) {
+            rename_type = if identity.object_type == ObjectType::Domain {
+                ObjectType::Domconstraint
+            } else if identity.object_type == ObjectType::Table {
+                ObjectType::Tabconstraint
+            } else {
+                return Err(
+                    self.error_here("RENAME CONSTRAINT is only valid for a table or domain")
+                );
+            };
+            identity.subname = Some(
+                self.consume_col_id()
+                    .ok_or_else(|| self.error_here("RENAME CONSTRAINT requires a name"))?,
+            );
+        } else if self.consume(TokenKind::Attribute) {
+            if identity.object_type != ObjectType::Type {
+                return Err(self.error_here("RENAME ATTRIBUTE is only valid for a type"));
+            }
+            rename_type = ObjectType::Attribute;
+            relation_type = ObjectType::Type;
+            identity.subname = Some(
+                self.consume_col_id()
+                    .ok_or_else(|| self.error_here("RENAME ATTRIBUTE requires a name"))?,
+            );
+            let Some(Node::AArrayExpr(names)) = identity.object.as_deref() else {
+                return Err(self.error_here("type name is not representable as a relation"));
+            };
+            identity.relation = Some(Box::new(range_var_from_parts(
+                list_to_names(&names.elements),
+                identity.location,
+            )));
+            identity.object = None;
+        } else if matches!(
+            identity.object_type,
+            ObjectType::Table | ObjectType::View | ObjectType::Matview | ObjectType::ForeignTable
+        ) && !self.at(TokenKind::To)
+        {
+            // COLUMN is optional in PostgreSQL's RENAME [COLUMN] syntax.
+            rename_type = ObjectType::Column;
+            relation_type = identity.object_type;
+            identity.subname = Some(
+                self.consume_col_id()
+                    .ok_or_else(|| self.error_here("RENAME requires a column name or TO"))?,
+            );
+        }
+        self.expect(TokenKind::To)?;
+        let newname = Some(if identity.object_type == ObjectType::Role {
+            self.consume_role_id()?
+                .ok_or_else(|| self.error_here("RENAME TO requires a new role name"))?
+        } else {
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("RENAME TO requires a new name"))?
+        });
+        if rename_type == ObjectType::Attribute {
+            behavior = self.parse_drop_behavior();
+        }
+        if matches!(
+            identity.object_type,
+            ObjectType::Database
+                | ObjectType::Role
+                | ObjectType::Schema
+                | ObjectType::Tablespace
+                | ObjectType::Policy
+                | ObjectType::Rule
+                | ObjectType::Trigger
+        ) {
+            identity.object = None;
+        }
+        self.expect_statement_end()?;
+        Ok(Node::RenameStmt(RenameStmt {
+            node_tag: NodeTag::RenameStmt,
+            rename_type,
+            relation_type,
+            relation: identity.relation,
+            object: identity.object,
+            subname: identity.subname,
+            newname,
+            behavior,
+            missing_ok: identity.missing_ok,
+        }))
+    }
+
+    pub(super) fn parse_alter_object_depends(&mut self) -> PResult<Node> {
+        let mut identity = self.parse_alter_identity(&[TokenKind::No, TokenKind::Depends])?;
+        if identity.missing_ok {
+            return Err(self.error_here("IF EXISTS is not supported with DEPENDS ON EXTENSION"));
+        }
+        if !matches!(
+            identity.object_type,
+            ObjectType::Function
+                | ObjectType::Procedure
+                | ObjectType::Routine
+                | ObjectType::Trigger
+                | ObjectType::Matview
+                | ObjectType::Index
+        ) {
+            return Err(self.error_here("this object type does not support DEPENDS ON EXTENSION"));
+        }
+        let remove = self.consume(TokenKind::No);
+        self.expect(TokenKind::Depends)?;
+        self.expect(TokenKind::On)?;
+        self.expect(TokenKind::Extension)?;
+        let extname = Some(Box::new(String::new(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("EXTENSION requires a name"))?,
+        )));
+        self.expect_statement_end()?;
+        Ok(Node::AlterObjectDependsStmt(AlterObjectDependsStmt {
+            node_tag: NodeTag::AlterObjectDependsStmt,
+            object_type: identity.object_type,
+            relation: identity.relation,
+            object: identity.object.take(),
+            extname,
+            remove,
+        }))
+    }
+
+    pub(super) fn parse_alter_object_schema(&mut self) -> PResult<Node> {
+        let identity = self.parse_alter_identity(&[TokenKind::Set])?;
+        if identity.missing_ok
+            && !matches!(
+                identity.object_type,
+                ObjectType::Propgraph
+                    | ObjectType::Table
+                    | ObjectType::Sequence
+                    | ObjectType::View
+                    | ObjectType::Matview
+                    | ObjectType::ForeignTable
+            )
+        {
+            return Err(self.error_here("IF EXISTS is not supported for this SET SCHEMA object"));
+        }
+        if !matches!(
+            identity.object_type,
+            ObjectType::Aggregate
+                | ObjectType::Collation
+                | ObjectType::Conversion
+                | ObjectType::Domain
+                | ObjectType::Extension
+                | ObjectType::Function
+                | ObjectType::Operator
+                | ObjectType::Opclass
+                | ObjectType::Opfamily
+                | ObjectType::Procedure
+                | ObjectType::Propgraph
+                | ObjectType::Routine
+                | ObjectType::Table
+                | ObjectType::StatisticExt
+                | ObjectType::Tsparser
+                | ObjectType::Tsdictionary
+                | ObjectType::Tstemplate
+                | ObjectType::Tsconfiguration
+                | ObjectType::Sequence
+                | ObjectType::View
+                | ObjectType::Matview
+                | ObjectType::ForeignTable
+                | ObjectType::Type
+        ) {
+            return Err(self.error_here("this object type does not support SET SCHEMA"));
+        }
+        self.expect(TokenKind::Set)?;
+        self.expect(TokenKind::Schema)?;
+        let newschema = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("SET SCHEMA requires a schema name"))?,
+        );
+        self.expect_statement_end()?;
+        Ok(Node::AlterObjectSchemaStmt(AlterObjectSchemaStmt {
+            node_tag: NodeTag::AlterObjectSchemaStmt,
+            object_type: identity.object_type,
+            relation: identity.relation,
+            object: identity.object,
+            newschema,
+            missing_ok: identity.missing_ok,
+        }))
+    }
+
+    pub(super) fn parse_alter_owner(&mut self) -> PResult<Node> {
+        let identity = self.parse_alter_identity(&[TokenKind::Owner])?;
+        if identity.missing_ok {
+            return Err(self.error_here("IF EXISTS is not supported with OWNER TO"));
+        }
+        if !matches!(
+            identity.object_type,
+            ObjectType::Aggregate
+                | ObjectType::Collation
+                | ObjectType::Conversion
+                | ObjectType::Database
+                | ObjectType::Domain
+                | ObjectType::Function
+                | ObjectType::Language
+                | ObjectType::Largeobject
+                | ObjectType::Operator
+                | ObjectType::Opclass
+                | ObjectType::Opfamily
+                | ObjectType::Procedure
+                | ObjectType::Propgraph
+                | ObjectType::Routine
+                | ObjectType::Schema
+                | ObjectType::Type
+                | ObjectType::Tablespace
+                | ObjectType::StatisticExt
+                | ObjectType::Tsdictionary
+                | ObjectType::Tsconfiguration
+                | ObjectType::Fdw
+                | ObjectType::ForeignServer
+                | ObjectType::EventTrigger
+                | ObjectType::Publication
+                | ObjectType::Subscription
+        ) {
+            return Err(self.error_here("this object type does not support OWNER TO"));
+        }
+        self.expect(TokenKind::Owner)?;
+        self.expect(TokenKind::To)?;
+        let newowner =
+            Some(Box::new(self.consume_role_spec().ok_or_else(|| {
+                self.error_here("OWNER TO requires a role")
+            })?));
+        self.expect_statement_end()?;
+        Ok(Node::AlterOwnerStmt(AlterOwnerStmt {
+            node_tag: NodeTag::AlterOwnerStmt,
+            object_type: identity.object_type,
+            relation: identity.relation,
+            object: identity.object,
+            newowner,
+        }))
+    }
+}
+pub(super) fn relation_object_type(object_type: ObjectType) -> bool {
+    matches!(
+        object_type,
+        ObjectType::Table
+            | ObjectType::Sequence
+            | ObjectType::View
+            | ObjectType::Matview
+            | ObjectType::Index
+            | ObjectType::ForeignTable
+            | ObjectType::Propgraph
+    )
+}

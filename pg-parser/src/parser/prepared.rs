@@ -1,0 +1,168 @@
+use super::*;
+
+impl Parser {
+    pub(super) fn parse_prepare(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Prepare)?;
+        let name = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("PREPARE requires a statement name"))?,
+        );
+        let argtypes = if self.consume(TokenKind::Char('(')) {
+            let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let types = parse_type_node_list(tokens)?;
+            self.expect(TokenKind::Char(')'))?;
+            types
+        } else {
+            Vec::new()
+        };
+        self.expect(TokenKind::As)?;
+        if !matches!(
+            self.peek_kind(),
+            TokenKind::Select
+                | TokenKind::Values
+                | TokenKind::Table
+                | TokenKind::Char('(')
+                | TokenKind::With
+                | TokenKind::Insert
+                | TokenKind::Update
+                | TokenKind::DeleteP
+                | TokenKind::Merge
+        ) {
+            return Err(self.error_here("PREPARE requires a preparable DML statement"));
+        }
+        let query = Some(Box::new(self.parse_statement(None)?));
+        Ok(Node::PrepareStmt(PrepareStmt {
+            node_tag: NodeTag::PrepareStmt,
+            name,
+            argtypes,
+            query,
+        }))
+    }
+
+    pub(super) fn parse_execute(&mut self) -> PResult<Node> {
+        let stmt = self.parse_execute_core()?;
+        self.expect_statement_end()?;
+        Ok(Node::ExecuteStmt(stmt))
+    }
+
+    pub(super) fn parse_execute_core(&mut self) -> PResult<ExecuteStmt> {
+        self.expect(TokenKind::Execute)?;
+        let name = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("EXECUTE requires a statement name"))?,
+        );
+        let params = if self.consume(TokenKind::Char('(')) {
+            let params = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            if params.is_empty() {
+                return Err(self.error_here("EXECUTE parameter list cannot be empty"));
+            }
+            self.expect(TokenKind::Char(')'))?;
+            params
+        } else {
+            Vec::new()
+        };
+        Ok(ExecuteStmt {
+            node_tag: NodeTag::ExecuteStmt,
+            name,
+            params,
+        })
+    }
+
+    pub(super) fn parse_optional_with_data(&mut self) -> PResult<bool> {
+        if !self.consume(TokenKind::With) {
+            return Ok(false);
+        }
+        let skip_data = self.consume(TokenKind::No);
+        self.expect(TokenKind::DataP)?;
+        Ok(skip_data)
+    }
+
+    pub(super) fn parse_deallocate(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Deallocate)?;
+        self.consume(TokenKind::Prepare);
+        let isall = self.consume(TokenKind::All);
+        let (name, location) = if isall {
+            (None, -1)
+        } else {
+            let location = self.location() as ParseLoc;
+            (
+                Some(self.consume_col_id().ok_or_else(|| {
+                    self.error_here("DEALLOCATE requires a statement name or ALL")
+                })?),
+                location,
+            )
+        };
+        self.expect_statement_end()?;
+        Ok(Node::DeallocateStmt(DeallocateStmt {
+            node_tag: NodeTag::DeallocateStmt,
+            name,
+            isall,
+            location,
+        }))
+    }
+
+    pub(super) fn parse_explain(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Explain)?;
+        let parenthesized = self.at(TokenKind::Char('('));
+        let mut options = if parenthesized {
+            self.parse_parenthesized_utility_option_list()?
+        } else {
+            Vec::new()
+        };
+        if !parenthesized && matches!(self.peek_kind(), TokenKind::Analyze | TokenKind::Analyse) {
+            let token = self.advance().clone();
+            options.push(make_def_elem("analyze", None, token.location));
+            if self.at(TokenKind::Verbose) {
+                let token = self.advance().clone();
+                options.push(make_def_elem("verbose", None, token.location));
+            }
+        } else if !parenthesized && self.at(TokenKind::Verbose) {
+            let token = self.advance().clone();
+            options.push(make_def_elem("verbose", None, token.location));
+        }
+        if self.at_statement_end() {
+            return Err(self.error_here("EXPLAIN requires a statement"));
+        }
+        let query = self.parse_statement(None)?;
+        if !matches!(
+            query,
+            Node::SelectStmt(_)
+                | Node::InsertStmt(_)
+                | Node::UpdateStmt(_)
+                | Node::DeleteStmt(_)
+                | Node::MergeStmt(_)
+                | Node::DeclareCursorStmt(_)
+                | Node::CreateTableAsStmt(_)
+                | Node::RefreshMatViewStmt(_)
+                | Node::ExecuteStmt(_)
+        ) {
+            return Err(self.error_here("statement is not explainable"));
+        }
+        Ok(Node::ExplainStmt(ExplainStmt {
+            node_tag: NodeTag::ExplainStmt,
+            query: Some(Box::new(query)),
+            options,
+        }))
+    }
+
+    pub(super) fn parse_call(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Call)?;
+        let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let funccall = match parse_expression_tokens(tokens)? {
+            Node::FuncCall(call)
+                if call.agg_filter.is_none()
+                    && call.over.is_none()
+                    && !call.agg_within_group
+                    && call.ignore_nulls == 0 =>
+            {
+                Some(Box::new(call))
+            }
+            _ => return Err(self.error_here("CALL requires a function application")),
+        };
+        Ok(Node::CallStmt(CallStmt {
+            node_tag: NodeTag::CallStmt,
+            funccall,
+            ..CallStmt::default()
+        }))
+    }
+}

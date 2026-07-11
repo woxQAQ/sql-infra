@@ -1,0 +1,290 @@
+use super::*;
+
+impl Parser {
+    pub(super) fn parse_create_event_trigger(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Trigger)?;
+        let trigname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("CREATE EVENT TRIGGER requires a name"))?,
+        );
+        self.expect(TokenKind::On)?;
+        let eventname = Some(
+            self.consume_col_label()
+                .ok_or_else(|| self.error_here("event trigger requires an event name"))?,
+        );
+        let mut whenclause = Vec::new();
+        if self.consume(TokenKind::When) {
+            loop {
+                let location = self.location();
+                let name = self
+                    .consume_col_id()
+                    .ok_or_else(|| self.error_here("event trigger WHEN requires a variable"))?;
+                self.expect(TokenKind::InP)?;
+                self.expect(TokenKind::Char('('))?;
+                let mut values = Vec::new();
+                loop {
+                    if !self.at(TokenKind::SConst) {
+                        return Err(self.error_here("event trigger values must be strings"));
+                    }
+                    values.push(make_string_node(
+                        self.consume_string_like().unwrap_or_default(),
+                    ));
+                    if !self.consume(TokenKind::Char(',')) {
+                        break;
+                    }
+                }
+                self.expect(TokenKind::Char(')'))?;
+                whenclause.push(make_def_elem(&name, Some(name_list_node(values)), location));
+                if !self.consume(TokenKind::And) {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenKind::Execute)?;
+        if !self.consume(TokenKind::Function) {
+            self.expect(TokenKind::Procedure)?;
+        }
+        let funcname = self.parse_func_name_list();
+        if funcname.is_empty() {
+            return Err(self.error_here("event trigger function requires a name"));
+        }
+        self.expect(TokenKind::Char('('))?;
+        self.expect(TokenKind::Char(')'))?;
+        Ok(Node::CreateEventTrigStmt(CreateEventTrigStmt {
+            node_tag: NodeTag::CreateEventTrigStmt,
+            trigname,
+            eventname,
+            whenclause,
+            funcname,
+        }))
+    }
+
+    pub(super) fn parse_alter_event_trigger(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Trigger)?;
+        let trigname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("ALTER EVENT TRIGGER requires a name"))?,
+        );
+        let tgenabled = match self.peek_kind() {
+            TokenKind::EnableP => {
+                self.advance();
+                if self.consume(TokenKind::Replica) {
+                    b'R'
+                } else if self.consume(TokenKind::Always) {
+                    b'A'
+                } else {
+                    b'O'
+                }
+            }
+            TokenKind::DisableP => {
+                self.advance();
+                b'D'
+            }
+            _ => return Err(self.error_here("event trigger requires ENABLE or DISABLE")),
+        };
+        self.expect_statement_end()?;
+        Ok(Node::AlterEventTrigStmt(AlterEventTrigStmt {
+            node_tag: NodeTag::AlterEventTrigStmt,
+            trigname,
+            tgenabled,
+        }))
+    }
+
+    pub(super) fn parse_create_trigger(
+        &mut self,
+        replace: bool,
+        isconstraint: bool,
+    ) -> PResult<Node> {
+        self.expect(TokenKind::Trigger)?;
+        if isconstraint && replace {
+            return Err(self.error_here("OR REPLACE is not supported for constraint triggers"));
+        }
+        let trigname = Some(
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("CREATE TRIGGER requires a name"))?,
+        );
+        let timing = if isconstraint {
+            self.expect(TokenKind::After)?;
+            0
+        } else if self.consume(TokenKind::Before) {
+            2
+        } else if self.consume(TokenKind::After) {
+            0
+        } else if self.consume(TokenKind::Instead) {
+            self.expect(TokenKind::Of)?;
+            64
+        } else {
+            return Err(self.error_here("trigger timing must be BEFORE, AFTER, or INSTEAD OF"));
+        };
+        let (events, columns) = self.parse_trigger_events()?;
+        self.expect(TokenKind::On)?;
+        let relation =
+            Some(Box::new(self.parse_plain_range_var().ok_or_else(|| {
+                self.error_here("CREATE TRIGGER requires a relation")
+            })?));
+        let constrrel = if isconstraint && self.consume(TokenKind::From) {
+            Some(Box::new(self.parse_plain_range_var().ok_or_else(|| {
+                self.error_here("FROM requires a relation")
+            })?))
+        } else {
+            None
+        };
+        let mut transition_rels = Vec::new();
+        if !isconstraint && self.consume(TokenKind::Referencing) {
+            let transition_start = self.location();
+            while matches!(self.peek_kind(), TokenKind::Old | TokenKind::New) {
+                let is_new = self.consume(TokenKind::New);
+                if !is_new {
+                    self.expect(TokenKind::Old)?;
+                }
+                let is_table = if self.consume(TokenKind::Table) {
+                    true
+                } else {
+                    self.expect(TokenKind::Row)?;
+                    false
+                };
+                self.consume(TokenKind::As);
+                let name = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("trigger transition requires a name"))?,
+                );
+                transition_rels.push(Node::TriggerTransition(TriggerTransition {
+                    node_tag: NodeTag::TriggerTransition,
+                    name,
+                    is_new,
+                    is_table,
+                }));
+            }
+            if transition_rels.is_empty() {
+                return Err(ParseError::new(
+                    transition_start,
+                    "REFERENCING requires at least one transition relation",
+                ));
+            }
+        }
+        let mut deferrable = false;
+        let mut initdeferred = false;
+        if isconstraint {
+            let mut saw_deferrable = None;
+            let mut saw_initially = None;
+            loop {
+                if self.consume(TokenKind::Deferrable) {
+                    if saw_deferrable == Some(false) {
+                        return Err(self.error_here("conflicting constraint properties"));
+                    }
+                    saw_deferrable = Some(true);
+                    deferrable = true;
+                } else if self.consume(TokenKind::Not) {
+                    self.expect(TokenKind::Deferrable)?;
+                    if saw_deferrable == Some(true) {
+                        return Err(self.error_here("conflicting constraint properties"));
+                    }
+                    if saw_initially == Some(true) {
+                        return Err(self.error_here(
+                            "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
+                        ));
+                    }
+                    saw_deferrable = Some(false);
+                    deferrable = false;
+                } else if self.consume(TokenKind::Initially) {
+                    let deferred = if self.consume(TokenKind::Deferred) {
+                        true
+                    } else {
+                        self.expect(TokenKind::Immediate)?;
+                        false
+                    };
+                    if saw_initially.is_some_and(|previous| previous != deferred) {
+                        return Err(self.error_here("conflicting constraint properties"));
+                    }
+                    saw_initially = Some(deferred);
+                    initdeferred = deferred;
+                    if deferred {
+                        if saw_deferrable == Some(false) {
+                            return Err(self.error_here(
+                                "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
+                            ));
+                        }
+                        deferrable = true;
+                    }
+                } else if self.consume(TokenKind::Enforced) {
+                    // Accepted by ConstraintAttributeSpec; CreateTrigStmt has no raw field for it.
+                } else {
+                    break;
+                }
+            }
+        }
+        let row = if self.consume(TokenKind::For) {
+            self.consume(TokenKind::Each);
+            if self.consume(TokenKind::Row) {
+                true
+            } else {
+                self.expect(TokenKind::Statement)?;
+                false
+            }
+        } else {
+            if isconstraint {
+                return Err(self.error_here("constraint trigger requires FOR EACH ROW"));
+            }
+            false
+        };
+        let when_clause = if self.consume(TokenKind::When) {
+            self.expect(TokenKind::Char('('))?;
+            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+            self.expect(TokenKind::Char(')'))?;
+            Some(expr)
+        } else {
+            None
+        };
+        self.expect(TokenKind::Execute)?;
+        if !self.consume(TokenKind::Function) {
+            self.expect(TokenKind::Procedure)?;
+        }
+        let funcname = self.parse_func_name_list();
+        if funcname.is_empty() {
+            return Err(self.error_here("trigger function requires a name"));
+        }
+        self.expect(TokenKind::Char('('))?;
+        let mut args = Vec::new();
+        if !self.at(TokenKind::Char(')')) {
+            loop {
+                let token = self.peek().clone();
+                let value = match (&token.kind, &token.value) {
+                    (TokenKind::IConst, Some(TokenValue::Integer(value))) => {
+                        self.advance();
+                        value.to_string()
+                    }
+                    (TokenKind::FConst | TokenKind::SConst, Some(TokenValue::String(value))) => {
+                        self.advance();
+                        value.clone()
+                    }
+                    _ => self
+                        .consume_col_label()
+                        .ok_or_else(|| self.error_here("invalid trigger function argument"))?,
+                };
+                args.push(make_string_node(value));
+                if !self.consume(TokenKind::Char(',')) {
+                    break;
+                }
+            }
+        }
+        self.expect(TokenKind::Char(')'))?;
+        Ok(Node::CreateTrigStmt(CreateTrigStmt {
+            node_tag: NodeTag::CreateTrigStmt,
+            replace,
+            isconstraint,
+            trigname,
+            relation,
+            funcname,
+            args,
+            row,
+            timing,
+            events,
+            columns,
+            when_clause,
+            transition_rels,
+            deferrable,
+            initdeferred,
+            constrrel,
+        }))
+    }
+}
