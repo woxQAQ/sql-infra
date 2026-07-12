@@ -58,38 +58,47 @@ impl Parser {
             } else {
                 None
             };
-            let mut constraint = Constraint {
+            let (contype, raw_expr) = match self.peek_kind() {
+                TokenKind::Default => {
+                    self.advance();
+                    let raw_expr = Some(self.parse_expr_box_strict_until(&[
+                        TokenKind::Constraint,
+                        TokenKind::Not,
+                        TokenKind::Check,
+                        TokenKind::Collate,
+                        TokenKind::Char(';'),
+                        TokenKind::Eof,
+                    ])?);
+                    (ConstrType::Default, raw_expr)
+                }
+                TokenKind::Not => {
+                    self.advance();
+                    self.expect(TokenKind::NullP)?;
+                    (ConstrType::Notnull, None)
+                }
+                TokenKind::NullP => {
+                    self.advance();
+                    (ConstrType::Null, None)
+                }
+                TokenKind::Check => {
+                    self.advance();
+                    self.expect(TokenKind::Char('('))?;
+                    let raw_expr = Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                    self.expect(TokenKind::Char(')'))?;
+                    (ConstrType::Check, raw_expr)
+                }
+                _ => return Err(self.error_here("invalid domain constraint")),
+            };
+            let constraint = Constraint {
                 node_tag: NodeTag::Constraint,
                 conname,
+                contype,
+                raw_expr,
                 location: location as ParseLoc,
                 initially_valid: true,
                 is_enforced: true,
                 ..Constraint::default()
             };
-            if self.consume(TokenKind::Default) {
-                constraint.contype = ConstrType::Default;
-                constraint.raw_expr = Some(self.parse_expr_box_strict_until(&[
-                    TokenKind::Constraint,
-                    TokenKind::Not,
-                    TokenKind::Check,
-                    TokenKind::Collate,
-                    TokenKind::Char(';'),
-                    TokenKind::Eof,
-                ])?);
-            } else if self.consume(TokenKind::Not) {
-                self.expect(TokenKind::NullP)?;
-                constraint.contype = ConstrType::Notnull;
-            } else if self.consume(TokenKind::NullP) {
-                constraint.contype = ConstrType::Null;
-            } else if self.consume(TokenKind::Check) {
-                constraint.contype = ConstrType::Check;
-                self.expect(TokenKind::Char('('))?;
-                constraint.raw_expr =
-                    Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
-                self.expect(TokenKind::Char(')'))?;
-            } else {
-                return Err(self.error_here("invalid domain constraint"));
-            }
             constraints.push(Node::Constraint(constraint));
         }
         Ok(Node::CreateDomainStmt(CreateDomainStmt {

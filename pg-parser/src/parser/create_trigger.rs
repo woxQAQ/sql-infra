@@ -135,26 +135,38 @@ impl Parser {
         let timing = if isconstraint {
             self.expect(TokenKind::After)?;
             0
-        } else if self.consume(TokenKind::Before) {
-            2
-        } else if self.consume(TokenKind::After) {
-            0
-        } else if self.consume(TokenKind::Instead) {
-            self.expect(TokenKind::Of)?;
-            64
         } else {
-            return Err(self.error_here("trigger timing must be BEFORE, AFTER, or INSTEAD OF"));
+            match self.peek_kind() {
+                TokenKind::Before => {
+                    self.advance();
+                    2
+                }
+                TokenKind::After => {
+                    self.advance();
+                    0
+                }
+                TokenKind::Instead => {
+                    self.advance();
+                    self.expect(TokenKind::Of)?;
+                    64
+                }
+                _ => {
+                    return Err(
+                        self.error_here("trigger timing must be BEFORE, AFTER, or INSTEAD OF")
+                    );
+                }
+            }
         };
         let (events, columns) = self.parse_trigger_events()?;
         self.expect(TokenKind::On)?;
-        let relation =
-            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                self.error_here("CREATE TRIGGER requires a relation")
-            })?));
+        let relation = Some(Box::new(
+            self.try_parse_qualified_range_var()
+                .ok_or_else(|| self.error_here("CREATE TRIGGER requires a relation"))?,
+        ));
         let constrrel = if isconstraint && self.consume(TokenKind::From) {
-            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                self.error_here("FROM requires a relation")
-            })?))
+            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
+                || self.error_here("FROM requires a relation"),
+            )?))
         } else {
             None
         };

@@ -14,7 +14,10 @@ impl Parser {
             TokenKind::Create => self.parse_create(),
             TokenKind::Alter => self.parse_alter(),
             TokenKind::Drop => self.parse_drop(),
-            TokenKind::Set => self.parse_set_or_constraints(),
+            TokenKind::Set if self.peek_kind_n(1) == TokenKind::Constraints => {
+                self.parse_set_constraints()
+            }
+            TokenKind::Set => self.parse_variable_set(),
             TokenKind::Reset => self.parse_variable_reset(),
             TokenKind::Show => self.parse_variable_show(),
             TokenKind::BeginP

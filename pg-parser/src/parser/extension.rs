@@ -235,65 +235,88 @@ impl Parser {
             return Ok((objtype, name_list_node(names)));
         }
 
-        let objtype = if self.consume(TokenKind::Access) {
-            self.expect(TokenKind::Method)?;
-            ObjectType::AccessMethod
-        } else if self.consume(TokenKind::Event) {
-            self.expect(TokenKind::Trigger)?;
-            ObjectType::EventTrigger
-        } else if self.consume(TokenKind::Foreign) {
-            if self.consume(TokenKind::DataP) {
-                self.expect(TokenKind::Wrapper)?;
-                ObjectType::Fdw
-            } else {
-                self.expect(TokenKind::Table)?;
-                ObjectType::ForeignTable
+        let objtype = match self.peek_kind() {
+            TokenKind::Access => {
+                self.advance();
+                self.expect(TokenKind::Method)?;
+                ObjectType::AccessMethod
             }
-        } else if self.consume(TokenKind::Procedural) {
-            self.expect(TokenKind::Language)?;
-            ObjectType::Language
-        } else if self.consume(TokenKind::Language) {
-            ObjectType::Language
-        } else if self.consume(TokenKind::Materialized) {
-            self.expect(TokenKind::View)?;
-            ObjectType::Matview
-        } else if self.consume(TokenKind::Property) {
-            self.expect(TokenKind::Graph)?;
-            ObjectType::Propgraph
-        } else if self.consume(TokenKind::TextP) {
-            self.expect(TokenKind::Search)?;
-            match self.advance().kind {
-                TokenKind::Parser => ObjectType::Tsparser,
-                TokenKind::Dictionary => ObjectType::Tsdictionary,
-                TokenKind::Template => ObjectType::Tstemplate,
-                TokenKind::Configuration => ObjectType::Tsconfiguration,
-                _ => return Err(self.error_here("invalid TEXT SEARCH object type")),
+            TokenKind::Event => {
+                self.advance();
+                self.expect(TokenKind::Trigger)?;
+                ObjectType::EventTrigger
             }
-        } else {
-            let objtype = self
-                .consume_object_type()
-                .ok_or_else(|| self.error_here("unsupported extension member object type"))?;
-            if !matches!(
-                objtype,
-                ObjectType::Table
-                    | ObjectType::Sequence
-                    | ObjectType::View
-                    | ObjectType::Index
-                    | ObjectType::Collation
-                    | ObjectType::Conversion
-                    | ObjectType::StatisticExt
-                    | ObjectType::Database
-                    | ObjectType::Role
-                    | ObjectType::Subscription
-                    | ObjectType::Extension
-                    | ObjectType::Publication
-                    | ObjectType::Schema
-                    | ObjectType::ForeignServer
-                    | ObjectType::Tablespace
-            ) {
-                return Err(self.error_here("unsupported extension member object type"));
+            TokenKind::Foreign => {
+                self.advance();
+                match self.peek_kind() {
+                    TokenKind::DataP => {
+                        self.advance();
+                        self.expect(TokenKind::Wrapper)?;
+                        ObjectType::Fdw
+                    }
+                    TokenKind::Table => {
+                        self.advance();
+                        ObjectType::ForeignTable
+                    }
+                    _ => return Err(self.error_here("FOREIGN requires DATA WRAPPER or TABLE")),
+                }
             }
-            objtype
+            TokenKind::Procedural => {
+                self.advance();
+                self.expect(TokenKind::Language)?;
+                ObjectType::Language
+            }
+            TokenKind::Language => {
+                self.advance();
+                ObjectType::Language
+            }
+            TokenKind::Materialized => {
+                self.advance();
+                self.expect(TokenKind::View)?;
+                ObjectType::Matview
+            }
+            TokenKind::Property => {
+                self.advance();
+                self.expect(TokenKind::Graph)?;
+                ObjectType::Propgraph
+            }
+            TokenKind::TextP => {
+                self.advance();
+                self.expect(TokenKind::Search)?;
+                match self.advance().kind {
+                    TokenKind::Parser => ObjectType::Tsparser,
+                    TokenKind::Dictionary => ObjectType::Tsdictionary,
+                    TokenKind::Template => ObjectType::Tstemplate,
+                    TokenKind::Configuration => ObjectType::Tsconfiguration,
+                    _ => return Err(self.error_here("invalid TEXT SEARCH object type")),
+                }
+            }
+            _ => {
+                let objtype = self
+                    .consume_object_type()
+                    .ok_or_else(|| self.error_here("unsupported extension member object type"))?;
+                if !matches!(
+                    objtype,
+                    ObjectType::Table
+                        | ObjectType::Sequence
+                        | ObjectType::View
+                        | ObjectType::Index
+                        | ObjectType::Collation
+                        | ObjectType::Conversion
+                        | ObjectType::StatisticExt
+                        | ObjectType::Database
+                        | ObjectType::Role
+                        | ObjectType::Subscription
+                        | ObjectType::Extension
+                        | ObjectType::Publication
+                        | ObjectType::Schema
+                        | ObjectType::ForeignServer
+                        | ObjectType::Tablespace
+                ) {
+                    return Err(self.error_here("unsupported extension member object type"));
+                }
+                objtype
+            }
         };
 
         let uses_any_name = matches!(

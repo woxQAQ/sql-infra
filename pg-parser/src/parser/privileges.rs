@@ -174,22 +174,22 @@ impl Parser {
         };
         let privileges = self.parse_access_privileges()?;
         self.expect(TokenKind::On)?;
-        let objtype = if self.consume(TokenKind::Tables) {
-            ObjectType::Table
-        } else if self.consume(TokenKind::Functions) || self.consume(TokenKind::Routines) {
-            ObjectType::Function
-        } else if self.consume(TokenKind::Sequences) {
-            ObjectType::Sequence
-        } else if self.consume(TokenKind::TypesP) {
-            ObjectType::Type
-        } else if self.consume(TokenKind::Schemas) {
-            ObjectType::Schema
-        } else if self.consume(TokenKind::LargeP) {
-            self.expect(TokenKind::ObjectsP)?;
-            ObjectType::Largeobject
-        } else {
-            return Err(self.error_here("invalid default privilege target"));
+        let objtype = match self.peek_kind() {
+            TokenKind::Tables => ObjectType::Table,
+            TokenKind::Functions | TokenKind::Routines => ObjectType::Function,
+            TokenKind::Sequences => ObjectType::Sequence,
+            TokenKind::TypesP => ObjectType::Type,
+            TokenKind::Schemas => ObjectType::Schema,
+            TokenKind::LargeP => {
+                self.advance();
+                self.expect(TokenKind::ObjectsP)?;
+                ObjectType::Largeobject
+            }
+            _ => return Err(self.error_here("invalid default privilege target")),
         };
+        if objtype != ObjectType::Largeobject {
+            self.advance();
+        }
         self.expect(if is_grant {
             TokenKind::To
         } else {
@@ -682,19 +682,15 @@ impl Parser {
 
     fn parse_privilege_target(&mut self) -> PResult<(GrantTargetType, ObjectType, NodeList)> {
         if self.consume(TokenKind::All) {
-            let objtype = if self.consume(TokenKind::Tables) {
-                ObjectType::Table
-            } else if self.consume(TokenKind::Sequences) {
-                ObjectType::Sequence
-            } else if self.consume(TokenKind::Functions) {
-                ObjectType::Function
-            } else if self.consume(TokenKind::Procedures) {
-                ObjectType::Procedure
-            } else if self.consume(TokenKind::Routines) {
-                ObjectType::Routine
-            } else {
-                return Err(self.error_here("expected an object class after ON ALL"));
+            let objtype = match self.peek_kind() {
+                TokenKind::Tables => ObjectType::Table,
+                TokenKind::Sequences => ObjectType::Sequence,
+                TokenKind::Functions => ObjectType::Function,
+                TokenKind::Procedures => ObjectType::Procedure,
+                TokenKind::Routines => ObjectType::Routine,
+                _ => return Err(self.error_here("expected an object class after ON ALL")),
             };
+            self.advance();
             self.expect(TokenKind::InP)?;
             self.expect(TokenKind::Schema)?;
             let objects = self.parse_simple_name_list_until(&[

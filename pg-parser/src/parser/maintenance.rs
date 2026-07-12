@@ -50,10 +50,10 @@ impl Parser {
             let query = parse_preparable_statement_tokens(tokens)?;
             (None, Some(Box::new(query)), Vec::new())
         } else {
-            let relation =
-                Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                    self.error_here("COPY requires a relation or query")
-                })?));
+            let relation = Some(Box::new(
+                self.try_parse_qualified_range_var()
+                    .ok_or_else(|| self.error_here("COPY requires a relation or query"))?,
+            ));
             let attlist = if self.consume(TokenKind::Char('(')) {
                 let columns = self.parse_parenthesized_name_list_body()?;
                 self.expect(TokenKind::Char(')'))?;
@@ -419,34 +419,56 @@ impl Parser {
     }
 
     pub(super) fn parse_lock_mode(&mut self) -> PResult<i32> {
-        let mode = if self.consume(TokenKind::Access) {
-            if self.consume(TokenKind::Share) {
-                1
-            } else {
-                self.expect(TokenKind::Exclusive)?;
-                8
+        let mode = match self.peek_kind() {
+            TokenKind::Access => {
+                self.advance();
+                match self.peek_kind() {
+                    TokenKind::Share => {
+                        self.advance();
+                        1
+                    }
+                    TokenKind::Exclusive => {
+                        self.advance();
+                        8
+                    }
+                    _ => return Err(self.error_here("ACCESS requires SHARE or EXCLUSIVE")),
+                }
             }
-        } else if self.consume(TokenKind::Row) {
-            if self.consume(TokenKind::Share) {
-                2
-            } else {
-                self.expect(TokenKind::Exclusive)?;
-                3
+            TokenKind::Row => {
+                self.advance();
+                match self.peek_kind() {
+                    TokenKind::Share => {
+                        self.advance();
+                        2
+                    }
+                    TokenKind::Exclusive => {
+                        self.advance();
+                        3
+                    }
+                    _ => return Err(self.error_here("ROW requires SHARE or EXCLUSIVE")),
+                }
             }
-        } else if self.consume(TokenKind::Share) {
-            if self.consume(TokenKind::Update) {
-                self.expect(TokenKind::Exclusive)?;
-                4
-            } else if self.consume(TokenKind::Row) {
-                self.expect(TokenKind::Exclusive)?;
-                6
-            } else {
-                5
+            TokenKind::Share => {
+                self.advance();
+                match self.peek_kind() {
+                    TokenKind::Update => {
+                        self.advance();
+                        self.expect(TokenKind::Exclusive)?;
+                        4
+                    }
+                    TokenKind::Row => {
+                        self.advance();
+                        self.expect(TokenKind::Exclusive)?;
+                        6
+                    }
+                    _ => 5,
+                }
             }
-        } else if self.consume(TokenKind::Exclusive) {
-            7
-        } else {
-            return Err(self.error_here("invalid LOCK mode"));
+            TokenKind::Exclusive => {
+                self.advance();
+                7
+            }
+            _ => return Err(self.error_here("invalid LOCK mode")),
         };
         Ok(mode)
     }
@@ -539,9 +561,9 @@ impl Parser {
         self.expect(TokenKind::Materialized)?;
         self.expect(TokenKind::View)?;
         let concurrent = self.consume(TokenKind::Concurrently);
-        let relation = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-            self.error_here("REFRESH MATERIALIZED VIEW requires a relation")
-        })?));
+        let relation = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
+            || self.error_here("REFRESH MATERIALIZED VIEW requires a relation"),
+        )?));
         let skip_data = if self.consume(TokenKind::With) {
             let no = self.consume(TokenKind::No);
             self.expect(TokenKind::DataP)?;
@@ -591,9 +613,9 @@ impl Parser {
         }
         let (relation, name) = match kind {
             ReindexObjectType::Index | ReindexObjectType::Table => (
-                Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                    self.error_here("REINDEX requires a relation name")
-                })?)),
+                Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
+                    || self.error_here("REINDEX requires a relation name"),
+                )?)),
                 None,
             ),
             ReindexObjectType::Schema => (

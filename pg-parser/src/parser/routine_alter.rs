@@ -75,75 +75,103 @@ impl Parser {
         let mut actions = Vec::new();
         while !self.at_any(&[TokenKind::Restrict, TokenKind::Char(';'), TokenKind::Eof]) {
             let location = self.location();
-            let (name, arg) = if self.consume(TokenKind::Called) {
-                self.expect(TokenKind::On)?;
-                self.expect(TokenKind::NullP)?;
-                self.expect(TokenKind::InputP)?;
-                ("strict", Some(Node::Boolean(Boolean::new(false))))
-            } else if self.consume(TokenKind::Returns) {
-                self.expect(TokenKind::NullP)?;
-                self.expect(TokenKind::On)?;
-                self.expect(TokenKind::NullP)?;
-                self.expect(TokenKind::InputP)?;
-                ("strict", Some(Node::Boolean(Boolean::new(true))))
-            } else if self.consume(TokenKind::StrictP) {
-                ("strict", Some(Node::Boolean(Boolean::new(true))))
-            } else if self.consume(TokenKind::Immutable) {
-                ("volatility", Some(make_string_node("immutable")))
-            } else if self.consume(TokenKind::Stable) {
-                ("volatility", Some(make_string_node("stable")))
-            } else if self.consume(TokenKind::Volatile) {
-                ("volatility", Some(make_string_node("volatile")))
-            } else if self.consume(TokenKind::External) {
-                self.expect(TokenKind::Security)?;
-                let value = if self.consume(TokenKind::Definer) {
-                    true
-                } else if self.consume(TokenKind::Invoker) {
-                    false
-                } else {
-                    return Err(self.error_here("SECURITY requires DEFINER or INVOKER"));
-                };
-                ("security", Some(Node::Boolean(Boolean::new(value))))
-            } else if self.consume(TokenKind::Security) {
-                let value = if self.consume(TokenKind::Definer) {
-                    true
-                } else if self.consume(TokenKind::Invoker) {
-                    false
-                } else {
-                    return Err(self.error_here("SECURITY requires DEFINER or INVOKER"));
-                };
-                ("security", Some(Node::Boolean(Boolean::new(value))))
-            } else if self.consume(TokenKind::Leakproof) {
-                ("leakproof", Some(Node::Boolean(Boolean::new(true))))
-            } else if self.consume(TokenKind::Not) {
-                self.expect(TokenKind::Leakproof)?;
-                ("leakproof", Some(Node::Boolean(Boolean::new(false))))
-            } else if self.consume(TokenKind::Cost) {
-                ("cost", Some(self.parse_numeric_only()?))
-            } else if self.consume(TokenKind::Rows) {
-                ("rows", Some(self.parse_numeric_only()?))
-            } else if self.consume(TokenKind::Support) {
-                let names =
-                    self.parse_name_list_until_keywords(&Self::alter_function_action_starts());
-                if names.is_empty() {
-                    return Err(self.error_here("SUPPORT requires a function name"));
+            let (name, arg) = match self.peek_kind() {
+                TokenKind::Called => {
+                    self.advance();
+                    self.expect(TokenKind::On)?;
+                    self.expect(TokenKind::NullP)?;
+                    self.expect(TokenKind::InputP)?;
+                    ("strict", Some(Node::Boolean(Boolean::new(false))))
                 }
-                ("support", Some(name_list_node(names)))
-            } else if matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
-                let action_starts = Self::alter_function_action_starts();
-                let setstmt = self.parse_function_set_reset_clause_until(&action_starts)?;
-                ("set", Some(Node::VariableSetStmt(setstmt)))
-            } else if self.consume(TokenKind::Parallel) {
-                let value = self
-                    .consume_col_id()
-                    .ok_or_else(|| self.error_here("PARALLEL requires a mode"))?;
-                ("parallel", Some(make_string_node(value)))
-            } else {
-                return Err(self.error_here("invalid ALTER FUNCTION option"));
+                TokenKind::Returns => {
+                    self.advance();
+                    self.expect(TokenKind::NullP)?;
+                    self.expect(TokenKind::On)?;
+                    self.expect(TokenKind::NullP)?;
+                    self.expect(TokenKind::InputP)?;
+                    ("strict", Some(Node::Boolean(Boolean::new(true))))
+                }
+                TokenKind::StrictP => {
+                    self.advance();
+                    ("strict", Some(Node::Boolean(Boolean::new(true))))
+                }
+                TokenKind::Immutable | TokenKind::Stable | TokenKind::Volatile => {
+                    let value = match self.advance().kind {
+                        TokenKind::Immutable => "immutable",
+                        TokenKind::Stable => "stable",
+                        TokenKind::Volatile => "volatile",
+                        _ => return Err(self.error_here("invalid volatility option")),
+                    };
+                    ("volatility", Some(make_string_node(value)))
+                }
+                TokenKind::External => {
+                    self.advance();
+                    self.expect(TokenKind::Security)?;
+                    let value = self.parse_routine_security()?;
+                    ("security", Some(Node::Boolean(Boolean::new(value))))
+                }
+                TokenKind::Security => {
+                    self.advance();
+                    let value = self.parse_routine_security()?;
+                    ("security", Some(Node::Boolean(Boolean::new(value))))
+                }
+                TokenKind::Leakproof => {
+                    self.advance();
+                    ("leakproof", Some(Node::Boolean(Boolean::new(true))))
+                }
+                TokenKind::Not => {
+                    self.advance();
+                    self.expect(TokenKind::Leakproof)?;
+                    ("leakproof", Some(Node::Boolean(Boolean::new(false))))
+                }
+                TokenKind::Cost => {
+                    self.advance();
+                    ("cost", Some(self.parse_numeric_only()?))
+                }
+                TokenKind::Rows => {
+                    self.advance();
+                    ("rows", Some(self.parse_numeric_only()?))
+                }
+                TokenKind::Support => {
+                    self.advance();
+                    let names =
+                        self.parse_name_list_until_keywords(&Self::alter_function_action_starts());
+                    if names.is_empty() {
+                        return Err(self.error_here("SUPPORT requires a function name"));
+                    }
+                    ("support", Some(name_list_node(names)))
+                }
+                TokenKind::Set | TokenKind::Reset => {
+                    let action_starts = Self::alter_function_action_starts();
+                    let setstmt = self.parse_function_set_reset_clause_until(&action_starts)?;
+                    ("set", Some(Node::VariableSetStmt(setstmt)))
+                }
+                TokenKind::Parallel => {
+                    self.advance();
+                    let value = self
+                        .consume_col_id()
+                        .ok_or_else(|| self.error_here("PARALLEL requires a mode"))?;
+                    ("parallel", Some(make_string_node(value)))
+                }
+                _ => return Err(self.error_here("invalid ALTER FUNCTION option")),
             };
             actions.push(make_def_elem(name, arg, location));
         }
         Ok(actions)
+    }
+
+    fn parse_routine_security(&mut self) -> PResult<bool> {
+        match self.peek_kind() {
+            TokenKind::Definer => {
+                self.advance();
+                Ok(true)
+            }
+            TokenKind::Invoker => {
+                self.advance();
+                Ok(false)
+            }
+            _ => Err(self.error_here("SECURITY requires DEFINER or INVOKER")),
+        }
     }
 
     pub(super) fn parse_function_set_reset_clause_until(

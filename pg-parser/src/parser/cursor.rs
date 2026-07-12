@@ -13,19 +13,29 @@ impl Parser {
         );
         let mut options = CURSOR_OPT_FAST_PLAN;
         loop {
-            if self.consume(TokenKind::No) {
-                self.expect(TokenKind::Scroll)?;
-                options |= CURSOR_OPT_NO_SCROLL;
-            } else if self.consume(TokenKind::Scroll) {
-                options |= CURSOR_OPT_SCROLL;
-            } else if self.consume(TokenKind::Binary) {
-                options |= CURSOR_OPT_BINARY;
-            } else if self.consume(TokenKind::Insensitive) {
-                options |= CURSOR_OPT_INSENSITIVE;
-            } else if self.consume(TokenKind::Asensitive) {
-                options |= CURSOR_OPT_ASENSITIVE;
-            } else {
-                break;
+            match self.peek_kind() {
+                TokenKind::No => {
+                    self.advance();
+                    self.expect(TokenKind::Scroll)?;
+                    options |= CURSOR_OPT_NO_SCROLL;
+                }
+                TokenKind::Scroll => {
+                    self.advance();
+                    options |= CURSOR_OPT_SCROLL;
+                }
+                TokenKind::Binary => {
+                    self.advance();
+                    options |= CURSOR_OPT_BINARY;
+                }
+                TokenKind::Insensitive => {
+                    self.advance();
+                    options |= CURSOR_OPT_INSENSITIVE;
+                }
+                TokenKind::Asensitive => {
+                    self.advance();
+                    options |= CURSOR_OPT_ASENSITIVE;
+                }
+                _ => break,
             }
         }
         self.expect(TokenKind::Cursor)?;

@@ -347,31 +347,50 @@ impl Parser {
 
     pub(super) fn parse_json_table_behavior(&mut self) -> PResult<JsonBehavior> {
         let location = self.location();
-        let (btype, expr) = if self.consume(TokenKind::Default) {
-            let tokens = self.take_until_top_level(&[TokenKind::On]);
-            (
-                JsonBehaviorType::Default,
-                Some(Box::new(parse_expression_tokens(tokens)?)),
-            )
-        } else if self.consume(TokenKind::ErrorP) {
-            (JsonBehaviorType::Error, None)
-        } else if self.consume(TokenKind::NullP) {
-            (JsonBehaviorType::Null, None)
-        } else if self.consume(TokenKind::TrueP) {
-            (JsonBehaviorType::True, None)
-        } else if self.consume(TokenKind::FalseP) {
-            (JsonBehaviorType::False, None)
-        } else if self.consume(TokenKind::Unknown) {
-            (JsonBehaviorType::Unknown, None)
-        } else if self.consume(TokenKind::EmptyP) {
-            if self.consume(TokenKind::ObjectP) {
-                (JsonBehaviorType::EmptyObject, None)
-            } else {
-                self.consume(TokenKind::Array);
-                (JsonBehaviorType::EmptyArray, None)
+        let (btype, expr) = match self.peek_kind() {
+            TokenKind::Default => {
+                self.advance();
+                let tokens = self.take_until_top_level(&[TokenKind::On]);
+                (
+                    JsonBehaviorType::Default,
+                    Some(Box::new(parse_expression_tokens(tokens)?)),
+                )
             }
-        } else {
-            return Err(self.error_here("expected a JSON behavior"));
+            TokenKind::ErrorP => {
+                self.advance();
+                (JsonBehaviorType::Error, None)
+            }
+            TokenKind::NullP => {
+                self.advance();
+                (JsonBehaviorType::Null, None)
+            }
+            TokenKind::TrueP => {
+                self.advance();
+                (JsonBehaviorType::True, None)
+            }
+            TokenKind::FalseP => {
+                self.advance();
+                (JsonBehaviorType::False, None)
+            }
+            TokenKind::Unknown => {
+                self.advance();
+                (JsonBehaviorType::Unknown, None)
+            }
+            TokenKind::EmptyP => {
+                self.advance();
+                match self.peek_kind() {
+                    TokenKind::ObjectP => {
+                        self.advance();
+                        (JsonBehaviorType::EmptyObject, None)
+                    }
+                    TokenKind::Array => {
+                        self.advance();
+                        (JsonBehaviorType::EmptyArray, None)
+                    }
+                    _ => return Err(self.error_here("EMPTY requires ARRAY or OBJECT")),
+                }
+            }
+            _ => return Err(self.error_here("expected a JSON behavior")),
         };
         Ok(JsonBehavior {
             node_tag: NodeTag::JsonBehavior,

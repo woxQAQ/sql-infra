@@ -592,27 +592,35 @@ impl Parser {
         let mut events = 0i16;
         let mut columns = Vec::new();
         loop {
-            let event = if self.consume(TokenKind::Insert) {
-                4
-            } else if self.consume(TokenKind::DeleteP) {
-                8
-            } else if self.consume(TokenKind::Update) {
-                if self.consume(TokenKind::Of) {
-                    loop {
-                        let column = self
-                            .consume_col_id()
-                            .ok_or_else(|| self.error_here("UPDATE OF requires a column name"))?;
-                        columns.push(make_string_node(column));
-                        if !self.consume(TokenKind::Char(',')) {
-                            break;
+            let event = match self.peek_kind() {
+                TokenKind::Insert => {
+                    self.advance();
+                    4
+                }
+                TokenKind::DeleteP => {
+                    self.advance();
+                    8
+                }
+                TokenKind::Update => {
+                    self.advance();
+                    if self.consume(TokenKind::Of) {
+                        loop {
+                            let column = self.consume_col_id().ok_or_else(|| {
+                                self.error_here("UPDATE OF requires a column name")
+                            })?;
+                            columns.push(make_string_node(column));
+                            if !self.consume(TokenKind::Char(',')) {
+                                break;
+                            }
                         }
                     }
+                    16
                 }
-                16
-            } else if self.consume(TokenKind::Truncate) {
-                32
-            } else {
-                return Err(self.error_here("expected a trigger event"));
+                TokenKind::Truncate => {
+                    self.advance();
+                    32
+                }
+                _ => return Err(self.error_here("expected a trigger event")),
             };
             if events & event != 0 {
                 return Err(self.error_here("duplicate trigger event"));

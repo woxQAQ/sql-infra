@@ -7,10 +7,6 @@ impl Parser {
     // SET [ SESSION | LOCAL ] TIME ZONE { value | 'value' | LOCAL | DEFAULT }
     //
     // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-set-constraints.html
-    // SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE }
-    //
-    // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-set-role.html
     // SET [ SESSION | LOCAL ] ROLE role_name
     // SET [ SESSION | LOCAL ] ROLE NONE
@@ -33,94 +29,67 @@ impl Parser {
     //     ISOLATION LEVEL { SERIALIZABLE | REPEATABLE READ | READ COMMITTED | READ UNCOMMITTED }
     //     READ WRITE | READ ONLY
     //     [ NOT ] DEFERRABLE
-    pub(super) fn parse_set_or_constraints(&mut self) -> PResult<Node> {
-        if self.peek_kind_n(1) == TokenKind::Constraints {
-            self.expect(TokenKind::Set)?;
-            self.expect(TokenKind::Constraints)?;
-            let constraints = if self.consume(TokenKind::All) {
-                Vec::new()
-            } else {
-                let mut constraints = Vec::new();
-                loop {
-                    constraints.push(Node::RangeVar(
-                        self.try_parse_qualified_range_var().ok_or_else(|| {
-                            self.error_here("SET CONSTRAINTS requires a constraint name or ALL")
-                        })?,
-                    ));
-                    if !self.consume(TokenKind::Char(',')) {
-                        break;
-                    }
-                    if self.at_any(&[
-                        TokenKind::Deferred,
-                        TokenKind::Immediate,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ]) {
-                        return Err(self.error_here("expected a constraint name after ','"));
-                    }
-                }
-                constraints
-            };
-            let deferred = if self.consume(TokenKind::Deferred) {
-                true
-            } else {
-                self.expect(TokenKind::Immediate)?;
-                false
-            };
-            self.expect_statement_end()?;
-            Ok(Node::ConstraintsSetStmt(ConstraintsSetStmt {
-                node_tag: NodeTag::ConstraintsSetStmt,
-                constraints,
-                deferred,
-            }))
-        } else {
-            Ok(Node::VariableSetStmt(self.parse_variable_set_like(true)?))
-        }
+    pub(super) fn parse_variable_set(&mut self) -> PResult<Node> {
+        Ok(Node::VariableSetStmt(self.parse_variable_set_like(true)?))
     }
 
     pub(super) fn parse_variable_set_like(
         &mut self,
         allow_scope: bool,
     ) -> PResult<VariableSetStmt> {
-        if self.consume(TokenKind::Reset) {
-            let (kind, name) = if self.consume(TokenKind::All) {
-                (VariableSetKind::ResetAll, None)
-            } else if self.consume(TokenKind::Time) {
-                self.expect(TokenKind::Zone)?;
-                (VariableSetKind::Reset, Some("timezone".to_owned()))
-            } else if self.consume(TokenKind::Transaction) {
-                self.expect(TokenKind::Isolation)?;
-                self.expect(TokenKind::Level)?;
-                (
-                    VariableSetKind::Reset,
-                    Some("transaction_isolation".to_owned()),
-                )
-            } else if self.consume(TokenKind::Session) {
-                self.expect(TokenKind::Authorization)?;
-                (
-                    VariableSetKind::Reset,
-                    Some("session_authorization".to_owned()),
-                )
-            } else {
-                (
-                    VariableSetKind::Reset,
-                    Some(
-                        self.consume_setting_name()
-                            .ok_or_else(|| self.error_here("RESET requires a parameter name"))?,
-                    ),
-                )
-            };
-            self.expect_statement_end()?;
-            return Ok(VariableSetStmt {
-                node_tag: NodeTag::VariableSetStmt,
-                kind,
-                name,
-                location: -1,
-                ..VariableSetStmt::default()
-            });
+        match self.peek_kind() {
+            TokenKind::Reset => {
+                self.advance();
+                let (kind, name) =
+                    match self.peek_kind() {
+                        TokenKind::All => {
+                            self.advance();
+                            (VariableSetKind::ResetAll, None)
+                        }
+                        TokenKind::Time => {
+                            self.advance();
+                            self.expect(TokenKind::Zone)?;
+                            (VariableSetKind::Reset, Some("timezone".to_owned()))
+                        }
+                        TokenKind::Transaction => {
+                            self.advance();
+                            self.expect(TokenKind::Isolation)?;
+                            self.expect(TokenKind::Level)?;
+                            (
+                                VariableSetKind::Reset,
+                                Some("transaction_isolation".to_owned()),
+                            )
+                        }
+                        TokenKind::Session => {
+                            self.advance();
+                            self.expect(TokenKind::Authorization)?;
+                            (
+                                VariableSetKind::Reset,
+                                Some("session_authorization".to_owned()),
+                            )
+                        }
+                        _ => (
+                            VariableSetKind::Reset,
+                            Some(self.consume_setting_name().ok_or_else(|| {
+                                self.error_here("RESET requires a parameter name")
+                            })?),
+                        ),
+                    };
+                self.expect_statement_end()?;
+                return Ok(VariableSetStmt {
+                    node_tag: NodeTag::VariableSetStmt,
+                    kind,
+                    name,
+                    location: -1,
+                    ..VariableSetStmt::default()
+                });
+            }
+            TokenKind::Set => {
+                self.advance();
+            }
+            _ => return Err(self.error_here("expected SET or RESET")),
         }
 
-        self.expect(TokenKind::Set)?;
         let is_local = allow_scope && self.consume(TokenKind::Local);
         if allow_scope
             && self.at(TokenKind::Session)
@@ -138,132 +107,157 @@ impl Parser {
             location: -1,
             ..VariableSetStmt::default()
         };
-        if self.at(TokenKind::Transaction) && self.peek_kind_n(1) != TokenKind::Snapshot {
-            self.advance();
-            stmt.kind = VariableSetKind::SetMulti;
-            stmt.name = Some("TRANSACTION".to_owned());
-            stmt.args = self.parse_transaction_modes()?;
-            if stmt.args.is_empty() {
-                return Err(self.error_here("SET TRANSACTION requires at least one mode"));
-            }
-            stmt.jumble_args = true;
-        } else if self.at(TokenKind::Session) && self.peek_kind_n(1) == TokenKind::Characteristics {
-            self.advance();
-            self.expect(TokenKind::Characteristics)?;
-            self.expect(TokenKind::As)?;
-            self.expect(TokenKind::Transaction)?;
-            stmt.kind = VariableSetKind::SetMulti;
-            stmt.name = Some("SESSION CHARACTERISTICS".to_owned());
-            stmt.args = self.parse_transaction_modes()?;
-            if stmt.args.is_empty() {
-                return Err(self.error_here("SESSION CHARACTERISTICS requires transaction modes"));
-            }
-            stmt.jumble_args = true;
-        } else if self.consume(TokenKind::Time) {
-            self.expect(TokenKind::Zone)?;
-            stmt.name = Some("timezone".to_owned());
-            if self.consume(TokenKind::Default) || self.consume(TokenKind::Local) {
-                stmt.kind = VariableSetKind::SetDefault;
-            } else {
-                let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
-                stmt.args = vec![parse_time_zone_value_tokens(tokens)?];
-            }
-            stmt.jumble_args = true;
-        } else if self.consume(TokenKind::Schema) {
-            stmt.name = Some("search_path".to_owned());
-            stmt.args = vec![Node::AConst(AConst::string(
-                self.consume_required_string("SET SCHEMA requires a string")?,
-                self.previous_location() as ParseLoc,
-            ))];
-            stmt.location = self.previous_location() as ParseLoc;
-        } else if self.consume(TokenKind::Names) {
-            stmt.name = Some("client_encoding".to_owned());
-            if self.consume(TokenKind::Default) {
-                stmt.kind = VariableSetKind::SetDefault;
-                stmt.location = self.previous_location() as ParseLoc;
-            } else if self.at_statement_end() {
-                stmt.kind = VariableSetKind::SetDefault;
-            } else {
-                let value = self
-                    .at(TokenKind::SConst)
-                    .then(|| self.consume_string_like())
-                    .flatten()
-                    .ok_or_else(|| self.error_here("SET NAMES requires an encoding"))?;
-                stmt.args = vec![Node::AConst(AConst::string(
-                    value,
-                    self.previous_location() as ParseLoc,
-                ))];
-                stmt.location = self.previous_location() as ParseLoc;
-            }
-        } else if self.consume(TokenKind::Role) {
-            stmt.name = Some("role".to_owned());
-            let value = self
-                .consume_non_reserved_word_or_sconst()
-                .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
-            stmt.args = vec![Node::AConst(AConst::string(
-                value,
-                self.previous_location() as ParseLoc,
-            ))];
-            stmt.location = self.previous_location() as ParseLoc;
-        } else if self.consume(TokenKind::Session) {
-            self.expect(TokenKind::Authorization)?;
-            stmt.name = Some("session_authorization".to_owned());
-            if self.consume(TokenKind::Default) {
-                stmt.kind = VariableSetKind::SetDefault;
-            } else {
-                let value = self
-                    .consume_non_reserved_word_or_sconst()
-                    .ok_or_else(|| self.error_here("SET SESSION AUTHORIZATION requires a role"))?;
-                stmt.args = vec![Node::AConst(AConst::string(
-                    value,
-                    self.previous_location() as ParseLoc,
-                ))];
-                stmt.location = self.previous_location() as ParseLoc;
-            }
-        } else if self.consume(TokenKind::XmlP) {
-            self.expect(TokenKind::Option)?;
-            let (value, value_location) = if self.consume(TokenKind::DocumentP) {
-                ("DOCUMENT", self.previous_location() as ParseLoc)
-            } else {
-                self.expect(TokenKind::ContentP)?;
-                ("CONTENT", self.previous_location() as ParseLoc)
-            };
-            stmt.name = Some("xmloption".to_owned());
-            stmt.args = vec![Node::AConst(AConst::string(value, value_location))];
-            stmt.jumble_args = true;
-        } else if self.consume(TokenKind::Transaction) {
-            self.expect(TokenKind::Snapshot)?;
-            stmt.kind = VariableSetKind::SetMulti;
-            stmt.name = Some("TRANSACTION SNAPSHOT".to_owned());
-            stmt.args = vec![Node::AConst(AConst::string(
-                self.consume_required_string("TRANSACTION SNAPSHOT requires a string")?,
-                self.previous_location() as ParseLoc,
-            ))];
-            stmt.location = self.previous_location() as ParseLoc;
-        } else {
-            stmt.name = Some(
-                self.consume_setting_name()
-                    .ok_or_else(|| self.error_here("SET requires a parameter name"))?,
-            );
-            if self.consume(TokenKind::From) {
-                self.expect(TokenKind::CurrentP)?;
-                stmt.kind = VariableSetKind::SetCurrent;
-            } else {
-                if !self.consume(TokenKind::To) && !self.consume(TokenKind::Char('=')) {
-                    return Err(self.error_here("SET parameter requires TO, '=', or FROM CURRENT"));
+        match self.peek_kind() {
+            TokenKind::Transaction if self.peek_kind_n(1) != TokenKind::Snapshot => {
+                self.advance();
+                stmt.kind = VariableSetKind::SetMulti;
+                stmt.name = Some("TRANSACTION".to_owned());
+                stmt.args = self.parse_transaction_modes()?;
+                if stmt.args.is_empty() {
+                    return Err(self.error_here("SET TRANSACTION requires at least one mode"));
                 }
-                let value_location = self.location() as ParseLoc;
+                stmt.jumble_args = true;
+            }
+            TokenKind::Session if self.peek_kind_n(1) == TokenKind::Characteristics => {
+                self.advance();
+                self.expect(TokenKind::Characteristics)?;
+                self.expect(TokenKind::As)?;
+                self.expect(TokenKind::Transaction)?;
+                stmt.kind = VariableSetKind::SetMulti;
+                stmt.name = Some("SESSION CHARACTERISTICS".to_owned());
+                stmt.args = self.parse_transaction_modes()?;
+                if stmt.args.is_empty() {
+                    return Err(
+                        self.error_here("SESSION CHARACTERISTICS requires transaction modes")
+                    );
+                }
+                stmt.jumble_args = true;
+            }
+            TokenKind::Time => {
+                self.advance();
+                self.expect(TokenKind::Zone)?;
+                stmt.name = Some("timezone".to_owned());
+                if self.consume(TokenKind::Default) || self.consume(TokenKind::Local) {
+                    stmt.kind = VariableSetKind::SetDefault;
+                } else {
+                    let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+                    stmt.args = vec![parse_time_zone_value_tokens(tokens)?];
+                }
+                stmt.jumble_args = true;
+            }
+            TokenKind::Schema => {
+                self.advance();
+                stmt.name = Some("search_path".to_owned());
+                stmt.args = vec![Node::AConst(AConst::string(
+                    self.consume_required_string("SET SCHEMA requires a string")?,
+                    self.previous_location() as ParseLoc,
+                ))];
+                stmt.location = self.previous_location() as ParseLoc;
+            }
+            TokenKind::Names => {
+                self.advance();
+                stmt.name = Some("client_encoding".to_owned());
                 if self.consume(TokenKind::Default) {
                     stmt.kind = VariableSetKind::SetDefault;
-                    stmt.location = -1;
-                } else if self.consume(TokenKind::NullP) {
-                    stmt.args = vec![Node::AConst(AConst::null(
-                        self.previous_location() as ParseLoc
-                    ))];
-                    stmt.location = value_location;
+                    stmt.location = self.previous_location() as ParseLoc;
+                } else if self.at_statement_end() {
+                    stmt.kind = VariableSetKind::SetDefault;
                 } else {
-                    stmt.args = self.parse_setting_value_list()?;
-                    stmt.location = value_location;
+                    let value = self
+                        .at(TokenKind::SConst)
+                        .then(|| self.consume_string_like())
+                        .flatten()
+                        .ok_or_else(|| self.error_here("SET NAMES requires an encoding"))?;
+                    stmt.args = vec![Node::AConst(AConst::string(
+                        value,
+                        self.previous_location() as ParseLoc,
+                    ))];
+                    stmt.location = self.previous_location() as ParseLoc;
+                }
+            }
+            TokenKind::Role => {
+                self.advance();
+                stmt.name = Some("role".to_owned());
+                let value = self
+                    .consume_non_reserved_word_or_sconst()
+                    .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
+                stmt.args = vec![Node::AConst(AConst::string(
+                    value,
+                    self.previous_location() as ParseLoc,
+                ))];
+                stmt.location = self.previous_location() as ParseLoc;
+            }
+            TokenKind::Session => {
+                self.advance();
+                self.expect(TokenKind::Authorization)?;
+                stmt.name = Some("session_authorization".to_owned());
+                if self.consume(TokenKind::Default) {
+                    stmt.kind = VariableSetKind::SetDefault;
+                } else {
+                    let value = self.consume_non_reserved_word_or_sconst().ok_or_else(|| {
+                        self.error_here("SET SESSION AUTHORIZATION requires a role")
+                    })?;
+                    stmt.args = vec![Node::AConst(AConst::string(
+                        value,
+                        self.previous_location() as ParseLoc,
+                    ))];
+                    stmt.location = self.previous_location() as ParseLoc;
+                }
+            }
+            TokenKind::XmlP => {
+                self.advance();
+                self.expect(TokenKind::Option)?;
+                let (value, value_location) = match self.peek_kind() {
+                    TokenKind::DocumentP => ("DOCUMENT", self.advance().location as ParseLoc),
+                    TokenKind::ContentP => ("CONTENT", self.advance().location as ParseLoc),
+                    _ => return Err(self.error_here("XML OPTION requires DOCUMENT or CONTENT")),
+                };
+                stmt.name = Some("xmloption".to_owned());
+                stmt.args = vec![Node::AConst(AConst::string(value, value_location))];
+                stmt.jumble_args = true;
+            }
+            TokenKind::Transaction => {
+                self.advance();
+                self.expect(TokenKind::Snapshot)?;
+                stmt.kind = VariableSetKind::SetMulti;
+                stmt.name = Some("TRANSACTION SNAPSHOT".to_owned());
+                stmt.args = vec![Node::AConst(AConst::string(
+                    self.consume_required_string("TRANSACTION SNAPSHOT requires a string")?,
+                    self.previous_location() as ParseLoc,
+                ))];
+                stmt.location = self.previous_location() as ParseLoc;
+            }
+            _ => {
+                stmt.name = Some(
+                    self.consume_setting_name()
+                        .ok_or_else(|| self.error_here("SET requires a parameter name"))?,
+                );
+                if self.consume(TokenKind::From) {
+                    self.expect(TokenKind::CurrentP)?;
+                    stmt.kind = VariableSetKind::SetCurrent;
+                } else {
+                    if !self.consume(TokenKind::To) && !self.consume(TokenKind::Char('=')) {
+                        return Err(
+                            self.error_here("SET parameter requires TO, '=', or FROM CURRENT")
+                        );
+                    }
+                    let value_location = self.location() as ParseLoc;
+                    match self.peek_kind() {
+                        TokenKind::Default => {
+                            self.advance();
+                            stmt.kind = VariableSetKind::SetDefault;
+                            stmt.location = -1;
+                        }
+                        TokenKind::NullP => {
+                            let location = self.advance().location as ParseLoc;
+                            stmt.args = vec![Node::AConst(AConst::null(location))];
+                            stmt.location = value_location;
+                        }
+                        _ => {
+                            stmt.args = self.parse_setting_value_list()?;
+                            stmt.location = value_location;
+                        }
+                    }
                 }
             }
         }
@@ -490,63 +484,76 @@ impl Parser {
         let mut options = Vec::new();
         while !self.at_statement_end() {
             let location = self.location();
-            let option = if self.consume(TokenKind::Isolation) {
-                self.expect(TokenKind::Level)?;
-                let value_location = self.location();
-                let value = if self.consume(TokenKind::Read) {
-                    if self.consume(TokenKind::Uncommitted) {
-                        "read uncommitted"
-                    } else {
-                        self.expect(TokenKind::Committed)?;
-                        "read committed"
-                    }
-                } else if self.consume(TokenKind::Repeatable) {
-                    self.expect(TokenKind::Read)?;
-                    "repeatable read"
-                } else if self.consume(TokenKind::Serializable) {
-                    "serializable"
-                } else {
-                    return Err(self.error_here("invalid transaction isolation level"));
-                };
-                make_def_elem(
-                    "transaction_isolation",
-                    Some(Node::AConst(AConst::string(
-                        value,
-                        value_location as ParseLoc,
-                    ))),
-                    location,
-                )
-            } else if self.consume(TokenKind::Read) {
-                let read_only = if self.consume(TokenKind::Only) {
-                    true
-                } else if self.consume(TokenKind::Write) {
-                    false
-                } else {
-                    return Err(self.error_here("READ requires ONLY or WRITE"));
-                };
-                make_def_elem(
-                    "transaction_read_only",
-                    Some(Node::AConst(AConst::integer(
-                        i32::from(read_only),
-                        location as ParseLoc,
-                    ))),
-                    location,
-                )
-            } else if self.consume(TokenKind::Deferrable) {
-                make_def_elem(
-                    "transaction_deferrable",
-                    Some(Node::AConst(AConst::integer(1, location as ParseLoc))),
-                    location,
-                )
-            } else if self.consume(TokenKind::Not) {
-                self.expect(TokenKind::Deferrable)?;
-                make_def_elem(
-                    "transaction_deferrable",
-                    Some(Node::AConst(AConst::integer(0, location as ParseLoc))),
-                    location,
-                )
-            } else {
-                return Err(self.error_here("invalid transaction mode"));
+            let option = match self.peek_kind() {
+                TokenKind::Isolation => {
+                    self.advance();
+                    self.expect(TokenKind::Level)?;
+                    let value_location = self.location();
+                    let value = match self.peek_kind() {
+                        TokenKind::Read => {
+                            self.advance();
+                            if self.consume(TokenKind::Uncommitted) {
+                                "read uncommitted"
+                            } else {
+                                self.expect(TokenKind::Committed)?;
+                                "read committed"
+                            }
+                        }
+                        TokenKind::Repeatable => {
+                            self.advance();
+                            self.expect(TokenKind::Read)?;
+                            "repeatable read"
+                        }
+                        TokenKind::Serializable => {
+                            self.advance();
+                            "serializable"
+                        }
+                        _ => return Err(self.error_here("invalid transaction isolation level")),
+                    };
+                    make_def_elem(
+                        "transaction_isolation",
+                        Some(Node::AConst(AConst::string(
+                            value,
+                            value_location as ParseLoc,
+                        ))),
+                        location,
+                    )
+                }
+                TokenKind::Read => {
+                    self.advance();
+                    let read_only = match self.peek_kind() {
+                        TokenKind::Only => true,
+                        TokenKind::Write => false,
+                        _ => return Err(self.error_here("READ requires ONLY or WRITE")),
+                    };
+                    self.advance();
+                    make_def_elem(
+                        "transaction_read_only",
+                        Some(Node::AConst(AConst::integer(
+                            i32::from(read_only),
+                            location as ParseLoc,
+                        ))),
+                        location,
+                    )
+                }
+                TokenKind::Deferrable => {
+                    self.advance();
+                    make_def_elem(
+                        "transaction_deferrable",
+                        Some(Node::AConst(AConst::integer(1, location as ParseLoc))),
+                        location,
+                    )
+                }
+                TokenKind::Not => {
+                    self.advance();
+                    self.expect(TokenKind::Deferrable)?;
+                    make_def_elem(
+                        "transaction_deferrable",
+                        Some(Node::AConst(AConst::integer(0, location as ParseLoc))),
+                        location,
+                    )
+                }
+                _ => return Err(self.error_here("invalid transaction mode")),
             };
             options.push(option);
             if self.consume(TokenKind::Char(',')) && self.at_statement_end() {

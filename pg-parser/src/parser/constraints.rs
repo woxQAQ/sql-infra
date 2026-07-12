@@ -1,6 +1,50 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-set-constraints.html
+    // SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE }
+    pub(super) fn parse_set_constraints(&mut self) -> PResult<Node> {
+        self.expect(TokenKind::Set)?;
+        self.expect(TokenKind::Constraints)?;
+        let constraints = if self.consume(TokenKind::All) {
+            Vec::new()
+        } else {
+            let mut constraints = Vec::new();
+            loop {
+                constraints.push(Node::RangeVar(
+                    self.try_parse_qualified_range_var().ok_or_else(|| {
+                        self.error_here("SET CONSTRAINTS requires a constraint name or ALL")
+                    })?,
+                ));
+                if !self.consume(TokenKind::Char(',')) {
+                    break;
+                }
+                if self.at_any(&[
+                    TokenKind::Deferred,
+                    TokenKind::Immediate,
+                    TokenKind::Char(';'),
+                    TokenKind::Eof,
+                ]) {
+                    return Err(self.error_here("expected a constraint name after ','"));
+                }
+            }
+            constraints
+        };
+        let deferred = if self.consume(TokenKind::Deferred) {
+            true
+        } else {
+            self.expect(TokenKind::Immediate)?;
+            false
+        };
+        self.expect_statement_end()?;
+        Ok(Node::ConstraintsSetStmt(ConstraintsSetStmt {
+            node_tag: NodeTag::ConstraintsSetStmt,
+            constraints,
+            deferred,
+        }))
+    }
+
     pub(super) fn parse_column_constraint_element(
         &mut self,
         location: usize,
@@ -33,9 +77,7 @@ impl Parser {
                         constraint.contype = ConstrType::AttrNotEnforced;
                     }
                     _ => {
-                        return Err(
-                            self.error_here("NOT requires NULL, DEFERRABLE, or ENFORCED")
-                        );
+                        return Err(self.error_here("NOT requires NULL, DEFERRABLE, or ENFORCED"));
                     }
                 }
             }
@@ -101,9 +143,7 @@ impl Parser {
                         b'd'
                     }
                     _ => {
-                        return Err(
-                            self.error_here("GENERATED requires ALWAYS or BY DEFAULT")
-                        );
+                        return Err(self.error_here("GENERATED requires ALWAYS or BY DEFAULT"));
                     }
                 };
                 self.expect(TokenKind::As)?;
@@ -111,14 +151,11 @@ impl Parser {
                 if self.consume(TokenKind::IdentityP) {
                     constraint.contype = ConstrType::Identity;
                     if self.consume(TokenKind::Char('(')) {
-                        constraint.options =
-                            self.parse_parenthesized_sequence_options_body()?;
+                        constraint.options = self.parse_parenthesized_sequence_options_body()?;
                     }
                 } else {
                     if generated_when != b'a' {
-                        return Err(
-                            self.error_here("generated columns require GENERATED ALWAYS")
-                        );
+                        return Err(self.error_here("generated columns require GENERATED ALWAYS"));
                     }
                     constraint.contype = ConstrType::Generated;
                     self.expect(TokenKind::Char('('))?;
@@ -251,19 +288,13 @@ impl Parser {
                         .first()
                         .map_or(self.location(), |token| token.location);
                     let starts_parenthesized =
-                        expr_tokens.first().map(|token| token.kind)
-                            == Some(TokenKind::Char('('));
-                    let starts_with_cast = expr_tokens
-                        .first()
-                        .map(|token| token.kind)
-                        == Some(TokenKind::Cast);
+                        expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
+                    let starts_with_cast =
+                        expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
                     let index_elem = parse_index_elem_tokens(expr_tokens)?;
                     if let Some(expression) = index_elem.expr.as_deref()
                         && !starts_parenthesized
-                        && !is_windowless_function_expression_node(
-                            expression,
-                            starts_with_cast,
-                        )
+                        && !is_windowless_function_expression_node(expression, starts_with_cast)
                     {
                         return Err(ParseError::new(
                             expr_location,
@@ -278,15 +309,10 @@ impl Parser {
                         self.expect(TokenKind::Char(')'))?;
                         tokens
                     } else {
-                        self.take_until_top_level(&[
-                            TokenKind::Char(','),
-                            TokenKind::Char(')'),
-                        ])
+                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')])
                     };
                     if operator_tokens.is_empty() {
-                        return Err(self.error_here(
-                            "EXCLUDE element requires an operator",
-                        ));
+                        return Err(self.error_here("EXCLUDE element requires an operator"));
                     }
                     validate_operator_name_tokens(&operator_tokens, operator_location)?;
                     let operator = name_list_node(parse_operator_name_tokens(
@@ -302,9 +328,7 @@ impl Parser {
                         break;
                     }
                     if self.at(TokenKind::Char(')')) {
-                        return Err(
-                            self.error_here("expected an EXCLUDE element after ','")
-                        );
+                        return Err(self.error_here("expected an EXCLUDE element after ','"));
                     }
                 }
                 self.expect(TokenKind::Char(')'))?;
@@ -541,9 +565,7 @@ impl Parser {
                 TokenKind::Deferrable => {
                     self.advance();
                     if !supports_deferrable {
-                        return Err(
-                            self.error_here("this constraint cannot be marked DEFERRABLE")
-                        );
+                        return Err(self.error_here("this constraint cannot be marked DEFERRABLE"));
                     }
                     if saw_deferrable == Some(false) {
                         return Err(self.error_here("conflicting constraint properties"));
@@ -554,9 +576,7 @@ impl Parser {
                 TokenKind::Initially => {
                     self.advance();
                     if !supports_deferrable {
-                        return Err(
-                            self.error_here("this constraint cannot be marked DEFERRABLE")
-                        );
+                        return Err(self.error_here("this constraint cannot be marked DEFERRABLE"));
                     }
                     let deferred = if self.consume(TokenKind::Deferred) {
                         true
@@ -583,9 +603,7 @@ impl Parser {
                 TokenKind::Enforced => {
                     self.advance();
                     if !supports_enforcement {
-                        return Err(
-                            self.error_here("this constraint cannot be marked ENFORCED")
-                        );
+                        return Err(self.error_here("this constraint cannot be marked ENFORCED"));
                     }
                     if saw_enforced == Some(false) {
                         return Err(self.error_here("conflicting constraint properties"));
@@ -599,14 +617,12 @@ impl Parser {
                         TokenKind::Deferrable => {
                             self.advance();
                             if !supports_deferrable {
-                                return Err(self.error_here(
-                                    "this constraint cannot be marked DEFERRABLE",
-                                ));
+                                return Err(
+                                    self.error_here("this constraint cannot be marked DEFERRABLE")
+                                );
                             }
                             if saw_deferrable == Some(true) {
-                                return Err(
-                                    self.error_here("conflicting constraint properties")
-                                );
+                                return Err(self.error_here("conflicting constraint properties"));
                             }
                             if saw_initially == Some(true) {
                                 return Err(self.error_here(
@@ -619,32 +635,27 @@ impl Parser {
                         TokenKind::Valid => {
                             self.advance();
                             if !supports_not_valid {
-                                return Err(self.error_here(
-                                    "this constraint cannot be marked NOT VALID",
-                                ));
+                                return Err(
+                                    self.error_here("this constraint cannot be marked NOT VALID")
+                                );
                             }
                             constraint.skip_validation = true;
                         }
                         TokenKind::Enforced => {
                             self.advance();
                             if !supports_enforcement {
-                                return Err(self.error_here(
-                                    "this constraint cannot be marked NOT ENFORCED",
-                                ));
+                                return Err(self
+                                    .error_here("this constraint cannot be marked NOT ENFORCED"));
                             }
                             if saw_enforced == Some(true) {
-                                return Err(
-                                    self.error_here("conflicting constraint properties")
-                                );
+                                return Err(self.error_here("conflicting constraint properties"));
                             }
                             saw_enforced = Some(false);
                             constraint.is_enforced = false;
                             constraint.skip_validation = true;
                         }
                         _ => {
-                            return Err(self.error_here(
-                                "invalid constraint attribute after NOT",
-                            ));
+                            return Err(self.error_here("invalid constraint attribute after NOT"));
                         }
                     }
                 }
@@ -652,9 +663,7 @@ impl Parser {
                     self.advance();
                     self.expect(TokenKind::Inherit)?;
                     if !supports_no_inherit {
-                        return Err(
-                            self.error_here("this constraint cannot be marked NO INHERIT")
-                        );
+                        return Err(self.error_here("this constraint cannot be marked NO INHERIT"));
                     }
                     constraint.is_no_inherit = true;
                 }

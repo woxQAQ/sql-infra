@@ -38,14 +38,20 @@ impl Parser {
         }
         let mut options = Vec::new();
         loop {
-            let action = if self.consume(TokenKind::Set) {
-                DefElemAction::Set
-            } else if self.consume(TokenKind::AddP) {
-                DefElemAction::Add
-            } else if self.consume(TokenKind::Drop) {
-                DefElemAction::Drop
-            } else {
-                DefElemAction::Unspec
+            let action = match self.peek_kind() {
+                TokenKind::Set => {
+                    self.advance();
+                    DefElemAction::Set
+                }
+                TokenKind::AddP => {
+                    self.advance();
+                    DefElemAction::Add
+                }
+                TokenKind::Drop => {
+                    self.advance();
+                    DefElemAction::Drop
+                }
+                _ => DefElemAction::Unspec,
             };
             let location = self.location();
             let name = self

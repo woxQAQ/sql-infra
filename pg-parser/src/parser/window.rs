@@ -85,15 +85,14 @@ impl Parser {
     }
 
     pub(super) fn parse_window_frame(&mut self, window: &mut WindowDef) -> PResult<()> {
-        window.frame_options = FRAMEOPTION_NONDEFAULT
-            | if self.consume(TokenKind::Rows) {
-                FRAMEOPTION_ROWS
-            } else if self.consume(TokenKind::Range) {
-                FRAMEOPTION_RANGE
-            } else {
-                self.expect(TokenKind::Groups)?;
-                FRAMEOPTION_GROUPS
-            };
+        let frame_mode = match self.peek_kind() {
+            TokenKind::Rows => FRAMEOPTION_ROWS,
+            TokenKind::Range => FRAMEOPTION_RANGE,
+            TokenKind::Groups => FRAMEOPTION_GROUPS,
+            _ => return Err(self.error_here("expected ROWS, RANGE, or GROUPS")),
+        };
+        self.advance();
+        window.frame_options = FRAMEOPTION_NONDEFAULT | frame_mode;
         if self.consume(TokenKind::Between) {
             let (start_options, start_offset) = self.parse_window_frame_bound()?;
             self.expect(TokenKind::And)?;
