@@ -214,77 +214,103 @@ impl Parser {
         } else {
             None
         };
+        let (contype, raw_expr, keys) = match self.peek_kind() {
+            TokenKind::Check => {
+                self.advance();
+                self.expect(TokenKind::Char('('))?;
+                let raw_expr = Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                self.expect(TokenKind::Char(')'))?;
+                (ConstrType::Check, raw_expr, Vec::new())
+            }
+            TokenKind::Not => {
+                self.advance();
+                self.expect(TokenKind::NullP)?;
+                (ConstrType::Notnull, None, vec![make_string_node("value")])
+            }
+            _ => return Err(self.error_here("domain constraint must be CHECK or NOT NULL")),
+        };
         let mut constraint = Constraint {
             node_tag: NodeTag::Constraint,
             conname,
+            contype,
+            raw_expr,
+            keys,
             is_enforced: true,
             initially_valid: true,
             location: location as ParseLoc,
             ..Constraint::default()
         };
-        if self.consume(TokenKind::Check) {
-            constraint.contype = ConstrType::Check;
-            self.expect(TokenKind::Char('('))?;
-            constraint.raw_expr = Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
-            self.expect(TokenKind::Char(')'))?;
-        } else if self.consume(TokenKind::Not) {
-            self.expect(TokenKind::NullP)?;
-            constraint.contype = ConstrType::Notnull;
-            constraint.keys = vec![make_string_node("value")];
-        } else {
-            return Err(self.error_here("domain constraint must be CHECK or NOT NULL"));
-        }
 
-        let mut saw_deferrable = false;
-        let mut saw_not_deferrable = false;
-        let mut saw_initially_immediate = false;
-        let mut saw_initially_deferred = false;
-        let mut saw_enforced = false;
-        let mut saw_not_enforced = false;
+        let mut deferrable = None;
+        let mut initially_deferred = None;
+        let mut enforced = None;
         loop {
-            if self.consume(TokenKind::Deferrable) {
-                saw_deferrable = true;
-                constraint.deferrable = true;
-            } else if self.consume(TokenKind::Initially) {
-                if self.consume(TokenKind::Immediate) {
-                    saw_initially_immediate = true;
-                    constraint.initdeferred = false;
-                } else if self.consume(TokenKind::Deferred) {
-                    saw_initially_deferred = true;
-                    constraint.initdeferred = true;
-                } else {
-                    return Err(self.error_here("INITIALLY requires IMMEDIATE or DEFERRED"));
+            match self.peek_kind() {
+                TokenKind::Deferrable => {
+                    self.advance();
+                    self.set_constraint_attribute(&mut deferrable, true)?;
+                    constraint.deferrable = true;
                 }
-            } else if self.consume(TokenKind::No) {
-                self.expect(TokenKind::Inherit)?;
-                constraint.is_no_inherit = true;
-            } else if self.consume(TokenKind::Enforced) {
-                saw_enforced = true;
-                constraint.is_enforced = true;
-            } else if self.consume(TokenKind::Not) {
-                if self.consume(TokenKind::Deferrable) {
-                    saw_not_deferrable = true;
-                    constraint.deferrable = false;
-                } else if self.consume(TokenKind::Valid) {
-                    constraint.skip_validation = true;
-                    constraint.initially_valid = false;
-                } else if self.consume(TokenKind::Enforced) {
-                    saw_not_enforced = true;
-                    constraint.is_enforced = false;
-                } else {
-                    return Err(self.error_here("invalid constraint attribute after NOT"));
+                TokenKind::Initially => {
+                    self.advance();
+                    let value = match self.peek_kind() {
+                        TokenKind::Immediate => false,
+                        TokenKind::Deferred => true,
+                        _ => {
+                            return Err(self.error_here("INITIALLY requires IMMEDIATE or DEFERRED"));
+                        }
+                    };
+                    self.advance();
+                    self.set_constraint_attribute(&mut initially_deferred, value)?;
+                    constraint.initdeferred = value;
                 }
-            } else {
-                break;
+                TokenKind::No => {
+                    self.advance();
+                    self.expect(TokenKind::Inherit)?;
+                    constraint.is_no_inherit = true;
+                }
+                TokenKind::Enforced => {
+                    self.advance();
+                    self.set_constraint_attribute(&mut enforced, true)?;
+                    constraint.is_enforced = true;
+                }
+                TokenKind::Not => {
+                    self.advance();
+                    match self.peek_kind() {
+                        TokenKind::Deferrable => {
+                            self.advance();
+                            self.set_constraint_attribute(&mut deferrable, false)?;
+                            constraint.deferrable = false;
+                        }
+                        TokenKind::Valid => {
+                            self.advance();
+                            constraint.skip_validation = true;
+                            constraint.initially_valid = false;
+                        }
+                        TokenKind::Enforced => {
+                            self.advance();
+                            self.set_constraint_attribute(&mut enforced, false)?;
+                            constraint.is_enforced = false;
+                        }
+                        _ => {
+                            return Err(self.error_here("invalid constraint attribute after NOT"));
+                        }
+                    }
+                }
+                _ => break,
             }
         }
-        if (saw_deferrable && saw_not_deferrable)
-            || (saw_initially_immediate && saw_initially_deferred)
-            || (saw_enforced && saw_not_enforced)
-            || (saw_not_deferrable && saw_initially_deferred)
-        {
+        if deferrable == Some(false) && initially_deferred == Some(true) {
             return Err(self.error_here("conflicting constraint attributes"));
         }
         Ok(constraint)
+    }
+
+    fn set_constraint_attribute(&self, state: &mut Option<bool>, value: bool) -> PResult<()> {
+        if state.is_some_and(|current| current != value) {
+            return Err(self.error_here("conflicting constraint attributes"));
+        }
+        *state = Some(value);
+        Ok(())
     }
 }
