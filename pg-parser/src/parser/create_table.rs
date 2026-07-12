@@ -414,7 +414,7 @@ impl Parser {
         self.expect(TokenKind::View)?;
         let if_not_exists = self.consume_if_not_exists()?;
         let mut relation = self
-            .parse_plain_range_var()
+            .try_parse_qualified_range_var()
             .ok_or_else(|| self.error_here("CREATE MATERIALIZED VIEW requires a name"))?;
         relation.relpersistence = relpersistence;
         let rel = Some(Box::new(relation));

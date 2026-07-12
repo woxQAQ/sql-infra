@@ -148,11 +148,11 @@ impl Parser {
         let (events, columns) = self.parse_trigger_events()?;
         self.expect(TokenKind::On)?;
         let relation =
-            Some(Box::new(self.parse_plain_range_var().ok_or_else(|| {
+            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
                 self.error_here("CREATE TRIGGER requires a relation")
             })?));
         let constrrel = if isconstraint && self.consume(TokenKind::From) {
-            Some(Box::new(self.parse_plain_range_var().ok_or_else(|| {
+            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
                 self.error_here("FROM requires a relation")
             })?))
         } else {

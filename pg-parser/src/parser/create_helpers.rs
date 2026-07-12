@@ -30,6 +30,14 @@ impl Parser {
         Ok(options)
     }
 
+    pub(super) fn parse_options_clause(&mut self) -> PResult<NodeList> {
+        if self.at(TokenKind::Options) {
+            self.parse_create_generic_options()
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
     pub(super) fn parse_partition_spec(&mut self) -> PResult<PartitionSpec> {
         let location = self.expect(TokenKind::Partition)?.location;
         self.expect(TokenKind::By)?;

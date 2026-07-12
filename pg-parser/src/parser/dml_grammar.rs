@@ -1,6 +1,25 @@
 use super::*;
 
 impl Parser {
+    pub(super) fn parse_where_or_current_clause(&mut self, stops: &[TokenKind]) -> PResult<Option<Box<Node>>> {
+        if !self.consume(TokenKind::Where) {
+            return Ok(None);
+        }
+        if self.consume(TokenKind::CurrentP) {
+            self.expect(TokenKind::Of)?;
+            let cursor_name = Some(
+                self.consume_col_id()
+                    .ok_or_else(|| self.error_here("CURRENT OF requires a cursor name"))?,
+            );
+            return Ok(Some(Box::new(Node::CurrentOfExpr(CurrentOfExpr {
+                xpr: Expr::new(NodeTag::CurrentOfExpr),
+                cursor_name,
+                ..CurrentOfExpr::default()
+            }))));
+        }
+        Ok(Some(self.parse_expr_box_strict_until(stops)?))
+    }
+
     pub(super) fn parse_returning_clause(&mut self) -> PResult<Option<Box<ReturningClause>>> {
         if !self.consume(TokenKind::Returning) {
             return Ok(None);

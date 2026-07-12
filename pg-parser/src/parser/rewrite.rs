@@ -29,7 +29,7 @@ impl Parser {
         };
         self.expect(TokenKind::To)?;
         let relation =
-            Some(Box::new(self.parse_plain_range_var().ok_or_else(|| {
+            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
                 self.error_here("CREATE RULE requires a target relation")
             })?));
         let where_clause = if self.consume(TokenKind::Where) {

@@ -15,7 +15,7 @@ impl Parser {
         self.expect(TokenKind::Sequence)?;
         let if_not_exists = self.consume_if_not_exists()?;
         let mut sequence_node = self
-            .parse_plain_range_var()
+            .try_parse_qualified_range_var()
             .ok_or_else(|| self.error_here("CREATE SEQUENCE requires a name"))?;
         sequence_node.relpersistence = relpersistence;
         let sequence = Some(Box::new(sequence_node));
@@ -47,7 +47,7 @@ impl Parser {
     pub(super) fn parse_alter_sequence(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Sequence)?;
         let missing_ok = self.consume_if_exists()?;
-        let sequence = Some(Box::new(self.parse_plain_range_var().ok_or_else(|| {
+        let sequence = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
             self.error_here("ALTER SEQUENCE requires a sequence name")
         })?));
         let options = self.parse_sequence_options()?;

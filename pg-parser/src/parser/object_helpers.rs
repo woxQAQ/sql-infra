@@ -408,6 +408,10 @@ impl Parser {
         Ok(defs)
     }
 
+    pub(super) fn parse_def_elem_list(&mut self) -> PResult<NodeList> {
+        self.parse_parenthesized_def_elem_list_strict()
+    }
+
     pub(super) fn parse_parenthesized_utility_option_list(&mut self) -> PResult<NodeList> {
         self.expect(TokenKind::Char('('))?;
         if self.at(TokenKind::Char(')')) {

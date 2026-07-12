@@ -17,7 +17,7 @@ impl Parser {
         );
         self.expect(TokenKind::On)?;
         let table =
-            Some(Box::new(self.parse_plain_range_var().ok_or_else(|| {
+            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
                 self.error_here("CREATE POLICY requires a table")
             })?));
         let permissive = if self.consume(TokenKind::As) {
@@ -110,7 +110,7 @@ impl Parser {
         );
         self.expect(TokenKind::On)?;
         let table =
-            Some(Box::new(self.parse_plain_range_var().ok_or_else(|| {
+            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
                 self.error_here("ALTER POLICY requires a table")
             })?));
         let roles = if self.consume(TokenKind::To) {

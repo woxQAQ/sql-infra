@@ -59,7 +59,7 @@ fn contains_braced_constructor(source: &str, name: &str) -> bool {
 
 #[test]
 fn every_node_variant_has_a_same_named_node_tag_and_mapping() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let node_tags: BTreeSet<_> = ast
         .split_once("pub enum NodeTag {")
         .expect("NodeTag enum")
@@ -106,7 +106,7 @@ fn every_node_variant_has_a_same_named_node_tag_and_mapping() {
 
 #[test]
 fn every_ast_statement_has_a_node_variant_and_tag_mapping() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let structs: BTreeSet<_> = ast
         .lines()
         .filter_map(|line| line.strip_prefix("pub struct "))
@@ -131,7 +131,7 @@ fn every_ast_statement_has_a_node_variant_and_tag_mapping() {
 
 #[test]
 fn raw_statement_constructors_are_audited() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let parser = parser_source();
     let structs: BTreeSet<_> = ast
         .lines()
@@ -157,7 +157,7 @@ fn raw_statement_constructors_are_audited() {
 
 #[test]
 fn every_ast_struct_is_parsed_or_explicitly_classified_as_non_parser_output() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let parser = parser_source();
     let structs: BTreeSet<_> = ast
         .lines()
@@ -242,7 +242,7 @@ fn every_ast_struct_is_parsed_or_explicitly_classified_as_non_parser_output() {
 
 #[test]
 fn every_parser_statement_constructor_has_statement_organized_coverage() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let parser = parser_source();
     let structs: BTreeSet<_> = ast
         .lines()
@@ -273,7 +273,7 @@ fn every_parser_statement_constructor_has_statement_organized_coverage() {
 
 #[test]
 fn every_raw_statement_type_appears_in_non_smoke_statement_tests() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/statements");
     let mut tests = String::new();
     for entry in fs::read_dir(&test_dir).expect("statement test directory") {
@@ -305,7 +305,7 @@ fn every_raw_statement_type_appears_in_non_smoke_statement_tests() {
 
 #[test]
 fn every_raw_statement_field_is_exercised_by_statement_tests() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/statements");
     let mut test_blocks = Vec::new();
     for entry in fs::read_dir(&test_dir).expect("statement test directory") {
@@ -401,7 +401,7 @@ fn every_parser_produced_nested_node_has_explicit_test_coverage() {
 
 #[test]
 fn every_nested_raw_field_is_exercised_or_analysis_only() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let parser = parser_source();
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/statements");
     let mut tests = String::new();
@@ -486,7 +486,7 @@ fn every_nested_raw_field_is_exercised_or_analysis_only() {
 
 #[test]
 fn every_directly_constructed_ast_struct_has_explicit_test_coverage() {
-    let ast = include_str!("../../src/ast.rs");
+    let ast = include_str!("../../src/ast/mod.rs");
     let parser = parser_source();
     let structs: BTreeSet<_> = ast
         .lines()
