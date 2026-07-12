@@ -10,110 +10,154 @@ impl Parser {
             location: location as ParseLoc,
             ..Constraint::default()
         };
-        if self.consume(TokenKind::Not) {
-            if self.consume(TokenKind::NullP) {
-                constraint.contype = ConstrType::Notnull;
+        match self.peek_kind() {
+            TokenKind::Not => {
+                self.advance();
+                match self.peek_kind() {
+                    TokenKind::NullP => {
+                        self.advance();
+                        constraint.contype = ConstrType::Notnull;
+                        constraint.is_enforced = true;
+                        constraint.initially_valid = true;
+                        if self.consume(TokenKind::No) {
+                            self.expect(TokenKind::Inherit)?;
+                            constraint.is_no_inherit = true;
+                        }
+                    }
+                    TokenKind::Deferrable => {
+                        self.advance();
+                        constraint.contype = ConstrType::AttrNotDeferrable;
+                    }
+                    TokenKind::Enforced => {
+                        self.advance();
+                        constraint.contype = ConstrType::AttrNotEnforced;
+                    }
+                    _ => {
+                        return Err(
+                            self.error_here("NOT requires NULL, DEFERRABLE, or ENFORCED")
+                        );
+                    }
+                }
+            }
+            TokenKind::NullP => {
+                self.advance();
+                constraint.contype = ConstrType::Null;
+            }
+            TokenKind::Unique => {
+                self.advance();
+                constraint.contype = ConstrType::Unique;
+                self.parse_unique_null_treatment(&mut constraint)?;
+                self.parse_index_constraint_options(&mut constraint)?;
+            }
+            TokenKind::Primary => {
+                self.advance();
+                self.expect(TokenKind::Key)?;
+                constraint.contype = ConstrType::Primary;
+                self.parse_index_constraint_options(&mut constraint)?;
+            }
+            TokenKind::Check => {
+                self.advance();
+                constraint.contype = ConstrType::Check;
                 constraint.is_enforced = true;
                 constraint.initially_valid = true;
-                if self.consume(TokenKind::No) {
-                    self.expect(TokenKind::Inherit)?;
-                    constraint.is_no_inherit = true;
-                }
-            } else if self.consume(TokenKind::Deferrable) {
-                constraint.contype = ConstrType::AttrNotDeferrable;
-            } else if self.consume(TokenKind::Enforced) {
-                constraint.contype = ConstrType::AttrNotEnforced;
-            } else {
-                return Err(self.error_here("NOT requires NULL, DEFERRABLE, or ENFORCED"));
-            }
-        } else if self.consume(TokenKind::NullP) {
-            constraint.contype = ConstrType::Null;
-        } else if self.consume(TokenKind::Unique) {
-            constraint.contype = ConstrType::Unique;
-            self.parse_unique_null_treatment(&mut constraint)?;
-            self.parse_index_constraint_options(&mut constraint)?;
-        } else if self.consume(TokenKind::Primary) {
-            self.expect(TokenKind::Key)?;
-            constraint.contype = ConstrType::Primary;
-            self.parse_index_constraint_options(&mut constraint)?;
-        } else if self.consume(TokenKind::Check) {
-            constraint.contype = ConstrType::Check;
-            constraint.is_enforced = true;
-            constraint.initially_valid = true;
-            self.expect(TokenKind::Char('('))?;
-            constraint.raw_expr = Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
-            self.expect(TokenKind::Char(')'))?;
-            if self.consume(TokenKind::No) {
-                self.expect(TokenKind::Inherit)?;
-                constraint.is_no_inherit = true;
-            }
-        } else if self.consume(TokenKind::Default) {
-            constraint.contype = ConstrType::Default;
-            constraint.raw_expr = Some(self.parse_b_expr_box_strict_until(&[
-                TokenKind::Constraint,
-                TokenKind::Collate,
-                TokenKind::Not,
-                TokenKind::NullP,
-                TokenKind::Unique,
-                TokenKind::Primary,
-                TokenKind::Check,
-                TokenKind::Generated,
-                TokenKind::References,
-                TokenKind::Deferrable,
-                TokenKind::Initially,
-                TokenKind::Enforced,
-                TokenKind::Eof,
-            ])?);
-        } else if self.consume(TokenKind::Generated) {
-            let generated_when = if self.consume(TokenKind::Always) {
-                b'a'
-            } else if self.consume(TokenKind::By) {
-                self.expect(TokenKind::Default)?;
-                b'd'
-            } else {
-                return Err(self.error_here("GENERATED requires ALWAYS or BY DEFAULT"));
-            };
-            self.expect(TokenKind::As)?;
-            constraint.generated_when = generated_when;
-            if self.consume(TokenKind::IdentityP) {
-                constraint.contype = ConstrType::Identity;
-                if self.consume(TokenKind::Char('(')) {
-                    constraint.options = self.parse_parenthesized_sequence_options_body()?;
-                }
-            } else {
-                if generated_when != b'a' {
-                    return Err(self.error_here("generated columns require GENERATED ALWAYS"));
-                }
-                constraint.contype = ConstrType::Generated;
                 self.expect(TokenKind::Char('('))?;
                 constraint.raw_expr =
                     Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
                 self.expect(TokenKind::Char(')'))?;
-                constraint.generated_kind = if self.consume(TokenKind::Stored) {
-                    b's'
+                if self.consume(TokenKind::No) {
+                    self.expect(TokenKind::Inherit)?;
+                    constraint.is_no_inherit = true;
+                }
+            }
+            TokenKind::Default => {
+                self.advance();
+                constraint.contype = ConstrType::Default;
+                constraint.raw_expr = Some(self.parse_b_expr_box_strict_until(&[
+                    TokenKind::Constraint,
+                    TokenKind::Collate,
+                    TokenKind::Not,
+                    TokenKind::NullP,
+                    TokenKind::Unique,
+                    TokenKind::Primary,
+                    TokenKind::Check,
+                    TokenKind::Generated,
+                    TokenKind::References,
+                    TokenKind::Deferrable,
+                    TokenKind::Initially,
+                    TokenKind::Enforced,
+                    TokenKind::Eof,
+                ])?);
+            }
+            TokenKind::Generated => {
+                self.advance();
+                let generated_when = match self.peek_kind() {
+                    TokenKind::Always => {
+                        self.advance();
+                        b'a'
+                    }
+                    TokenKind::By => {
+                        self.advance();
+                        self.expect(TokenKind::Default)?;
+                        b'd'
+                    }
+                    _ => {
+                        return Err(
+                            self.error_here("GENERATED requires ALWAYS or BY DEFAULT")
+                        );
+                    }
+                };
+                self.expect(TokenKind::As)?;
+                constraint.generated_when = generated_when;
+                if self.consume(TokenKind::IdentityP) {
+                    constraint.contype = ConstrType::Identity;
+                    if self.consume(TokenKind::Char('(')) {
+                        constraint.options =
+                            self.parse_parenthesized_sequence_options_body()?;
+                    }
                 } else {
-                    self.consume(TokenKind::Virtual);
-                    b'v'
+                    if generated_when != b'a' {
+                        return Err(
+                            self.error_here("generated columns require GENERATED ALWAYS")
+                        );
+                    }
+                    constraint.contype = ConstrType::Generated;
+                    self.expect(TokenKind::Char('('))?;
+                    constraint.raw_expr =
+                        Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                    self.expect(TokenKind::Char(')'))?;
+                    constraint.generated_kind = if self.consume(TokenKind::Stored) {
+                        b's'
+                    } else {
+                        self.consume(TokenKind::Virtual);
+                        b'v'
+                    };
+                }
+            }
+            TokenKind::References => {
+                self.advance();
+                constraint.contype = ConstrType::Foreign;
+                constraint.is_enforced = true;
+                constraint.initially_valid = true;
+                self.parse_references_clause(&mut constraint, false)?;
+            }
+            TokenKind::Deferrable => {
+                self.advance();
+                constraint.contype = ConstrType::AttrDeferrable;
+            }
+            TokenKind::Initially => {
+                self.advance();
+                constraint.contype = if self.consume(TokenKind::Deferred) {
+                    ConstrType::AttrDeferred
+                } else {
+                    self.expect(TokenKind::Immediate)?;
+                    ConstrType::AttrImmediate
                 };
             }
-        } else if self.consume(TokenKind::References) {
-            constraint.contype = ConstrType::Foreign;
-            constraint.is_enforced = true;
-            constraint.initially_valid = true;
-            self.parse_references_clause(&mut constraint, false)?;
-        } else if self.consume(TokenKind::Deferrable) {
-            constraint.contype = ConstrType::AttrDeferrable;
-        } else if self.consume(TokenKind::Initially) {
-            constraint.contype = if self.consume(TokenKind::Deferred) {
-                ConstrType::AttrDeferred
-            } else {
-                self.expect(TokenKind::Immediate)?;
-                ConstrType::AttrImmediate
-            };
-        } else if self.consume(TokenKind::Enforced) {
-            constraint.contype = ConstrType::AttrEnforced;
-        } else {
-            return Err(self.error_here("invalid column constraint"));
+            TokenKind::Enforced => {
+                self.advance();
+                constraint.contype = ConstrType::AttrEnforced;
+            }
+            _ => return Err(self.error_here("invalid column constraint")),
         }
         Ok(constraint)
     }
@@ -134,124 +178,150 @@ impl Parser {
             location: location as ParseLoc,
             ..Constraint::default()
         };
-        if self.consume(TokenKind::Check) {
-            constraint.contype = ConstrType::Check;
-            constraint.is_enforced = true;
-            self.expect(TokenKind::Char('('))?;
-            constraint.raw_expr = Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
-            self.expect(TokenKind::Char(')'))?;
-        } else if self.consume(TokenKind::Not) {
-            self.expect(TokenKind::NullP)?;
-            constraint.contype = ConstrType::Notnull;
-            constraint.keys = vec![make_string_node(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("NOT NULL requires a column name"))?,
-            )];
-        } else if self.consume(TokenKind::Unique) {
-            constraint.contype = ConstrType::Unique;
-            let has_null_treatment = self.at(TokenKind::NullsP);
-            self.parse_unique_null_treatment(&mut constraint)?;
-            if has_null_treatment
-                && self.at(TokenKind::Using)
-                && self.peek_kind_n(1) == TokenKind::Index
-            {
-                return Err(
-                    self.error_here("NULLS DISTINCT/NOT DISTINCT is not allowed with USING INDEX")
-                );
-            }
-            self.parse_table_index_constraint(&mut constraint)?;
-        } else if self.consume(TokenKind::Primary) {
-            self.expect(TokenKind::Key)?;
-            constraint.contype = ConstrType::Primary;
-            self.parse_table_index_constraint(&mut constraint)?;
-        } else if self.consume(TokenKind::Foreign) {
-            self.expect(TokenKind::Key)?;
-            constraint.contype = ConstrType::Foreign;
-            constraint.is_enforced = true;
-            self.expect(TokenKind::Char('('))?;
-            (constraint.fk_attrs, constraint.fk_with_period) =
-                self.parse_column_and_period_list_body()?;
-            self.expect(TokenKind::Char(')'))?;
-            self.expect(TokenKind::References)?;
-            self.parse_references_clause(&mut constraint, true)?;
-        } else if self.consume(TokenKind::Exclude) {
-            constraint.contype = ConstrType::Exclusion;
-            if self.consume(TokenKind::Using) {
-                constraint.access_method = Some(
-                    self.consume_col_id()
-                        .ok_or_else(|| self.error_here("USING requires an access method"))?,
-                );
-            } else {
-                constraint.access_method = Some("btree".to_owned());
-            }
-            self.expect(TokenKind::Char('('))?;
-            if self.at(TokenKind::Char(')')) {
-                return Err(self.error_here("EXCLUDE requires at least one element"));
-            }
-            loop {
-                let expr_tokens = self.take_until_top_level(&[TokenKind::With]);
-                let expr_location = expr_tokens
-                    .first()
-                    .map_or(self.location(), |token| token.location);
-                let starts_parenthesized =
-                    expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
-                let starts_with_cast =
-                    expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-                let index_elem = parse_index_elem_tokens(expr_tokens)?;
-                if let Some(expression) = index_elem.expr.as_deref()
-                    && !starts_parenthesized
-                    && !is_windowless_function_expression_node(expression, starts_with_cast)
-                {
-                    return Err(ParseError::new(
-                        expr_location,
-                        "exclusion expressions must be parenthesized unless they are function calls",
-                    ));
-                }
-                self.expect(TokenKind::With)?;
-                let operator_location = self.location();
-                let operator_tokens = if self.consume(TokenKind::Operator) {
-                    self.expect(TokenKind::Char('('))?;
-                    let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
-                    self.expect(TokenKind::Char(')'))?;
-                    tokens
-                } else {
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')])
-                };
-                if operator_tokens.is_empty() {
-                    return Err(self.error_here("EXCLUDE element requires an operator"));
-                }
-                validate_operator_name_tokens(&operator_tokens, operator_location)?;
-                let operator = name_list_node(parse_operator_name_tokens(
-                    operator_tokens,
-                    operator_location,
-                )?);
-                constraint.exclusions.push(Node::AArrayExpr(AArrayExpr {
-                    node_tag: NodeTag::AArrayExpr,
-                    elements: vec![Node::IndexElem(index_elem), operator],
-                    ..AArrayExpr::default()
-                }));
-                if !self.consume(TokenKind::Char(',')) {
-                    break;
-                }
-                if self.at(TokenKind::Char(')')) {
-                    return Err(self.error_here("expected an EXCLUDE element after ','"));
-                }
-            }
-            self.expect(TokenKind::Char(')'))?;
-            if self.consume(TokenKind::Include) {
+        match self.peek_kind() {
+            TokenKind::Check => {
+                self.advance();
+                constraint.contype = ConstrType::Check;
+                constraint.is_enforced = true;
                 self.expect(TokenKind::Char('('))?;
-                constraint.including = self.parse_parenthesized_name_list_body()?;
-                self.expect(TokenKind::Char(')'))?;
-            }
-            self.parse_index_constraint_options(&mut constraint)?;
-            if self.consume(TokenKind::Where) {
-                self.expect(TokenKind::Char('('))?;
-                constraint.where_clause =
+                constraint.raw_expr =
                     Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
                 self.expect(TokenKind::Char(')'))?;
             }
-        } else {
-            return Err(self.error_here("invalid table constraint"));
+            TokenKind::Not => {
+                self.advance();
+                self.expect(TokenKind::NullP)?;
+                constraint.contype = ConstrType::Notnull;
+                constraint.keys = vec![make_string_node(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("NOT NULL requires a column name"))?,
+                )];
+            }
+            TokenKind::Unique => {
+                self.advance();
+                constraint.contype = ConstrType::Unique;
+                let has_null_treatment = self.at(TokenKind::NullsP);
+                self.parse_unique_null_treatment(&mut constraint)?;
+                if has_null_treatment
+                    && self.at(TokenKind::Using)
+                    && self.peek_kind_n(1) == TokenKind::Index
+                {
+                    return Err(self.error_here(
+                        "NULLS DISTINCT/NOT DISTINCT is not allowed with USING INDEX",
+                    ));
+                }
+                self.parse_table_index_constraint(&mut constraint)?;
+            }
+            TokenKind::Primary => {
+                self.advance();
+                self.expect(TokenKind::Key)?;
+                constraint.contype = ConstrType::Primary;
+                self.parse_table_index_constraint(&mut constraint)?;
+            }
+            TokenKind::Foreign => {
+                self.advance();
+                self.expect(TokenKind::Key)?;
+                constraint.contype = ConstrType::Foreign;
+                constraint.is_enforced = true;
+                self.expect(TokenKind::Char('('))?;
+                (constraint.fk_attrs, constraint.fk_with_period) =
+                    self.parse_column_and_period_list_body()?;
+                self.expect(TokenKind::Char(')'))?;
+                self.expect(TokenKind::References)?;
+                self.parse_references_clause(&mut constraint, true)?;
+            }
+            TokenKind::Exclude => {
+                self.advance();
+                constraint.contype = ConstrType::Exclusion;
+                if self.consume(TokenKind::Using) {
+                    constraint.access_method = Some(
+                        self.consume_col_id()
+                            .ok_or_else(|| self.error_here("USING requires an access method"))?,
+                    );
+                } else {
+                    constraint.access_method = Some("btree".to_owned());
+                }
+                self.expect(TokenKind::Char('('))?;
+                if self.at(TokenKind::Char(')')) {
+                    return Err(self.error_here("EXCLUDE requires at least one element"));
+                }
+                loop {
+                    let expr_tokens = self.take_until_top_level(&[TokenKind::With]);
+                    let expr_location = expr_tokens
+                        .first()
+                        .map_or(self.location(), |token| token.location);
+                    let starts_parenthesized =
+                        expr_tokens.first().map(|token| token.kind)
+                            == Some(TokenKind::Char('('));
+                    let starts_with_cast = expr_tokens
+                        .first()
+                        .map(|token| token.kind)
+                        == Some(TokenKind::Cast);
+                    let index_elem = parse_index_elem_tokens(expr_tokens)?;
+                    if let Some(expression) = index_elem.expr.as_deref()
+                        && !starts_parenthesized
+                        && !is_windowless_function_expression_node(
+                            expression,
+                            starts_with_cast,
+                        )
+                    {
+                        return Err(ParseError::new(
+                            expr_location,
+                            "exclusion expressions must be parenthesized unless they are function calls",
+                        ));
+                    }
+                    self.expect(TokenKind::With)?;
+                    let operator_location = self.location();
+                    let operator_tokens = if self.consume(TokenKind::Operator) {
+                        self.expect(TokenKind::Char('('))?;
+                        let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
+                        self.expect(TokenKind::Char(')'))?;
+                        tokens
+                    } else {
+                        self.take_until_top_level(&[
+                            TokenKind::Char(','),
+                            TokenKind::Char(')'),
+                        ])
+                    };
+                    if operator_tokens.is_empty() {
+                        return Err(self.error_here(
+                            "EXCLUDE element requires an operator",
+                        ));
+                    }
+                    validate_operator_name_tokens(&operator_tokens, operator_location)?;
+                    let operator = name_list_node(parse_operator_name_tokens(
+                        operator_tokens,
+                        operator_location,
+                    )?);
+                    constraint.exclusions.push(Node::AArrayExpr(AArrayExpr {
+                        node_tag: NodeTag::AArrayExpr,
+                        elements: vec![Node::IndexElem(index_elem), operator],
+                        ..AArrayExpr::default()
+                    }));
+                    if !self.consume(TokenKind::Char(',')) {
+                        break;
+                    }
+                    if self.at(TokenKind::Char(')')) {
+                        return Err(
+                            self.error_here("expected an EXCLUDE element after ','")
+                        );
+                    }
+                }
+                self.expect(TokenKind::Char(')'))?;
+                if self.consume(TokenKind::Include) {
+                    self.expect(TokenKind::Char('('))?;
+                    constraint.including = self.parse_parenthesized_name_list_body()?;
+                    self.expect(TokenKind::Char(')'))?;
+                }
+                self.parse_index_constraint_options(&mut constraint)?;
+                if self.consume(TokenKind::Where) {
+                    self.expect(TokenKind::Char('('))?;
+                    constraint.where_clause =
+                        Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                    self.expect(TokenKind::Char(')'))?;
+                }
+            }
+            _ => return Err(self.error_here("invalid table constraint")),
         }
         self.parse_constraint_attribute_spec(&mut constraint)?;
         constraint.initially_valid = !constraint.skip_validation;
@@ -412,33 +482,39 @@ impl Parser {
     }
 
     pub(super) fn parse_foreign_key_action(&mut self) -> PResult<(u8, NodeList)> {
-        if self.consume(TokenKind::No) {
-            self.expect(TokenKind::Action)?;
-            return Ok((b'a', Vec::new()));
+        match self.peek_kind() {
+            TokenKind::No => {
+                self.advance();
+                self.expect(TokenKind::Action)?;
+                Ok((b'a', Vec::new()))
+            }
+            TokenKind::Restrict => {
+                self.advance();
+                Ok((b'r', Vec::new()))
+            }
+            TokenKind::Cascade => {
+                self.advance();
+                Ok((b'c', Vec::new()))
+            }
+            TokenKind::Set => {
+                self.advance();
+                let action = if self.consume(TokenKind::NullP) {
+                    b'n'
+                } else {
+                    self.expect(TokenKind::Default)?;
+                    b'd'
+                };
+                let cols = if self.consume(TokenKind::Char('(')) {
+                    let cols = self.parse_parenthesized_name_list_body()?;
+                    self.expect(TokenKind::Char(')'))?;
+                    cols
+                } else {
+                    Vec::new()
+                };
+                Ok((action, cols))
+            }
+            _ => Err(self.error_here("invalid foreign key action")),
         }
-        if self.consume(TokenKind::Restrict) {
-            return Ok((b'r', Vec::new()));
-        }
-        if self.consume(TokenKind::Cascade) {
-            return Ok((b'c', Vec::new()));
-        }
-        if self.consume(TokenKind::Set) {
-            let action = if self.consume(TokenKind::NullP) {
-                b'n'
-            } else {
-                self.expect(TokenKind::Default)?;
-                b'd'
-            };
-            let cols = if self.consume(TokenKind::Char('(')) {
-                let cols = self.parse_parenthesized_name_list_body()?;
-                self.expect(TokenKind::Char(')'))?;
-                cols
-            } else {
-                Vec::new()
-            };
-            return Ok((action, cols));
-        }
-        Err(self.error_here("invalid foreign key action"))
     }
 
     pub(super) fn parse_constraint_attribute_spec(
@@ -461,92 +537,128 @@ impl Parser {
         let mut saw_initially = None;
         let mut saw_enforced = None;
         while !self.at_any(&[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof]) {
-            if self.consume(TokenKind::Deferrable) {
-                if !supports_deferrable {
-                    return Err(self.error_here("this constraint cannot be marked DEFERRABLE"));
-                }
-                if saw_deferrable == Some(false) {
-                    return Err(self.error_here("conflicting constraint properties"));
-                }
-                saw_deferrable = Some(true);
-                constraint.deferrable = true;
-            } else if self.consume(TokenKind::Initially) {
-                if !supports_deferrable {
-                    return Err(self.error_here("this constraint cannot be marked DEFERRABLE"));
-                }
-                let deferred = if self.consume(TokenKind::Deferred) {
-                    true
-                } else {
-                    self.expect(TokenKind::Immediate)?;
-                    false
-                };
-                if saw_initially.is_some_and(|previous| previous != deferred) {
-                    return Err(self.error_here("conflicting constraint properties"));
-                }
-                saw_initially = Some(deferred);
-                if deferred {
-                    if saw_deferrable == Some(false) {
-                        return Err(self.error_here(
-                            "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
-                        ));
-                    }
-                    constraint.deferrable = true;
-                    constraint.initdeferred = true;
-                } else {
-                    constraint.initdeferred = false;
-                }
-            } else if self.consume(TokenKind::Enforced) {
-                if !supports_enforcement {
-                    return Err(self.error_here("this constraint cannot be marked ENFORCED"));
-                }
-                if saw_enforced == Some(false) {
-                    return Err(self.error_here("conflicting constraint properties"));
-                }
-                saw_enforced = Some(true);
-                constraint.is_enforced = true;
-            } else if self.consume(TokenKind::Not) {
-                if self.consume(TokenKind::Deferrable) {
+            match self.peek_kind() {
+                TokenKind::Deferrable => {
+                    self.advance();
                     if !supports_deferrable {
-                        return Err(self.error_here("this constraint cannot be marked DEFERRABLE"));
-                    }
-                    if saw_deferrable == Some(true) {
-                        return Err(self.error_here("conflicting constraint properties"));
-                    }
-                    if saw_initially == Some(true) {
-                        return Err(self.error_here(
-                            "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
-                        ));
-                    }
-                    saw_deferrable = Some(false);
-                    constraint.deferrable = false;
-                } else if self.consume(TokenKind::Valid) {
-                    if !supports_not_valid {
-                        return Err(self.error_here("this constraint cannot be marked NOT VALID"));
-                    }
-                    constraint.skip_validation = true;
-                } else if self.consume(TokenKind::Enforced) {
-                    if !supports_enforcement {
                         return Err(
-                            self.error_here("this constraint cannot be marked NOT ENFORCED")
+                            self.error_here("this constraint cannot be marked DEFERRABLE")
                         );
                     }
-                    if saw_enforced == Some(true) {
+                    if saw_deferrable == Some(false) {
                         return Err(self.error_here("conflicting constraint properties"));
                     }
-                    saw_enforced = Some(false);
-                    constraint.is_enforced = false;
-                    constraint.skip_validation = true;
-                } else {
-                    return Err(self.error_here("invalid constraint attribute after NOT"));
+                    saw_deferrable = Some(true);
+                    constraint.deferrable = true;
                 }
-            } else if self.consume(TokenKind::No) {
-                self.expect(TokenKind::Inherit)?;
-                if !supports_no_inherit {
-                    return Err(self.error_here("this constraint cannot be marked NO INHERIT"));
+                TokenKind::Initially => {
+                    self.advance();
+                    if !supports_deferrable {
+                        return Err(
+                            self.error_here("this constraint cannot be marked DEFERRABLE")
+                        );
+                    }
+                    let deferred = if self.consume(TokenKind::Deferred) {
+                        true
+                    } else {
+                        self.expect(TokenKind::Immediate)?;
+                        false
+                    };
+                    if saw_initially.is_some_and(|previous| previous != deferred) {
+                        return Err(self.error_here("conflicting constraint properties"));
+                    }
+                    saw_initially = Some(deferred);
+                    if deferred {
+                        if saw_deferrable == Some(false) {
+                            return Err(self.error_here(
+                                "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
+                            ));
+                        }
+                        constraint.deferrable = true;
+                        constraint.initdeferred = true;
+                    } else {
+                        constraint.initdeferred = false;
+                    }
                 }
-                constraint.is_no_inherit = true;
-            } else {
-                return Err(self.error_here("invalid constraint attribute"));
+                TokenKind::Enforced => {
+                    self.advance();
+                    if !supports_enforcement {
+                        return Err(
+                            self.error_here("this constraint cannot be marked ENFORCED")
+                        );
+                    }
+                    if saw_enforced == Some(false) {
+                        return Err(self.error_here("conflicting constraint properties"));
+                    }
+                    saw_enforced = Some(true);
+                    constraint.is_enforced = true;
+                }
+                TokenKind::Not => {
+                    self.advance();
+                    match self.peek_kind() {
+                        TokenKind::Deferrable => {
+                            self.advance();
+                            if !supports_deferrable {
+                                return Err(self.error_here(
+                                    "this constraint cannot be marked DEFERRABLE",
+                                ));
+                            }
+                            if saw_deferrable == Some(true) {
+                                return Err(
+                                    self.error_here("conflicting constraint properties")
+                                );
+                            }
+                            if saw_initially == Some(true) {
+                                return Err(self.error_here(
+                                    "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
+                                ));
+                            }
+                            saw_deferrable = Some(false);
+                            constraint.deferrable = false;
+                        }
+                        TokenKind::Valid => {
+                            self.advance();
+                            if !supports_not_valid {
+                                return Err(self.error_here(
+                                    "this constraint cannot be marked NOT VALID",
+                                ));
+                            }
+                            constraint.skip_validation = true;
+                        }
+                        TokenKind::Enforced => {
+                            self.advance();
+                            if !supports_enforcement {
+                                return Err(self.error_here(
+                                    "this constraint cannot be marked NOT ENFORCED",
+                                ));
+                            }
+                            if saw_enforced == Some(true) {
+                                return Err(
+                                    self.error_here("conflicting constraint properties")
+                                );
+                            }
+                            saw_enforced = Some(false);
+                            constraint.is_enforced = false;
+                            constraint.skip_validation = true;
+                        }
+                        _ => {
+                            return Err(self.error_here(
+                                "invalid constraint attribute after NOT",
+                            ));
+                        }
+                    }
+                }
+                TokenKind::No => {
+                    self.advance();
+                    self.expect(TokenKind::Inherit)?;
+                    if !supports_no_inherit {
+                        return Err(
+                            self.error_here("this constraint cannot be marked NO INHERIT")
+                        );
+                    }
+                    constraint.is_no_inherit = true;
+                }
+                _ => return Err(self.error_here("invalid constraint attribute")),
             }
         }
         Ok(())
