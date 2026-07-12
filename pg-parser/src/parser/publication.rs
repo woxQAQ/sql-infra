@@ -1,6 +1,12 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createsubscription.html
+    // CREATE SUBSCRIPTION subscription_name
+    //     CONNECTION 'conninfo'
+    //     PUBLICATION publication_name [, ...]
+    //     [ WITH ( subscription_parameter [= value] [, ... ] ) ]
     pub(super) fn parse_create_subscription(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Subscription)?;
         let subname = Some(
@@ -39,6 +45,28 @@ impl Parser {
             options,
         }))
     }
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alterpublication.html
+    // ALTER PUBLICATION name ADD publication_object [, ...]
+    // ALTER PUBLICATION name SET publication_object [, ...]
+    // ALTER PUBLICATION name DROP publication_drop_object [, ...]
+    // ALTER PUBLICATION name SET ( publication_parameter [= value] [, ... ] )
+    // ALTER PUBLICATION name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER PUBLICATION name RENAME TO new_name
+    //
+    // where publication_object is one of:
+    //
+    //     TABLE table_and_columns [, ... ]
+    //     TABLES IN SCHEMA { schema_name | CURRENT_SCHEMA } [, ... ]
+    //
+    // and publication_drop_object is one of:
+    //
+    //     TABLE [ ONLY ] table_name [ * ] [, ... ]
+    //     TABLES IN SCHEMA { schema_name | CURRENT_SCHEMA } [, ... ]
+    //
+    // and table_and_columns is:
+    //
+    //     [ ONLY ] table_name [ * ] [ ( column_name [, ... ] ) ] [ WHERE ( expression ) ]
     pub(super) fn parse_alter_publication(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Publication)?;
         let pubname = Some(
@@ -79,6 +107,19 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altersubscription.html
+    // ALTER SUBSCRIPTION name CONNECTION 'conninfo'
+    // ALTER SUBSCRIPTION name SET PUBLICATION publication_name [, ...] [ WITH ( publication_option [= value] [, ... ] ) ]
+    // ALTER SUBSCRIPTION name ADD PUBLICATION publication_name [, ...] [ WITH ( publication_option [= value] [, ... ] ) ]
+    // ALTER SUBSCRIPTION name DROP PUBLICATION publication_name [, ...] [ WITH ( publication_option [= value] [, ... ] ) ]
+    // ALTER SUBSCRIPTION name REFRESH PUBLICATION [ WITH ( refresh_option [= value] [, ... ] ) ]
+    // ALTER SUBSCRIPTION name ENABLE
+    // ALTER SUBSCRIPTION name DISABLE
+    // ALTER SUBSCRIPTION name SET ( subscription_parameter [= value] [, ... ] )
+    // ALTER SUBSCRIPTION name SKIP ( skip_option = value )
+    // ALTER SUBSCRIPTION name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER SUBSCRIPTION name RENAME TO new_name
     pub(super) fn parse_alter_subscription(&mut self) -> PResult<Node> {
         let alter_location = self.previous_location();
         self.expect(TokenKind::Subscription)?;
@@ -178,6 +219,9 @@ impl Parser {
         Ok(Node::AlterSubscriptionStmt(stmt))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-dropsubscription.html
+    // DROP SUBSCRIPTION [ IF EXISTS ] name [ CASCADE | RESTRICT ]
     pub(super) fn parse_drop_subscription(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Subscription)?;
         let missing_ok = self.consume_if_exists()?;
@@ -195,6 +239,21 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createpublication.html
+    // CREATE PUBLICATION name
+    //     [ FOR ALL TABLES
+    //       | FOR publication_object [, ... ] ]
+    //     [ WITH ( publication_parameter [= value] [, ... ] ) ]
+    //
+    // where publication_object is one of:
+    //
+    //     TABLE table_and_columns [, ... ]
+    //     TABLES IN SCHEMA { schema_name | CURRENT_SCHEMA } [, ... ]
+    //
+    // and table_and_columns is:
+    //
+    //     [ ONLY ] table_name [ * ] [ ( column_name [, ... ] ) ] [ WHERE ( expression ) ]
     pub(super) fn parse_create_publication(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Publication)?;
         let pubname = Some(

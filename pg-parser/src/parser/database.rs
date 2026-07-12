@@ -1,6 +1,26 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createdatabase.html
+    // CREATE DATABASE name
+    //     [ WITH ] [ OWNER [=] user_name ]
+    //            [ TEMPLATE [=] template ]
+    //            [ ENCODING [=] encoding ]
+    //            [ STRATEGY [=] strategy ]
+    //            [ LOCALE [=] locale ]
+    //            [ LC_COLLATE [=] lc_collate ]
+    //            [ LC_CTYPE [=] lc_ctype ]
+    //            [ BUILTIN_LOCALE [=] builtin_locale ]
+    //            [ ICU_LOCALE [=] icu_locale ]
+    //            [ ICU_RULES [=] icu_rules ]
+    //            [ LOCALE_PROVIDER [=] locale_provider ]
+    //            [ COLLATION_VERSION = collation_version ]
+    //            [ TABLESPACE [=] tablespace_name ]
+    //            [ ALLOW_CONNECTIONS [=] allowconn ]
+    //            [ CONNECTION LIMIT [=] connlimit ]
+    //            [ IS_TEMPLATE [=] istemplate ]
+    //            [ OID [=] oid ]
     pub(super) fn parse_createdb(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
         let dbname = Some(
@@ -62,6 +82,28 @@ impl Parser {
         Ok(options)
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alterdatabase.html
+    // ALTER DATABASE name [ [ WITH ] option [ ... ] ]
+    //
+    // where option can be:
+    //
+    //     ALLOW_CONNECTIONS allowconn
+    //     CONNECTION LIMIT connlimit
+    //     IS_TEMPLATE istemplate
+    //
+    // ALTER DATABASE name RENAME TO new_name
+    //
+    // ALTER DATABASE name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    //
+    // ALTER DATABASE name SET TABLESPACE new_tablespace
+    //
+    // ALTER DATABASE name REFRESH COLLATION VERSION
+    //
+    // ALTER DATABASE name SET configuration_parameter { TO | = } { value | DEFAULT }
+    // ALTER DATABASE name SET configuration_parameter FROM CURRENT
+    // ALTER DATABASE name RESET configuration_parameter
+    // ALTER DATABASE name RESET ALL
     pub(super) fn parse_alter_database(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
         let dbname = Some(
@@ -115,6 +157,12 @@ impl Parser {
         }
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altersystem.html
+    // ALTER SYSTEM SET configuration_parameter { TO | = } { value [, ...] | DEFAULT }
+    //
+    // ALTER SYSTEM RESET configuration_parameter
+    // ALTER SYSTEM RESET ALL
     pub(super) fn parse_alter_system(&mut self) -> PResult<Node> {
         self.expect(TokenKind::SystemP)?;
         if !matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
@@ -127,6 +175,13 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-dropdatabase.html
+    // DROP DATABASE [ IF EXISTS ] name [ [ WITH ] ( option [, ...] ) ]
+    //
+    // where option can be:
+    //
+    //     FORCE
     pub(super) fn parse_drop_database(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
         let missing_ok = self.consume_if_exists()?;

@@ -1,6 +1,9 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-prepare.html
+    // PREPARE name [ ( data_type [, ...] ) ] AS statement
     pub(super) fn parse_prepare(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Prepare)?;
         let name = Some(
@@ -39,6 +42,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-execute.html
+    // EXECUTE name [ ( parameter [, ...] ) ]
     pub(super) fn parse_execute(&mut self) -> PResult<Node> {
         let stmt = self.parse_execute_core()?;
         self.expect_statement_end()?;
@@ -77,6 +83,9 @@ impl Parser {
         Ok(skip_data)
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-deallocate.html
+    // DEALLOCATE [ PREPARE ] { name | ALL }
     pub(super) fn parse_deallocate(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Deallocate)?;
         self.consume(TokenKind::Prepare);
@@ -101,6 +110,24 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-explain.html
+    // EXPLAIN [ ( option [, ...] ) ] statement
+    //
+    // where option can be one of:
+    //
+    //     ANALYZE [ boolean ]
+    //     VERBOSE [ boolean ]
+    //     COSTS [ boolean ]
+    //     SETTINGS [ boolean ]
+    //     GENERIC_PLAN [ boolean ]
+    //     BUFFERS [ boolean ]
+    //     SERIALIZE [ { NONE | TEXT | BINARY } ]
+    //     WAL [ boolean ]
+    //     TIMING [ boolean ]
+    //     SUMMARY [ boolean ]
+    //     MEMORY [ boolean ]
+    //     FORMAT { TEXT | XML | JSON | YAML }
     pub(super) fn parse_explain(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Explain)?;
         let parenthesized = self.at(TokenKind::Char('('));
@@ -145,6 +172,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-call.html
+    // CALL name ( [ argument ] [, ...] )
     pub(super) fn parse_call(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Call)?;
         let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);

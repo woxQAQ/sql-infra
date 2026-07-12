@@ -1,6 +1,13 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-values.html
+    // VALUES ( expression [, ...] ) [, ...]
+    //     [ ORDER BY sort_expression [ ASC | DESC | USING operator ] [, ...] ]
+    //     [ LIMIT { count | ALL } ]
+    //     [ OFFSET start [ ROW | ROWS ] ]
+    //     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
     pub(super) fn parse_values_lists(&mut self) -> PResult<NodeList> {
         let mut values = Vec::new();
         while self.consume(TokenKind::Char('(')) {

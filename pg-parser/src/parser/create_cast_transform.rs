@@ -1,6 +1,19 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createcast.html
+    // CREATE CAST (source_type AS target_type)
+    //     WITH FUNCTION function_name [ (argument_type [, ...]) ]
+    //     [ AS ASSIGNMENT | AS IMPLICIT ]
+    //
+    // CREATE CAST (source_type AS target_type)
+    //     WITHOUT FUNCTION
+    //     [ AS ASSIGNMENT | AS IMPLICIT ]
+    //
+    // CREATE CAST (source_type AS target_type)
+    //     WITH INOUT
+    //     [ AS ASSIGNMENT | AS IMPLICIT ]
     pub(super) fn parse_create_cast(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Cast)?;
         self.expect(TokenKind::Char('('))?;
@@ -54,6 +67,10 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createconversion.html
+    // CREATE [ DEFAULT ] CONVERSION name
+    //     FOR source_encoding TO dest_encoding FROM function_name
     pub(super) fn parse_create_conversion(&mut self, def: bool) -> PResult<Node> {
         self.expect(TokenKind::ConversionP)?;
         let conversion_name = self.parse_name_list_until_keywords(&[
@@ -90,6 +107,12 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createtransform.html
+    // CREATE [ OR REPLACE ] TRANSFORM FOR type_name LANGUAGE lang_name (
+    //     FROM SQL WITH FUNCTION from_sql_function_name [ (argument_type [, ...]) ],
+    //     TO SQL WITH FUNCTION to_sql_function_name [ (argument_type [, ...]) ]
+    // );
     pub(super) fn parse_create_transform(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Transform)?;
         self.expect(TokenKind::For)?;

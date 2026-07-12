@@ -66,6 +66,16 @@ fn parse_stats_params(tokens: Vec<Token>) -> PResult<NodeList> {
 }
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createstatistics.html
+    // CREATE STATISTICS [ [ IF NOT EXISTS ] statistics_name ]
+    //     ON ( expression )
+    //     FROM table_name
+    //
+    // CREATE STATISTICS [ [ IF NOT EXISTS ] statistics_name ]
+    //     [ ( statistics_kind [, ... ] ) ]
+    //     ON { column_name | ( expression ) }, { column_name | ( expression ) } [, ...]
+    //     FROM table_name
     pub(super) fn parse_create_stats(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Statistics)?;
         let if_not_exists = self.consume_if_not_exists()?;
@@ -115,6 +125,12 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alterstatistics.html
+    // ALTER STATISTICS name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER STATISTICS name RENAME TO new_name
+    // ALTER STATISTICS name SET SCHEMA new_schema
+    // ALTER STATISTICS name SET STATISTICS { new_target | DEFAULT }
     pub(super) fn parse_alter_stats(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Statistics)?;
         let missing_ok = self.consume_if_exists()?;

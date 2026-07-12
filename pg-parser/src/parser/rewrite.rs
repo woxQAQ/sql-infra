@@ -1,6 +1,15 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createrule.html
+    // CREATE [ OR REPLACE ] RULE name AS ON event
+    //     TO table_name [ WHERE condition ]
+    //     DO [ ALSO | INSTEAD ] { NOTHING | command | ( command ; command ... ) }
+    //
+    // where event can be one of:
+    //
+    //     SELECT | INSERT | UPDATE | DELETE
     pub(super) fn parse_rule(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Rule)?;
         let rulename = Some(
@@ -68,6 +77,12 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createview.html
+    // CREATE [ OR REPLACE ] [ TEMP | TEMPORARY ] [ RECURSIVE ] VIEW name [ ( column_name [, ...] ) ]
+    //     [ WITH ( view_option_name [= view_option_value] [, ... ] ) ]
+    //     AS query
+    //     [ WITH [ CASCADED | LOCAL ] CHECK OPTION ]
     pub(super) fn parse_view(
         &mut self,
         replace: bool,

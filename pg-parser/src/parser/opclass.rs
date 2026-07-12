@@ -1,6 +1,14 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createopclass.html
+    // CREATE OPERATOR CLASS name [ DEFAULT ] FOR TYPE data_type
+    //   USING index_method [ FAMILY family_name ] AS
+    //   {  OPERATOR strategy_number operator_name [ ( op_type, op_type ) ] [ FOR SEARCH | FOR ORDER BY sort_family_name ]
+    //    | FUNCTION support_number [ ( op_type [ , op_type ] ) ] function_name ( argument_type [, ...] )
+    //    | STORAGE storage_type
+    //   } [, ... ]
     pub(super) fn parse_create_op_class(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Class)?;
         let opclassname = self.parse_name_list_until_keywords(&[
@@ -52,6 +60,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createopfamily.html
+    // CREATE OPERATOR FAMILY name USING index_method
     pub(super) fn parse_create_op_family(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Family)?;
         let opfamilyname = self.parse_name_list_until_keywords(&[
@@ -74,6 +85,28 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alteropfamily.html
+    // ALTER OPERATOR FAMILY name USING index_method ADD
+    //   {  OPERATOR strategy_number operator_name ( op_type, op_type )
+    //               [ FOR SEARCH | FOR ORDER BY sort_family_name ]
+    //    | FUNCTION support_number [ ( op_type [ , op_type ] ) ]
+    //               function_name [ ( argument_type [, ...] ) ]
+    //   } [, ... ]
+    //
+    // ALTER OPERATOR FAMILY name USING index_method DROP
+    //   {  OPERATOR strategy_number ( op_type [ , op_type ] )
+    //    | FUNCTION support_number ( op_type [ , op_type ] )
+    //   } [, ... ]
+    //
+    // ALTER OPERATOR FAMILY name USING index_method
+    //     RENAME TO new_name
+    //
+    // ALTER OPERATOR FAMILY name USING index_method
+    //     OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    //
+    // ALTER OPERATOR FAMILY name USING index_method
+    //     SET SCHEMA new_schema
     pub(super) fn parse_alter_op_family(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Family)?;
         let opfamilyname = self.parse_name_list_until_keywords(&[

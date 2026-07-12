@@ -1,6 +1,38 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-set.html
+    // SET [ SESSION | LOCAL ] configuration_parameter { TO | = } { value | 'value' | DEFAULT }
+    // SET [ SESSION | LOCAL ] TIME ZONE { value | 'value' | LOCAL | DEFAULT }
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-set-constraints.html
+    // SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE }
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-set-role.html
+    // SET [ SESSION | LOCAL ] ROLE role_name
+    // SET [ SESSION | LOCAL ] ROLE NONE
+    // RESET ROLE
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-set-session-authorization.html
+    // SET [ SESSION | LOCAL ] SESSION AUTHORIZATION user_name
+    // SET [ SESSION | LOCAL ] SESSION AUTHORIZATION DEFAULT
+    // RESET SESSION AUTHORIZATION
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-set-transaction.html
+    // SET TRANSACTION transaction_mode [, ...]
+    // SET TRANSACTION SNAPSHOT snapshot_id
+    // SET SESSION CHARACTERISTICS AS TRANSACTION transaction_mode [, ...]
+    //
+    // where transaction_mode is one of:
+    //
+    //     ISOLATION LEVEL { SERIALIZABLE | REPEATABLE READ | READ COMMITTED | READ UNCOMMITTED }
+    //     READ WRITE | READ ONLY
+    //     [ NOT ] DEFERRABLE
     pub(super) fn parse_set_or_constraints(&mut self) -> PResult<Node> {
         if self.peek_kind_n(1) == TokenKind::Constraints {
             self.expect(TokenKind::Set)?;
@@ -258,10 +290,18 @@ impl Parser {
         Ok(args)
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-reset.html
+    // RESET configuration_parameter
+    // RESET ALL
     pub(super) fn parse_variable_reset(&mut self) -> PResult<Node> {
         Ok(Node::VariableSetStmt(self.parse_variable_set_like(true)?))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-show.html
+    // SHOW name
+    // SHOW ALL
     pub(super) fn parse_variable_show(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Show)?;
         let name = if self.consume(TokenKind::All) {
@@ -289,6 +329,65 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-begin.html
+    // BEGIN [ WORK | TRANSACTION ] [ transaction_mode [, ...] ]
+    //
+    // where transaction_mode is one of:
+    //
+    //     ISOLATION LEVEL { SERIALIZABLE | REPEATABLE READ | READ COMMITTED | READ UNCOMMITTED }
+    //     READ WRITE | READ ONLY
+    //     [ NOT ] DEFERRABLE
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-start-transaction.html
+    // START TRANSACTION [ transaction_mode [, ...] ]
+    //
+    // where transaction_mode is one of:
+    //
+    //     ISOLATION LEVEL { SERIALIZABLE | REPEATABLE READ | READ COMMITTED | READ UNCOMMITTED }
+    //     READ WRITE | READ ONLY
+    //     [ NOT ] DEFERRABLE
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-commit.html
+    // COMMIT [ WORK | TRANSACTION ] [ AND [ NO ] CHAIN ]
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-end.html
+    // END [ WORK | TRANSACTION ] [ AND [ NO ] CHAIN ]
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-commit-prepared.html
+    // COMMIT PREPARED transaction_id
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-rollback.html
+    // ROLLBACK [ WORK | TRANSACTION ] [ AND [ NO ] CHAIN ]
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-abort.html
+    // ABORT [ WORK | TRANSACTION ] [ AND [ NO ] CHAIN ]
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-rollback-prepared.html
+    // ROLLBACK PREPARED transaction_id
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-rollback-to.html
+    // ROLLBACK [ WORK | TRANSACTION ] TO [ SAVEPOINT ] savepoint_name
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-savepoint.html
+    // SAVEPOINT savepoint_name
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-release-savepoint.html
+    // RELEASE [ SAVEPOINT ] savepoint_name
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-prepare-transaction.html
+    // PREPARE TRANSACTION transaction_id
     pub(super) fn parse_transaction(&mut self) -> PResult<Node> {
         let first = self.advance().kind;
         let mut stmt = TransactionStmt {

@@ -1,6 +1,34 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-copy.html
+    // COPY table_name [ ( column_name [, ...] ) ]
+    //     FROM { 'filename' | PROGRAM 'command' | STDIN }
+    //     [ [ WITH ] ( option [, ...] ) ]
+    //     [ WHERE condition ]
+    //
+    // COPY { table_name [ ( column_name [, ...] ) ] | ( query ) }
+    //     TO { 'filename' | PROGRAM 'command' | STDOUT }
+    //     [ [ WITH ] ( option [, ...] ) ]
+    //
+    // where option can be one of:
+    //
+    //     FORMAT format_name
+    //     FREEZE [ boolean ]
+    //     DELIMITER 'delimiter_character'
+    //     NULL 'null_string'
+    //     DEFAULT 'default_string'
+    //     HEADER [ boolean | MATCH ]
+    //     QUOTE 'quote_character'
+    //     ESCAPE 'escape_character'
+    //     FORCE_QUOTE { ( column_name [, ...] ) | * }
+    //     FORCE_NOT_NULL { ( column_name [, ...] ) | * }
+    //     FORCE_NULL { ( column_name [, ...] ) | * }
+    //     ON_ERROR error_action
+    //     REJECT_LIMIT maxerror
+    //     ENCODING 'encoding_name'
+    //     LOG_VERBOSITY verbosity
     pub(super) fn parse_copy(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Copy)?;
         let mut options = Vec::new();
@@ -90,6 +118,44 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-vacuum.html
+    // VACUUM [ ( option [, ...] ) ] [ table_and_columns [, ...] ]
+    //
+    // where option can be one of:
+    //
+    //     FULL [ boolean ]
+    //     FREEZE [ boolean ]
+    //     VERBOSE [ boolean ]
+    //     ANALYZE [ boolean ]
+    //     DISABLE_PAGE_SKIPPING [ boolean ]
+    //     SKIP_LOCKED [ boolean ]
+    //     INDEX_CLEANUP { AUTO | ON | OFF }
+    //     PROCESS_MAIN [ boolean ]
+    //     PROCESS_TOAST [ boolean ]
+    //     TRUNCATE [ boolean ]
+    //     PARALLEL integer
+    //     SKIP_DATABASE_STATS [ boolean ]
+    //     ONLY_DATABASE_STATS [ boolean ]
+    //     BUFFER_USAGE_LIMIT size
+    //
+    // and table_and_columns is:
+    //
+    //     [ ONLY ] table_name [ * ] [ ( column_name [, ...] ) ]
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-analyze.html
+    // ANALYZE [ ( option [, ...] ) ] [ table_and_columns [, ...] ]
+    //
+    // where option can be one of:
+    //
+    //     VERBOSE [ boolean ]
+    //     SKIP_LOCKED [ boolean ]
+    //     BUFFER_USAGE_LIMIT size
+    //
+    // and table_and_columns is:
+    //
+    //     [ ONLY ] table_name [ * ] [ ( column_name [, ...] ) ]
     pub(super) fn parse_vacuum(&mut self) -> PResult<Node> {
         let is_vacuumcmd = self.consume(TokenKind::Vacuum);
         if !is_vacuumcmd {
@@ -128,6 +194,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-checkpoint.html
+    // CHECKPOINT
     pub(super) fn parse_checkpoint(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Checkpoint)?;
         let options = if self.at(TokenKind::Char('(')) {
@@ -141,6 +210,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-discard.html
+    // DISCARD { ALL | PLANS | SEQUENCES | TEMPORARY | TEMP }
     pub(super) fn parse_discard(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Discard)?;
         let target = match self.advance().kind {
@@ -156,6 +228,14 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-lock.html
+    // LOCK [ TABLE ] [ ONLY ] name [ * ] [, ...] [ IN lockmode MODE ] [ NOWAIT ]
+    //
+    // where lockmode is one of:
+    //
+    //     ACCESS SHARE | ROW SHARE | ROW EXCLUSIVE | SHARE UPDATE EXCLUSIVE
+    //     | SHARE | SHARE ROW EXCLUSIVE | EXCLUSIVE | ACCESS EXCLUSIVE
     pub(super) fn parse_lock(&mut self) -> PResult<Node> {
         self.expect(TokenKind::LockP)?;
         self.consume(TokenKind::Table);
@@ -216,6 +296,9 @@ impl Parser {
         Ok(mode)
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-listen.html
+    // LISTEN channel
     pub(super) fn parse_listen(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Listen)?;
         let conditionname = Some(
@@ -228,6 +311,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-unlisten.html
+    // UNLISTEN { channel | * }
     pub(super) fn parse_unlisten(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Unlisten)?;
         let conditionname = if self.consume(TokenKind::Char('*')) {
@@ -244,6 +330,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-notify.html
+    // NOTIFY channel [ , payload ]
     pub(super) fn parse_notify(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Notify)?;
         let conditionname = Some(
@@ -268,6 +357,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-load.html
+    // LOAD 'filename'
     pub(super) fn parse_load(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Load)?;
         if !self.at(TokenKind::SConst) {
@@ -283,6 +375,10 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-refreshmaterializedview.html
+    // REFRESH MATERIALIZED VIEW [ CONCURRENTLY ] name
+    //     [ WITH [ NO ] DATA ]
     pub(super) fn parse_refresh(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Refresh)?;
         self.expect(TokenKind::Materialized)?;
@@ -306,6 +402,16 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-reindex.html
+    // REINDEX [ ( option [, ...] ) ] { INDEX | TABLE | SCHEMA } [ CONCURRENTLY ] name
+    // REINDEX [ ( option [, ...] ) ] { DATABASE | SYSTEM } [ CONCURRENTLY ] [ name ]
+    //
+    // where option can be one of:
+    //
+    //     CONCURRENTLY [ boolean ]
+    //     TABLESPACE new_tablespace
+    //     VERBOSE [ boolean ]
     pub(super) fn parse_reindex(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Reindex)?;
         let mut params = if self.at(TokenKind::Char('(')) {
@@ -355,6 +461,13 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-cluster.html
+    // CLUSTER [ ( option [, ...] ) ] [ table_name [ USING index_name ] ]
+    //
+    // where option can be one of:
+    //
+    //     VERBOSE [ boolean ]
     pub(super) fn parse_repack(&mut self) -> PResult<Node> {
         if self.consume(TokenKind::Cluster) {
             return self.parse_cluster();
@@ -470,6 +583,10 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-truncate.html
+    // TRUNCATE [ TABLE ] [ ONLY ] name [ * ] [, ... ]
+    //     [ RESTART IDENTITY | CONTINUE IDENTITY ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_truncate(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Truncate)?;
         self.consume(TokenKind::Table);

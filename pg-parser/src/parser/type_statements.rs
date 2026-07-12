@@ -1,6 +1,46 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createtype.html
+    // CREATE TYPE name AS
+    //     ( [ attribute_name data_type [ COLLATE collation ] [, ... ] ] )
+    //
+    // CREATE TYPE name AS ENUM
+    //     ( [ 'label' [, ... ] ] )
+    //
+    // CREATE TYPE name AS RANGE (
+    //     SUBTYPE = subtype
+    //     [ , SUBTYPE_OPCLASS = subtype_operator_class ]
+    //     [ , COLLATION = collation ]
+    //     [ , CANONICAL = canonical_function ]
+    //     [ , SUBTYPE_DIFF = subtype_diff_function ]
+    //     [ , MULTIRANGE_TYPE_NAME = multirange_type_name ]
+    // )
+    //
+    // CREATE TYPE name (
+    //     INPUT = input_function,
+    //     OUTPUT = output_function
+    //     [ , RECEIVE = receive_function ]
+    //     [ , SEND = send_function ]
+    //     [ , TYPMOD_IN = type_modifier_input_function ]
+    //     [ , TYPMOD_OUT = type_modifier_output_function ]
+    //     [ , ANALYZE = analyze_function ]
+    //     [ , SUBSCRIPT = subscript_function ]
+    //     [ , INTERNALLENGTH = { internallength | VARIABLE } ]
+    //     [ , PASSEDBYVALUE ]
+    //     [ , ALIGNMENT = alignment ]
+    //     [ , STORAGE = storage ]
+    //     [ , LIKE = like_type ]
+    //     [ , CATEGORY = category ]
+    //     [ , PREFERRED = preferred ]
+    //     [ , DEFAULT = default ]
+    //     [ , ELEMENT = element ]
+    //     [ , DELIMITER = delimiter ]
+    //     [ , COLLATABLE = collatable ]
+    // )
+    //
+    // CREATE TYPE name
     pub(super) fn parse_create_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         let type_location = self.location();
@@ -79,6 +119,22 @@ impl Parser {
             Err(self.error_here("expected ENUM, RANGE, or a composite attribute list"))
         }
     }
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altertype.html
+    // ALTER TYPE name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER TYPE name RENAME TO new_name
+    // ALTER TYPE name SET SCHEMA new_schema
+    // ALTER TYPE name RENAME ATTRIBUTE attribute_name TO new_attribute_name [ CASCADE | RESTRICT ]
+    // ALTER TYPE name action [, ... ]
+    // ALTER TYPE name ADD VALUE [ IF NOT EXISTS ] new_enum_value [ { BEFORE | AFTER } neighbor_enum_value ]
+    // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
+    // ALTER TYPE name SET ( property = value [, ... ] )
+    //
+    // where action is one of:
+    //
+    //     ADD ATTRIBUTE attribute_name data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
+    //     DROP ATTRIBUTE [ IF EXISTS ] attribute_name [ CASCADE | RESTRICT ]
+    //     ALTER ATTRIBUTE attribute_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         let type_name = self.parse_name_list_until_keywords(&[
@@ -99,6 +155,22 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altertype.html
+    // ALTER TYPE name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER TYPE name RENAME TO new_name
+    // ALTER TYPE name SET SCHEMA new_schema
+    // ALTER TYPE name RENAME ATTRIBUTE attribute_name TO new_attribute_name [ CASCADE | RESTRICT ]
+    // ALTER TYPE name action [, ... ]
+    // ALTER TYPE name ADD VALUE [ IF NOT EXISTS ] new_enum_value [ { BEFORE | AFTER } neighbor_enum_value ]
+    // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
+    // ALTER TYPE name SET ( property = value [, ... ] )
+    //
+    // where action is one of:
+    //
+    //     ADD ATTRIBUTE attribute_name data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
+    //     DROP ATTRIBUTE [ IF EXISTS ] attribute_name [ CASCADE | RESTRICT ]
+    //     ALTER ATTRIBUTE attribute_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_enum(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         let type_name = self.parse_name_list_until_keywords(&[
@@ -151,6 +223,22 @@ impl Parser {
         Ok(Node::AlterEnumStmt(stmt))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altertype.html
+    // ALTER TYPE name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER TYPE name RENAME TO new_name
+    // ALTER TYPE name SET SCHEMA new_schema
+    // ALTER TYPE name RENAME ATTRIBUTE attribute_name TO new_attribute_name [ CASCADE | RESTRICT ]
+    // ALTER TYPE name action [, ... ]
+    // ALTER TYPE name ADD VALUE [ IF NOT EXISTS ] new_enum_value [ { BEFORE | AFTER } neighbor_enum_value ]
+    // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
+    // ALTER TYPE name SET ( property = value [, ... ] )
+    //
+    // where action is one of:
+    //
+    //     ADD ATTRIBUTE attribute_name data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
+    //     DROP ATTRIBUTE [ IF EXISTS ] attribute_name [ CASCADE | RESTRICT ]
+    //     ALTER ATTRIBUTE attribute_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_composite_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         let type_location = self.location();

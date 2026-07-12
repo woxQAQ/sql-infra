@@ -1,6 +1,13 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altercollation.html
+    // ALTER COLLATION name REFRESH VERSION
+    //
+    // ALTER COLLATION name RENAME TO new_name
+    // ALTER COLLATION name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER COLLATION name SET SCHEMA new_schema
     pub(super) fn parse_alter_collation(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Collation)?;
         let collname = self.parse_name_list_until_keywords(&[
@@ -20,6 +27,11 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createlanguage.html
+    // CREATE [ OR REPLACE ] [ TRUSTED ] [ PROCEDURAL ] LANGUAGE name
+    //     HANDLER call_handler [ INLINE inline_handler ] [ VALIDATOR valfunction ]
+    // CREATE [ OR REPLACE ] [ TRUSTED ] [ PROCEDURAL ] LANGUAGE name
     pub(super) fn parse_create_language(
         &mut self,
         replace: bool,
@@ -74,6 +86,12 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createtablespace.html
+    // CREATE TABLESPACE tablespace_name
+    //     [ OWNER { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER } ]
+    //     LOCATION 'directory'
+    //     [ WITH ( tablespace_option = value [, ... ] ) ]
     pub(super) fn parse_create_tablespace(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Tablespace)?;
         let tablespacename = Some(
@@ -107,6 +125,12 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altertablespace.html
+    // ALTER TABLESPACE name RENAME TO new_name
+    // ALTER TABLESPACE name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER TABLESPACE name SET ( tablespace_option = value [, ... ] )
+    // ALTER TABLESPACE name RESET ( tablespace_option [, ... ] )
     pub(super) fn parse_alter_tablespace(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Tablespace)?;
         let tablespacename = Some(
@@ -145,6 +169,9 @@ impl Parser {
         ))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-droptablespace.html
+    // DROP TABLESPACE [ IF EXISTS ] name
     pub(super) fn parse_drop_tablespace(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Tablespace)?;
         let missing_ok = self.consume_if_exists()?;
@@ -160,6 +187,11 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-create-access-method.html
+    // CREATE ACCESS METHOD name
+    //     TYPE access_method_type
+    //     HANDLER handler_function
     pub(super) fn parse_create_am(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Method)?;
         let amname = Some(

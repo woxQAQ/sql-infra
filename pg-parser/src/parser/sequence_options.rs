@@ -1,6 +1,16 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createsequence.html
+    // CREATE [ { TEMPORARY | TEMP } | UNLOGGED ] SEQUENCE [ IF NOT EXISTS ] name
+    //     [ AS data_type ]
+    //     [ INCREMENT [ BY ] increment ]
+    //     [ MINVALUE minvalue | NO MINVALUE ] [ MAXVALUE maxvalue | NO MAXVALUE ]
+    //     [ [ NO ] CYCLE ]
+    //     [ START [ WITH ] start ]
+    //     [ CACHE cache ]
+    //     [ OWNED BY { table_name.column_name | NONE } ]
     pub(super) fn parse_create_sequence(&mut self, relpersistence: u8) -> PResult<Node> {
         self.expect(TokenKind::Sequence)?;
         let if_not_exists = self.consume_if_not_exists()?;
@@ -19,6 +29,21 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altersequence.html
+    // ALTER SEQUENCE [ IF EXISTS ] name
+    //     [ AS data_type ]
+    //     [ INCREMENT [ BY ] increment ]
+    //     [ MINVALUE minvalue | NO MINVALUE ] [ MAXVALUE maxvalue | NO MAXVALUE ]
+    //     [ [ NO ] CYCLE ]
+    //     [ START [ WITH ] start ]
+    //     [ RESTART [ [ WITH ] restart ] ]
+    //     [ CACHE cache ]
+    //     [ OWNED BY { table_name.column_name | NONE } ]
+    // ALTER SEQUENCE [ IF EXISTS ] name SET { LOGGED | UNLOGGED }
+    // ALTER SEQUENCE [ IF EXISTS ] name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER SEQUENCE [ IF EXISTS ] name RENAME TO new_name
+    // ALTER SEQUENCE [ IF EXISTS ] name SET SCHEMA new_schema
     pub(super) fn parse_alter_sequence(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Sequence)?;
         let missing_ok = self.consume_if_exists()?;

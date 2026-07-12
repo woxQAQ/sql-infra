@@ -1,6 +1,11 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alterusermapping.html
+    // ALTER USER MAPPING FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | SESSION_USER | PUBLIC }
+    //     SERVER server_name
+    //     OPTIONS ( [ ADD | SET | DROP ] option ['value'] [, ... ] )
     pub(super) fn parse_alter_user_mapping(&mut self) -> PResult<Node> {
         self.expect(TokenKind::User)?;
         self.expect(TokenKind::Mapping)?;
@@ -24,6 +29,14 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alterforeigndatawrapper.html
+    // ALTER FOREIGN DATA WRAPPER name
+    //     [ HANDLER handler_function | NO HANDLER ]
+    //     [ VALIDATOR validator_function | NO VALIDATOR ]
+    //     [ OPTIONS ( [ ADD | SET | DROP ] option ['value'] [, ... ]) ]
+    // ALTER FOREIGN DATA WRAPPER name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER FOREIGN DATA WRAPPER name RENAME TO new_name
     pub(super) fn parse_alter_fdw(&mut self) -> PResult<Node> {
         let fdwname = Some(
             self.consume_col_id()
@@ -47,6 +60,12 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alterserver.html
+    // ALTER SERVER name [ VERSION 'new_version' ]
+    //     [ OPTIONS ( [ ADD | SET | DROP ] option ['value'] [, ... ] ) ]
+    // ALTER SERVER name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER SERVER name RENAME TO new_name
     pub(super) fn parse_alter_foreign_server(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Server)?;
         let servername = Some(
@@ -81,6 +100,12 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createforeigndatawrapper.html
+    // CREATE FOREIGN DATA WRAPPER name
+    //     [ HANDLER handler_function | NO HANDLER ]
+    //     [ VALIDATOR validator_function | NO VALIDATOR ]
+    //     [ OPTIONS ( option 'value' [, ... ] ) ]
     pub(super) fn parse_create_fdw(&mut self) -> PResult<Node> {
         let fdwname = Some(
             self.consume_col_id()
@@ -141,6 +166,11 @@ impl Parser {
         Ok(func_options)
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createserver.html
+    // CREATE SERVER [ IF NOT EXISTS ] server_name [ TYPE 'server_type' ] [ VERSION 'server_version' ]
+    //     FOREIGN DATA WRAPPER fdw_name
+    //     [ OPTIONS ( option 'value' [, ... ] ) ]
     pub(super) fn parse_create_server(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Server)?;
         let if_not_exists = self.consume_if_not_exists()?;
@@ -189,6 +219,11 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createusermapping.html
+    // CREATE USER MAPPING [ IF NOT EXISTS ] FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | PUBLIC }
+    //     SERVER server_name
+    //     [ OPTIONS ( option 'value' [ , ... ] ) ]
     pub(super) fn parse_create_user_mapping(&mut self) -> PResult<Node> {
         self.expect(TokenKind::User)?;
         self.expect(TokenKind::Mapping)?;

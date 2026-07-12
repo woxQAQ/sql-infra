@@ -1,6 +1,19 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createschema.html
+    // CREATE SCHEMA schema_name [ AUTHORIZATION role_specification ] [ schema_element [ ... ] ]
+    // CREATE SCHEMA AUTHORIZATION role_specification [ schema_element [ ... ] ]
+    // CREATE SCHEMA IF NOT EXISTS schema_name [ AUTHORIZATION role_specification ]
+    // CREATE SCHEMA IF NOT EXISTS AUTHORIZATION role_specification
+    //
+    // where role_specification can be:
+    //
+    //     user_name
+    //   | CURRENT_ROLE
+    //   | CURRENT_USER
+    //   | SESSION_USER
     pub(super) fn parse_create_schema(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Schema)?;
         let if_not_exists = self.consume_if_not_exists()?;

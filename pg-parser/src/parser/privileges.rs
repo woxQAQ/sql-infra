@@ -1,6 +1,82 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html
+    // ALTER DEFAULT PRIVILEGES
+    //     [ FOR { ROLE | USER } target_role [, ...] ]
+    //     [ IN SCHEMA schema_name [, ...] ]
+    //     abbreviated_grant_or_revoke
+    //
+    // where abbreviated_grant_or_revoke is one of:
+    //
+    // GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES | TRIGGER | MAINTAIN }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON TABLES
+    //     TO { [ GROUP ] role_name | PUBLIC } [, ...] [ WITH GRANT OPTION ]
+    //
+    // GRANT { { USAGE | SELECT | UPDATE }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON SEQUENCES
+    //     TO { [ GROUP ] role_name | PUBLIC } [, ...] [ WITH GRANT OPTION ]
+    //
+    // GRANT { EXECUTE | ALL [ PRIVILEGES ] }
+    //     ON { FUNCTIONS | ROUTINES }
+    //     TO { [ GROUP ] role_name | PUBLIC } [, ...] [ WITH GRANT OPTION ]
+    //
+    // GRANT { USAGE | ALL [ PRIVILEGES ] }
+    //     ON TYPES
+    //     TO { [ GROUP ] role_name | PUBLIC } [, ...] [ WITH GRANT OPTION ]
+    //
+    // GRANT { { USAGE | CREATE }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON SCHEMAS
+    //     TO { [ GROUP ] role_name | PUBLIC } [, ...] [ WITH GRANT OPTION ]
+    //
+    // GRANT { { SELECT | UPDATE }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON LARGE OBJECTS
+    //     TO { [ GROUP ] role_name | PUBLIC } [, ...] [ WITH GRANT OPTION ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES | TRIGGER | MAINTAIN }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON TABLES
+    //     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { USAGE | SELECT | UPDATE }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON SEQUENCES
+    //     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { EXECUTE | ALL [ PRIVILEGES ] }
+    //     ON { FUNCTIONS | ROUTINES }
+    //     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { USAGE | ALL [ PRIVILEGES ] }
+    //     ON TYPES
+    //     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { USAGE | CREATE }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON SCHEMAS
+    //     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { SELECT | UPDATE }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON LARGE OBJECTS
+    //     FROM { [ GROUP ] role_name | PUBLIC } [, ...]
+    //     [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_default_privileges(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Default)?;
         self.expect(TokenKind::Privileges)?;
@@ -156,6 +232,214 @@ impl Parser {
         })
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-grant.html
+    // GRANT { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES | TRIGGER | MAINTAIN }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON { [ TABLE ] table_name [, ...]
+    //          | ALL TABLES IN SCHEMA schema_name [, ...] }
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { { SELECT | INSERT | UPDATE | REFERENCES } ( column_name [, ...] )
+    //     [, ...] | ALL [ PRIVILEGES ] ( column_name [, ...] ) }
+    //     ON [ TABLE ] table_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { { USAGE | SELECT | UPDATE }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON { SEQUENCE sequence_name [, ...]
+    //          | ALL SEQUENCES IN SCHEMA schema_name [, ...] }
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { { CREATE | CONNECT | TEMPORARY | TEMP } [, ...] | ALL [ PRIVILEGES ] }
+    //     ON DATABASE database_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { USAGE | ALL [ PRIVILEGES ] }
+    //     ON DOMAIN domain_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { USAGE | ALL [ PRIVILEGES ] }
+    //     ON FOREIGN DATA WRAPPER fdw_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { USAGE | ALL [ PRIVILEGES ] }
+    //     ON FOREIGN SERVER server_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { EXECUTE | ALL [ PRIVILEGES ] }
+    //     ON { { FUNCTION | PROCEDURE | ROUTINE } routine_name [ ( [ [ argmode ] [ arg_name ] arg_type [, ...] ] ) ] [, ...]
+    //          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { USAGE | ALL [ PRIVILEGES ] }
+    //     ON LANGUAGE lang_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { { SELECT | UPDATE } [, ...] | ALL [ PRIVILEGES ] }
+    //     ON LARGE OBJECT loid [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { { SET | ALTER SYSTEM } [, ... ] | ALL [ PRIVILEGES ] }
+    //     ON PARAMETER configuration_parameter [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { { CREATE | USAGE } [, ...] | ALL [ PRIVILEGES ] }
+    //     ON SCHEMA schema_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { CREATE | ALL [ PRIVILEGES ] }
+    //     ON TABLESPACE tablespace_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT { USAGE | ALL [ PRIVILEGES ] }
+    //     ON TYPE type_name [, ...]
+    //     TO role_specification [, ...] [ WITH GRANT OPTION ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // GRANT role_name [, ...] TO role_specification [, ...]
+    //     [ WITH { ADMIN | INHERIT | SET } { OPTION | TRUE | FALSE } ]
+    //     [ GRANTED BY role_specification ]
+    //
+    // where role_specification can be:
+    //
+    //     [ GROUP ] role_name
+    //   | PUBLIC
+    //   | CURRENT_ROLE
+    //   | CURRENT_USER
+    //   | SESSION_USER
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-revoke.html
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { SELECT | INSERT | UPDATE | DELETE | TRUNCATE | REFERENCES | TRIGGER | MAINTAIN }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON { [ TABLE ] table_name [, ...]
+    //          | ALL TABLES IN SCHEMA schema_name [, ...] }
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { SELECT | INSERT | UPDATE | REFERENCES } ( column_name [, ...] )
+    //     [, ...] | ALL [ PRIVILEGES ] ( column_name [, ...] ) }
+    //     ON [ TABLE ] table_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { USAGE | SELECT | UPDATE }
+    //     [, ...] | ALL [ PRIVILEGES ] }
+    //     ON { SEQUENCE sequence_name [, ...]
+    //          | ALL SEQUENCES IN SCHEMA schema_name [, ...] }
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { CREATE | CONNECT | TEMPORARY | TEMP } [, ...] | ALL [ PRIVILEGES ] }
+    //     ON DATABASE database_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { USAGE | ALL [ PRIVILEGES ] }
+    //     ON DOMAIN domain_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { USAGE | ALL [ PRIVILEGES ] }
+    //     ON FOREIGN DATA WRAPPER fdw_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { USAGE | ALL [ PRIVILEGES ] }
+    //     ON FOREIGN SERVER server_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { EXECUTE | ALL [ PRIVILEGES ] }
+    //     ON { { FUNCTION | PROCEDURE | ROUTINE } function_name [ ( [ [ argmode ] [ arg_name ] arg_type [, ...] ] ) ] [, ...]
+    //          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { USAGE | ALL [ PRIVILEGES ] }
+    //     ON LANGUAGE lang_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { SELECT | UPDATE } [, ...] | ALL [ PRIVILEGES ] }
+    //     ON LARGE OBJECT loid [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { SET | ALTER SYSTEM } [, ...] | ALL [ PRIVILEGES ] }
+    //     ON PARAMETER configuration_parameter [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { { CREATE | USAGE } [, ...] | ALL [ PRIVILEGES ] }
+    //     ON SCHEMA schema_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { CREATE | ALL [ PRIVILEGES ] }
+    //     ON TABLESPACE tablespace_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ GRANT OPTION FOR ]
+    //     { USAGE | ALL [ PRIVILEGES ] }
+    //     ON TYPE type_name [, ...]
+    //     FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // REVOKE [ { ADMIN | INHERIT | SET } OPTION FOR ]
+    //     role_name [, ...] FROM role_specification [, ...]
+    //     [ GRANTED BY role_specification ]
+    //     [ CASCADE | RESTRICT ]
+    //
+    // where role_specification can be:
+    //
+    //     [ GROUP ] role_name
+    //   | PUBLIC
+    //   | CURRENT_ROLE
+    //   | CURRENT_USER
+    //   | SESSION_USER
     pub(super) fn parse_grant(&mut self, is_grant: bool) -> PResult<Node> {
         self.advance();
         let mut revoke_grant_option = false;

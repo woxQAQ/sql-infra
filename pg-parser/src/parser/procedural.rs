@@ -1,6 +1,13 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-importforeignschema.html
+    // IMPORT FOREIGN SCHEMA remote_schema
+    //     [ { LIMIT TO | EXCEPT } ( table_name [, ...] ) ]
+    //     FROM SERVER server_name
+    //     INTO local_schema
+    //     [ OPTIONS ( option 'value' [, ... ] ) ]
     pub(super) fn parse_import_foreign_schema(&mut self) -> PResult<Node> {
         self.expect(TokenKind::ImportP)?;
         self.expect(TokenKind::Foreign)?;
@@ -50,6 +57,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-do.html
+    // DO [ LANGUAGE lang_name ] code
     pub(super) fn parse_do(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Do)?;
         let mut args = Vec::new();

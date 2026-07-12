@@ -1,6 +1,36 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createtsconfig.html
+    // CREATE TEXT SEARCH CONFIGURATION name (
+    //     PARSER = parser_name |
+    //     COPY = source_config
+    // )
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createtsdictionary.html
+    // CREATE TEXT SEARCH DICTIONARY name (
+    //     TEMPLATE = template
+    //     [, option = value [, ... ]]
+    // )
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createtsparser.html
+    // CREATE TEXT SEARCH PARSER name (
+    //     START = start_function ,
+    //     GETTOKEN = gettoken_function ,
+    //     END = end_function ,
+    //     LEXTYPES = lextypes_function
+    //     [, HEADLINE = headline_function ]
+    // )
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createtstemplate.html
+    // CREATE TEXT SEARCH TEMPLATE name (
+    //     [ INIT = init_function , ]
+    //     LEXIZE = lexize_function
+    // )
     pub(super) fn parse_define_text_search(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TextP)?;
         self.expect(TokenKind::Search)?;
@@ -29,6 +59,14 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altertsdictionary.html
+    // ALTER TEXT SEARCH DICTIONARY name (
+    //     option [ = value ] [, ... ]
+    // )
+    // ALTER TEXT SEARCH DICTIONARY name RENAME TO new_name
+    // ALTER TEXT SEARCH DICTIONARY name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER TEXT SEARCH DICTIONARY name SET SCHEMA new_schema
     pub(super) fn parse_alter_ts_dictionary(&mut self) -> PResult<Node> {
         let dictname = self.parse_name_list_until_keywords(&[
             TokenKind::Char('('),
@@ -47,6 +85,21 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altertsconfig.html
+    // ALTER TEXT SEARCH CONFIGURATION name
+    //     ADD MAPPING FOR token_type [, ... ] WITH dictionary_name [, ... ]
+    // ALTER TEXT SEARCH CONFIGURATION name
+    //     ALTER MAPPING FOR token_type [, ... ] WITH dictionary_name [, ... ]
+    // ALTER TEXT SEARCH CONFIGURATION name
+    //     ALTER MAPPING REPLACE old_dictionary WITH new_dictionary
+    // ALTER TEXT SEARCH CONFIGURATION name
+    //     ALTER MAPPING FOR token_type [, ... ] REPLACE old_dictionary WITH new_dictionary
+    // ALTER TEXT SEARCH CONFIGURATION name
+    //     DROP MAPPING [ IF EXISTS ] FOR token_type [, ... ]
+    // ALTER TEXT SEARCH CONFIGURATION name RENAME TO new_name
+    // ALTER TEXT SEARCH CONFIGURATION name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER TEXT SEARCH CONFIGURATION name SET SCHEMA new_schema
     pub(super) fn parse_alter_ts_configuration(&mut self) -> PResult<Node> {
         let cfgname = self.parse_name_list_until_keywords(&[
             TokenKind::AddP,

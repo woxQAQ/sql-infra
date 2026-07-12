@@ -1,6 +1,12 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createeventtrigger.html
+    // CREATE EVENT TRIGGER name
+    //     ON event
+    //     [ WHEN filter_variable IN (filter_value [, ... ]) [ AND ... ] ]
+    //     EXECUTE { FUNCTION | PROCEDURE } function_name()
     pub(super) fn parse_create_event_trigger(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Trigger)?;
         let trigname = Some(
@@ -59,6 +65,12 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-altereventtrigger.html
+    // ALTER EVENT TRIGGER name DISABLE
+    // ALTER EVENT TRIGGER name ENABLE [ REPLICA | ALWAYS ]
+    // ALTER EVENT TRIGGER name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    // ALTER EVENT TRIGGER name RENAME TO new_name
     pub(super) fn parse_alter_event_trigger(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Trigger)?;
         let trigname = Some(
@@ -90,6 +102,23 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createtrigger.html
+    // CREATE [ OR REPLACE ] [ CONSTRAINT ] TRIGGER name { BEFORE | AFTER | INSTEAD OF } { event [ OR ... ] }
+    //     ON table_name
+    //     [ FROM referenced_table_name ]
+    //     [ NOT DEFERRABLE | [ DEFERRABLE ] [ INITIALLY IMMEDIATE | INITIALLY DEFERRED ] ]
+    //     [ REFERENCING { { OLD | NEW } TABLE [ AS ] transition_relation_name } [ ... ] ]
+    //     [ FOR [ EACH ] { ROW | STATEMENT } ]
+    //     [ WHEN ( condition ) ]
+    //     EXECUTE { FUNCTION | PROCEDURE } function_name ( arguments )
+    //
+    // where event can be one of:
+    //
+    //     INSERT
+    //     UPDATE [ OF column_name [, ... ] ]
+    //     DELETE
+    //     TRUNCATE
     pub(super) fn parse_create_trigger(
         &mut self,
         replace: bool,

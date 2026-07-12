@@ -1,6 +1,10 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-declare.html
+    // DECLARE name [ BINARY ] [ ASENSITIVE | INSENSITIVE ] [ [ NO ] SCROLL ]
+    //     CURSOR [ { WITH | WITHOUT } HOLD ] FOR query
     pub(super) fn parse_declare_cursor(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Declare)?;
         let portalname = Some(
@@ -48,6 +52,9 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-close.html
+    // CLOSE { name | ALL }
     pub(super) fn parse_close(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Close)?;
         let portalname = if self.consume(TokenKind::All) {
@@ -64,6 +71,47 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-fetch.html
+    // FETCH [ direction ] [ FROM | IN ] cursor_name
+    //
+    // where direction can be one of:
+    //
+    //     NEXT
+    //     PRIOR
+    //     FIRST
+    //     LAST
+    //     ABSOLUTE count
+    //     RELATIVE count
+    //     count
+    //     ALL
+    //     FORWARD
+    //     FORWARD count
+    //     FORWARD ALL
+    //     BACKWARD
+    //     BACKWARD count
+    //     BACKWARD ALL
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-move.html
+    // MOVE [ direction ] [ FROM | IN ] cursor_name
+    //
+    // where direction can be one of:
+    //
+    //     NEXT
+    //     PRIOR
+    //     FIRST
+    //     LAST
+    //     ABSOLUTE count
+    //     RELATIVE count
+    //     count
+    //     ALL
+    //     FORWARD
+    //     FORWARD count
+    //     FORWARD ALL
+    //     BACKWARD
+    //     BACKWARD count
+    //     BACKWARD ALL
     pub(super) fn parse_fetch_or_move(&mut self) -> PResult<Node> {
         let ismove = self.consume(TokenKind::Move);
         if !ismove {

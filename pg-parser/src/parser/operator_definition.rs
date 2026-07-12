@@ -41,6 +41,22 @@ impl Parser {
         Ok(options)
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alteroperator.html
+    // ALTER OPERATOR name ( { left_type | NONE } , right_type )
+    //     OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
+    //
+    // ALTER OPERATOR name ( { left_type | NONE } , right_type )
+    //     SET SCHEMA new_schema
+    //
+    // ALTER OPERATOR name ( { left_type | NONE } , right_type )
+    //     SET ( {  RESTRICT = { res_proc | NONE }
+    //            | JOIN = { join_proc | NONE }
+    //            | COMMUTATOR = com_op
+    //            | NEGATOR = neg_op
+    //            | HASHES
+    //            | MERGES
+    //           } [, ... ] )
     pub(super) fn parse_alter_operator(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Operator)?;
         let opername = Some(Box::new(self.parse_operator_with_args_until(&[

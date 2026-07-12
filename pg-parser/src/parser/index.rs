@@ -1,6 +1,15 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createindex.html
+    // CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] [ [ IF NOT EXISTS ] name ] ON [ ONLY ] table_name [ USING method ]
+    //     ( { column_name | ( expression ) } [ COLLATE collation ] [ opclass [ ( opclass_parameter = value [, ... ] ) ] ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ] [, ...] )
+    //     [ INCLUDE ( column_name [, ...] ) ]
+    //     [ NULLS [ NOT ] DISTINCT ]
+    //     [ WITH ( storage_parameter [= value] [, ... ] ) ]
+    //     [ TABLESPACE tablespace_name ]
+    //     [ WHERE predicate ]
     pub(super) fn parse_index(&mut self, unique_seen: bool) -> PResult<Node> {
         let unique = unique_seen || self.consume(TokenKind::Unique);
         self.expect(TokenKind::Index)?;

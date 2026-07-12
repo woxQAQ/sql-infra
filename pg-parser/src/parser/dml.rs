@@ -1,6 +1,29 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-insert.html
+    // [ WITH [ RECURSIVE ] with_query [, ...] ]
+    // INSERT INTO table_name [ AS alias ] [ ( column_name [, ...] ) ]
+    //     [ OVERRIDING { SYSTEM | USER } VALUE ]
+    //     { DEFAULT VALUES | VALUES ( { expression | DEFAULT } [, ...] ) [, ...] | query }
+    //     [ ON CONFLICT [ conflict_target ] conflict_action ]
+    //     [ RETURNING [ WITH ( { OLD | NEW } AS output_alias [, ...] ) ]
+    //                 { * | output_expression [ [ AS ] output_name ] } [, ...] ]
+    //
+    // where conflict_target can be one of:
+    //
+    //     ( { index_column_name | ( index_expression ) } [ COLLATE collation ] [ opclass ] [, ...] ) [ WHERE index_predicate ]
+    //     ON CONSTRAINT constraint_name
+    //
+    // and conflict_action is one of:
+    //
+    //     DO NOTHING
+    //     DO UPDATE SET { column_name = { expression | DEFAULT } |
+    //                     ( column_name [, ...] ) = [ ROW ] ( { expression | DEFAULT } [, ...] ) |
+    //                     ( column_name [, ...] ) = ( sub-SELECT )
+    //                   } [, ...]
+    //               [ WHERE condition ]
     pub(super) fn parse_insert(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::Insert)?;
         self.expect(TokenKind::Into)?;
@@ -84,6 +107,18 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-update.html
+    // [ WITH [ RECURSIVE ] with_query [, ...] ]
+    // UPDATE [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+    //     SET { column_name = { expression | DEFAULT } |
+    //           ( column_name [, ...] ) = [ ROW ] ( { expression | DEFAULT } [, ...] ) |
+    //           ( column_name [, ...] ) = ( sub-SELECT )
+    //         } [, ...]
+    //     [ FROM from_item [, ...] ]
+    //     [ WHERE condition | WHERE CURRENT OF cursor_name ]
+    //     [ RETURNING [ WITH ( { OLD | NEW } AS output_alias [, ...] ) ]
+    //                 { * | output_expression [ [ AS ] output_name ] } [, ...] ]
     pub(super) fn parse_update(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::Update)?;
         let mut relation = Some(Box::new(
@@ -139,6 +174,14 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-delete.html
+    // [ WITH [ RECURSIVE ] with_query [, ...] ]
+    // DELETE FROM [ ONLY ] table_name [ * ] [ [ AS ] alias ]
+    //     [ USING from_item [, ...] ]
+    //     [ WHERE condition | WHERE CURRENT OF cursor_name ]
+    //     [ RETURNING [ WITH ( { OLD | NEW } AS output_alias [, ...] ) ]
+    //                 { * | output_expression [ [ AS ] output_name ] } [, ...] ]
     pub(super) fn parse_delete(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::DeleteP)?;
         self.expect(TokenKind::From)?;
@@ -202,6 +245,41 @@ impl Parser {
         Ok(Some(self.parse_expr_box_strict_until(stops)?))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-merge.html
+    // [ WITH with_query [, ...] ]
+    // MERGE INTO [ ONLY ] target_table_name [ * ] [ [ AS ] target_alias ]
+    //     USING data_source ON join_condition
+    //     when_clause [...]
+    //     [ RETURNING [ WITH ( { OLD | NEW } AS output_alias [, ...] ) ]
+    //                 { * | output_expression [ [ AS ] output_name ] } [, ...] ]
+    //
+    // where data_source is:
+    //
+    //     { [ ONLY ] source_table_name [ * ] | ( source_query ) } [ [ AS ] source_alias ]
+    //
+    // and when_clause is:
+    //
+    //     { WHEN MATCHED [ AND condition ] THEN { merge_update | merge_delete | DO NOTHING } |
+    //       WHEN NOT MATCHED BY SOURCE [ AND condition ] THEN { merge_update | merge_delete | DO NOTHING } |
+    //       WHEN NOT MATCHED [ BY TARGET ] [ AND condition ] THEN { merge_insert | DO NOTHING } }
+    //
+    // and merge_insert is:
+    //
+    //     INSERT [( column_name [, ...] )]
+    //         [ OVERRIDING { SYSTEM | USER } VALUE ]
+    //         { VALUES ( { expression | DEFAULT } [, ...] ) | DEFAULT VALUES }
+    //
+    // and merge_update is:
+    //
+    //     UPDATE SET { column_name = { expression | DEFAULT } |
+    //                  ( column_name [, ...] ) = [ ROW ] ( { expression | DEFAULT } [, ...] ) |
+    //                  ( column_name [, ...] ) = ( sub-SELECT )
+    //                } [, ...]
+    //
+    // and merge_delete is:
+    //
+    //     DELETE
     pub(super) fn parse_merge(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::Merge)?;
         self.expect(TokenKind::Into)?;

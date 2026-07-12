@@ -1,6 +1,14 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createpolicy.html
+    // CREATE POLICY name ON table_name
+    //     [ AS { PERMISSIVE | RESTRICTIVE } ]
+    //     [ FOR { ALL | SELECT | INSERT | UPDATE | DELETE } ]
+    //     [ TO { role_name | PUBLIC | CURRENT_ROLE | CURRENT_USER | SESSION_USER } [, ...] ]
+    //     [ USING ( using_expression ) ]
+    //     [ WITH CHECK ( check_expression ) ]
     pub(super) fn parse_create_policy(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Policy)?;
         let policy_name = Some(
@@ -86,6 +94,14 @@ impl Parser {
         }))
     }
 
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-alterpolicy.html
+    // ALTER POLICY name ON table_name RENAME TO new_name
+    //
+    // ALTER POLICY name ON table_name
+    //     [ TO { role_name | PUBLIC | CURRENT_ROLE | CURRENT_USER | SESSION_USER } [, ...] ]
+    //     [ USING ( using_expression ) ]
+    //     [ WITH CHECK ( check_expression ) ]
     pub(super) fn parse_alter_policy(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Policy)?;
         let policy_name = Some(

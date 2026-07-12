@@ -1,6 +1,41 @@
 use super::*;
 
 impl Parser {
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createfunction.html
+    // CREATE [ OR REPLACE ] FUNCTION
+    //     name ( [ [ argmode ] [ argname ] argtype [ { DEFAULT | = } default_expr ] [, ...] ] )
+    //     [ RETURNS rettype
+    //       | RETURNS TABLE ( column_name column_type [, ...] ) ]
+    //   { LANGUAGE lang_name
+    //     | TRANSFORM { FOR TYPE type_name } [, ... ]
+    //     | WINDOW
+    //     | { IMMUTABLE | STABLE | VOLATILE }
+    //     | [ NOT ] LEAKPROOF
+    //     | { CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT }
+    //     | { [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER }
+    //     | PARALLEL { UNSAFE | RESTRICTED | SAFE }
+    //     | COST execution_cost
+    //     | ROWS result_rows
+    //     | SUPPORT support_function
+    //     | SET configuration_parameter { TO value | = value | FROM CURRENT }
+    //     | AS 'definition'
+    //     | AS 'obj_file', 'link_symbol'
+    //     | sql_body
+    //   } ...
+    //
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createprocedure.html
+    // CREATE [ OR REPLACE ] PROCEDURE
+    //     name ( [ [ argmode ] [ argname ] argtype [ { DEFAULT | = } default_expr ] [, ...] ] )
+    //   { LANGUAGE lang_name
+    //     | TRANSFORM { FOR TYPE type_name } [, ... ]
+    //     | [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER
+    //     | SET configuration_parameter { TO value | = value | FROM CURRENT }
+    //     | AS 'definition'
+    //     | AS 'obj_file', 'link_symbol'
+    //     | sql_body
+    //   } ...
     pub(super) fn parse_create_function(&mut self, replace: bool) -> PResult<Node> {
         let is_procedure = self.consume(TokenKind::Procedure);
         if !is_procedure {
