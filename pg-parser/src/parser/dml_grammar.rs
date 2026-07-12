@@ -385,76 +385,114 @@ impl Parser {
             };
             self.expect(TokenKind::Then)?;
 
-            let mut clause = MergeWhenClause {
-                node_tag: NodeTag::MergeWhenClause,
-                match_kind,
-                condition,
-                ..MergeWhenClause::default()
+            let (command_type, override_, target_list, values) = match self.peek_kind() {
+                TokenKind::Update => {
+                    self.advance();
+                    self.expect(TokenKind::Set)?;
+                    let target_list = self.parse_set_clause_list_until(&[
+                        TokenKind::When,
+                        TokenKind::Returning,
+                        TokenKind::Char(';'),
+                        TokenKind::Eof,
+                    ])?;
+                    (
+                        CmdType::Update,
+                        OverridingKind::NotSet,
+                        target_list,
+                        Vec::new(),
+                    )
+                }
+                TokenKind::DeleteP => {
+                    self.advance();
+                    (
+                        CmdType::Delete,
+                        OverridingKind::NotSet,
+                        Vec::new(),
+                        Vec::new(),
+                    )
+                }
+                TokenKind::Do => {
+                    self.advance();
+                    self.expect(TokenKind::Nothing)?;
+                    (
+                        CmdType::Nothing,
+                        OverridingKind::NotSet,
+                        Vec::new(),
+                        Vec::new(),
+                    )
+                }
+                TokenKind::Insert => {
+                    self.advance();
+                    let (override_, target_list, values) = self.parse_merge_insert_action()?;
+                    (CmdType::Insert, override_, target_list, values)
+                }
+                _ => return Err(self.error_here("expected a MERGE action after THEN")),
             };
-            if self.consume(TokenKind::Update) {
-                self.expect(TokenKind::Set)?;
-                clause.command_type = CmdType::Update;
-                clause.target_list = self.parse_set_clause_list_until(&[
-                    TokenKind::When,
-                    TokenKind::Returning,
-                    TokenKind::Char(';'),
-                    TokenKind::Eof,
-                ])?;
-            } else if self.consume(TokenKind::DeleteP) {
-                clause.command_type = CmdType::Delete;
-            } else if self.consume(TokenKind::Do) {
-                self.expect(TokenKind::Nothing)?;
-                clause.command_type = CmdType::Nothing;
-            } else if self.consume(TokenKind::Insert) {
-                clause.command_type = CmdType::Insert;
-                if self.consume(TokenKind::Char('(')) {
-                    clause.target_list = self.parse_insert_column_list()?;
-                    self.expect(TokenKind::Char(')'))?;
-                }
-                if self.consume(TokenKind::Overriding) {
-                    clause.override_ = if self.consume(TokenKind::User) {
-                        OverridingKind::UserValue
-                    } else if self.consume(TokenKind::SystemP) {
-                        OverridingKind::SystemValue
-                    } else {
-                        return Err(self.error_here("expected USER or SYSTEM after OVERRIDING"));
-                    };
-                    self.expect(TokenKind::ValueP)?;
-                }
-                if self.consume(TokenKind::Default) {
-                    if !clause.target_list.is_empty() || clause.override_ != OverridingKind::NotSet
-                    {
-                        return Err(self.error_here(
-                            "MERGE INSERT DEFAULT VALUES does not accept columns or OVERRIDING",
-                        ));
-                    }
-                    self.expect(TokenKind::Values)?;
-                } else {
-                    self.expect(TokenKind::Values)?;
-                    self.expect(TokenKind::Char('('))?;
-                    clause.values = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
-                    if clause.values.is_empty() {
-                        return Err(self.error_here("MERGE INSERT VALUES cannot be empty"));
-                    }
-                    self.expect(TokenKind::Char(')'))?;
-                }
-            } else {
-                return Err(self.error_here("expected a MERGE action after THEN"));
-            }
-            let action_allowed = match clause.match_kind {
-                MergeMatchKind::Matched | MergeMatchKind::NotMatchedBySource => matches!(
-                    clause.command_type,
+            let action_allowed = matches!(
+                (match_kind, command_type),
+                (
+                    MergeMatchKind::Matched | MergeMatchKind::NotMatchedBySource,
                     CmdType::Update | CmdType::Delete | CmdType::Nothing
-                ),
-                MergeMatchKind::NotMatchedByTarget => {
-                    matches!(clause.command_type, CmdType::Insert | CmdType::Nothing)
-                }
-            };
+                ) | (
+                    MergeMatchKind::NotMatchedByTarget,
+                    CmdType::Insert | CmdType::Nothing
+                )
+            );
             if !action_allowed {
                 return Err(self.error_here("MERGE action is not valid for this match kind"));
             }
-            clauses.push(Node::MergeWhenClause(clause));
+            clauses.push(Node::MergeWhenClause(MergeWhenClause {
+                node_tag: NodeTag::MergeWhenClause,
+                match_kind,
+                command_type,
+                override_,
+                condition,
+                target_list,
+                values,
+            }));
         }
         Ok(clauses)
+    }
+
+    fn parse_merge_insert_action(&mut self) -> PResult<(OverridingKind, NodeList, NodeList)> {
+        let target_list = if self.consume(TokenKind::Char('(')) {
+            let target_list = self.parse_insert_column_list()?;
+            self.expect(TokenKind::Char(')'))?;
+            target_list
+        } else {
+            Vec::new()
+        };
+        let override_ = if self.consume(TokenKind::Overriding) {
+            let override_ = if self.consume(TokenKind::User) {
+                OverridingKind::UserValue
+            } else if self.consume(TokenKind::SystemP) {
+                OverridingKind::SystemValue
+            } else {
+                return Err(self.error_here("expected USER or SYSTEM after OVERRIDING"));
+            };
+            self.expect(TokenKind::ValueP)?;
+            override_
+        } else {
+            OverridingKind::NotSet
+        };
+        let values = if self.consume(TokenKind::Default) {
+            if !target_list.is_empty() || override_ != OverridingKind::NotSet {
+                return Err(self.error_here(
+                    "MERGE INSERT DEFAULT VALUES does not accept columns or OVERRIDING",
+                ));
+            }
+            self.expect(TokenKind::Values)?;
+            Vec::new()
+        } else {
+            self.expect(TokenKind::Values)?;
+            self.expect(TokenKind::Char('('))?;
+            let values = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            if values.is_empty() {
+                return Err(self.error_here("MERGE INSERT VALUES cannot be empty"));
+            }
+            self.expect(TokenKind::Char(')'))?;
+            values
+        };
+        Ok((override_, target_list, values))
     }
 }
