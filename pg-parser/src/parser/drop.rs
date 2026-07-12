@@ -45,11 +45,7 @@ impl Parser {
         let remove_type = self
             .consume_object_type()
             .ok_or_else(|| self.error_here("DROP requires an object type"))?;
-        let concurrent = if remove_type == ObjectType::Index {
-            self.consume(TokenKind::Concurrently)
-        } else {
-            false
-        };
+        let concurrent = remove_type == ObjectType::Index && self.consume(TokenKind::Concurrently);
         let missing_ok = self.consume_if_exists()?;
         let stops = [
             TokenKind::Cascade,
@@ -57,48 +53,38 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
-        let objects = if matches!(
-            remove_type,
-            ObjectType::Policy | ObjectType::Rule | ObjectType::Trigger
-        ) {
-            let object_name = self
-                .consume_col_id()
-                .ok_or_else(|| self.error_here("DROP requires an object name"))?;
-            self.expect(TokenKind::On)?;
-            let mut parts = self.consume_name_parts();
-            if parts.is_empty() {
-                return Err(self.error_here("ON requires an object name"));
+        let objects = match remove_type {
+            ObjectType::Policy | ObjectType::Rule | ObjectType::Trigger => {
+                let object_name = self
+                    .consume_col_id()
+                    .ok_or_else(|| self.error_here("DROP requires an object name"))?;
+                self.expect(TokenKind::On)?;
+                let mut parts = self.consume_name_parts();
+                if parts.is_empty() {
+                    return Err(self.error_here("ON requires an object name"));
+                }
+                parts.push(object_name);
+                vec![name_list_node(
+                    parts.into_iter().map(make_string_node).collect(),
+                )]
             }
-            parts.push(object_name);
-            vec![name_list_node(
-                parts.into_iter().map(make_string_node).collect(),
-            )]
-        } else if remove_type == ObjectType::Operator {
-            self.parse_operator_with_args_list_until(&stops)?
-        } else if remove_type == ObjectType::Aggregate {
-            self.parse_aggregate_with_args_list_until(&stops)?
-        } else if matches!(
-            remove_type,
-            ObjectType::Function | ObjectType::Procedure | ObjectType::Routine
-        ) {
-            self.parse_object_with_args_list_until(&stops)?
-        } else if matches!(remove_type, ObjectType::Type | ObjectType::Domain) {
-            let tokens = self.take_until_top_level(&stops);
-            parse_type_node_list(tokens)?
-        } else if matches!(
-            remove_type,
+            ObjectType::Operator => self.parse_operator_with_args_list_until(&stops)?,
+            ObjectType::Aggregate => self.parse_aggregate_with_args_list_until(&stops)?,
+            ObjectType::Function | ObjectType::Procedure | ObjectType::Routine => {
+                self.parse_object_with_args_list_until(&stops)?
+            }
+            ObjectType::Type | ObjectType::Domain => {
+                parse_type_node_list(self.take_until_top_level(&stops))?
+            }
             ObjectType::AccessMethod
-                | ObjectType::EventTrigger
-                | ObjectType::Extension
-                | ObjectType::Fdw
-                | ObjectType::Language
-                | ObjectType::Publication
-                | ObjectType::Schema
-                | ObjectType::ForeignServer
-        ) {
-            self.parse_simple_name_list_until(&stops)?
-        } else {
-            self.parse_any_name_list_until(&stops)?
+            | ObjectType::EventTrigger
+            | ObjectType::Extension
+            | ObjectType::Fdw
+            | ObjectType::Language
+            | ObjectType::Publication
+            | ObjectType::Schema
+            | ObjectType::ForeignServer => self.parse_simple_name_list_until(&stops)?,
+            _ => self.parse_any_name_list_until(&stops)?,
         };
         if objects.is_empty() {
             return Err(self.error_here("DROP requires at least one object name"));
