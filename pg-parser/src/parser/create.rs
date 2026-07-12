@@ -117,6 +117,9 @@ impl Parser {
                 self.parse_create_prop_graph(relpersistence)?
             }
             TokenKind::Rule => self.parse_rule(replace)?,
+            // PostgreSQL recognizes ASSERTION as a keyword but does not implement
+            // CREATE ASSERTION. Keep this branch to emit its specific diagnostic;
+            // no corresponding AST node is constructed.
             TokenKind::Assertion => self.parse_create_assertion()?,
             TokenKind::Aggregate => self.parse_define(ObjectType::Aggregate, replace)?,
             TokenKind::Operator => self.parse_define(ObjectType::Operator, replace)?,
