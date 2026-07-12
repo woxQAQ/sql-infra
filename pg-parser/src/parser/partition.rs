@@ -1,43 +1,6 @@
 use super::*;
 
 impl Parser {
-    pub(super) fn parse_create_generic_options(&mut self) -> PResult<NodeList> {
-        self.expect(TokenKind::Options)?;
-        self.expect(TokenKind::Char('('))?;
-        if self.at(TokenKind::Char(')')) {
-            return Err(self.error_here("OPTIONS list cannot be empty"));
-        }
-        let mut options = Vec::new();
-        loop {
-            let location = self.location();
-            let name = self
-                .consume_col_label()
-                .ok_or_else(|| self.error_here("expected an option name"))?;
-            let value = self.consume_required_string("option value must be a string literal")?;
-            options.push(make_def_elem(
-                &name,
-                Some(make_string_node(value)),
-                location,
-            ));
-            if !self.consume(TokenKind::Char(',')) {
-                break;
-            }
-            if self.at(TokenKind::Char(')')) {
-                return Err(self.error_here("expected an option after ','"));
-            }
-        }
-        self.expect(TokenKind::Char(')'))?;
-        Ok(options)
-    }
-
-    pub(super) fn parse_options_clause(&mut self) -> PResult<NodeList> {
-        if self.at(TokenKind::Options) {
-            self.parse_create_generic_options()
-        } else {
-            Ok(Vec::new())
-        }
-    }
-
     pub(super) fn parse_partition_spec(&mut self) -> PResult<PartitionSpec> {
         let location = self.expect(TokenKind::Partition)?.location;
         self.expect(TokenKind::By)?;

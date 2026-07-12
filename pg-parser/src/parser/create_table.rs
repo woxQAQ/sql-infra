@@ -274,7 +274,11 @@ impl Parser {
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("expected a foreign server name"))?,
             );
-            let foreign_options = self.parse_options_clause()?;
+            let foreign_options = if self.at(TokenKind::Options) {
+                self.parse_create_generic_options()?
+            } else {
+                Vec::new()
+            };
             Ok(Node::CreateForeignTableStmt(CreateForeignTableStmt {
                 base: create,
                 servername,
