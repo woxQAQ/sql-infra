@@ -24,138 +24,23 @@ impl Parser {
         }
     }
 
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-drop-access-method.html
-    // DROP ACCESS METHOD [ IF EXISTS ] name [ CASCADE | RESTRICT ]
+    // PostgreSQL 18 Synopsis subset — generic DROP
+    // Sources:
+    // - https://www.postgresql.org/docs/18/sql-commands.html
+    // - https://www.postgresql.org/docs/18/sql-droptable.html
+    // - https://www.postgresql.org/docs/18/sql-dropfunction.html
+    // - https://www.postgresql.org/docs/18/sql-dropoperator.html
     //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropaggregate.html
-    // DROP AGGREGATE [ IF EXISTS ] name ( aggregate_signature ) [, ...] [ CASCADE | RESTRICT ]
-    //
-    // where aggregate_signature is:
-    //
-    // * |
-    // [ argmode ] [ argname ] argtype [ , ... ] |
-    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ , ... ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropcollation.html
-    // DROP COLLATION [ IF EXISTS ] name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropconversion.html
-    // DROP CONVERSION [ IF EXISTS ] name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropdomain.html
-    // DROP DOMAIN [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropeventtrigger.html
-    // DROP EVENT TRIGGER [ IF EXISTS ] name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropextension.html
-    // DROP EXTENSION [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropforeigndatawrapper.html
-    // DROP FOREIGN DATA WRAPPER [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropforeigntable.html
-    // DROP FOREIGN TABLE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropfunction.html
-    // DROP FUNCTION [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
+    // Normalized across the object-specific DROP command pages:
+    // DROP object_type [ CONCURRENTLY ] [ IF EXISTS ] object_identity [, ...]
     //     [ CASCADE | RESTRICT ]
     //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropindex.html
-    // DROP INDEX [ CONCURRENTLY ] [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droplanguage.html
-    // DROP [ PROCEDURAL ] LANGUAGE [ IF EXISTS ] name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropmaterializedview.html
-    // DROP MATERIALIZED VIEW [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropoperator.html
-    // DROP OPERATOR [ IF EXISTS ] name ( { left_type | NONE } , right_type ) [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droppolicy.html
-    // DROP POLICY [ IF EXISTS ] name ON table_name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropprocedure.html
-    // DROP PROCEDURE [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
-    //     [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droppublication.html
-    // DROP PUBLICATION [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droproutine.html
-    // DROP ROUTINE [ IF EXISTS ] name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ] [, ...]
-    //     [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droprule.html
-    // DROP RULE [ IF EXISTS ] name ON table_name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropschema.html
-    // DROP SCHEMA [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropsequence.html
-    // DROP SEQUENCE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropserver.html
-    // DROP SERVER [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropstatistics.html
-    // DROP STATISTICS [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droptable.html
-    // DROP TABLE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droptrigger.html
-    // DROP TRIGGER [ IF EXISTS ] name ON table_name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droptsconfig.html
-    // DROP TEXT SEARCH CONFIGURATION [ IF EXISTS ] name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droptsdictionary.html
-    // DROP TEXT SEARCH DICTIONARY [ IF EXISTS ] name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droptsparser.html
-    // DROP TEXT SEARCH PARSER [ IF EXISTS ] name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droptstemplate.html
-    // DROP TEXT SEARCH TEMPLATE [ IF EXISTS ] name [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-droptype.html
-    // DROP TYPE [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-dropview.html
-    // DROP VIEW [ IF EXISTS ] name [, ...] [ CASCADE | RESTRICT ]
+    // object_identity is parsed according to object_type:
+    //     name
+    //     name [ ( [ argument [, ...] ] ) ]
+    //     aggregate_name ( aggregate_signature )
+    //     operator_name ( { left_type | NONE }, { right_type | NONE } )
+    //     { policy | rule | trigger }_name ON relation_name
     fn parse_drop_stmt(&mut self) -> PResult<Node> {
         let remove_type = self
             .consume_object_type()

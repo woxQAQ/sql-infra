@@ -10,90 +10,16 @@ fn operator_name_nodes(tokens: Vec<Token>) -> NodeList {
 }
 
 impl Parser {
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-createaggregate.html
-    // CREATE [ OR REPLACE ] AGGREGATE name ( [ argmode ] [ argname ] arg_data_type [ , ... ] ) (
-    //     SFUNC = sfunc,
-    //     STYPE = state_data_type
-    //     [ , SSPACE = state_data_size ]
-    //     [ , FINALFUNC = ffunc ]
-    //     [ , FINALFUNC_EXTRA ]
-    //     [ , FINALFUNC_MODIFY = { READ_ONLY | SHAREABLE | READ_WRITE } ]
-    //     [ , COMBINEFUNC = combinefunc ]
-    //     [ , SERIALFUNC = serialfunc ]
-    //     [ , DESERIALFUNC = deserialfunc ]
-    //     [ , INITCOND = initial_condition ]
-    //     [ , MSFUNC = msfunc ]
-    //     [ , MINVFUNC = minvfunc ]
-    //     [ , MSTYPE = mstate_data_type ]
-    //     [ , MSSPACE = mstate_data_size ]
-    //     [ , MFINALFUNC = mffunc ]
-    //     [ , MFINALFUNC_EXTRA ]
-    //     [ , MFINALFUNC_MODIFY = { READ_ONLY | SHAREABLE | READ_WRITE } ]
-    //     [ , MINITCOND = minitial_condition ]
-    //     [ , SORTOP = sort_operator ]
-    //     [ , PARALLEL = { SAFE | RESTRICTED | UNSAFE } ]
-    // )
+    // PostgreSQL 18 Synopsis subset — definition-based CREATE commands
+    // Sources:
+    // - https://www.postgresql.org/docs/18/sql-createaggregate.html
+    // - https://www.postgresql.org/docs/18/sql-createoperator.html
+    // - https://www.postgresql.org/docs/18/sql-createcollation.html
     //
-    // CREATE [ OR REPLACE ] AGGREGATE name ( [ [ argmode ] [ argname ] arg_data_type [ , ... ] ]
-    //                         ORDER BY [ argmode ] [ argname ] arg_data_type [ , ... ] ) (
-    //     SFUNC = sfunc,
-    //     STYPE = state_data_type
-    //     [ , SSPACE = state_data_size ]
-    //     [ , FINALFUNC = ffunc ]
-    //     [ , FINALFUNC_EXTRA ]
-    //     [ , FINALFUNC_MODIFY = { READ_ONLY | SHAREABLE | READ_WRITE } ]
-    //     [ , INITCOND = initial_condition ]
-    //     [ , PARALLEL = { SAFE | RESTRICTED | UNSAFE } ]
-    //     [ , HYPOTHETICAL ]
-    // )
-    //
-    // or the old syntax
-    //
-    // CREATE [ OR REPLACE ] AGGREGATE name (
-    //     BASETYPE = base_type,
-    //     SFUNC = sfunc,
-    //     STYPE = state_data_type
-    //     [ , SSPACE = state_data_size ]
-    //     [ , FINALFUNC = ffunc ]
-    //     [ , FINALFUNC_EXTRA ]
-    //     [ , FINALFUNC_MODIFY = { READ_ONLY | SHAREABLE | READ_WRITE } ]
-    //     [ , COMBINEFUNC = combinefunc ]
-    //     [ , SERIALFUNC = serialfunc ]
-    //     [ , DESERIALFUNC = deserialfunc ]
-    //     [ , INITCOND = initial_condition ]
-    //     [ , MSFUNC = msfunc ]
-    //     [ , MINVFUNC = minvfunc ]
-    //     [ , MSTYPE = mstate_data_type ]
-    //     [ , MSSPACE = mstate_data_size ]
-    //     [ , MFINALFUNC = mffunc ]
-    //     [ , MFINALFUNC_EXTRA ]
-    //     [ , MFINALFUNC_MODIFY = { READ_ONLY | SHAREABLE | READ_WRITE } ]
-    //     [ , MINITCOND = minitial_condition ]
-    //     [ , SORTOP = sort_operator ]
-    // )
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-createoperator.html
-    // CREATE OPERATOR name (
-    //     {FUNCTION|PROCEDURE} = function_name
-    //     [, LEFTARG = left_type ] [, RIGHTARG = right_type ]
-    //     [, COMMUTATOR = com_op ] [, NEGATOR = neg_op ]
-    //     [, RESTRICT = res_proc ] [, JOIN = join_proc ]
-    //     [, HASHES ] [, MERGES ]
-    // )
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-createcollation.html
-    // CREATE COLLATION [ IF NOT EXISTS ] name (
-    //     [ LOCALE = locale, ]
-    //     [ LC_COLLATE = lc_collate, ]
-    //     [ LC_CTYPE = lc_ctype, ]
-    //     [ PROVIDER = provider, ]
-    //     [ DETERMINISTIC = boolean, ]
-    //     [ RULES = rules, ]
-    //     [ VERSION = version ]
-    // )
+    // CREATE [ OR REPLACE ] AGGREGATE name ( aggregate_signature ) ( definition )
+    // CREATE [ OR REPLACE ] AGGREGATE name ( old_style_definition )
+    // CREATE OPERATOR name ( definition )
+    // CREATE COLLATION [ IF NOT EXISTS ] name ( definition )
     // CREATE COLLATION [ IF NOT EXISTS ] name FROM existing_collation
     pub(super) fn parse_define(&mut self, kind: ObjectType, replace: bool) -> PResult<Node> {
         self.advance();

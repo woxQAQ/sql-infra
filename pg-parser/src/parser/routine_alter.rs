@@ -1,93 +1,27 @@
 use super::*;
 
 impl Parser {
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-alterfunction.html
-    // ALTER FUNCTION name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
+    // PostgreSQL 18 Synopsis subset — routine actions
+    // Sources:
+    // - https://www.postgresql.org/docs/18/sql-alterfunction.html
+    // - https://www.postgresql.org/docs/18/sql-alterprocedure.html
+    // - https://www.postgresql.org/docs/18/sql-alterroutine.html
+    //
+    // ALTER { FUNCTION | PROCEDURE | ROUTINE } name
+    //     [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
     //     action [ ... ] [ RESTRICT ]
-    // ALTER FUNCTION name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     RENAME TO new_name
-    // ALTER FUNCTION name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER FUNCTION name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     SET SCHEMA new_schema
-    // ALTER FUNCTION name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     [ NO ] DEPENDS ON EXTENSION extension_name
     //
     // where action is one of:
-    //
     //     CALLED ON NULL INPUT | RETURNS NULL ON NULL INPUT | STRICT
-    //     IMMUTABLE | STABLE | VOLATILE
-    //     [ NOT ] LEAKPROOF
-    //     [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER
+    //     IMMUTABLE | STABLE | VOLATILE | [ NOT ] LEAKPROOF
+    //     [ EXTERNAL ] SECURITY { INVOKER | DEFINER }
     //     PARALLEL { UNSAFE | RESTRICTED | SAFE }
-    //     COST execution_cost
-    //     ROWS result_rows
-    //     SUPPORT support_function
+    //     COST execution_cost | ROWS result_rows | SUPPORT support_function
     //     SET configuration_parameter { TO | = } { value | DEFAULT }
     //     SET configuration_parameter FROM CURRENT
-    //     RESET configuration_parameter
-    //     RESET ALL
+    //     RESET configuration_parameter | RESET ALL
     //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-alterprocedure.html
-    // ALTER PROCEDURE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     action [ ... ] [ RESTRICT ]
-    // ALTER PROCEDURE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     RENAME TO new_name
-    // ALTER PROCEDURE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER PROCEDURE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     SET SCHEMA new_schema
-    // ALTER PROCEDURE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     [ NO ] DEPENDS ON EXTENSION extension_name
-    //
-    // where action is one of:
-    //
-    //     [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER
-    //     SET configuration_parameter { TO | = } { value | DEFAULT }
-    //     SET configuration_parameter FROM CURRENT
-    //     RESET configuration_parameter
-    //     RESET ALL
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-alterroutine.html
-    // ALTER ROUTINE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     action [ ... ] [ RESTRICT ]
-    // ALTER ROUTINE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     RENAME TO new_name
-    // ALTER ROUTINE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER ROUTINE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     SET SCHEMA new_schema
-    // ALTER ROUTINE name [ ( [ [ argmode ] [ argname ] argtype [, ...] ] ) ]
-    //     [ NO ] DEPENDS ON EXTENSION extension_name
-    //
-    // where action is one of:
-    //
-    //     IMMUTABLE | STABLE | VOLATILE
-    //     [ NOT ] LEAKPROOF
-    //     [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER
-    //     PARALLEL { UNSAFE | RESTRICTED | SAFE }
-    //     COST execution_cost
-    //     ROWS result_rows
-    //     SET configuration_parameter { TO | = } { value | DEFAULT }
-    //     SET configuration_parameter FROM CURRENT
-    //     RESET configuration_parameter
-    //     RESET ALL
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-alteraggregate.html
-    // ALTER AGGREGATE name ( aggregate_signature ) RENAME TO new_name
-    // ALTER AGGREGATE name ( aggregate_signature )
-    //                 OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER AGGREGATE name ( aggregate_signature ) SET SCHEMA new_schema
-    //
-    // where aggregate_signature is:
-    //
-    // * |
-    // [ argmode ] [ argname ] argtype [ , ... ] |
-    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ , ... ]
+    // RENAME, OWNER, SET SCHEMA, and DEPENDS forms are handled by alter_identity.
     pub(super) fn parse_alter_function(&mut self) -> PResult<Node> {
         let objtype = match self.advance().kind {
             TokenKind::Procedure => ObjectType::Procedure,

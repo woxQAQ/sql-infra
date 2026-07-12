@@ -119,22 +119,10 @@ impl Parser {
             Err(self.error_here("expected ENUM, RANGE, or a composite attribute list"))
         }
     }
-    // PostgreSQL 18 Synopsis
+
+    // PostgreSQL 18 Synopsis subset — base type properties
     // Source: https://www.postgresql.org/docs/18/sql-altertype.html
-    // ALTER TYPE name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER TYPE name RENAME TO new_name
-    // ALTER TYPE name SET SCHEMA new_schema
-    // ALTER TYPE name RENAME ATTRIBUTE attribute_name TO new_attribute_name [ CASCADE | RESTRICT ]
-    // ALTER TYPE name action [, ... ]
-    // ALTER TYPE name ADD VALUE [ IF NOT EXISTS ] new_enum_value [ { BEFORE | AFTER } neighbor_enum_value ]
-    // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
     // ALTER TYPE name SET ( property = value [, ... ] )
-    //
-    // where action is one of:
-    //
-    //     ADD ATTRIBUTE attribute_name data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
-    //     DROP ATTRIBUTE [ IF EXISTS ] attribute_name [ CASCADE | RESTRICT ]
-    //     ALTER ATTRIBUTE attribute_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         let type_name = self.parse_name_list_until_keywords(&[
@@ -155,22 +143,12 @@ impl Parser {
         }))
     }
 
-    // PostgreSQL 18 Synopsis
+    // PostgreSQL 18 Synopsis subset — enum values
     // Source: https://www.postgresql.org/docs/18/sql-altertype.html
-    // ALTER TYPE name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER TYPE name RENAME TO new_name
-    // ALTER TYPE name SET SCHEMA new_schema
-    // ALTER TYPE name RENAME ATTRIBUTE attribute_name TO new_attribute_name [ CASCADE | RESTRICT ]
-    // ALTER TYPE name action [, ... ]
-    // ALTER TYPE name ADD VALUE [ IF NOT EXISTS ] new_enum_value [ { BEFORE | AFTER } neighbor_enum_value ]
+    // ALTER TYPE name
+    //     ADD VALUE [ IF NOT EXISTS ] new_enum_value
+    //         [ { BEFORE | AFTER } neighbor_enum_value ]
     // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
-    // ALTER TYPE name SET ( property = value [, ... ] )
-    //
-    // where action is one of:
-    //
-    //     ADD ATTRIBUTE attribute_name data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
-    //     DROP ATTRIBUTE [ IF EXISTS ] attribute_name [ CASCADE | RESTRICT ]
-    //     ALTER ATTRIBUTE attribute_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_enum(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         let type_name = self.parse_name_list_until_keywords(&[
@@ -223,22 +201,16 @@ impl Parser {
         Ok(Node::AlterEnumStmt(stmt))
     }
 
-    // PostgreSQL 18 Synopsis
+    // PostgreSQL 18 Synopsis subset — composite attributes
     // Source: https://www.postgresql.org/docs/18/sql-altertype.html
-    // ALTER TYPE name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER TYPE name RENAME TO new_name
-    // ALTER TYPE name SET SCHEMA new_schema
-    // ALTER TYPE name RENAME ATTRIBUTE attribute_name TO new_attribute_name [ CASCADE | RESTRICT ]
     // ALTER TYPE name action [, ... ]
-    // ALTER TYPE name ADD VALUE [ IF NOT EXISTS ] new_enum_value [ { BEFORE | AFTER } neighbor_enum_value ]
-    // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
-    // ALTER TYPE name SET ( property = value [, ... ] )
     //
     // where action is one of:
-    //
-    //     ADD ATTRIBUTE attribute_name data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
+    //     ADD ATTRIBUTE attribute_name data_type [ COLLATE collation ]
+    //         [ CASCADE | RESTRICT ]
     //     DROP ATTRIBUTE [ IF EXISTS ] attribute_name [ CASCADE | RESTRICT ]
-    //     ALTER ATTRIBUTE attribute_name [ SET DATA ] TYPE data_type [ COLLATE collation ] [ CASCADE | RESTRICT ]
+    //     ALTER ATTRIBUTE attribute_name [ SET DATA ] TYPE data_type
+    //         [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_composite_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         let type_location = self.location();

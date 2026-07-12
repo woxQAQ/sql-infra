@@ -1,72 +1,23 @@
 use super::*;
 
 impl Parser {
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-createrole.html
-    // CREATE ROLE name [ [ WITH ] option [ ... ] ]
+    // PostgreSQL 18 Synopsis subset — CREATE ROLE aliases
+    // Sources:
+    // - https://www.postgresql.org/docs/18/sql-createrole.html
+    // - https://www.postgresql.org/docs/18/sql-createuser.html
+    // - https://www.postgresql.org/docs/18/sql-creategroup.html
+    //
+    // CREATE { ROLE | USER | GROUP } name [ [ WITH ] option [ ... ] ]
     //
     // where option can be:
-    //
-    //       SUPERUSER | NOSUPERUSER
-    //     | CREATEDB | NOCREATEDB
-    //     | CREATEROLE | NOCREATEROLE
-    //     | INHERIT | NOINHERIT
-    //     | LOGIN | NOLOGIN
-    //     | REPLICATION | NOREPLICATION
-    //     | BYPASSRLS | NOBYPASSRLS
-    //     | CONNECTION LIMIT connlimit
-    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
-    //     | VALID UNTIL 'timestamp'
-    //     | IN ROLE role_name [, ...]
-    //     | ROLE role_name [, ...]
-    //     | ADMIN role_name [, ...]
-    //     | SYSID uid
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-createuser.html
-    // CREATE USER name [ [ WITH ] option [ ... ] ]
-    //
-    // where option can be:
-    //
-    //       SUPERUSER | NOSUPERUSER
-    //     | CREATEDB | NOCREATEDB
-    //     | CREATEROLE | NOCREATEROLE
-    //     | INHERIT | NOINHERIT
-    //     | LOGIN | NOLOGIN
-    //     | REPLICATION | NOREPLICATION
-    //     | BYPASSRLS | NOBYPASSRLS
-    //     | CONNECTION LIMIT connlimit
-    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
-    //     | VALID UNTIL 'timestamp'
-    //     | IN ROLE role_name [, ...]
-    //     | IN GROUP role_name [, ...]
-    //     | ROLE role_name [, ...]
-    //     | ADMIN role_name [, ...]
-    //     | USER role_name [, ...]
-    //     | SYSID uid
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-creategroup.html
-    // CREATE GROUP name [ [ WITH ] option [ ... ] ]
-    //
-    // where option can be:
-    //
-    //       SUPERUSER | NOSUPERUSER
-    //     | CREATEDB | NOCREATEDB
-    //     | CREATEROLE | NOCREATEROLE
-    //     | INHERIT | NOINHERIT
-    //     | LOGIN | NOLOGIN
-    //     | REPLICATION | NOREPLICATION
-    //     | BYPASSRLS | NOBYPASSRLS
-    //     | CONNECTION LIMIT connlimit
-    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
-    //     | VALID UNTIL 'timestamp'
-    //     | IN ROLE role_name [, ...]
-    //     | IN GROUP role_name [, ...]
-    //     | ROLE role_name [, ...]
-    //     | ADMIN role_name [, ...]
-    //     | USER role_name [, ...]
-    //     | SYSID uid
+    //     SUPERUSER | NOSUPERUSER | CREATEDB | NOCREATEDB
+    //     CREATEROLE | NOCREATEROLE | INHERIT | NOINHERIT
+    //     LOGIN | NOLOGIN | REPLICATION | NOREPLICATION
+    //     BYPASSRLS | NOBYPASSRLS | CONNECTION LIMIT connlimit
+    //     [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
+    //     VALID UNTIL 'timestamp'
+    //     IN { ROLE | GROUP } role_name [, ...]
+    //     { ROLE | USER | ADMIN } role_name [, ...] | SYSID uid
     pub(super) fn parse_create_role(&mut self) -> PResult<Node> {
         let stmt_type = match self.advance().kind {
             TokenKind::User => RoleStmtType::User,
@@ -87,81 +38,18 @@ impl Parser {
         }))
     }
 
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-alterrole.html
-    // ALTER ROLE role_specification [ WITH ] option [ ... ]
+    // PostgreSQL 18 Synopsis subset — ALTER ROLE aliases
+    // Sources:
+    // - https://www.postgresql.org/docs/18/sql-alterrole.html
+    // - https://www.postgresql.org/docs/18/sql-alteruser.html
+    // - https://www.postgresql.org/docs/18/sql-altergroup.html
     //
-    // where option can be:
+    // ALTER { ROLE | USER } role_specification [ WITH ] option [ ... ]
+    // ALTER { ROLE | USER } { role_specification | ALL }
+    //     [ IN DATABASE database_name ] { SET | RESET } configuration_parameter ...
+    // ALTER GROUP role_specification { ADD | DROP } USER user_name [, ...]
     //
-    //       SUPERUSER | NOSUPERUSER
-    //     | CREATEDB | NOCREATEDB
-    //     | CREATEROLE | NOCREATEROLE
-    //     | INHERIT | NOINHERIT
-    //     | LOGIN | NOLOGIN
-    //     | REPLICATION | NOREPLICATION
-    //     | BYPASSRLS | NOBYPASSRLS
-    //     | CONNECTION LIMIT connlimit
-    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
-    //     | VALID UNTIL 'timestamp'
-    //
-    // ALTER ROLE name RENAME TO new_name
-    //
-    // ALTER ROLE { role_specification | ALL } [ IN DATABASE database_name ] SET configuration_parameter { TO | = } { value | DEFAULT }
-    // ALTER ROLE { role_specification | ALL } [ IN DATABASE database_name ] SET configuration_parameter FROM CURRENT
-    // ALTER ROLE { role_specification | ALL } [ IN DATABASE database_name ] RESET configuration_parameter
-    // ALTER ROLE { role_specification | ALL } [ IN DATABASE database_name ] RESET ALL
-    //
-    // where role_specification can be:
-    //
-    //     role_name
-    //   | CURRENT_ROLE
-    //   | CURRENT_USER
-    //   | SESSION_USER
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-alteruser.html
-    // ALTER USER role_specification [ WITH ] option [ ... ]
-    //
-    // where option can be:
-    //
-    //       SUPERUSER | NOSUPERUSER
-    //     | CREATEDB | NOCREATEDB
-    //     | CREATEROLE | NOCREATEROLE
-    //     | INHERIT | NOINHERIT
-    //     | LOGIN | NOLOGIN
-    //     | REPLICATION | NOREPLICATION
-    //     | BYPASSRLS | NOBYPASSRLS
-    //     | CONNECTION LIMIT connlimit
-    //     | [ ENCRYPTED ] PASSWORD 'password' | PASSWORD NULL
-    //     | VALID UNTIL 'timestamp'
-    //
-    // ALTER USER name RENAME TO new_name
-    //
-    // ALTER USER { role_specification | ALL } [ IN DATABASE database_name ] SET configuration_parameter { TO | = } { value | DEFAULT }
-    // ALTER USER { role_specification | ALL } [ IN DATABASE database_name ] SET configuration_parameter FROM CURRENT
-    // ALTER USER { role_specification | ALL } [ IN DATABASE database_name ] RESET configuration_parameter
-    // ALTER USER { role_specification | ALL } [ IN DATABASE database_name ] RESET ALL
-    //
-    // where role_specification can be:
-    //
-    //     role_name
-    //   | CURRENT_ROLE
-    //   | CURRENT_USER
-    //   | SESSION_USER
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-altergroup.html
-    // ALTER GROUP role_specification ADD USER user_name [, ... ]
-    // ALTER GROUP role_specification DROP USER user_name [, ... ]
-    //
-    // where role_specification can be:
-    //
-    //     role_name
-    //   | CURRENT_ROLE
-    //   | CURRENT_USER
-    //   | SESSION_USER
-    //
-    // ALTER GROUP group_name RENAME TO new_name
+    // RENAME forms are handled by alter_identity.
     pub(super) fn parse_alter_role(&mut self) -> PResult<Node> {
         let role_kind = self.advance().kind;
         let role = if self.at(TokenKind::All) {
