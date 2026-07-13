@@ -79,8 +79,8 @@ impl Parser {
                 let chunk =
                     self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
                 elements.push(parse_table_element_tokens(chunk).map_err(|mut error| {
-                    if error.location == 0 {
-                        error.location = location;
+                    if error.location() == 0 {
+                        error.reanchor(location);
                     }
                     error
                 })?);
@@ -106,8 +106,8 @@ impl Parser {
             let chunk = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
             elements.push(
                 parse_typed_table_element_tokens(chunk).map_err(|mut error| {
-                    if error.location == 0 {
-                        error.location = location;
+                    if error.location() == 0 {
+                        error.reanchor(location);
                     }
                     error
                 })?,
@@ -306,22 +306,14 @@ impl Parser {
     }
 }
 pub(super) fn parse_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.last().map_or(0, |token| token.location);
-    tokens.push(Token {
-        kind: TokenKind::Eof,
-        location,
-        value: None,
-    });
+    let location = tokens.last().map_or(0, Token::end_location);
+    tokens.push(Token::synthetic(TokenKind::Eof, location));
     let mut parser = Parser { tokens, pos: 0 };
     parser.parse_table_element_inner()
 }
 pub(super) fn parse_typed_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.last().map_or(0, |token| token.location);
-    tokens.push(Token {
-        kind: TokenKind::Eof,
-        location,
-        value: None,
-    });
+    let location = tokens.last().map_or(0, Token::end_location);
+    tokens.push(Token::synthetic(TokenKind::Eof, location));
     let mut parser = Parser { tokens, pos: 0 };
     parser.parse_typed_table_element_inner()
 }

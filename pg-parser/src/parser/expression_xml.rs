@@ -16,7 +16,7 @@ impl ExprParser {
                 TokenKind::Xmlroot => XmlExprOp::Xmlroot,
                 _ => return None,
             },
-            location: token.location as ParseLoc,
+            location: token.location() as ParseLoc,
             ..XmlExpr::default()
         };
         match token.kind {
@@ -171,7 +171,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_xml_serialize(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Xmlserialize)?.location;
+        let location = self.expect(TokenKind::Xmlserialize)?.location();
         self.expect(TokenKind::Char('('))?;
         let xmloption = if self.consume(TokenKind::DocumentP) {
             XmlOptionType::Document
@@ -217,7 +217,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_merge_support_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::MergeAction)?.location;
+        let location = self.expect(TokenKind::MergeAction)?.location();
         self.expect(TokenKind::Char('('))?;
         self.expect(TokenKind::Char(')'))?;
         Some(Node::MergeSupportFunc(MergeSupportFunc {

@@ -2,14 +2,14 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_json_table(&mut self, lateral: bool) -> PResult<JsonTable> {
-        let location = self.expect(TokenKind::JsonTable)?.location;
+        let location = self.expect(TokenKind::JsonTable)?.location();
         self.expect(TokenKind::Char('('))?;
 
         let context_location = self.location();
         let context_tokens = self.take_until_top_level(&[TokenKind::Char(',')]);
         let context_item = parse_json_value_expr_tokens(context_tokens).map_err(|mut error| {
-            if error.location == 0 {
-                error.location = context_location;
+            if error.location() == 0 {
+                error.reanchor(context_location);
             }
             error
         })?;
@@ -215,7 +215,7 @@ impl Parser {
         }
         let token = self.advance().clone();
         let value = token_name(&token)
-            .ok_or_else(|| ParseError::new(token.location, "invalid JSON path string"))?;
+            .ok_or_else(|| ParseError::ranged(token.range, "invalid JSON path string"))?;
         let (name, name_location) = if self.consume(TokenKind::As) {
             let name_location = self.location();
             let name = self
@@ -229,11 +229,11 @@ impl Parser {
             node_tag: NodeTag::JsonTablePathSpec,
             string: Some(Box::new(Node::AConst(AConst::string(
                 value,
-                token.location as ParseLoc,
+                token.location() as ParseLoc,
             )))),
             name,
             name_location,
-            location: token.location as ParseLoc,
+            location: token.location() as ParseLoc,
         }))
     }
 
@@ -253,8 +253,8 @@ impl Parser {
                 "utf16" => JsonEncoding::Utf16,
                 "utf32" => JsonEncoding::Utf32,
                 _ => {
-                    return Err(ParseError::new(
-                        token.location,
+                    return Err(ParseError::ranged(
+                        token.range,
                         format!("unrecognized JSON encoding: {name}"),
                     ));
                 }

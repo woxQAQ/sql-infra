@@ -1,7 +1,10 @@
 use super::*;
 
 impl Parser {
-    pub(super) fn parse_where_or_current_clause(&mut self, stops: &[TokenKind]) -> PResult<Option<Box<Node>>> {
+    pub(super) fn parse_where_or_current_clause(
+        &mut self,
+        stops: &[TokenKind],
+    ) -> PResult<Option<Box<Node>>> {
         if !self.consume(TokenKind::Where) {
             return Ok(None);
         }
@@ -90,7 +93,7 @@ impl Parser {
                 ..ForPortionOfClause::default()
             })));
         }
-        let target_location = self.expect(TokenKind::From)?.location;
+        let target_location = self.expect(TokenKind::From)?.location();
         let target_start = self.parse_expr_box_strict_until(&[TokenKind::To])?;
         self.expect(TokenKind::To)?;
         let target_end = self.parse_expr_box_strict_until(&[

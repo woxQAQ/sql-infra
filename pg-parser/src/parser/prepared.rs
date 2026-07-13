@@ -138,14 +138,14 @@ impl Parser {
         };
         if !parenthesized && matches!(self.peek_kind(), TokenKind::Analyze | TokenKind::Analyse) {
             let token = self.advance().clone();
-            options.push(make_def_elem("analyze", None, token.location));
+            options.push(make_def_elem("analyze", None, token.location()));
             if self.at(TokenKind::Verbose) {
                 let token = self.advance().clone();
-                options.push(make_def_elem("verbose", None, token.location));
+                options.push(make_def_elem("verbose", None, token.location()));
             }
         } else if !parenthesized && self.at(TokenKind::Verbose) {
             let token = self.advance().clone();
-            options.push(make_def_elem("verbose", None, token.location));
+            options.push(make_def_elem("verbose", None, token.location()));
         }
         if self.at_statement_end() {
             return Err(self.error_here("EXPLAIN requires a statement"));

@@ -244,7 +244,7 @@ impl Parser {
             } else if self.consume(TokenKind::Sysid) {
                 let token = self.expect(TokenKind::IConst)?;
                 let Some(TokenValue::Integer(value)) = token.value else {
-                    return Err(ParseError::new(token.location, "SYSID requires an integer"));
+                    return Err(ParseError::ranged(token.range, "SYSID requires an integer"));
                 };
                 options.push(make_def_elem(
                     "sysid",

@@ -53,14 +53,10 @@ impl Parser {
             } else {
                 let item_location = inner
                     .first()
-                    .map_or(self.location(), |token| token.location);
-                let location = inner.last().map_or(self.location(), |token| token.location);
+                    .map_or(self.location(), |token| token.location());
+                let location = inner.last().map_or(self.location(), Token::end_location);
                 let mut tokens = inner;
-                tokens.push(Token {
-                    kind: TokenKind::Eof,
-                    location,
-                    value: None,
-                });
+                tokens.push(Token::synthetic(TokenKind::Eof, location));
                 let mut nested = Parser { tokens, pos: 0 };
                 let mut item = nested.parse_from_item(&[TokenKind::Eof])?;
                 if !nested.at(TokenKind::Eof) {

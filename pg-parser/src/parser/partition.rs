@@ -2,7 +2,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_partition_spec(&mut self) -> PResult<PartitionSpec> {
-        let location = self.expect(TokenKind::Partition)?.location;
+        let location = self.expect(TokenKind::Partition)?.location();
         self.expect(TokenKind::By)?;
         let strategy_name = self
             .consume_col_id()
@@ -119,7 +119,7 @@ impl Parser {
                 ..PartitionBoundSpec::default()
             });
         }
-        let location = self.expect(TokenKind::With)?.location;
+        let location = self.expect(TokenKind::With)?.location();
         self.expect(TokenKind::Char('('))?;
         let mut modulus = None;
         let mut remainder = None;

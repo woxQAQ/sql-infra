@@ -1,14 +1,14 @@
 use crate::ast::*;
 use crate::lexer::{Token, TokenValue, lex, lookup_keyword};
-use crate::{BareLabel, KeywordCategory, TokenKind};
+use crate::{BareLabel, KeywordCategory, TextRange, TextSize, TokenKind};
 
 mod access_method;
 mod aggregate_signatures;
 mod alter;
+mod alter_collation;
 mod alter_identity;
 mod alter_table;
 mod alter_table_partition;
-mod alter_collation;
 mod constraints;
 mod create;
 mod create_cast_transform;
@@ -17,8 +17,8 @@ mod create_trigger;
 mod cursor;
 mod database;
 mod define;
-mod describe;
 mod delete;
+mod describe;
 mod dml_grammar;
 mod domain;
 mod drop;
@@ -96,15 +96,34 @@ use xmltable_columns::*;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
     pub message: std::string::String,
-    pub location: usize,
+    pub range: TextRange,
 }
 
 impl ParseError {
     pub(super) fn new(location: usize, message: impl Into<std::string::String>) -> Self {
         Self {
-            location,
+            range: TextRange::empty(
+                TextSize::try_from(location).expect("parser locations come from validated input"),
+            ),
             message: message.into(),
         }
+    }
+
+    pub(super) fn ranged(range: TextRange, message: impl Into<std::string::String>) -> Self {
+        Self {
+            range,
+            message: message.into(),
+        }
+    }
+
+    pub fn location(&self) -> usize {
+        self.range.start().into()
+    }
+
+    pub(super) fn reanchor(&mut self, location: usize) {
+        self.range = TextRange::empty(
+            TextSize::try_from(location).expect("parser locations come from validated input"),
+        );
     }
 }
 
@@ -112,14 +131,14 @@ impl From<crate::lexer::LexError> for ParseError {
     fn from(value: crate::lexer::LexError) -> Self {
         Self {
             message: value.message,
-            location: value.location,
+            range: value.range,
         }
     }
 }
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at byte {}", self.message, self.location)
+        write!(f, "{} at byte {}", self.message, self.location())
     }
 }
 
@@ -131,7 +150,19 @@ type PResult<T> = Result<T, ParseError>;
 type JsonBehaviorPair = (Option<Box<JsonBehavior>>, Option<Box<JsonBehavior>>);
 
 pub fn parse(sql: &str) -> PResult<Vec<RawStmt>> {
-    Parser::new(sql)?.parse()
+    Ok(parse_with_ranges(sql)?
+        .into_iter()
+        .map(|statement| statement.raw)
+        .collect())
+}
+
+/// Parse SQL while retaining complete source ranges for tooling.
+///
+/// PostgreSQL-compatible `RawStmt::stmt_len` semantics remain unchanged;
+/// callers that need the real range of an unterminated final statement should
+/// use this interface.
+pub fn parse_with_ranges(sql: &str) -> PResult<Vec<ParsedStatement>> {
+    Parser::new(sql)?.parse_with_ranges()
 }
 
 pub fn parse_one(sql: &str) -> PResult<RawStmt> {
@@ -181,6 +212,30 @@ pub struct Parser {
     pos: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StatementRange {
+    /// From the first statement token to the terminator or EOF, excluding the
+    /// terminating semicolon but retaining trivia within those bounds.
+    pub syntax: TextRange,
+    /// The semicolon range, when the statement was terminated.
+    pub terminator: Option<TextRange>,
+}
+
+impl StatementRange {
+    pub fn full(self) -> TextRange {
+        TextRange::new(
+            self.syntax.start(),
+            self.terminator.map_or(self.syntax.end(), TextRange::end),
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParsedStatement {
+    pub raw: RawStmt,
+    pub range: StatementRange,
+}
+
 impl Parser {
     pub fn new(sql: &str) -> PResult<Self> {
         Ok(Self {
@@ -190,6 +245,14 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> PResult<Vec<RawStmt>> {
+        Ok(self
+            .parse_with_ranges()?
+            .into_iter()
+            .map(|statement| statement.raw)
+            .collect())
+    }
+
+    pub fn parse_with_ranges(&mut self) -> PResult<Vec<ParsedStatement>> {
         let mut stmts = Vec::new();
         while !self.at(TokenKind::Eof) {
             while self.consume(TokenKind::Char(';')) {}
@@ -206,16 +269,28 @@ impl Parser {
                     self.peek_kind()
                 )));
             }
-            let terminated = self.consume(TokenKind::Char(';'));
-            stmts.push(RawStmt {
+            let terminator = if self.at(TokenKind::Char(';')) {
+                Some(self.advance().range)
+            } else {
+                None
+            };
+            let syntax = TextRange::new(
+                TextSize::try_from(start).expect("validated parser offset"),
+                TextSize::try_from(end).expect("validated parser offset"),
+            );
+            let raw = RawStmt {
                 node_tag: NodeTag::RawStmt,
                 stmt: Some(Box::new(stmt)),
                 stmt_location: start as ParseLoc,
-                stmt_len: if terminated {
+                stmt_len: if terminator.is_some() {
                     end.saturating_sub(start) as ParseLoc
                 } else {
                     0
                 },
+            };
+            stmts.push(ParsedStatement {
+                raw,
+                range: StatementRange { syntax, terminator },
             });
         }
         Ok(stmts)
@@ -405,7 +480,7 @@ impl Parser {
     /// Byte offset of the current token in the source text.  Commonly used as
     /// the `location` field on AST nodes.
     pub(super) fn location(&self) -> usize {
-        self.peek().location
+        self.peek().location()
     }
 
     /// Byte offset of the most recently consumed token.  Useful after
@@ -414,14 +489,14 @@ impl Parser {
     pub(super) fn previous_location(&self) -> usize {
         self.tokens
             .get(self.pos.saturating_sub(1))
-            .map(|token| token.location)
+            .map(|token| token.location())
             .unwrap_or(self.location())
     }
 
     /// Construct a `ParseError` anchored at the current token position.
     /// The single entry point for all parser error reporting.
     pub(super) fn error_here(&self, message: impl Into<std::string::String>) -> ParseError {
-        ParseError::new(self.location(), message)
+        ParseError::ranged(self.peek().range, message)
     }
 }
 

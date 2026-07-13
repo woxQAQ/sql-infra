@@ -104,7 +104,7 @@ impl Parser {
             let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
             let location = tokens
                 .first()
-                .map_or(self.location(), |token| token.location);
+                .map_or(self.location(), |token| token.location());
             let starts_parenthesized =
                 tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
             let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
@@ -151,7 +151,7 @@ pub(super) fn node_to_index_elem(node: Node) -> Node {
 }
 
 pub(super) fn parse_index_elem_tokens(tokens: Vec<Token>) -> PResult<IndexElem> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
         return Err(ParseError::new(location, "expected an index element"));
     }
@@ -180,14 +180,8 @@ pub(super) fn parse_index_elem_tokens(tokens: Vec<Token>) -> PResult<IndexElem> 
     element.location = location as ParseLoc;
 
     let mut suffix_tokens = tokens[suffix_start..].to_vec();
-    let end_location = suffix_tokens
-        .last()
-        .map_or(location, |token| token.location);
-    suffix_tokens.push(Token {
-        kind: TokenKind::Eof,
-        location: end_location,
-        value: None,
-    });
+    let end_location = suffix_tokens.last().map_or(location, Token::end_location);
+    suffix_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
     let mut suffix = Parser {
         tokens: suffix_tokens,
         pos: 0,

@@ -286,7 +286,7 @@ impl Parser {
                     let expr_tokens = self.take_until_top_level(&[TokenKind::With]);
                     let expr_location = expr_tokens
                         .first()
-                        .map_or(self.location(), |token| token.location);
+                        .map_or(self.location(), |token| token.location());
                     let starts_parenthesized =
                         expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
                     let starts_with_cast =

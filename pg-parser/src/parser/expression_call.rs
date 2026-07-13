@@ -72,7 +72,7 @@ impl ExprParser {
         if !self.at(TokenKind::Char(']')) {
             if self.at(TokenKind::Char('[')) {
                 loop {
-                    let nested_start = self.expect(TokenKind::Char('['))?.location;
+                    let nested_start = self.expect(TokenKind::Char('['))?.location();
                     elements.push(self.parse_array_expr_body(nested_start, nested_start)?);
                     if !self.consume(TokenKind::Char(',')) {
                         break;
@@ -85,7 +85,7 @@ impl ExprParser {
                 elements = self.parse_expr_list_until(TokenKind::Char(']'))?;
             }
         }
-        let list_end = self.expect(TokenKind::Char(']'))?.location;
+        let list_end = self.expect(TokenKind::Char(']'))?.location();
         Some(Node::AArrayExpr(AArrayExpr {
             node_tag: NodeTag::AArrayExpr,
             elements,
@@ -98,7 +98,7 @@ impl ExprParser {
     pub(super) fn parse_function_argument(&mut self) -> Option<Node> {
         if self.starts_named_function_argument() {
             let name_token = self.advance().clone();
-            let location = name_token.location;
+            let location = name_token.location();
             self.advance();
             return Some(Node::NamedArgExpr(NamedArgExpr {
                 xpr: Expr::new(NodeTag::NamedArgExpr),
@@ -238,7 +238,7 @@ impl ExprParser {
             return Some(None);
         }
         if self.at(TokenKind::Char('(')) {
-            let location = self.advance().location;
+            let location = self.advance().location();
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
             self.expect(TokenKind::Char(')'))?;
             match parse_window_specification_tokens(tokens, location) {
@@ -311,17 +311,9 @@ pub(super) fn parse_window_specification_tokens(
     mut tokens: Vec<Token>,
     location: usize,
 ) -> PResult<WindowDef> {
-    let end_location = tokens.last().map_or(location, |token| token.location);
-    tokens.push(Token {
-        kind: TokenKind::Char(')'),
-        location: end_location,
-        value: None,
-    });
-    tokens.push(Token {
-        kind: TokenKind::Eof,
-        location: end_location,
-        value: None,
-    });
+    let end_location = tokens.last().map_or(location, Token::end_location);
+    tokens.push(Token::synthetic(TokenKind::Char(')'), end_location));
+    tokens.push(Token::synthetic(TokenKind::Eof, end_location));
     let mut parser = Parser { tokens, pos: 0 };
     let window = parser.parse_window_specification_body(location)?;
     if !parser.at(TokenKind::Eof) {

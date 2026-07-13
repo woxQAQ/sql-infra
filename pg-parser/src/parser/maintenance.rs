@@ -329,16 +329,16 @@ impl Parser {
             ] {
                 if self.at(kind) {
                     let token = self.advance().clone();
-                    options.push(make_def_elem(name, None, token.location));
+                    options.push(make_def_elem(name, None, token.location()));
                 }
             }
             if matches!(self.peek_kind(), TokenKind::Analyze | TokenKind::Analyse) {
                 let token = self.advance().clone();
-                options.push(make_def_elem("analyze", None, token.location));
+                options.push(make_def_elem("analyze", None, token.location()));
             }
         } else if options.is_empty() && self.at(TokenKind::Verbose) {
             let token = self.advance().clone();
-            options.push(make_def_elem("verbose", None, token.location));
+            options.push(make_def_elem("verbose", None, token.location()));
         }
         let rels = self.parse_vacuum_relation_list()?;
         Ok(Node::VacuumStmt(VacuumStmt {
@@ -795,12 +795,8 @@ impl Parser {
 }
 
 fn parse_copy_generic_option(mut tokens: Vec<Token>, location: usize) -> PResult<DefElem> {
-    let eof_location = tokens.last().map_or(location, |token| token.location);
-    tokens.push(Token {
-        kind: TokenKind::Eof,
-        location: eof_location,
-        value: None,
-    });
+    let eof_location = tokens.last().map_or(location, Token::end_location);
+    tokens.push(Token::synthetic(TokenKind::Eof, eof_location));
     let mut parser = Parser { tokens, pos: 0 };
     let name = if parser.consume(TokenKind::FormatLa) {
         "format".to_owned()

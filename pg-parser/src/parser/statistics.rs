@@ -1,7 +1,7 @@
 use super::*;
 
 fn parse_stats_params(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
         return Err(ParseError::new(
             location,
@@ -17,7 +17,7 @@ fn parse_stats_params(tokens: Vec<Token>) -> PResult<NodeList> {
     split_top_level_commas(tokens)
         .into_iter()
         .map(|tokens| {
-            let item_location = tokens.first().map_or(location, |token| token.location);
+            let item_location = tokens.first().map_or(location, |token| token.location());
             if tokens.len() == 1
                 && token_name_in_categories(
                     &tokens[0],
@@ -39,8 +39,8 @@ fn parse_stats_params(tokens: Vec<Token>) -> PResult<NodeList> {
                     ParseError::new(item_location, "unterminated statistics expression")
                 })?;
                 if close + 1 != tokens.len() {
-                    return Err(ParseError::new(
-                        tokens[close + 1].location,
+                    return Err(ParseError::ranged(
+                        tokens[close + 1].range,
                         "unexpected token after statistics expression",
                     ));
                 }

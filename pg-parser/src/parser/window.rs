@@ -9,7 +9,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("WINDOW requires a name"))?,
             );
             self.expect(TokenKind::As)?;
-            let location = self.expect(TokenKind::Char('('))?.location;
+            let location = self.expect(TokenKind::Char('('))?.location();
             let mut window = self.parse_window_specification_body(location)?;
             window.name = name;
             windows.push(Node::WindowDef(window));

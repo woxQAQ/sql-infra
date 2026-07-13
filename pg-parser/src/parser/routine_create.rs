@@ -35,7 +35,7 @@ impl Parser {
         let return_type = if has_return_clause {
             self.advance();
             if self.at(TokenKind::Table) {
-                let table_location = self.advance().location;
+                let table_location = self.advance().location();
                 for parameter in &parameters {
                     let Node::FunctionParameter(parameter) = parameter else {
                         continue;
@@ -77,8 +77,8 @@ impl Parser {
                 let tokens = self.take_until_top_level(Self::create_function_option_starts());
                 Some(Box::new(parse_func_type_tokens(tokens).map_err(
                     |mut error| {
-                        if error.location == 0 {
-                            error.location = location;
+                        if error.location() == 0 {
+                            error.reanchor(location);
                         }
                         error
                     },
@@ -457,7 +457,7 @@ impl Parser {
             let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
             let location = tokens
                 .first()
-                .map_or(self.location(), |token| token.location);
+                .map_or(self.location(), |token| token.location());
             let name = tokens
                 .first()
                 .and_then(|token| {

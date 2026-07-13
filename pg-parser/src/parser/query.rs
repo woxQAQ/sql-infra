@@ -28,7 +28,7 @@ impl Parser {
     }
 
     fn parse_with_clause(&mut self) -> PResult<WithClause> {
-        let location = self.expect(TokenKind::With)?.location;
+        let location = self.expect(TokenKind::With)?.location();
         let recursive = self.consume(TokenKind::Recursive);
         let mut ctes = Vec::new();
 

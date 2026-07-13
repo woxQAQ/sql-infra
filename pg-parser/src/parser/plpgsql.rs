@@ -14,7 +14,7 @@ pub(super) fn parse_assignment(sql: &str, nnames: i32) -> PResult<RawStmt> {
         let token = parser.advance().clone();
         match token.value {
             Some(TokenValue::Integer(number)) => format!("${number}"),
-            _ => return Err(ParseError::new(token.location, "invalid parameter target")),
+            _ => return Err(ParseError::ranged(token.range, "invalid parameter target")),
         }
     } else {
         parser
@@ -59,15 +59,8 @@ fn parse_expression_select(parser: &mut Parser) -> PResult<SelectStmt> {
     let mut tokens = parser.take_until_top_level(&[TokenKind::Eof]);
     let location = tokens
         .first()
-        .map_or_else(|| parser.location(), |token| token.location);
-    tokens.insert(
-        0,
-        Token {
-            kind: TokenKind::Select,
-            location,
-            value: None,
-        },
-    );
+        .map_or_else(|| parser.location(), |token| token.location());
+    tokens.insert(0, Token::synthetic(TokenKind::Select, location));
     match parse_statement_node_tokens(tokens)? {
         Node::SelectStmt(select) => Ok(select),
         _ => unreachable!("synthetic SELECT must produce SelectStmt"),

@@ -28,10 +28,10 @@ impl Parser {
             }
         };
         self.expect(TokenKind::To)?;
-        let relation =
-            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                self.error_here("CREATE RULE requires a target relation")
-            })?));
+        let relation = Some(Box::new(
+            self.try_parse_qualified_range_var()
+                .ok_or_else(|| self.error_here("CREATE RULE requires a target relation"))?,
+        ));
         let where_clause = if self.consume(TokenKind::Where) {
             Some(self.parse_expr_box_strict_until(&[
                 TokenKind::Do,
@@ -240,12 +240,8 @@ pub(super) fn make_recursive_view_select(
     }))
 }
 pub(super) fn parse_statement_list_tokens(mut tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.last().map_or(0, |token| token.location);
-    tokens.push(Token {
-        kind: TokenKind::Eof,
-        location,
-        value: None,
-    });
+    let location = tokens.last().map_or(0, Token::end_location);
+    tokens.push(Token::synthetic(TokenKind::Eof, location));
     let mut parser = Parser { tokens, pos: 0 };
     Ok(parser
         .parse()?

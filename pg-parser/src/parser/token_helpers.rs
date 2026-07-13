@@ -63,7 +63,7 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
         TokenKind::IConst => match token.value {
             Some(TokenValue::Integer(value)) => Some(Node::AConst(AConst::integer(
                 value,
-                token.location as ParseLoc,
+                token.location() as ParseLoc,
             ))),
             _ => None,
         },
@@ -71,18 +71,18 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
             Some(TokenValue::String(value)) => Some(Node::AConst(AConst {
                 node_tag: NodeTag::AConst,
                 val: ValUnion::Float(Float::new(value.clone())),
-                location: token.location as ParseLoc,
+                location: token.location() as ParseLoc,
                 ..AConst::default()
             })),
             _ => None,
         },
         TokenKind::SConst => token_name(token)
-            .map(|value| Node::AConst(AConst::string(value, token.location as ParseLoc))),
+            .map(|value| Node::AConst(AConst::string(value, token.location() as ParseLoc))),
         TokenKind::BConst | TokenKind::XConst => match &token.value {
             Some(TokenValue::String(value)) => Some(Node::AConst(AConst {
                 node_tag: NodeTag::AConst,
                 val: ValUnion::BitString(BitString::new(value.clone())),
-                location: token.location as ParseLoc,
+                location: token.location() as ParseLoc,
                 ..AConst::default()
             })),
             _ => None,
@@ -91,21 +91,21 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
             Some(TokenValue::Integer(number)) => Some(Node::ParamRef(ParamRef {
                 node_tag: NodeTag::ParamRef,
                 number,
-                location: token.location as ParseLoc,
+                location: token.location() as ParseLoc,
             })),
             _ => None,
         },
-        TokenKind::NullP => Some(Node::AConst(AConst::null(token.location as ParseLoc))),
+        TokenKind::NullP => Some(Node::AConst(AConst::null(token.location() as ParseLoc))),
         TokenKind::TrueP => Some(Node::AConst(AConst {
             node_tag: NodeTag::AConst,
             val: ValUnion::Boolean(Boolean::new(true)),
-            location: token.location as ParseLoc,
+            location: token.location() as ParseLoc,
             ..AConst::default()
         })),
         TokenKind::FalseP => Some(Node::AConst(AConst {
             node_tag: NodeTag::AConst,
             val: ValUnion::Boolean(Boolean::new(false)),
-            location: token.location as ParseLoc,
+            location: token.location() as ParseLoc,
             ..AConst::default()
         })),
         TokenKind::Char('*') => Some(Node::AStar(AStar {
@@ -115,7 +115,7 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
             Node::ColumnRef(ColumnRef {
                 node_tag: NodeTag::ColumnRef,
                 fields: vec![make_string_node(name)],
-                location: token.location as ParseLoc,
+                location: token.location() as ParseLoc,
             })
         }),
     }
@@ -132,8 +132,8 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
     let first = token_name(&tokens[0])
         .ok_or_else(|| ParseError::new(location, "expected an option name"))?;
     if tokens.get(1).map(|token| token.kind) == Some(TokenKind::Char('.')) {
-        return Err(ParseError::new(
-            tokens[1].location,
+        return Err(ParseError::ranged(
+            tokens[1].range,
             "definition option names cannot be qualified",
         ));
     }
@@ -147,8 +147,8 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
         tokens.remove(0);
     }
     if !tokens.is_empty() && !has_equals {
-        return Err(ParseError::new(
-            tokens[0].location,
+        return Err(ParseError::ranged(
+            tokens[0].range,
             "definition option values require '='",
         ));
     }
@@ -206,8 +206,8 @@ pub(super) fn parse_operator_def_arg(
             }
             (_, Some(TokenValue::Keyword(_))) => token_name(token)
                 .map(make_string_node)
-                .ok_or_else(|| ParseError::new(token.location, "invalid option value")),
-            _ => Err(ParseError::new(token.location, "invalid option value")),
+                .ok_or_else(|| ParseError::ranged(token.range, "invalid option value")),
+            _ => Err(ParseError::ranged(token.range, "invalid option value")),
         };
     }
     if tokens.first().map(|token| token.kind) == Some(TokenKind::Operator) {
@@ -231,14 +231,14 @@ pub(super) fn parse_operator_name_tokens(tokens: Vec<Token>, location: usize) ->
     for token in tokens {
         if token.kind == TokenKind::Char('.') {
             if expect_component {
-                return Err(ParseError::new(token.location, "invalid operator name"));
+                return Err(ParseError::ranged(token.range, "invalid operator name"));
             }
             expect_component = true;
             continue;
         }
         if !expect_component {
-            return Err(ParseError::new(
-                token.location,
+            return Err(ParseError::ranged(
+                token.range,
                 "operator name components must be separated by '.'",
             ));
         }
@@ -257,7 +257,7 @@ pub(super) fn parse_operator_name_tokens(tokens: Vec<Token>, location: usize) ->
                 _ => None,
             });
         elements.push(make_string_node(value.ok_or_else(|| {
-            ParseError::new(token.location, "invalid operator name")
+            ParseError::ranged(token.range, "invalid operator name")
         })?));
         expect_component = false;
     }

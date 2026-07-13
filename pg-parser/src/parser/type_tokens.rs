@@ -25,7 +25,7 @@ pub(super) fn parse_const_type_name_tokens(tokens: Vec<Token>) -> PResult<TypeNa
 }
 
 pub(super) fn parse_simple_type_name_tokens(tokens: Vec<Token>) -> PResult<TypeName> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     let type_name = parse_type_name_tokens(tokens)?;
     if type_name.setof || !type_name.array_bounds.is_empty() {
         return Err(ParseError::new(
@@ -37,14 +37,14 @@ pub(super) fn parse_simple_type_name_tokens(tokens: Vec<Token>) -> PResult<TypeN
 }
 
 pub(super) fn parse_func_type_tokens(mut tokens: Vec<Token>) -> PResult<TypeName> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     let setof = if tokens.first().map(|token| token.kind) == Some(TokenKind::Setof) {
         tokens.remove(0);
         true
     } else {
         false
     };
-    let type_location = tokens.first().map_or(location, |token| token.location);
+    let type_location = tokens.first().map_or(location, |token| token.location());
     if tokens.len() >= 3
         && tokens[tokens.len() - 2].kind == TokenKind::Char('%')
         && tokens[tokens.len() - 1].kind == TokenKind::TypeP
@@ -71,7 +71,7 @@ pub(super) fn parse_func_type_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
 }
 
 pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
         return Err(ParseError::new(location, "expected a type name"));
     }
@@ -84,7 +84,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
     if tokens.is_empty() {
         return Err(ParseError::new(location, "SETOF requires a type name"));
     }
-    let type_location = tokens[0].location;
+    let type_location = tokens[0].location();
 
     let mut array_bounds = Vec::new();
     while tokens.last().map(|token| token.kind) == Some(TokenKind::Char(']')) {
@@ -92,7 +92,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         let open = (0..close)
             .rev()
             .find(|index| tokens[*index].kind == TokenKind::Char('['))
-            .ok_or_else(|| ParseError::new(tokens[close].location, "unmatched ']' in type"))?;
+            .ok_or_else(|| ParseError::ranged(tokens[close].range, "unmatched ']' in type"))?;
         let bound = match &tokens[open + 1..close] {
             [] => -1,
             [
@@ -103,8 +103,8 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
                 },
             ] if *value >= 0 => *value,
             _ => {
-                return Err(ParseError::new(
-                    tokens[open].location,
+                return Err(ParseError::ranged(
+                    tokens[open].range,
                     "array bound must be a non-negative integer",
                 ));
             }
@@ -148,17 +148,17 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
     let modifier_open = find_top_level_token(&tokens, TokenKind::Char('('));
     let (base_tokens, typmods) = if let Some(open) = modifier_open {
         let close = find_matching_close(&tokens, open)
-            .ok_or_else(|| ParseError::new(tokens[open].location, "unterminated type modifier"))?;
+            .ok_or_else(|| ParseError::ranged(tokens[open].range, "unterminated type modifier"))?;
         if close + 1 != tokens.len() {
-            return Err(ParseError::new(
-                tokens[close + 1].location,
+            return Err(ParseError::ranged(
+                tokens[close + 1].range,
                 "unexpected token after type modifier",
             ));
         }
         let modifier_tokens = tokens[open + 1..close].to_vec();
         if modifier_tokens.is_empty() {
-            return Err(ParseError::new(
-                tokens[open].location,
+            return Err(ParseError::ranged(
+                tokens[open].range,
                 "type modifier list cannot be empty",
             ));
         }
@@ -166,7 +166,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
             return Err(ParseError::new(
                 modifier_tokens
                     .last()
-                    .map_or(location, |token| token.location),
+                    .map_or(location, |token| token.location()),
                 "type modifier list cannot end with ','",
             ));
         }
@@ -280,7 +280,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
             } else {
                 default_typmods.push(Node::AConst(AConst::integer(
                     parse_interval_mask(&kinds[1..], location)?,
-                    base_tokens[1].location as ParseLoc,
+                    base_tokens[1].location() as ParseLoc,
                 )));
             }
             (system_type_names("interval"), true)
@@ -364,14 +364,14 @@ fn parse_interval_mask(kinds: &[TokenKind], location: usize) -> PResult<i32> {
 }
 
 pub(super) fn parse_qualified_type_names(tokens: &[Token]) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     let mut names = Vec::new();
     let mut expect_name = true;
     for token in tokens {
         if token.kind == TokenKind::Char('.') {
             if expect_name {
-                return Err(ParseError::new(
-                    token.location,
+                return Err(ParseError::ranged(
+                    token.range,
                     "invalid qualified type name",
                 ));
             }
@@ -379,13 +379,13 @@ pub(super) fn parse_qualified_type_names(tokens: &[Token]) -> PResult<NodeList> 
             continue;
         }
         if !expect_name {
-            return Err(ParseError::new(
-                token.location,
+            return Err(ParseError::ranged(
+                token.range,
                 "type name components must be separated by '.'",
             ));
         }
         let name = token_name(token)
-            .ok_or_else(|| ParseError::new(token.location, "invalid token in type name"))?;
+            .ok_or_else(|| ParseError::ranged(token.range, "invalid token in type name"))?;
         names.push(make_string_node(name));
         expect_name = false;
     }
@@ -396,14 +396,14 @@ pub(super) fn parse_qualified_type_names(tokens: &[Token]) -> PResult<NodeList> 
 }
 
 pub(super) fn parse_any_name_tokens(tokens: &[Token]) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     let mut names = Vec::new();
     let mut expect_name = true;
     for token in tokens {
         if token.kind == TokenKind::Char('.') {
             if expect_name {
-                return Err(ParseError::new(
-                    token.location,
+                return Err(ParseError::ranged(
+                    token.range,
                     "invalid qualified object name",
                 ));
             }
@@ -411,8 +411,8 @@ pub(super) fn parse_any_name_tokens(tokens: &[Token]) -> PResult<NodeList> {
             continue;
         }
         if !expect_name {
-            return Err(ParseError::new(
-                token.location,
+            return Err(ParseError::ranged(
+                token.range,
                 "object name components must be separated by '.'",
             ));
         }
@@ -427,7 +427,7 @@ pub(super) fn parse_any_name_tokens(tokens: &[Token]) -> PResult<NodeList> {
             ]
         };
         let name = token_name_in_categories(token, categories)
-            .ok_or_else(|| ParseError::new(token.location, "invalid token in object name"))?;
+            .ok_or_else(|| ParseError::ranged(token.range, "invalid token in object name"))?;
         names.push(make_string_node(name));
         expect_name = false;
     }

@@ -8,7 +8,7 @@ impl ExprParser {
         match token.kind {
             TokenKind::JsonObject => {
                 if self.json_object_uses_standard_syntax() {
-                    self.parse_json_object_constructor(token.location)
+                    self.parse_json_object_constructor(token.location())
                 } else {
                     let first = self.parse_function_argument()?;
                     let args = self.parse_plain_function_arguments_after(first)?;
@@ -17,12 +17,12 @@ impl ExprParser {
                         node_tag: NodeTag::FuncCall,
                         funcname: system_type_names("json_object"),
                         args,
-                        location: token.location as ParseLoc,
+                        location: token.location() as ParseLoc,
                         ..FuncCall::default()
                     }))
                 }
             }
-            TokenKind::JsonArray => self.parse_json_array_constructor(token.location),
+            TokenKind::JsonArray => self.parse_json_array_constructor(token.location()),
             TokenKind::Json => {
                 let expr = self.parse_json_value_expr()?;
                 let unique_keys = self.parse_json_unique_keys()?;
@@ -31,7 +31,7 @@ impl ExprParser {
                     node_tag: NodeTag::JsonParseExpr,
                     expr: Some(Box::new(expr)),
                     unique_keys,
-                    location: token.location as ParseLoc,
+                    location: token.location() as ParseLoc,
                     ..JsonParseExpr::default()
                 }))
             }
@@ -41,7 +41,7 @@ impl ExprParser {
                 Some(Node::JsonScalarExpr(JsonScalarExpr {
                     node_tag: NodeTag::JsonScalarExpr,
                     expr: Some(Box::new(expr)),
-                    location: token.location as ParseLoc,
+                    location: token.location() as ParseLoc,
                     ..JsonScalarExpr::default()
                 }))
             }
@@ -53,14 +53,14 @@ impl ExprParser {
                     node_tag: NodeTag::JsonSerializeExpr,
                     expr: Some(Box::new(expr)),
                     output,
-                    location: token.location as ParseLoc,
+                    location: token.location() as ParseLoc,
                 }))
             }
             TokenKind::JsonQuery | TokenKind::JsonExists | TokenKind::JsonValue => {
                 self.parse_json_func(token)
             }
-            TokenKind::JsonObjectagg => self.parse_json_object_agg(token.location),
-            TokenKind::JsonArrayagg => self.parse_json_array_agg(token.location),
+            TokenKind::JsonObjectagg => self.parse_json_object_agg(token.location()),
+            TokenKind::JsonArrayagg => self.parse_json_array_agg(token.location()),
             _ => None,
         }
     }
@@ -337,7 +337,7 @@ impl ExprParser {
     }
 }
 pub(super) fn parse_json_value_expr_tokens(tokens: Vec<Token>) -> PResult<JsonValueExpr> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
         return Err(ParseError::new(
             location,

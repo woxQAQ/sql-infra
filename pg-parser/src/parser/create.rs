@@ -158,7 +158,7 @@ impl Parser {
     }
 
     fn parse_create_assertion(&mut self) -> PResult<Node> {
-        let location = self.expect(TokenKind::Assertion)?.location;
+        let location = self.expect(TokenKind::Assertion)?.location();
         Err(ParseError::new(
             location,
             "CREATE ASSERTION is not implemented by PostgreSQL",

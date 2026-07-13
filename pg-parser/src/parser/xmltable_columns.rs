@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTableFuncCol> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     let colname = tokens
         .first()
         .and_then(|token| {
@@ -46,11 +46,11 @@ pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTa
         match tokens[index].kind {
             TokenKind::Not => {
                 if tokens.get(index + 1).map(|token| token.kind) != Some(TokenKind::NullP) {
-                    return Err(ParseError::new(tokens[index].location, "expected NOT NULL"));
+                    return Err(ParseError::ranged(tokens[index].range, "expected NOT NULL"));
                 }
                 if nullability_seen {
-                    return Err(ParseError::new(
-                        tokens[index].location,
+                    return Err(ParseError::ranged(
+                        tokens[index].range,
                         format!(
                             "conflicting or redundant NULL / NOT NULL declarations for column {colname:?}"
                         ),
@@ -62,8 +62,8 @@ pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTa
             }
             TokenKind::NullP => {
                 if nullability_seen {
-                    return Err(ParseError::new(
-                        tokens[index].location,
+                    return Err(ParseError::ranged(
+                        tokens[index].range,
                         format!(
                             "conflicting or redundant NULL / NOT NULL declarations for column {colname:?}"
                         ),
@@ -75,7 +75,7 @@ pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTa
             }
             TokenKind::Path | TokenKind::Default => {
                 let is_path = tokens[index].kind == TokenKind::Path;
-                let option_location = tokens[index].location;
+                let option_location = tokens[index].location();
                 index += 1;
                 let start = index;
                 index = xmltable_option_expression_end(&tokens, start);
@@ -105,11 +105,11 @@ pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTa
                 } else {
                     format!("unrecognized column option {option:?}")
                 };
-                return Err(ParseError::new(tokens[index].location, message));
+                return Err(ParseError::ranged(tokens[index].range, message));
             }
             _ => {
-                return Err(ParseError::new(
-                    tokens[index].location,
+                return Err(ParseError::ranged(
+                    tokens[index].range,
                     "unsupported XMLTABLE column option",
                 ));
             }

@@ -105,7 +105,7 @@ impl Parser {
 
     pub(super) fn parse_group_by_item(&mut self, stops: &[TokenKind]) -> PResult<Node> {
         if self.at(TokenKind::Char('(')) && self.peek_kind_n(1) == TokenKind::Char(')') {
-            let location = self.advance().location;
+            let location = self.advance().location();
             self.advance();
             return Ok(Node::GroupingSet(GroupingSet {
                 node_tag: NodeTag::GroupingSet,
@@ -120,7 +120,7 @@ impl Parser {
         } else if self.consume(TokenKind::Cube) {
             (Some(GroupingSetKind::Cube), self.previous_location())
         } else if self.at(TokenKind::Grouping) && self.peek_kind_n(1) == TokenKind::Sets {
-            let location = self.advance().location;
+            let location = self.advance().location();
             self.advance();
             (Some(GroupingSetKind::Sets), location)
         } else {
@@ -182,8 +182,8 @@ impl Parser {
                     Some(TokenKind::FirstP) => SortByNulls::First,
                     Some(TokenKind::LastP) => SortByNulls::Last,
                     _ => {
-                        return Err(ParseError::new(
-                            tokens[tokens.len() - 2].location,
+                        return Err(ParseError::ranged(
+                            tokens[tokens.len() - 2].range,
                             "NULLS requires FIRST or LAST",
                         ));
                     }
@@ -203,11 +203,14 @@ impl Parser {
             if sortby_dir == SortByDir::Default
                 && let Some(using_index) = find_top_level_token(&tokens, TokenKind::Using)
             {
+                let missing_operator_location = tokens[using_index].end_location();
                 let mut operator_tokens = tokens.split_off(using_index + 1);
                 tokens.pop();
                 location = operator_tokens
                     .first()
-                    .map_or(-1, |token| token.location as ParseLoc);
+                    .map_or(missing_operator_location as ParseLoc, |token| {
+                        token.location() as ParseLoc
+                    });
                 if operator_tokens.first().map(|token| token.kind) == Some(TokenKind::Operator) {
                     if operator_tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('('))
                         || operator_tokens.last().map(|token| token.kind)

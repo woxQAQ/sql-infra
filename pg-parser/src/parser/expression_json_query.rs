@@ -41,7 +41,7 @@ impl ExprParser {
             on_error,
             wrapper,
             quotes,
-            location: token.location as ParseLoc,
+            location: token.location() as ParseLoc,
             ..JsonFuncExpr::default()
         }))
     }
@@ -306,12 +306,8 @@ impl ExprParser {
     }
 }
 pub(super) fn parse_sort_list_tokens(mut tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.last().map_or(0, |token| token.location);
-    tokens.push(Token {
-        kind: TokenKind::Eof,
-        location,
-        value: None,
-    });
+    let location = tokens.last().map_or(0, Token::end_location);
+    tokens.push(Token::synthetic(TokenKind::Eof, location));
     let mut parser = Parser { tokens, pos: 0 };
     let items = parser.parse_sort_list_strict_until(&[TokenKind::Eof])?;
     if !parser.at(TokenKind::Eof) {

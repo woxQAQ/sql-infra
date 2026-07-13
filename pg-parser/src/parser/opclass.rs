@@ -207,7 +207,7 @@ impl Parser {
                 let token = self.expect(TokenKind::IConst)?;
                 match token.value {
                     Some(TokenValue::Integer(value)) => value,
-                    _ => return Err(ParseError::new(token.location, "expected item number")),
+                    _ => return Err(ParseError::ranged(token.range, "expected item number")),
                 }
             } else {
                 0

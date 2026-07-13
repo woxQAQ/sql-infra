@@ -7,11 +7,11 @@ pub(super) fn parse_aggregate_with_args_tokens(
     let open = find_top_level_token(&tokens, TokenKind::Char('('))
         .ok_or_else(|| ParseError::new(location, "aggregate requires argument types"))?;
     let close = find_matching_close(&tokens, open).ok_or_else(|| {
-        ParseError::new(tokens[open].location, "unterminated aggregate arguments")
+        ParseError::ranged(tokens[open].range, "unterminated aggregate arguments")
     })?;
     if close + 1 != tokens.len() {
-        return Err(ParseError::new(
-            tokens[close + 1].location,
+        return Err(ParseError::ranged(
+            tokens[close + 1].range,
             "unexpected token after aggregate signature",
         ));
     }
@@ -78,8 +78,8 @@ pub(super) fn validate_operator_name_tokens(tokens: &[Token], location: usize) -
         .rposition(|token| token.kind != TokenKind::Char('.'))
         .ok_or_else(|| ParseError::new(location, "operator requires a name"))?;
     if !is_operator_name_kind(tokens[name_end].kind) {
-        return Err(ParseError::new(
-            tokens[name_end].location,
+        return Err(ParseError::ranged(
+            tokens[name_end].range,
             "operator name must end with an operator",
         ));
     }
@@ -98,8 +98,8 @@ pub(super) fn parse_qualified_all_operator_tokens(
     let close = find_matching_close(&tokens, 1)
         .ok_or_else(|| ParseError::new(location, "unterminated OPERATOR(...) value"))?;
     if close + 1 != tokens.len() {
-        return Err(ParseError::new(
-            tokens[close + 1].location,
+        return Err(ParseError::ranged(
+            tokens[close + 1].range,
             "unexpected token after OPERATOR(...) value",
         ));
     }
@@ -126,10 +126,10 @@ fn parse_object_with_args_tokens_impl(
     let open = find_top_level_token(&tokens, TokenKind::Char('('));
     let (name_tokens, arg_tokens, args_unspecified) = if let Some(open) = open {
         let close = find_matching_close(&tokens, open)
-            .ok_or_else(|| ParseError::new(tokens[open].location, "unterminated argument list"))?;
+            .ok_or_else(|| ParseError::ranged(tokens[open].range, "unterminated argument list"))?;
         if close + 1 != tokens.len() {
-            return Err(ParseError::new(
-                tokens[close + 1].location,
+            return Err(ParseError::ranged(
+                tokens[close + 1].range,
                 "unexpected token after object signature",
             ));
         }
@@ -153,8 +153,8 @@ fn parse_object_with_args_tokens_impl(
     for (index, token) in name_tokens.iter().enumerate() {
         if token.kind == TokenKind::Char('.') {
             if expect_component {
-                return Err(ParseError::new(
-                    token.location,
+                return Err(ParseError::ranged(
+                    token.range,
                     "invalid qualified object name",
                 ));
             }
@@ -162,8 +162,8 @@ fn parse_object_with_args_tokens_impl(
             continue;
         }
         if !expect_component {
-            return Err(ParseError::new(
-                token.location,
+            return Err(ParseError::ranged(
+                token.range,
                 "object name components must be separated by '.'",
             ));
         }
@@ -184,7 +184,7 @@ fn parse_object_with_args_tokens_impl(
                 .then(|| token_text(token))
         });
         objname.push(make_string_node(value.ok_or_else(|| {
-            ParseError::new(token.location, "invalid object name")
+            ParseError::ranged(token.range, "invalid object name")
         })?));
         component_index += 1;
         expect_component = false;
@@ -224,7 +224,7 @@ fn parse_object_with_args_tokens_impl(
                 ));
             }
             for chunk in chunks {
-                let arg_location = chunk.first().map_or(location, |token| token.location);
+                let arg_location = chunk.first().map_or(location, |token| token.location());
                 if chunk.len() == 1 && chunk[0].kind == TokenKind::None {
                     objargs.push(None);
                 } else {
@@ -242,7 +242,7 @@ fn parse_object_with_args_tokens_impl(
             }
         } else {
             for chunk in chunks {
-                let arg_location = chunk.first().map_or(location, |token| token.location);
+                let arg_location = chunk.first().map_or(location, |token| token.location());
                 let parameter = function_parameter_from_tokens(chunk)
                     .map_err(|_| ParseError::new(arg_location, "invalid function argument"))?;
                 if parameter.defexpr.is_some() {

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
         return Err(ParseError::new(
             location,
@@ -18,7 +18,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
     chunks
         .into_iter()
         .map(|tokens| {
-            let item_location = tokens.first().map_or(location, |token| token.location);
+            let item_location = tokens.first().map_or(location, |token| token.location());
             let Some(name_token) = tokens.first() else {
                 return Err(ParseError::new(
                     item_location,
@@ -26,8 +26,8 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
                 ));
             };
             if !matches!(name_token.kind, TokenKind::Ident | TokenKind::UIdent) {
-                return Err(ParseError::new(
-                    name_token.location,
+                return Err(ParseError::ranged(
+                    name_token.range,
                     "old-style aggregate option name must be an identifier",
                 ));
             }
@@ -38,10 +38,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
                 ));
             }
             let name = token_name(name_token).ok_or_else(|| {
-                ParseError::new(
-                    name_token.location,
-                    "invalid old-style aggregate option name",
-                )
+                ParseError::ranged(name_token.range, "invalid old-style aggregate option name")
             })?;
             let arg = parse_operator_def_arg(&name, tokens[2..].to_vec(), item_location)?;
             Ok(Node::DefElem(DefElem {
@@ -56,7 +53,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
 }
 
 pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.len() == 1 && tokens[0].kind == TokenKind::Char('*') {
         return Ok(vec![
             name_list_node(Vec::new()),
@@ -98,7 +95,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
             return Err(ParseError::new(
                 direct_tokens
                     .last()
-                    .map_or(location, |token| token.location),
+                    .map_or(location, |token| token.location()),
                 "aggregate argument list cannot end with ','",
             ));
         }
@@ -121,7 +118,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
             return Err(ParseError::new(
                 ordered_tokens
                     .last()
-                    .map_or(location, |token| token.location),
+                    .map_or(location, |token| token.location()),
                 "ordered aggregate argument list cannot end with ','",
             ));
         }
@@ -191,7 +188,7 @@ fn type_names_equal_ignoring_locations(left: &TypeName, right: &TypeName) -> boo
 }
 
 fn parse_aggregate_parameter(tokens: Vec<Token>) -> PResult<FunctionParameter> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     let parameter = function_parameter_from_tokens(tokens)?;
     if !matches!(
         parameter.mode,

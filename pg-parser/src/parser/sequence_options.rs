@@ -47,9 +47,9 @@ impl Parser {
     pub(super) fn parse_alter_sequence(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Sequence)?;
         let missing_ok = self.consume_if_exists()?;
-        let sequence = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-            self.error_here("ALTER SEQUENCE requires a sequence name")
-        })?));
+        let sequence = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
+            || self.error_here("ALTER SEQUENCE requires a sequence name"),
+        )?));
         let options = self.parse_sequence_options()?;
         if options.is_empty() {
             return Err(self.error_here("ALTER SEQUENCE requires at least one option"));
@@ -246,6 +246,7 @@ impl Parser {
             self.consume(TokenKind::Char('+'));
         }
         let token = self.advance().clone();
+        let location = token.location();
         match (token.kind, token.value) {
             (TokenKind::IConst, Some(TokenValue::Integer(value))) => {
                 Ok(Node::Integer(Integer::new(if negative {
@@ -261,7 +262,7 @@ impl Parser {
                     value
                 })))
             }
-            _ => Err(ParseError::new(token.location, "expected a numeric value")),
+            _ => Err(ParseError::new(location, "expected a numeric value")),
         }
     }
 
@@ -272,7 +273,7 @@ impl Parser {
         }
         let token = self.expect(TokenKind::IConst)?;
         let Some(TokenValue::Integer(value)) = token.value else {
-            return Err(ParseError::new(token.location, "expected an integer"));
+            return Err(ParseError::ranged(token.range, "expected an integer"));
         };
         Ok(Node::Integer(Integer::new(if negative {
             -value

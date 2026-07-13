@@ -60,7 +60,7 @@ impl ExprParser {
                 if restricted {
                     return self.fail("NOT is not allowed in a restricted expression");
                 }
-                let location = self.advance().location;
+                let location = self.advance().location();
                 let arg = self.parse_expr_mode(60, restricted)?;
                 Some(Node::BoolExpr(BoolExpr {
                     xpr: Expr::new(NodeTag::BoolExpr),
@@ -77,11 +77,11 @@ impl ExprParser {
                     vec![token_text(&token)],
                     None,
                     Some(rhs),
-                    token.location,
+                    token.location(),
                 ))
             }
             TokenKind::Char('-') => {
-                let location = self.advance().location;
+                let location = self.advance().location();
                 let rhs = self.parse_expr_mode(70, restricted)?;
                 Some(negate_node(rhs, location))
             }
@@ -93,7 +93,7 @@ impl ExprParser {
                     vec![token_name(&token)?],
                     None,
                     Some(rhs),
-                    token.location,
+                    token.location(),
                 ))
             }
             TokenKind::Operator => {
@@ -109,7 +109,7 @@ impl ExprParser {
                 ))
             }
             TokenKind::Exists => {
-                let location = self.advance().location;
+                let location = self.advance().location();
                 let subselect = self.parse_parenthesized_statement()?;
                 Some(Node::SubLink(SubLink {
                     xpr: Expr::new(NodeTag::SubLink),
@@ -121,7 +121,7 @@ impl ExprParser {
             }
             TokenKind::Unique => self.fail("UNIQUE predicate is not yet implemented"),
             TokenKind::Array => {
-                let location = self.advance().location;
+                let location = self.advance().location();
                 if self.consume(TokenKind::Char('[')) {
                     let list_start = self.previous_location();
                     self.parse_array_expr_body(location, list_start)
@@ -142,7 +142,7 @@ impl ExprParser {
                 if restricted {
                     return self.fail("DEFAULT is not allowed in a restricted expression");
                 }
-                let location = self.advance().location;
+                let location = self.advance().location();
                 Some(Node::SetToDefault(SetToDefault {
                     xpr: Expr::new(NodeTag::SetToDefault),
                     location: location as ParseLoc,
@@ -151,7 +151,7 @@ impl ExprParser {
             }
             TokenKind::Grouping => self.parse_grouping_func(),
             TokenKind::Collation if self.peek_kind_n(1) == TokenKind::For => {
-                let location = self.advance().location;
+                let location = self.advance().location();
                 self.advance();
                 self.expect(TokenKind::Char('('))?;
                 let arg = self.parse_expr(0)?;
@@ -167,7 +167,7 @@ impl ExprParser {
             TokenKind::Trim => self.parse_trim_func(),
             TokenKind::Xmlexists => self.parse_xmlexists_func(),
             TokenKind::SystemUser => {
-                let location = self.advance().location;
+                let location = self.advance().location();
                 Some(Node::FuncCall(FuncCall {
                     node_tag: NodeTag::FuncCall,
                     funcname: system_type_names("system_user"),
@@ -206,7 +206,7 @@ impl ExprParser {
             | TokenKind::JsonArrayagg => self.parse_json_expression(),
             TokenKind::MergeAction => self.parse_merge_support_func(),
             TokenKind::Row => {
-                let location = self.advance().location;
+                let location = self.advance().location();
                 self.expect(TokenKind::Char('('))?;
                 let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
                 self.expect(TokenKind::Char(')'))?;

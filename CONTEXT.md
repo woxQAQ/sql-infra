@@ -19,3 +19,15 @@ _Avoid_: Any NodeTag
 **Statement node**:
 A raw-parse-tree syntax node whose Rust type ends in `Stmt`; it may be a top-level statement or a grammar-produced nested statement such as `ReplicaIdentityStmt`.
 _Avoid_: Top-level statement only
+
+**Source offset**:
+A zero-based UTF-8 byte offset into SQL source text. It is distinct from a character index or a displayed line and column.
+_Avoid_: Character offset, column
+
+**Text range**:
+A half-open source interval `[start, end)` expressed by two source offsets. It describes source coverage rather than the PostgreSQL semantic anchor stored in a raw node's `location` field.
+_Avoid_: Location, inclusive range
+
+**Location**:
+The PostgreSQL-compatible semantic anchor attached to some raw parse tree nodes, usually the source offset of the grammar token that introduced the node. A location is not the node's complete text range.
+_Avoid_: Span, node range

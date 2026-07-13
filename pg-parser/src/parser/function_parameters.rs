@@ -38,7 +38,7 @@ pub(super) fn token_starts_builtin_type(kind: TokenKind) -> bool {
 }
 
 pub(super) fn function_parameter_from_tokens(mut tokens: Vec<Token>) -> PResult<FunctionParameter> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
         return Err(ParseError::new(location, "expected a function parameter"));
     }

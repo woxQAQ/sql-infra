@@ -194,7 +194,7 @@ impl Parser {
             self.expect(TokenKind::Char('('))?;
             let mut options = Vec::new();
             loop {
-                let location = self.expect(TokenKind::Force)?.location;
+                let location = self.expect(TokenKind::Force)?.location();
                 options.push(make_def_elem("force", None, location));
                 if !self.consume(TokenKind::Char(',')) {
                     break;

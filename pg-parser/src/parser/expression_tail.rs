@@ -86,7 +86,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_parenthesized_expr(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Char('('))?.location;
+        let location = self.expect(TokenKind::Char('('))?.location();
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
             self.expect(TokenKind::Char(')'))?;
@@ -127,7 +127,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_keyword_call_as_coalesce(&mut self) -> Option<Node> {
-        let location = self.advance().location;
+        let location = self.advance().location();
         self.expect(TokenKind::Char('('))?;
         let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
         self.expect(TokenKind::Char(')'))?;
@@ -158,7 +158,7 @@ impl ExprParser {
                 MinMaxOp::Greatest
             },
             args,
-            location: token.location as ParseLoc,
+            location: token.location() as ParseLoc,
             ..MinMaxExpr::default()
         }))
     }
@@ -174,7 +174,7 @@ impl ExprParser {
         let mut iter = args.into_iter();
         let lhs = iter.next();
         let rhs = iter.next();
-        Some(make_aexpr(kind, vec!["="], lhs, rhs, token.location))
+        Some(make_aexpr(kind, vec!["="], lhs, rhs, token.location()))
     }
 
     pub(super) fn parse_special_infix(
@@ -186,7 +186,7 @@ impl ExprParser {
     ) -> Option<Node> {
         match op {
             TokenKind::InP => {
-                let list_start = self.expect(TokenKind::Char('('))?.location;
+                let list_start = self.expect(TokenKind::Char('('))?.location();
                 if self.starts_statement() {
                     let tokens = self.take_until_balanced(TokenKind::Char(')'));
                     self.expect(TokenKind::Char(')'))?;
@@ -208,7 +208,7 @@ impl ExprParser {
                     if elements.is_empty() {
                         return self.fail("IN requires at least one expression");
                     }
-                    let list_end = self.expect(TokenKind::Char(')'))?.location;
+                    let list_end = self.expect(TokenKind::Char(')'))?.location();
                     let mut expression = make_aexpr(
                         AExprKind::In,
                         vec![if negated { "<>" } else { "=" }],
@@ -303,7 +303,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_explicit_operator_name(&mut self) -> Option<NodeList> {
-        let location = self.expect(TokenKind::Operator)?.location;
+        let location = self.expect(TokenKind::Operator)?.location();
         self.expect(TokenKind::Char('('))?;
         let tokens = self.take_until_balanced(TokenKind::Char(')'));
         self.expect(TokenKind::Char(')'))?;
@@ -436,7 +436,7 @@ impl ExprParser {
         if !restricted && (self.at(TokenKind::Normalized) || normalization_form.is_some()) {
             let mut args = vec![lhs];
             if let Some(form) = normalization_form {
-                let form_location = self.advance().location;
+                let form_location = self.advance().location();
                 args.push(Node::AConst(AConst::string(
                     form,
                     form_location as ParseLoc,
@@ -606,8 +606,8 @@ impl ExprParser {
             }
             if self.at(stop) || self.at(TokenKind::Eof) {
                 if self.error.is_none() {
-                    self.error = Some(ParseError::new(
-                        self.location(),
+                    self.error = Some(ParseError::ranged(
+                        self.peek().range,
                         "expected an expression after ','",
                     ));
                 }
@@ -619,7 +619,7 @@ impl ExprParser {
 
     pub(super) fn fail<T>(&mut self, message: impl Into<std::string::String>) -> Option<T> {
         if self.error.is_none() {
-            self.error = Some(ParseError::new(self.location(), message));
+            self.error = Some(ParseError::ranged(self.peek().range, message));
         }
         None
     }
@@ -714,13 +714,13 @@ impl ExprParser {
     }
 
     pub(super) fn location(&self) -> usize {
-        self.peek().location
+        self.peek().location()
     }
 
     pub(super) fn previous_location(&self) -> usize {
         self.tokens
             .get(self.pos.saturating_sub(1))
-            .map(|token| token.location)
+            .map(|token| token.location())
             .unwrap_or_else(|| self.location())
     }
 }

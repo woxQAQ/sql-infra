@@ -1,7 +1,12 @@
 // Translated by hand from PostgreSQL's src/backend/parser/scan.l semantics.
 // Token names come from gram.y and keyword mappings from parser/kwlist.h.
 use crate::{BareLabel, KEYWORDS, KeywordCategory, TokenKind};
+use crate::{TextRange, TextSize};
 const NAMEDATALEN: usize = 64;
+
+fn text_size(offset: usize) -> TextSize {
+    TextSize::try_from(offset).expect("lexer input length is validated before scanning")
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Keyword {
@@ -21,7 +26,7 @@ pub enum TokenValue {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub location: usize,
+    pub range: TextRange,
     pub value: Option<TokenValue>,
 }
 
@@ -29,7 +34,7 @@ impl Token {
     fn new(kind: TokenKind, location: usize) -> Self {
         Self {
             kind,
-            location,
+            range: TextRange::empty(text_size(location)),
             value: None,
         }
     }
@@ -37,7 +42,7 @@ impl Token {
     fn string(kind: TokenKind, location: usize, value: impl Into<std::string::String>) -> Self {
         Self {
             kind,
-            location,
+            range: TextRange::empty(text_size(location)),
             value: Some(TokenValue::String(value.into())),
         }
     }
@@ -45,7 +50,7 @@ impl Token {
     fn integer(kind: TokenKind, location: usize, value: i32) -> Self {
         Self {
             kind,
-            location,
+            range: TextRange::empty(text_size(location)),
             value: Some(TokenValue::Integer(value)),
         }
     }
@@ -53,30 +58,57 @@ impl Token {
     fn keyword(kind: TokenKind, location: usize, word: &'static str) -> Self {
         Self {
             kind,
-            location,
+            range: TextRange::empty(text_size(location)),
             value: Some(TokenValue::Keyword(word)),
         }
+    }
+
+    pub(crate) fn synthetic(kind: TokenKind, location: usize) -> Self {
+        Self::new(kind, location)
+    }
+
+    pub fn location(&self) -> usize {
+        self.range.start().into()
+    }
+
+    pub fn end_location(&self) -> usize {
+        self.range.end().into()
+    }
+
+    fn finish(&mut self, end: usize) {
+        self.range = TextRange::new(self.range.start(), text_size(end));
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LexError {
     pub message: std::string::String,
-    pub location: usize,
+    pub range: TextRange,
 }
 
 impl LexError {
     fn new(location: usize, message: impl Into<std::string::String>) -> Self {
         Self {
-            location,
+            range: TextRange::empty(text_size(location)),
             message: message.into(),
         }
+    }
+
+    fn ranged(start: usize, end: usize, message: impl Into<std::string::String>) -> Self {
+        Self {
+            range: TextRange::new(text_size(start), text_size(end)),
+            message: message.into(),
+        }
+    }
+
+    pub fn location(&self) -> usize {
+        self.range.start().into()
     }
 }
 
 impl std::fmt::Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at byte {}", self.message, self.location)
+        write!(f, "{} at byte {}", self.message, self.location())
     }
 }
 
@@ -93,7 +125,7 @@ pub fn lookup_keyword(word: &str) -> Option<&'static Keyword> {
 }
 
 pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
-    let mut lexer = Lexer::new(input);
+    let mut lexer = Lexer::new(input)?;
     let mut tokens = Vec::new();
     loop {
         let token = lexer.next_token()?;
@@ -112,15 +144,22 @@ pub struct Lexer<'a> {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Self {
-        Self {
+    pub fn new(input: &'a str) -> Result<Self, LexError> {
+        TextSize::try_from(input.len()).map_err(|error| LexError::new(0, error.to_string()))?;
+        Ok(Self {
             input,
             bytes: input.as_bytes(),
             pos: 0,
-        }
+        })
     }
 
     pub fn next_token(&mut self) -> Result<Token, LexError> {
+        let mut token = self.next_token_unranged()?;
+        token.finish(self.pos);
+        Ok(token)
+    }
+
+    fn next_token_unranged(&mut self) -> Result<Token, LexError> {
         self.skip_whitespace_and_comments()?;
         let location = self.pos;
         if self.eof() {
@@ -264,7 +303,7 @@ impl<'a> Lexer<'a> {
         location: usize,
         message: impl Into<std::string::String>,
     ) -> Result<T, LexError> {
-        Err(LexError::new(location, message))
+        Err(LexError::ranged(location, self.pos, message))
     }
 
     fn skip_whitespace_and_comments(&mut self) -> Result<(), LexError> {
@@ -405,11 +444,11 @@ impl<'a> Lexer<'a> {
                     return self.error(self.pos, "invalid Unicode surrogate pair");
                 }
                 let codepoint = 0x10000 + (((first - 0xD800) << 10) | (second - 0xDC00));
-                push_codepoint(literal, codepoint, escape_location)?;
+                push_codepoint(literal, codepoint, escape_location, self.pos)?;
             } else if is_utf16_surrogate_second(first) {
                 return self.error(escape_location, "invalid Unicode surrogate pair");
             } else {
-                push_codepoint(literal, first, escape_location)?;
+                push_codepoint(literal, first, escape_location, self.pos)?;
             }
             return Ok(());
         }
@@ -539,7 +578,7 @@ impl<'a> Lexer<'a> {
             let raw = &self.input[start..self.pos];
             let value = raw
                 .parse::<i32>()
-                .map_err(|_| LexError::new(location, "parameter number too large"))?;
+                .map_err(|_| LexError::ranged(location, self.pos, "parameter number too large"))?;
             return Ok(Some(Token::integer(TokenKind::Param, location, value)));
         }
 
@@ -733,8 +772,9 @@ impl<'a> Lexer<'a> {
 
     fn reject_numeric_junk(&self, location: usize) -> Result<(), LexError> {
         if self.peek().is_some_and(is_ident_start) {
-            return Err(LexError::new(
+            return Err(LexError::ranged(
                 location,
+                self.pos,
                 "trailing junk after numeric literal",
             ));
         }
@@ -942,9 +982,18 @@ fn is_utf16_surrogate_second(c: u32) -> bool {
     (0xDC00..=0xDFFF).contains(&c)
 }
 
-fn push_codepoint(literal: &mut Vec<u8>, codepoint: u32, location: usize) -> Result<(), LexError> {
+fn push_codepoint(
+    literal: &mut Vec<u8>,
+    codepoint: u32,
+    location: usize,
+    end: usize,
+) -> Result<(), LexError> {
     let Some(ch) = char::from_u32(codepoint) else {
-        return Err(LexError::new(location, "invalid Unicode escape value"));
+        return Err(LexError::ranged(
+            location,
+            end,
+            "invalid Unicode escape value",
+        ));
     };
     let mut buf = [0; 4];
     literal.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
@@ -954,6 +1003,7 @@ fn push_codepoint(literal: &mut Vec<u8>, codepoint: u32, location: usize) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SourceText;
 
     fn kinds(sql: &str) -> Vec<TokenKind> {
         lex(sql)
@@ -1028,5 +1078,27 @@ mod tests {
     fn rejects_trailing_numeric_junk() {
         assert!(lex("123abc").is_err());
         assert!(lex("$1abc").is_err());
+    }
+
+    #[test]
+    fn token_ranges_cover_complete_utf8_lexemes_and_skip_trivia() {
+        let sql = "  select /* comment */ 中文::text";
+        let tokens = lex(sql).unwrap();
+        let source = SourceText::new(sql).unwrap();
+        let lexemes = tokens
+            .iter()
+            .map(|token| source.slice(token.range).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(lexemes, ["select", "中文", "::", "text", ""]);
+        assert_eq!(tokens[1].location(), sql.find("中文").unwrap());
+        assert_eq!(tokens[1].end_location(), sql.find("中文").unwrap() + 6);
+    }
+
+    #[test]
+    fn lexical_error_ranges_cover_the_invalid_construct() {
+        let sql = "select 'unterminated";
+        let error = lex(sql).unwrap_err();
+        assert_eq!(error.location(), sql.find('\'').unwrap());
+        assert_eq!(usize::from(error.range.end()), sql.len());
     }
 }

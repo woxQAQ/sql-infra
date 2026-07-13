@@ -2,7 +2,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_graph_table(&mut self) -> PResult<RangeGraphTable> {
-        let location = self.expect(TokenKind::GraphTable)?.location;
+        let location = self.expect(TokenKind::GraphTable)?.location();
         self.expect(TokenKind::Char('('))?;
         let graph_name = Some(Box::new(
             self.try_parse_qualified_range_var()
@@ -213,7 +213,7 @@ impl Parser {
         while self.at(TokenKind::Char('|'))
             || (self.at(TokenKind::Op) && token_name(self.peek()).as_deref() == Some("|"))
         {
-            let operator_location = self.advance().location;
+            let operator_location = self.advance().location();
             let term_location = self.location();
             let name = self
                 .consume_col_id()

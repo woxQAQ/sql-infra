@@ -279,7 +279,7 @@ impl Parser {
         let token = self.expect(TokenKind::IConst)?;
         match token.value {
             Some(TokenValue::Integer(value)) => Ok(sign * i64::from(value)),
-            _ => Err(ParseError::new(token.location, "expected an integer count")),
+            _ => Err(ParseError::ranged(token.range, "expected an integer count")),
         }
     }
 }

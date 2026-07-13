@@ -3,7 +3,7 @@ use super::*;
 
 impl ExprParser {
     pub(super) fn parse_case_expr(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Case)?.location;
+        let location = self.expect(TokenKind::Case)?.location();
         let arg = if self.at(TokenKind::When) {
             None
         } else {
@@ -42,7 +42,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_grouping_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Grouping)?.location;
+        let location = self.expect(TokenKind::Grouping)?.location();
         self.expect(TokenKind::Char('('))?;
         let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
         self.expect(TokenKind::Char(')'))?;
@@ -70,7 +70,7 @@ impl ExprParser {
                 node_tag: NodeTag::TypeCast,
                 arg: Some(Box::new(arg)),
                 type_name: Some(Box::new(type_name)),
-                location: token.location as ParseLoc,
+                location: token.location() as ParseLoc,
             }))
         } else {
             let function_name = type_name.names.last().and_then(|name| match name {
@@ -81,14 +81,14 @@ impl ExprParser {
                 node_tag: NodeTag::FuncCall,
                 funcname: system_type_names(&function_name),
                 args: vec![arg],
-                location: token.location as ParseLoc,
+                location: token.location() as ParseLoc,
                 ..FuncCall::default()
             }))
         }
     }
 
     pub(super) fn parse_extract_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Extract)?.location;
+        let location = self.expect(TokenKind::Extract)?.location();
         self.expect(TokenKind::Char('('))?;
         let field_token = self.peek().clone();
         if !matches!(
@@ -114,7 +114,7 @@ impl ExprParser {
             node_tag: NodeTag::FuncCall,
             funcname: system_type_names("extract"),
             args: vec![
-                Node::AConst(AConst::string(field, field_token.location as ParseLoc)),
+                Node::AConst(AConst::string(field, field_token.location() as ParseLoc)),
                 arg,
             ],
             funcformat: CoercionForm::SqlSyntax,
@@ -124,7 +124,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_normalize_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Normalize)?.location;
+        let location = self.expect(TokenKind::Normalize)?.location();
         self.expect(TokenKind::Char('('))?;
         let mut args = vec![self.parse_expr(0)?];
         if self.consume(TokenKind::Char(',')) {
@@ -138,7 +138,7 @@ impl ExprParser {
             };
             args.push(Node::AConst(AConst::string(
                 form,
-                form_token.location as ParseLoc,
+                form_token.location() as ParseLoc,
             )));
         }
         self.expect(TokenKind::Char(')'))?;
@@ -164,7 +164,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_position_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Position)?.location;
+        let location = self.expect(TokenKind::Position)?.location();
         self.expect(TokenKind::Char('('))?;
         let needle = self.parse_b_expr(0)?;
         self.expect(TokenKind::InP)?;
@@ -174,7 +174,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_overlay_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Overlay)?.location;
+        let location = self.expect(TokenKind::Overlay)?.location();
         self.expect(TokenKind::Char('('))?;
         if self.consume(TokenKind::Char(')')) {
             return Some(Node::FuncCall(FuncCall {
@@ -212,7 +212,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_substring_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Substring)?.location;
+        let location = self.expect(TokenKind::Substring)?.location();
         self.expect(TokenKind::Char('('))?;
         if self.consume(TokenKind::Char(')')) {
             return Some(Node::FuncCall(FuncCall {
@@ -280,7 +280,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_trim_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Trim)?.location;
+        let location = self.expect(TokenKind::Trim)?.location();
         self.expect(TokenKind::Char('('))?;
         let function = if self.consume(TokenKind::Leading) {
             "ltrim"
@@ -314,7 +314,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_xmlexists_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Xmlexists)?.location;
+        let location = self.expect(TokenKind::Xmlexists)?.location();
         self.expect(TokenKind::Char('('))?;
         let xpath = self.parse_c_expr()?;
         self.expect(TokenKind::Passing)?;
@@ -379,7 +379,7 @@ impl ExprParser {
             xpr: Expr::new(NodeTag::SqlValueFunction),
             op,
             typmod,
-            location: token.location as ParseLoc,
+            location: token.location() as ParseLoc,
             ..SqlValueFunction::default()
         }))
     }

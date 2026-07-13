@@ -208,8 +208,8 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::Option)?;
                 let (value, value_location) = match self.peek_kind() {
-                    TokenKind::DocumentP => ("DOCUMENT", self.advance().location as ParseLoc),
-                    TokenKind::ContentP => ("CONTENT", self.advance().location as ParseLoc),
+                    TokenKind::DocumentP => ("DOCUMENT", self.advance().location() as ParseLoc),
+                    TokenKind::ContentP => ("CONTENT", self.advance().location() as ParseLoc),
                     _ => return Err(self.error_here("XML OPTION requires DOCUMENT or CONTENT")),
                 };
                 stmt.name = Some("xmloption".to_owned());
@@ -249,7 +249,7 @@ impl Parser {
                             stmt.location = -1;
                         }
                         TokenKind::NullP => {
-                            let location = self.advance().location as ParseLoc;
+                            let location = self.advance().location() as ParseLoc;
                             stmt.args = vec![Node::AConst(AConst::null(location))];
                             stmt.location = value_location;
                         }
@@ -579,7 +579,7 @@ impl Parser {
     }
 }
 pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
         return Err(ParseError::new(location, "SET requires a value"));
     }
@@ -602,7 +602,7 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
         if is_setting_word && let Some(value) = token_name(&tokens[0]) {
             return Ok(Node::AConst(AConst::string(
                 value,
-                tokens[0].location as ParseLoc,
+                tokens[0].location() as ParseLoc,
             )));
         }
     }
@@ -625,7 +625,7 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
 }
 
 pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location);
+    let location = tokens.first().map_or(0, |token| token.location());
     if tokens.len() == 1 {
         if matches!(
             tokens[0].kind,
@@ -669,7 +669,7 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
             ]
         ) {
             return Err(ParseError::new(
-                qualifier.first().map_or(location, |token| token.location),
+                qualifier.first().map_or(location, |token| token.location()),
                 "time zone interval must be HOUR or HOUR TO MINUTE",
             ));
         }

@@ -2,7 +2,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_xmltable(&mut self, lateral: bool) -> PResult<RangeTableFunc> {
-        let location = self.expect(TokenKind::Xmltable)?.location;
+        let location = self.expect(TokenKind::Xmltable)?.location();
         self.expect(TokenKind::Char('('))?;
         let mut namespaces = Vec::new();
         if self.consume(TokenKind::Xmlnamespaces) {

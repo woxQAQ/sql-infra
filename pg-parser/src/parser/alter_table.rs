@@ -369,11 +369,11 @@ impl Parser {
                 if self.at(TokenKind::IConst) {
                     let token = self.advance().clone();
                     let Some(TokenValue::Integer(value)) = token.value else {
-                        return Err(ParseError::new(token.location, "expected a column number"));
+                        return Err(ParseError::ranged(token.range, "expected a column number"));
                     };
                     if value <= 0 || value > i32::from(i16::MAX) {
-                        return Err(ParseError::new(
-                            token.location,
+                        return Err(ParseError::ranged(
+                            token.range,
                             "column number must be in range from 1 to 32767",
                         ));
                     }
@@ -747,7 +747,7 @@ impl Parser {
                 }
             }
             TokenKind::Of => {
-                let location = self.advance().location;
+                let location = self.advance().location();
                 let names = self.parse_name_list();
                 if names.is_empty() {
                     return Err(self.error_here("OF requires a type name"));

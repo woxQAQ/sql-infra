@@ -32,6 +32,43 @@ fn raw_select_statement_locations_follow_postgresql_semicolon_rules() {
     assert_eq!(terminated[0].stmt_len, 8);
 }
 
+#[test]
+fn tooling_statement_ranges_are_complete_with_or_without_semicolons() {
+    let sql = "  select 1; \n select 中文  ";
+    let statements = pg_parser::parse_with_ranges(sql).expect("parse statements with ranges");
+    assert_eq!(statements.len(), 2);
+
+    let first_start = sql.find("select 1").unwrap();
+    let semicolon = sql.find(';').unwrap();
+    assert_eq!(usize::from(statements[0].range.syntax.start()), first_start);
+    assert_eq!(usize::from(statements[0].range.syntax.end()), semicolon);
+    assert_eq!(
+        statements[0].range.terminator,
+        Some(pg_parser::TextRange::new(
+            pg_parser::TextSize::try_from(semicolon).unwrap(),
+            pg_parser::TextSize::try_from(semicolon + 1).unwrap(),
+        ))
+    );
+
+    let second_start = sql.find("select 中文").unwrap();
+    assert_eq!(
+        usize::from(statements[1].range.syntax.start()),
+        second_start
+    );
+    assert_eq!(usize::from(statements[1].range.syntax.end()), sql.len());
+    assert_eq!(statements[1].range.terminator, None);
+    assert_eq!(statements[1].raw.stmt_len, 0);
+}
+
+#[test]
+fn parser_errors_use_the_unexpected_token_range() {
+    let sql = "select 1 trailing extra";
+    let error = pg_parser::parse(sql).unwrap_err();
+    let start = sql.find("trailing").unwrap();
+    assert_eq!(usize::from(error.range.start()), start);
+    assert_eq!(usize::from(error.range.end()), start + "trailing".len());
+}
+
 fn set_shape(stmt: &pg_parser::SelectStmt) -> String {
     if let (Some(left), Some(right)) = (&stmt.larg, &stmt.rarg) {
         format!("{:?}({},{})", stmt.op, set_shape(left), set_shape(right))
