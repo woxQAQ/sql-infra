@@ -90,6 +90,26 @@ fn create_function_stmt_populates_parameters_return_type_and_options() {
 }
 
 #[test]
+fn create_procedure_uses_procedure_specific_options() {
+    let Node::CreateFunctionStmt(stmt) = parse_statement(
+        "create or replace procedure app.refresh(in target text, inout changed integer)
+         language sql security definer set search_path to app
+         begin atomic
+           insert into audit_log values (target);
+         end",
+    ) else {
+        panic!("expected CreateFunctionStmt");
+    };
+    assert!(stmt.is_procedure);
+    assert!(stmt.replace);
+    assert_eq!(stmt.funcname.len(), 2);
+    assert_eq!(stmt.parameters.len(), 2);
+    assert!(stmt.return_type.is_none());
+    assert_eq!(stmt.options.len(), 3);
+    assert!(stmt.sql_body.is_some());
+}
+
+#[test]
 fn create_function_stmt_can_store_a_sql_return_body() {
     let Node::CreateFunctionStmt(stmt) =
         parse_statement("create function increment(a int) returns int return a + 1")

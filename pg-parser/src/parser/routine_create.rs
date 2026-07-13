@@ -23,24 +23,8 @@ impl Parser {
     //     | AS 'obj_file', 'link_symbol'
     //     | sql_body
     //   } ...
-    //
-    // PostgreSQL 18 Synopsis
-    // Source: https://www.postgresql.org/docs/18/sql-createprocedure.html
-    // CREATE [ OR REPLACE ] PROCEDURE
-    //     name ( [ [ argmode ] [ argname ] argtype [ { DEFAULT | = } default_expr ] [, ...] ] )
-    //   { LANGUAGE lang_name
-    //     | TRANSFORM { FOR TYPE type_name } [, ... ]
-    //     | [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER
-    //     | SET configuration_parameter { TO value | = value | FROM CURRENT }
-    //     | AS 'definition'
-    //     | AS 'obj_file', 'link_symbol'
-    //     | sql_body
-    //   } ...
     pub(super) fn parse_create_function(&mut self, replace: bool) -> PResult<Node> {
-        let is_procedure = self.consume(TokenKind::Procedure);
-        if !is_procedure {
-            self.expect(TokenKind::Function)?;
-        }
+        self.expect(TokenKind::Function)?;
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("CREATE FUNCTION requires a function name"));
@@ -50,9 +34,6 @@ impl Parser {
             && !(self.peek_kind_n(1) == TokenKind::NullP && self.peek_kind_n(2) == TokenKind::On);
         let return_type = if has_return_clause {
             self.advance();
-            if is_procedure {
-                return Err(self.error_here("CREATE PROCEDURE cannot specify RETURNS"));
-            }
             if self.at(TokenKind::Table) {
                 let table_location = self.advance().location;
                 for parameter in &parameters {
@@ -307,11 +288,141 @@ impl Parser {
         }
         Ok(Node::CreateFunctionStmt(CreateFunctionStmt {
             node_tag: NodeTag::CreateFunctionStmt,
-            is_procedure,
+            is_procedure: false,
             replace,
             funcname,
             parameters,
             return_type,
+            options,
+            sql_body,
+        }))
+    }
+
+    // PostgreSQL 18 Synopsis
+    // Source: https://www.postgresql.org/docs/18/sql-createprocedure.html
+    // CREATE [ OR REPLACE ] PROCEDURE
+    //     name ( [ [ argmode ] [ argname ] argtype [ { DEFAULT | = } default_expr ] [, ...] ] )
+    //   { LANGUAGE lang_name
+    //     | TRANSFORM { FOR TYPE type_name } [, ... ]
+    //     | [ EXTERNAL ] SECURITY INVOKER | [ EXTERNAL ] SECURITY DEFINER
+    //     | SET configuration_parameter { TO value | = value | FROM CURRENT }
+    //     | AS 'definition'
+    //     | AS 'obj_file', 'link_symbol'
+    //     | sql_body
+    //   } ...
+    pub(super) fn parse_create_procedure(&mut self, replace: bool) -> PResult<Node> {
+        self.expect(TokenKind::Procedure)?;
+        let funcname = self.parse_func_name_list();
+        if funcname.is_empty() {
+            return Err(self.error_here("CREATE PROCEDURE requires a procedure name"));
+        }
+        let parameters = self.parse_function_parameters()?;
+        let mut options = Vec::new();
+        let mut sql_body = None;
+        while !self.at_statement_end() {
+            let location = self.location();
+            match self.peek_kind() {
+                TokenKind::Language => {
+                    self.advance();
+                    let language = self
+                        .consume_non_reserved_word_or_sconst()
+                        .ok_or_else(|| self.error_here("expected a language name"))?;
+                    options.push(make_def_elem(
+                        "language",
+                        Some(make_string_node(language)),
+                        location,
+                    ));
+                }
+                TokenKind::As => {
+                    self.advance();
+                    let first = self
+                        .consume_string_like()
+                        .ok_or_else(|| self.error_here("expected a procedure body string"))?;
+                    let mut bodies = vec![make_string_node(first)];
+                    if self.consume(TokenKind::Char(',')) {
+                        let second = self.consume_string_like().ok_or_else(|| {
+                            self.error_here("expected a second procedure body string")
+                        })?;
+                        bodies.push(make_string_node(second));
+                    }
+                    options.push(make_def_elem(
+                        "as",
+                        Some(Node::AArrayExpr(AArrayExpr {
+                            node_tag: NodeTag::AArrayExpr,
+                            elements: bodies,
+                            ..AArrayExpr::default()
+                        })),
+                        location,
+                    ));
+                }
+                TokenKind::Security => {
+                    self.advance();
+                    let value = if self.consume(TokenKind::Definer) {
+                        true
+                    } else if self.consume(TokenKind::Invoker) {
+                        false
+                    } else {
+                        return Err(self.error_here("expected DEFINER or INVOKER"));
+                    };
+                    options.push(make_def_elem(
+                        "security",
+                        Some(Node::Boolean(Boolean::new(value))),
+                        location,
+                    ));
+                }
+                TokenKind::External => {
+                    self.advance();
+                    self.expect(TokenKind::Security)?;
+                    let value = if self.consume(TokenKind::Definer) {
+                        true
+                    } else if self.consume(TokenKind::Invoker) {
+                        false
+                    } else {
+                        return Err(self.error_here("SECURITY requires DEFINER or INVOKER"));
+                    };
+                    options.push(make_def_elem(
+                        "security",
+                        Some(Node::Boolean(Boolean::new(value))),
+                        location,
+                    ));
+                }
+                TokenKind::Transform => {
+                    self.advance();
+                    let types = self.parse_transform_type_list()?;
+                    options.push(make_def_elem(
+                        "transform",
+                        Some(name_list_node(types)),
+                        location,
+                    ));
+                }
+                TokenKind::Set | TokenKind::Reset => {
+                    let setstmt = self.parse_function_set_reset_clause_until(
+                        Self::create_procedure_option_starts(),
+                    )?;
+                    options.push(make_def_elem(
+                        "set",
+                        Some(Node::VariableSetStmt(setstmt)),
+                        location,
+                    ));
+                }
+                TokenKind::BeginP => {
+                    sql_body = Some(Box::new(self.parse_atomic_routine_body()?));
+                    break;
+                }
+                other => {
+                    return Err(
+                        self.error_here(format!("unsupported CREATE PROCEDURE option {:?}", other))
+                    );
+                }
+            }
+        }
+        Ok(Node::CreateFunctionStmt(CreateFunctionStmt {
+            node_tag: NodeTag::CreateFunctionStmt,
+            is_procedure: true,
+            replace,
+            funcname,
+            parameters,
+            return_type: None,
             options,
             sql_body,
         }))
@@ -447,6 +558,21 @@ impl Parser {
             TokenKind::Reset,
             TokenKind::Parallel,
             TokenKind::Return,
+            TokenKind::BeginP,
+            TokenKind::Char(';'),
+            TokenKind::Eof,
+        ]
+    }
+
+    fn create_procedure_option_starts() -> &'static [TokenKind] {
+        &[
+            TokenKind::As,
+            TokenKind::Language,
+            TokenKind::Transform,
+            TokenKind::External,
+            TokenKind::Security,
+            TokenKind::Set,
+            TokenKind::Reset,
             TokenKind::BeginP,
             TokenKind::Char(';'),
             TokenKind::Eof,

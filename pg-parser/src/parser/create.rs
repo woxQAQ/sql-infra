@@ -69,7 +69,8 @@ impl Parser {
                 self.parse_create_table_as(ObjectType::Matview, relpersistence)?
             }
             TokenKind::Extension => self.parse_create_extension()?,
-            TokenKind::Function | TokenKind::Procedure => self.parse_create_function(replace)?,
+            TokenKind::Function => self.parse_create_function(replace)?,
+            TokenKind::Procedure => self.parse_create_procedure(replace)?,
             TokenKind::User if self.peek_kind_n(1) == TokenKind::Mapping => {
                 self.parse_create_user_mapping()?
             }
