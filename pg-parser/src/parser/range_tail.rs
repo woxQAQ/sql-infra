@@ -125,18 +125,27 @@ impl Parser {
             TokenKind::Natural => {
                 self.advance();
                 is_natural = true;
-                let jointype = if self.consume(TokenKind::Left) {
-                    self.consume(TokenKind::OuterP);
-                    JoinType::Left
-                } else if self.consume(TokenKind::Right) {
-                    self.consume(TokenKind::OuterP);
-                    JoinType::Right
-                } else if self.consume(TokenKind::Full) {
-                    self.consume(TokenKind::OuterP);
-                    JoinType::Full
-                } else {
-                    self.consume(TokenKind::InnerP);
-                    JoinType::Inner
+                let jointype = match self.peek_kind() {
+                    TokenKind::Left => {
+                        self.advance();
+                        self.consume(TokenKind::OuterP);
+                        JoinType::Left
+                    }
+                    TokenKind::Right => {
+                        self.advance();
+                        self.consume(TokenKind::OuterP);
+                        JoinType::Right
+                    }
+                    TokenKind::Full => {
+                        self.advance();
+                        self.consume(TokenKind::OuterP);
+                        JoinType::Full
+                    }
+                    TokenKind::InnerP => {
+                        self.advance();
+                        JoinType::Inner
+                    }
+                    _ => JoinType::Inner,
                 };
                 (jointype, false)
             }

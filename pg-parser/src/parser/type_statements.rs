@@ -63,60 +63,66 @@ impl Parser {
             }));
         }
 
-        if self.consume(TokenKind::EnumP) {
-            self.expect(TokenKind::Char('('))?;
-            let mut vals = Vec::new();
-            while !self.at(TokenKind::Char(')')) {
-                if !self.at(TokenKind::SConst) {
-                    return Err(self.error_here("enum labels must be string literals"));
+        match self.peek_kind() {
+            TokenKind::EnumP => {
+                self.advance();
+                self.expect(TokenKind::Char('('))?;
+                let mut vals = Vec::new();
+                while !self.at(TokenKind::Char(')')) {
+                    if !self.at(TokenKind::SConst) {
+                        return Err(self.error_here("enum labels must be string literals"));
+                    }
+                    let value = self.consume_string_like().unwrap_or_default();
+                    vals.push(make_string_node(value));
+                    if !self.consume(TokenKind::Char(',')) {
+                        break;
+                    }
+                    if self.at(TokenKind::Char(')')) {
+                        return Err(self.error_here("expected an enum label after ','"));
+                    }
                 }
-                let value = self.consume_string_like().unwrap_or_default();
-                vals.push(make_string_node(value));
-                if !self.consume(TokenKind::Char(',')) {
-                    break;
-                }
-                if self.at(TokenKind::Char(')')) {
-                    return Err(self.error_here("expected an enum label after ','"));
-                }
+                self.expect(TokenKind::Char(')'))?;
+                Ok(Node::CreateEnumStmt(CreateEnumStmt {
+                    node_tag: NodeTag::CreateEnumStmt,
+                    type_name,
+                    vals,
+                }))
             }
-            self.expect(TokenKind::Char(')'))?;
-            Ok(Node::CreateEnumStmt(CreateEnumStmt {
-                node_tag: NodeTag::CreateEnumStmt,
-                type_name,
-                vals,
-            }))
-        } else if self.consume(TokenKind::Range) {
-            let params = self.parse_parenthesized_definition()?;
-            Ok(Node::CreateRangeStmt(CreateRangeStmt {
-                node_tag: NodeTag::CreateRangeStmt,
-                type_name,
-                params,
-            }))
-        } else if self.consume(TokenKind::Char('(')) {
-            let mut coldeflist = Vec::new();
-            while !self.at(TokenKind::Char(')')) {
-                coldeflist.push(*self.parse_table_func_element_until(&[
-                    TokenKind::Char(','),
-                    TokenKind::Char(')'),
-                ])?);
-                if !self.consume(TokenKind::Char(',')) {
-                    break;
-                }
-                if self.at(TokenKind::Char(')')) {
-                    return Err(self.error_here("expected a composite attribute after ','"));
-                }
+            TokenKind::Range => {
+                self.advance();
+                let params = self.parse_parenthesized_definition()?;
+                Ok(Node::CreateRangeStmt(CreateRangeStmt {
+                    node_tag: NodeTag::CreateRangeStmt,
+                    type_name,
+                    params,
+                }))
             }
-            self.expect(TokenKind::Char(')'))?;
-            Ok(Node::CompositeTypeStmt(CompositeTypeStmt {
-                node_tag: NodeTag::CompositeTypeStmt,
-                typevar: Some(Box::new(range_var_from_parts(
-                    list_to_names(&type_name),
-                    type_location,
-                ))),
-                coldeflist,
-            }))
-        } else {
-            Err(self.error_here("expected ENUM, RANGE, or a composite attribute list"))
+            TokenKind::Char('(') => {
+                self.advance();
+                let mut coldeflist = Vec::new();
+                while !self.at(TokenKind::Char(')')) {
+                    coldeflist.push(*self.parse_table_func_element_until(&[
+                        TokenKind::Char(','),
+                        TokenKind::Char(')'),
+                    ])?);
+                    if !self.consume(TokenKind::Char(',')) {
+                        break;
+                    }
+                    if self.at(TokenKind::Char(')')) {
+                        return Err(self.error_here("expected a composite attribute after ','"));
+                    }
+                }
+                self.expect(TokenKind::Char(')'))?;
+                Ok(Node::CompositeTypeStmt(CompositeTypeStmt {
+                    node_tag: NodeTag::CompositeTypeStmt,
+                    typevar: Some(Box::new(range_var_from_parts(
+                        list_to_names(&type_name),
+                        type_location,
+                    ))),
+                    coldeflist,
+                }))
+            }
+            _ => Err(self.error_here("expected ENUM, RANGE, or a composite attribute list")),
         }
     }
 
@@ -167,35 +173,44 @@ impl Parser {
             return Err(self.error_here("ALTER TYPE requires an enum type name"));
         }
 
-        if self.consume(TokenKind::AddP) {
-            self.expect(TokenKind::ValueP)?;
-            stmt.skip_if_new_val_exists = self.consume_if_not_exists()?;
-            stmt.new_val = Some(self.consume_required_string("ADD VALUE requires a string")?);
-            if self.consume(TokenKind::Before) {
-                stmt.new_val_neighbor =
-                    Some(self.consume_required_string("BEFORE requires an enum value string")?);
-                stmt.new_val_is_after = false;
-            } else if self.consume(TokenKind::After) {
-                stmt.new_val_neighbor =
-                    Some(self.consume_required_string("AFTER requires an enum value string")?);
-                stmt.new_val_is_after = true;
-            } else {
-                stmt.new_val_is_after = true;
+        match self.peek_kind() {
+            TokenKind::AddP => {
+                self.advance();
+                self.expect(TokenKind::ValueP)?;
+                stmt.skip_if_new_val_exists = self.consume_if_not_exists()?;
+                stmt.new_val = Some(self.consume_required_string("ADD VALUE requires a string")?);
+                if self.consume(TokenKind::Before) {
+                    stmt.new_val_neighbor =
+                        Some(self.consume_required_string("BEFORE requires an enum value string")?);
+                    stmt.new_val_is_after = false;
+                } else if self.consume(TokenKind::After) {
+                    stmt.new_val_neighbor =
+                        Some(self.consume_required_string("AFTER requires an enum value string")?);
+                    stmt.new_val_is_after = true;
+                } else {
+                    stmt.new_val_is_after = true;
+                }
             }
-        } else if self.consume(TokenKind::Rename) {
-            self.expect(TokenKind::ValueP)?;
-            stmt.old_val = Some(self.consume_required_string("RENAME VALUE requires a string")?);
-            self.expect(TokenKind::To)?;
-            stmt.new_val = Some(self.consume_required_string("TO requires a string")?);
-        } else if self.consume(TokenKind::Drop) {
-            self.expect(TokenKind::ValueP)?;
-            self.consume_required_string("DROP VALUE requires a string")?;
-            return Err(ParseError::new(
-                self.previous_location(),
-                "dropping an enum value is not implemented",
-            ));
-        } else {
-            return Err(self.error_here("ALTER TYPE enum requires ADD, RENAME, or DROP VALUE"));
+            TokenKind::Rename => {
+                self.advance();
+                self.expect(TokenKind::ValueP)?;
+                stmt.old_val =
+                    Some(self.consume_required_string("RENAME VALUE requires a string")?);
+                self.expect(TokenKind::To)?;
+                stmt.new_val = Some(self.consume_required_string("TO requires a string")?);
+            }
+            TokenKind::Drop => {
+                self.advance();
+                self.expect(TokenKind::ValueP)?;
+                self.consume_required_string("DROP VALUE requires a string")?;
+                return Err(ParseError::new(
+                    self.previous_location(),
+                    "dropping an enum value is not implemented",
+                ));
+            }
+            _ => {
+                return Err(self.error_here("ALTER TYPE enum requires ADD, RENAME, or DROP VALUE"));
+            }
         }
         self.expect_statement_end()?;
         Ok(Node::AlterEnumStmt(stmt))
@@ -253,80 +268,88 @@ impl Parser {
             node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
-        if self.consume(TokenKind::AddP) {
-            self.expect(TokenKind::Attribute)?;
-            cmd.subtype = AlterTableType::AddColumn;
-            cmd.def = Some(self.parse_table_func_element_until(&[
-                TokenKind::Cascade,
-                TokenKind::Restrict,
-                TokenKind::Char(','),
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?);
-            cmd.behavior = self.parse_drop_behavior();
-        } else if self.consume(TokenKind::Drop) {
-            self.expect(TokenKind::Attribute)?;
-            cmd.subtype = AlterTableType::DropColumn;
-            cmd.missing_ok = self.consume_if_exists()?;
-            cmd.name = Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("DROP ATTRIBUTE requires a name"))?,
-            );
-            cmd.behavior = self.parse_drop_behavior();
-        } else if self.consume(TokenKind::Alter) {
-            self.expect(TokenKind::Attribute)?;
-            cmd.subtype = AlterTableType::AlterColumnType;
-            let attribute_location = self.location();
-            cmd.name = Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("ALTER ATTRIBUTE requires a name"))?,
-            );
-            if self.consume(TokenKind::Set) {
-                self.expect(TokenKind::DataP)?;
+        match self.peek_kind() {
+            TokenKind::AddP => {
+                self.advance();
+                self.expect(TokenKind::Attribute)?;
+                cmd.subtype = AlterTableType::AddColumn;
+                cmd.def = Some(self.parse_table_func_element_until(&[
+                    TokenKind::Cascade,
+                    TokenKind::Restrict,
+                    TokenKind::Char(','),
+                    TokenKind::Char(';'),
+                    TokenKind::Eof,
+                ])?);
+                cmd.behavior = self.parse_drop_behavior();
             }
-            self.expect(TokenKind::TypeP)?;
-            let type_name = Some(Box::new(
-                self.parse_type_name_until(&[
-                    TokenKind::Collate,
-                    TokenKind::Cascade,
-                    TokenKind::Restrict,
-                    TokenKind::Char(','),
-                    TokenKind::Char(';'),
-                    TokenKind::Eof,
-                ])
-                .ok_or_else(|| self.error_here("ALTER ATTRIBUTE TYPE requires a data type"))?,
-            ));
-            let coll_clause = if self.consume(TokenKind::Collate) {
-                let location = self.previous_location();
-                let collname = self.parse_name_list_until_keywords(&[
-                    TokenKind::Cascade,
-                    TokenKind::Restrict,
-                    TokenKind::Char(','),
-                    TokenKind::Char(';'),
-                    TokenKind::Eof,
-                ]);
-                if collname.is_empty() {
-                    return Err(self.error_here("COLLATE requires a collation name"));
+            TokenKind::Drop => {
+                self.advance();
+                self.expect(TokenKind::Attribute)?;
+                cmd.subtype = AlterTableType::DropColumn;
+                cmd.missing_ok = self.consume_if_exists()?;
+                cmd.name = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("DROP ATTRIBUTE requires a name"))?,
+                );
+                cmd.behavior = self.parse_drop_behavior();
+            }
+            TokenKind::Alter => {
+                self.advance();
+                self.expect(TokenKind::Attribute)?;
+                cmd.subtype = AlterTableType::AlterColumnType;
+                let attribute_location = self.location();
+                cmd.name = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("ALTER ATTRIBUTE requires a name"))?,
+                );
+                if self.consume(TokenKind::Set) {
+                    self.expect(TokenKind::DataP)?;
                 }
-                Some(Box::new(CollateClause {
-                    node_tag: NodeTag::CollateClause,
-                    collname,
-                    location: location as ParseLoc,
-                    ..CollateClause::default()
-                }))
-            } else {
-                None
-            };
-            cmd.def = Some(Box::new(Node::ColumnDef(ColumnDef {
-                node_tag: NodeTag::ColumnDef,
-                type_name,
-                coll_clause,
-                location: attribute_location as ParseLoc,
-                ..ColumnDef::default()
-            })));
-            cmd.behavior = self.parse_drop_behavior();
-        } else {
-            return Err(self.error_here("expected ADD, DROP, or ALTER ATTRIBUTE"));
+                self.expect(TokenKind::TypeP)?;
+                let type_name = Some(Box::new(
+                    self.parse_type_name_until(&[
+                        TokenKind::Collate,
+                        TokenKind::Cascade,
+                        TokenKind::Restrict,
+                        TokenKind::Char(','),
+                        TokenKind::Char(';'),
+                        TokenKind::Eof,
+                    ])
+                    .ok_or_else(|| self.error_here("ALTER ATTRIBUTE TYPE requires a data type"))?,
+                ));
+                let coll_clause = if self.consume(TokenKind::Collate) {
+                    let location = self.previous_location();
+                    let collname = self.parse_name_list_until_keywords(&[
+                        TokenKind::Cascade,
+                        TokenKind::Restrict,
+                        TokenKind::Char(','),
+                        TokenKind::Char(';'),
+                        TokenKind::Eof,
+                    ]);
+                    if collname.is_empty() {
+                        return Err(self.error_here("COLLATE requires a collation name"));
+                    }
+                    Some(Box::new(CollateClause {
+                        node_tag: NodeTag::CollateClause,
+                        collname,
+                        location: location as ParseLoc,
+                        ..CollateClause::default()
+                    }))
+                } else {
+                    None
+                };
+                cmd.def = Some(Box::new(Node::ColumnDef(ColumnDef {
+                    node_tag: NodeTag::ColumnDef,
+                    type_name,
+                    coll_clause,
+                    location: attribute_location as ParseLoc,
+                    ..ColumnDef::default()
+                })));
+                cmd.behavior = self.parse_drop_behavior();
+            }
+            _ => {
+                return Err(self.error_here("expected ADD, DROP, or ALTER ATTRIBUTE"));
+            }
         }
         Ok(cmd)
     }

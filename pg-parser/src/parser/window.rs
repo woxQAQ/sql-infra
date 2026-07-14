@@ -124,17 +124,26 @@ impl Parser {
             window.start_offset = start_offset;
         }
         if self.consume(TokenKind::Exclude) {
-            window.frame_options |= if self.consume(TokenKind::CurrentP) {
-                self.expect(TokenKind::Row)?;
-                FRAMEOPTION_EXCLUDE_CURRENT_ROW
-            } else if self.consume(TokenKind::GroupP) {
-                FRAMEOPTION_EXCLUDE_GROUP
-            } else if self.consume(TokenKind::Ties) {
-                FRAMEOPTION_EXCLUDE_TIES
-            } else {
-                self.expect(TokenKind::No)?;
-                self.expect(TokenKind::Others)?;
-                0
+            window.frame_options |= match self.peek_kind() {
+                TokenKind::CurrentP => {
+                    self.advance();
+                    self.expect(TokenKind::Row)?;
+                    FRAMEOPTION_EXCLUDE_CURRENT_ROW
+                }
+                TokenKind::GroupP => {
+                    self.advance();
+                    FRAMEOPTION_EXCLUDE_GROUP
+                }
+                TokenKind::Ties => {
+                    self.advance();
+                    FRAMEOPTION_EXCLUDE_TIES
+                }
+                TokenKind::No => {
+                    self.advance();
+                    self.expect(TokenKind::Others)?;
+                    0
+                }
+                _ => return Err(self.error_here("invalid window frame exclusion")),
             };
         }
         Ok(())
@@ -173,20 +182,7 @@ impl Parser {
                 }
                 return Ok(Vec::new());
             }
-            let strength = if self.consume(TokenKind::Update) {
-                LockClauseStrength::Forupdate
-            } else if self.consume(TokenKind::No) {
-                self.expect(TokenKind::Key)?;
-                self.expect(TokenKind::Update)?;
-                LockClauseStrength::Fornokeyupdate
-            } else if self.consume(TokenKind::Share) {
-                LockClauseStrength::Forshare
-            } else if self.consume(TokenKind::Key) {
-                self.expect(TokenKind::Share)?;
-                LockClauseStrength::Forkeyshare
-            } else {
-                return Err(self.error_here("invalid FOR locking strength"));
-            };
+            let strength = self.parse_locking_strength()?;
             let locked_rels = if self.consume(TokenKind::Of) {
                 let mut relations = Vec::new();
                 loop {
@@ -230,5 +226,30 @@ impl Parser {
             }
         }
         Ok(clauses)
+    }
+
+    pub(super) fn parse_locking_strength(&mut self) -> PResult<LockClauseStrength> {
+        match self.peek_kind() {
+            TokenKind::Update => {
+                self.advance();
+                Ok(LockClauseStrength::Forupdate)
+            }
+            TokenKind::No => {
+                self.advance();
+                self.expect(TokenKind::Key)?;
+                self.expect(TokenKind::Update)?;
+                Ok(LockClauseStrength::Fornokeyupdate)
+            }
+            TokenKind::Share => {
+                self.advance();
+                Ok(LockClauseStrength::Forshare)
+            }
+            TokenKind::Key => {
+                self.advance();
+                self.expect(TokenKind::Share)?;
+                Ok(LockClauseStrength::Forkeyshare)
+            }
+            _ => Err(self.error_here("expected UPDATE, NO KEY UPDATE, SHARE, or KEY SHARE")),
+        }
     }
 }

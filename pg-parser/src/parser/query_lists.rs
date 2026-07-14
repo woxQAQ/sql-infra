@@ -115,16 +115,21 @@ impl Parser {
             }));
         }
 
-        let (kind, location) = if self.consume(TokenKind::Rollup) {
-            (Some(GroupingSetKind::Rollup), self.previous_location())
-        } else if self.consume(TokenKind::Cube) {
-            (Some(GroupingSetKind::Cube), self.previous_location())
-        } else if self.at(TokenKind::Grouping) && self.peek_kind_n(1) == TokenKind::Sets {
-            let location = self.advance().location();
-            self.advance();
-            (Some(GroupingSetKind::Sets), location)
-        } else {
-            (None, self.location())
+        let (kind, location) = match self.peek_kind() {
+            TokenKind::Rollup => {
+                let location = self.advance().location();
+                (Some(GroupingSetKind::Rollup), location)
+            }
+            TokenKind::Cube => {
+                let location = self.advance().location();
+                (Some(GroupingSetKind::Cube), location)
+            }
+            TokenKind::Grouping if self.peek_kind_n(1) == TokenKind::Sets => {
+                let location = self.advance().location();
+                self.advance();
+                (Some(GroupingSetKind::Sets), location)
+            }
+            _ => (None, self.location()),
         };
 
         if let Some(kind) = kind {

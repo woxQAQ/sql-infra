@@ -315,66 +315,78 @@ impl Parser {
         let mut relation_type = ObjectType::default();
         let mut rename_type = identity.object_type;
         let mut behavior = DropBehavior::Restrict;
-        if self.consume(TokenKind::Column) {
-            if !matches!(
+        match self.peek_kind() {
+            TokenKind::Column => {
+                self.advance();
+                if !matches!(
+                    identity.object_type,
+                    ObjectType::Table
+                        | ObjectType::View
+                        | ObjectType::Matview
+                        | ObjectType::ForeignTable
+                ) {
+                    return Err(self.error_here("RENAME COLUMN is not valid for this object type"));
+                }
+                rename_type = ObjectType::Column;
+                relation_type = identity.object_type;
+                identity.subname = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("RENAME COLUMN requires a column name"))?,
+                );
+            }
+            TokenKind::Constraint => {
+                self.advance();
+                rename_type = if identity.object_type == ObjectType::Domain {
+                    ObjectType::Domconstraint
+                } else if identity.object_type == ObjectType::Table {
+                    ObjectType::Tabconstraint
+                } else {
+                    return Err(
+                        self.error_here("RENAME CONSTRAINT is only valid for a table or domain")
+                    );
+                };
+                identity.subname = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("RENAME CONSTRAINT requires a name"))?,
+                );
+            }
+            TokenKind::Attribute => {
+                self.advance();
+                if identity.object_type != ObjectType::Type {
+                    return Err(self.error_here("RENAME ATTRIBUTE is only valid for a type"));
+                }
+                rename_type = ObjectType::Attribute;
+                relation_type = ObjectType::Type;
+                identity.subname = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("RENAME ATTRIBUTE requires a name"))?,
+                );
+                let Some(Node::AArrayExpr(names)) = identity.object.as_deref() else {
+                    return Err(self.error_here("type name is not representable as a relation"));
+                };
+                identity.relation = Some(Box::new(range_var_from_parts(
+                    list_to_names(&names.elements),
+                    identity.location,
+                )));
+                identity.object = None;
+            }
+            _ if matches!(
                 identity.object_type,
                 ObjectType::Table
                     | ObjectType::View
                     | ObjectType::Matview
                     | ObjectType::ForeignTable
-            ) {
-                return Err(self.error_here("RENAME COLUMN is not valid for this object type"));
-            }
-            rename_type = ObjectType::Column;
-            relation_type = identity.object_type;
-            identity.subname = Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("RENAME COLUMN requires a column name"))?,
-            );
-        } else if self.consume(TokenKind::Constraint) {
-            rename_type = if identity.object_type == ObjectType::Domain {
-                ObjectType::Domconstraint
-            } else if identity.object_type == ObjectType::Table {
-                ObjectType::Tabconstraint
-            } else {
-                return Err(
-                    self.error_here("RENAME CONSTRAINT is only valid for a table or domain")
+            ) && !self.at(TokenKind::To) =>
+            {
+                // COLUMN is optional in PostgreSQL's RENAME [COLUMN] syntax.
+                rename_type = ObjectType::Column;
+                relation_type = identity.object_type;
+                identity.subname = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("RENAME requires a column name or TO"))?,
                 );
-            };
-            identity.subname = Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("RENAME CONSTRAINT requires a name"))?,
-            );
-        } else if self.consume(TokenKind::Attribute) {
-            if identity.object_type != ObjectType::Type {
-                return Err(self.error_here("RENAME ATTRIBUTE is only valid for a type"));
             }
-            rename_type = ObjectType::Attribute;
-            relation_type = ObjectType::Type;
-            identity.subname = Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("RENAME ATTRIBUTE requires a name"))?,
-            );
-            let Some(Node::AArrayExpr(names)) = identity.object.as_deref() else {
-                return Err(self.error_here("type name is not representable as a relation"));
-            };
-            identity.relation = Some(Box::new(range_var_from_parts(
-                list_to_names(&names.elements),
-                identity.location,
-            )));
-            identity.object = None;
-        } else if matches!(
-            identity.object_type,
-            ObjectType::Table | ObjectType::View | ObjectType::Matview | ObjectType::ForeignTable
-        ) && !self.at(TokenKind::To)
-        {
-            // COLUMN is optional in PostgreSQL's RENAME [COLUMN] syntax.
-            rename_type = ObjectType::Column;
-            relation_type = identity.object_type;
-            identity.subname = Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("RENAME requires a column name or TO"))?,
-            );
+            _ => {}
         }
         self.expect(TokenKind::To)?;
         let newname = Some(if identity.object_type == ObjectType::Role {

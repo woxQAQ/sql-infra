@@ -168,73 +168,69 @@ impl Parser {
             None
         };
         self.expect(TokenKind::Do)?;
-        let (action, lock_strength, target_list, where_clause) = if self.consume(TokenKind::Nothing)
-        {
-            (
-                OnConflictAction::Nothing,
-                LockClauseStrength::None,
-                Vec::new(),
-                None,
-            )
-        } else if self.consume(TokenKind::Update) {
-            self.expect(TokenKind::Set)?;
-            let target_list = self.parse_set_clause_list_until(&[
-                TokenKind::Where,
-                TokenKind::Returning,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?;
-            let where_clause = if self.consume(TokenKind::Where) {
-                Some(self.parse_expr_box_strict_until(&[
+        let (action, lock_strength, target_list, where_clause) = match self.peek_kind() {
+            TokenKind::Nothing => {
+                self.advance();
+                (
+                    OnConflictAction::Nothing,
+                    LockClauseStrength::None,
+                    Vec::new(),
+                    None,
+                )
+            }
+            TokenKind::Update => {
+                self.advance();
+                self.expect(TokenKind::Set)?;
+                let target_list = self.parse_set_clause_list_until(&[
+                    TokenKind::Where,
                     TokenKind::Returning,
                     TokenKind::Char(';'),
                     TokenKind::Eof,
-                ])?)
-            } else {
-                None
-            };
-            (
-                OnConflictAction::Update,
-                LockClauseStrength::None,
-                target_list,
-                where_clause,
-            )
-        } else if self.consume(TokenKind::Select) {
-            let lock_strength = if self.consume(TokenKind::For) {
-                if self.consume(TokenKind::Update) {
-                    LockClauseStrength::Forupdate
-                } else if self.consume(TokenKind::No) {
-                    self.expect(TokenKind::Key)?;
-                    self.expect(TokenKind::Update)?;
-                    LockClauseStrength::Fornokeyupdate
-                } else if self.consume(TokenKind::Share) {
-                    LockClauseStrength::Forshare
-                } else if self.consume(TokenKind::Key) {
-                    self.expect(TokenKind::Share)?;
-                    LockClauseStrength::Forkeyshare
+                ])?;
+                let where_clause = if self.consume(TokenKind::Where) {
+                    Some(self.parse_expr_box_strict_until(&[
+                        TokenKind::Returning,
+                        TokenKind::Char(';'),
+                        TokenKind::Eof,
+                    ])?)
                 } else {
-                    return Err(self.error_here("invalid ON CONFLICT SELECT locking strength"));
-                }
-            } else {
-                LockClauseStrength::None
-            };
-            let where_clause = if self.consume(TokenKind::Where) {
-                Some(self.parse_expr_box_strict_until(&[
-                    TokenKind::Returning,
-                    TokenKind::Char(';'),
-                    TokenKind::Eof,
-                ])?)
-            } else {
-                None
-            };
-            (
-                OnConflictAction::Select,
-                lock_strength,
-                Vec::new(),
-                where_clause,
-            )
-        } else {
-            return Err(self.error_here("expected NOTHING, UPDATE, or SELECT after ON CONFLICT DO"));
+                    None
+                };
+                (
+                    OnConflictAction::Update,
+                    LockClauseStrength::None,
+                    target_list,
+                    where_clause,
+                )
+            }
+            TokenKind::Select => {
+                self.advance();
+                let lock_strength = if self.consume(TokenKind::For) {
+                    self.parse_locking_strength()?
+                } else {
+                    LockClauseStrength::None
+                };
+                let where_clause = if self.consume(TokenKind::Where) {
+                    Some(self.parse_expr_box_strict_until(&[
+                        TokenKind::Returning,
+                        TokenKind::Char(';'),
+                        TokenKind::Eof,
+                    ])?)
+                } else {
+                    None
+                };
+                (
+                    OnConflictAction::Select,
+                    lock_strength,
+                    Vec::new(),
+                    where_clause,
+                )
+            }
+            _ => {
+                return Err(
+                    self.error_here("expected NOTHING, UPDATE, or SELECT after ON CONFLICT DO")
+                );
+            }
         };
         Ok(Some(Box::new(OnConflictClause {
             node_tag: NodeTag::OnConflictClause,

@@ -137,40 +137,48 @@ impl ExprParser {
             let mut sortby_dir = SortByDir::Default;
             let mut use_op = Vec::new();
             let mut location = -1;
-            if self.consume(TokenKind::Asc) {
-                sortby_dir = SortByDir::Asc;
-            } else if self.consume(TokenKind::Desc) {
-                sortby_dir = SortByDir::Desc;
-            } else if self.consume(TokenKind::Using) {
-                sortby_dir = SortByDir::Using;
-                location = self.location() as ParseLoc;
-                if self.at(TokenKind::Operator) {
-                    use_op = self.parse_explicit_operator_name()?;
-                } else {
-                    let operator = self.peek().clone();
-                    if !matches!(
-                        operator.kind,
-                        TokenKind::Op
-                            | TokenKind::Char('+')
-                            | TokenKind::Char('-')
-                            | TokenKind::Char('*')
-                            | TokenKind::Char('/')
-                            | TokenKind::Char('%')
-                            | TokenKind::Char('^')
-                            | TokenKind::Char('<')
-                            | TokenKind::Char('>')
-                            | TokenKind::Char('=')
-                            | TokenKind::LessEquals
-                            | TokenKind::GreaterEquals
-                            | TokenKind::NotEquals
-                            | TokenKind::RightArrow
-                            | TokenKind::Char('|')
-                    ) {
-                        return self.fail("ORDER BY USING requires an operator");
-                    }
+            match self.peek_kind() {
+                TokenKind::Asc => {
                     self.advance();
-                    use_op.push(make_string_node(token_text(&operator)));
+                    sortby_dir = SortByDir::Asc;
                 }
+                TokenKind::Desc => {
+                    self.advance();
+                    sortby_dir = SortByDir::Desc;
+                }
+                TokenKind::Using => {
+                    self.advance();
+                    sortby_dir = SortByDir::Using;
+                    location = self.location() as ParseLoc;
+                    if self.at(TokenKind::Operator) {
+                        use_op = self.parse_explicit_operator_name()?;
+                    } else {
+                        let operator = self.peek().clone();
+                        if !matches!(
+                            operator.kind,
+                            TokenKind::Op
+                                | TokenKind::Char('+')
+                                | TokenKind::Char('-')
+                                | TokenKind::Char('*')
+                                | TokenKind::Char('/')
+                                | TokenKind::Char('%')
+                                | TokenKind::Char('^')
+                                | TokenKind::Char('<')
+                                | TokenKind::Char('>')
+                                | TokenKind::Char('=')
+                                | TokenKind::LessEquals
+                                | TokenKind::GreaterEquals
+                                | TokenKind::NotEquals
+                                | TokenKind::RightArrow
+                                | TokenKind::Char('|')
+                        ) {
+                            return self.fail("ORDER BY USING requires an operator");
+                        }
+                        self.advance();
+                        use_op.push(make_string_node(token_text(&operator)));
+                    }
+                }
+                _ => {}
             }
             let sortby_nulls = if self.consume(TokenKind::NullsP) {
                 if self.consume(TokenKind::FirstP) {

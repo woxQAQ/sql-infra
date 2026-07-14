@@ -458,17 +458,19 @@ impl ExprParser {
             });
         }
         if !restricted && self.consume(TokenKind::Json) {
-            let item_type = if self.consume(TokenKind::ValueP) {
-                JsonValueType::Any
-            } else if self.consume(TokenKind::Array) {
-                JsonValueType::Array
-            } else if self.consume(TokenKind::ObjectP) {
-                JsonValueType::Object
-            } else if self.consume(TokenKind::Scalar) {
-                JsonValueType::Scalar
-            } else {
-                JsonValueType::Any
+            let item_type = match self.peek_kind() {
+                TokenKind::ValueP => JsonValueType::Any,
+                TokenKind::Array => JsonValueType::Array,
+                TokenKind::ObjectP => JsonValueType::Object,
+                TokenKind::Scalar => JsonValueType::Scalar,
+                _ => JsonValueType::Any,
             };
+            if matches!(
+                self.peek_kind(),
+                TokenKind::ValueP | TokenKind::Array | TokenKind::ObjectP | TokenKind::Scalar
+            ) {
+                self.advance();
+            }
             let unique_keys = if self.consume(TokenKind::With) {
                 self.expect(TokenKind::Unique)?;
                 self.consume(TokenKind::Keys);
@@ -523,28 +525,26 @@ impl ExprParser {
                 ..NullTest::default()
             }));
         }
-        let booltesttype = if self.consume(TokenKind::TrueP) {
-            Some(if negated {
+        let booltesttype = match self.peek_kind() {
+            TokenKind::TrueP => Some(if negated {
                 BoolTestType::NotTrue
             } else {
                 BoolTestType::True
-            })
-        } else if self.consume(TokenKind::FalseP) {
-            Some(if negated {
+            }),
+            TokenKind::FalseP => Some(if negated {
                 BoolTestType::NotFalse
             } else {
                 BoolTestType::False
-            })
-        } else if self.consume(TokenKind::Unknown) {
-            Some(if negated {
+            }),
+            TokenKind::Unknown => Some(if negated {
                 BoolTestType::NotUnknown
             } else {
                 BoolTestType::Unknown
-            })
-        } else {
-            None
+            }),
+            _ => None,
         };
         if let Some(booltesttype) = booltesttype {
+            self.advance();
             return Some(Node::BooleanTest(BooleanTest {
                 xpr: Expr::new(NodeTag::BooleanTest),
                 arg: Some(Box::new(lhs)),

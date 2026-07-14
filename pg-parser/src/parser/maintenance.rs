@@ -74,12 +74,13 @@ impl Parser {
             false
         };
         let is_program = self.consume(TokenKind::Program);
-        let filename = if self.at(TokenKind::SConst) {
-            self.consume_string_like()
-        } else if self.consume(TokenKind::Stdin) || self.consume(TokenKind::Stdout) {
-            None
-        } else {
-            return Err(self.error_here("COPY requires a filename, STDIN, or STDOUT"));
+        let filename = match self.peek_kind() {
+            TokenKind::SConst => self.consume_string_like(),
+            TokenKind::Stdin | TokenKind::Stdout => {
+                self.advance();
+                None
+            }
+            _ => return Err(self.error_here("COPY requires a filename, STDIN, or STDOUT")),
         };
         if is_program && filename.is_none() {
             return Err(self.error_here("STDIN/STDOUT is not allowed with PROGRAM"));

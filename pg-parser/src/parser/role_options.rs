@@ -199,109 +199,128 @@ impl Parser {
         let mut options = Vec::new();
         while !self.at_statement_end() {
             let location = self.location();
-            if self.consume(TokenKind::Password) {
-                let arg = if self.consume(TokenKind::NullP) {
-                    None
-                } else {
-                    if !self.at(TokenKind::SConst) {
-                        return Err(self.error_here("PASSWORD requires a string or NULL"));
-                    }
-                    self.consume_string_like().map(make_string_node)
-                };
-                options.push(make_def_elem("password", arg, location));
-            } else if self.consume(TokenKind::Encrypted) {
-                self.expect(TokenKind::Password)?;
-                if !self.at(TokenKind::SConst) {
-                    return Err(self.error_here("ENCRYPTED PASSWORD requires a string"));
-                }
-                let password = self.consume_string_like().unwrap_or_default();
-                options.push(make_def_elem(
-                    "password",
-                    Some(make_string_node(password)),
-                    location,
-                ));
-            } else if self.consume(TokenKind::Inherit) {
-                options.push(make_def_elem(
-                    "inherit",
-                    Some(Node::Boolean(Boolean::new(true))),
-                    location,
-                ));
-            } else if self.consume(TokenKind::Connection) {
-                self.expect(TokenKind::Limit)?;
-                let value = self.parse_signed_integer()?;
-                options.push(make_def_elem("connectionlimit", Some(value), location));
-            } else if self.consume(TokenKind::Valid) {
-                self.expect(TokenKind::Until)?;
-                if !self.at(TokenKind::SConst) {
-                    return Err(self.error_here("VALID UNTIL requires a string"));
-                }
-                let value = self.consume_string_like().unwrap_or_default();
-                options.push(make_def_elem(
-                    "validUntil",
-                    Some(make_string_node(value)),
-                    location,
-                ));
-            } else if self.consume(TokenKind::Sysid) {
-                let token = self.expect(TokenKind::IConst)?;
-                let Some(TokenValue::Integer(value)) = token.value else {
-                    return Err(ParseError::ranged(token.range, "SYSID requires an integer"));
-                };
-                options.push(make_def_elem(
-                    "sysid",
-                    Some(Node::Integer(Integer::new(value))),
-                    location,
-                ));
-            } else if matches!(
-                self.peek_kind(),
-                TokenKind::InP | TokenKind::Role | TokenKind::Admin | TokenKind::User
-            ) {
-                let defname = if self.consume(TokenKind::InP) {
-                    if !self.consume(TokenKind::Role) {
-                        self.expect(TokenKind::GroupP)?;
-                    }
-                    "addroleto"
-                } else if self.consume(TokenKind::Admin) {
-                    "adminmembers"
-                } else {
+            match self.peek_kind() {
+                TokenKind::Password => {
                     self.advance();
-                    "rolemembers"
-                };
-                let roles =
-                    self.parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
-                options.push(make_def_elem(
-                    defname,
-                    Some(Node::AArrayExpr(AArrayExpr {
-                        node_tag: NodeTag::AArrayExpr,
-                        elements: roles,
-                        ..AArrayExpr::default()
-                    })),
-                    location,
-                ));
-            } else {
-                let name = self
-                    .consume_col_label()
-                    .ok_or_else(|| self.error_here("invalid CREATE ROLE option"))?;
-                let (defname, value) = match name.as_str() {
-                    "superuser" => ("superuser", true),
-                    "nosuperuser" => ("superuser", false),
-                    "createrole" => ("createrole", true),
-                    "nocreaterole" => ("createrole", false),
-                    "createdb" => ("createdb", true),
-                    "nocreatedb" => ("createdb", false),
-                    "login" => ("canlogin", true),
-                    "nologin" => ("canlogin", false),
-                    "replication" => ("isreplication", true),
-                    "noreplication" => ("isreplication", false),
-                    "bypassrls" => ("bypassrls", true),
-                    "nobypassrls" => ("bypassrls", false),
-                    "noinherit" => ("inherit", false),
-                    _ => return Err(ParseError::new(location, "invalid CREATE ROLE option")),
-                };
-                options.push(make_def_elem(
-                    defname,
-                    Some(Node::Boolean(Boolean::new(value))),
-                    location,
-                ));
+                    let arg = if self.consume(TokenKind::NullP) {
+                        None
+                    } else {
+                        if !self.at(TokenKind::SConst) {
+                            return Err(self.error_here("PASSWORD requires a string or NULL"));
+                        }
+                        self.consume_string_like().map(make_string_node)
+                    };
+                    options.push(make_def_elem("password", arg, location));
+                }
+                TokenKind::Encrypted => {
+                    self.advance();
+                    self.expect(TokenKind::Password)?;
+                    if !self.at(TokenKind::SConst) {
+                        return Err(self.error_here("ENCRYPTED PASSWORD requires a string"));
+                    }
+                    let password = self.consume_string_like().unwrap_or_default();
+                    options.push(make_def_elem(
+                        "password",
+                        Some(make_string_node(password)),
+                        location,
+                    ));
+                }
+                TokenKind::Inherit => {
+                    self.advance();
+                    options.push(make_def_elem(
+                        "inherit",
+                        Some(Node::Boolean(Boolean::new(true))),
+                        location,
+                    ));
+                }
+                TokenKind::Connection => {
+                    self.advance();
+                    self.expect(TokenKind::Limit)?;
+                    let value = self.parse_signed_integer()?;
+                    options.push(make_def_elem("connectionlimit", Some(value), location));
+                }
+                TokenKind::Valid => {
+                    self.advance();
+                    self.expect(TokenKind::Until)?;
+                    if !self.at(TokenKind::SConst) {
+                        return Err(self.error_here("VALID UNTIL requires a string"));
+                    }
+                    let value = self.consume_string_like().unwrap_or_default();
+                    options.push(make_def_elem(
+                        "validUntil",
+                        Some(make_string_node(value)),
+                        location,
+                    ));
+                }
+                TokenKind::Sysid => {
+                    self.advance();
+                    let token = self.expect(TokenKind::IConst)?;
+                    let Some(TokenValue::Integer(value)) = token.value else {
+                        return Err(ParseError::ranged(token.range, "SYSID requires an integer"));
+                    };
+                    options.push(make_def_elem(
+                        "sysid",
+                        Some(Node::Integer(Integer::new(value))),
+                        location,
+                    ));
+                }
+                TokenKind::InP | TokenKind::Role | TokenKind::Admin | TokenKind::User => {
+                    let defname = match self.peek_kind() {
+                        TokenKind::InP => {
+                            self.advance();
+                            if !self.consume(TokenKind::Role) {
+                                self.expect(TokenKind::GroupP)?;
+                            }
+                            "addroleto"
+                        }
+                        TokenKind::Admin => {
+                            self.advance();
+                            "adminmembers"
+                        }
+                        TokenKind::Role | TokenKind::User => {
+                            self.advance();
+                            "rolemembers"
+                        }
+                        _ => unreachable!(),
+                    };
+                    let roles = self
+                        .parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+                    options.push(make_def_elem(
+                        defname,
+                        Some(Node::AArrayExpr(AArrayExpr {
+                            node_tag: NodeTag::AArrayExpr,
+                            elements: roles,
+                            ..AArrayExpr::default()
+                        })),
+                        location,
+                    ));
+                }
+                _ => {
+                    let name = self
+                        .consume_col_label()
+                        .ok_or_else(|| self.error_here("invalid CREATE ROLE option"))?;
+                    let (defname, value) = match name.as_str() {
+                        "superuser" => ("superuser", true),
+                        "nosuperuser" => ("superuser", false),
+                        "createrole" => ("createrole", true),
+                        "nocreaterole" => ("createrole", false),
+                        "createdb" => ("createdb", true),
+                        "nocreatedb" => ("createdb", false),
+                        "login" => ("canlogin", true),
+                        "nologin" => ("canlogin", false),
+                        "replication" => ("isreplication", true),
+                        "noreplication" => ("isreplication", false),
+                        "bypassrls" => ("bypassrls", true),
+                        "nobypassrls" => ("bypassrls", false),
+                        "noinherit" => ("inherit", false),
+                        _ => return Err(ParseError::new(location, "invalid CREATE ROLE option")),
+                    };
+                    options.push(make_def_elem(
+                        defname,
+                        Some(Node::Boolean(Boolean::new(value))),
+                        location,
+                    ));
+                }
             }
         }
         Ok(options)
@@ -311,84 +330,98 @@ impl Parser {
         let mut options = Vec::new();
         while !self.at_statement_end() {
             let location = self.location();
-            if self.consume(TokenKind::Password) {
-                let arg = if self.consume(TokenKind::NullP) {
-                    None
-                } else {
-                    Some(make_string_node(self.consume_required_string(
-                        "PASSWORD requires a string or NULL",
-                    )?))
-                };
-                options.push(make_def_elem("password", arg, location));
-            } else if self.consume(TokenKind::Encrypted) {
-                self.expect(TokenKind::Password)?;
-                let password =
-                    self.consume_required_string("ENCRYPTED PASSWORD requires a string")?;
-                options.push(make_def_elem(
-                    "password",
-                    Some(make_string_node(password)),
-                    location,
-                ));
-            } else if self.consume(TokenKind::Inherit) {
-                options.push(make_def_elem(
-                    "inherit",
-                    Some(Node::Boolean(Boolean::new(true))),
-                    location,
-                ));
-            } else if self.consume(TokenKind::Connection) {
-                self.expect(TokenKind::Limit)?;
-                let value = self.parse_signed_integer()?;
-                options.push(make_def_elem("connectionlimit", Some(value), location));
-            } else if self.consume(TokenKind::Valid) {
-                self.expect(TokenKind::Until)?;
-                let value = self.consume_required_string("VALID UNTIL requires a string")?;
-                options.push(make_def_elem(
-                    "validUntil",
-                    Some(make_string_node(value)),
-                    location,
-                ));
-            } else if self.consume(TokenKind::User) {
-                let members =
-                    self.parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
-                if members.is_empty() {
-                    return Err(self.error_here("USER requires at least one role"));
+            match self.peek_kind() {
+                TokenKind::Password => {
+                    self.advance();
+                    let arg = if self.consume(TokenKind::NullP) {
+                        None
+                    } else {
+                        Some(make_string_node(self.consume_required_string(
+                            "PASSWORD requires a string or NULL",
+                        )?))
+                    };
+                    options.push(make_def_elem("password", arg, location));
                 }
-                options.push(make_def_elem(
-                    "rolemembers",
-                    Some(name_list_node(members)),
-                    location,
-                ));
-            } else {
-                let option = self
-                    .consume_col_label()
-                    .ok_or_else(|| self.error_here("invalid ALTER ROLE option"))?;
-                let (name, value) = match option.as_str() {
-                    "superuser" => ("superuser", true),
-                    "nosuperuser" => ("superuser", false),
-                    "createrole" => ("createrole", true),
-                    "nocreaterole" => ("createrole", false),
-                    "createdb" => ("createdb", true),
-                    "nocreatedb" => ("createdb", false),
-                    "login" => ("canlogin", true),
-                    "nologin" => ("canlogin", false),
-                    "replication" => ("isreplication", true),
-                    "noreplication" => ("isreplication", false),
-                    "bypassrls" => ("bypassrls", true),
-                    "nobypassrls" => ("bypassrls", false),
-                    "noinherit" => ("inherit", false),
-                    "unencrypted" => {
-                        return Err(ParseError::new(
-                            location,
-                            "UNENCRYPTED PASSWORD is not supported",
-                        ));
+                TokenKind::Encrypted => {
+                    self.advance();
+                    self.expect(TokenKind::Password)?;
+                    let password =
+                        self.consume_required_string("ENCRYPTED PASSWORD requires a string")?;
+                    options.push(make_def_elem(
+                        "password",
+                        Some(make_string_node(password)),
+                        location,
+                    ));
+                }
+                TokenKind::Inherit => {
+                    self.advance();
+                    options.push(make_def_elem(
+                        "inherit",
+                        Some(Node::Boolean(Boolean::new(true))),
+                        location,
+                    ));
+                }
+                TokenKind::Connection => {
+                    self.advance();
+                    self.expect(TokenKind::Limit)?;
+                    let value = self.parse_signed_integer()?;
+                    options.push(make_def_elem("connectionlimit", Some(value), location));
+                }
+                TokenKind::Valid => {
+                    self.advance();
+                    self.expect(TokenKind::Until)?;
+                    let value = self.consume_required_string("VALID UNTIL requires a string")?;
+                    options.push(make_def_elem(
+                        "validUntil",
+                        Some(make_string_node(value)),
+                        location,
+                    ));
+                }
+                TokenKind::User => {
+                    self.advance();
+                    let members = self
+                        .parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+                    if members.is_empty() {
+                        return Err(self.error_here("USER requires at least one role"));
                     }
-                    _ => return Err(ParseError::new(location, "invalid ALTER ROLE option")),
-                };
-                options.push(make_def_elem(
-                    name,
-                    Some(Node::Boolean(Boolean::new(value))),
-                    location,
-                ));
+                    options.push(make_def_elem(
+                        "rolemembers",
+                        Some(name_list_node(members)),
+                        location,
+                    ));
+                }
+                _ => {
+                    let option = self
+                        .consume_col_label()
+                        .ok_or_else(|| self.error_here("invalid ALTER ROLE option"))?;
+                    let (name, value) = match option.as_str() {
+                        "superuser" => ("superuser", true),
+                        "nosuperuser" => ("superuser", false),
+                        "createrole" => ("createrole", true),
+                        "nocreaterole" => ("createrole", false),
+                        "createdb" => ("createdb", true),
+                        "nocreatedb" => ("createdb", false),
+                        "login" => ("canlogin", true),
+                        "nologin" => ("canlogin", false),
+                        "replication" => ("isreplication", true),
+                        "noreplication" => ("isreplication", false),
+                        "bypassrls" => ("bypassrls", true),
+                        "nobypassrls" => ("bypassrls", false),
+                        "noinherit" => ("inherit", false),
+                        "unencrypted" => {
+                            return Err(ParseError::new(
+                                location,
+                                "UNENCRYPTED PASSWORD is not supported",
+                            ));
+                        }
+                        _ => return Err(ParseError::new(location, "invalid ALTER ROLE option")),
+                    };
+                    options.push(make_def_elem(
+                        name,
+                        Some(Node::Boolean(Boolean::new(value))),
+                        location,
+                    ));
+                }
             }
         }
         Ok(options)

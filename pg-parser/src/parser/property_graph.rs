@@ -42,108 +42,128 @@ impl Parser {
             pgname,
             ..AlterPropGraphStmt::default()
         };
-        if self.consume(TokenKind::AddP) {
-            if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
+        match self.peek_kind() {
+            TokenKind::AddP => {
                 self.advance();
-                self.expect(TokenKind::Tables)?;
-                stmt.add_vertex_tables = self.parse_prop_graph_vertex_list()?;
-                if self.consume(TokenKind::AddP) {
-                    if !matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
-                        return Err(self.error_here("second ADD must introduce EDGE TABLES"));
+                if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
+                    self.advance();
+                    self.expect(TokenKind::Tables)?;
+                    stmt.add_vertex_tables = self.parse_prop_graph_vertex_list()?;
+                    if self.consume(TokenKind::AddP) {
+                        if !matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
+                            return Err(self.error_here("second ADD must introduce EDGE TABLES"));
+                        }
+                        self.advance();
+                        self.expect(TokenKind::Tables)?;
+                        stmt.add_edge_tables = self.parse_prop_graph_edge_list()?;
                     }
+                } else if matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
                     self.advance();
                     self.expect(TokenKind::Tables)?;
                     stmt.add_edge_tables = self.parse_prop_graph_edge_list()?;
-                }
-            } else if matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
-                self.advance();
-                self.expect(TokenKind::Tables)?;
-                stmt.add_edge_tables = self.parse_prop_graph_edge_list()?;
-            } else {
-                return Err(self.error_here("ADD requires VERTEX TABLES or EDGE TABLES"));
-            }
-        } else if self.consume(TokenKind::Drop) {
-            let vertex = if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
-                self.advance();
-                true
-            } else if matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
-                self.advance();
-                false
-            } else {
-                return Err(self.error_here("DROP requires VERTEX TABLES or EDGE TABLES"));
-            };
-            self.expect(TokenKind::Tables)?;
-            self.expect(TokenKind::Char('('))?;
-            let names = self.parse_parenthesized_name_list_body()?;
-            self.expect(TokenKind::Char(')'))?;
-            if vertex {
-                stmt.drop_vertex_tables = names;
-            } else {
-                stmt.drop_edge_tables = names;
-            }
-            stmt.drop_behavior = self.parse_drop_behavior();
-        } else if self.consume(TokenKind::Alter) {
-            stmt.element_kind = if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
-                self.advance();
-                AlterPropGraphElementKind::Vertex
-            } else if matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
-                self.advance();
-                AlterPropGraphElementKind::Edge
-            } else {
-                return Err(self.error_here("ALTER requires VERTEX or EDGE TABLE"));
-            };
-            self.expect(TokenKind::Table)?;
-            stmt.element_alias = Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("ALTER graph element requires an alias"))?,
-            );
-            if self.at(TokenKind::AddP) {
-                while self.consume(TokenKind::AddP) {
-                    let location = self.previous_location();
-                    self.expect(TokenKind::Label)?;
-                    let label = Some(
-                        self.consume_col_id()
-                            .ok_or_else(|| self.error_here("ADD LABEL requires a name"))?,
-                    );
-                    let properties = Some(Box::new(self.parse_prop_graph_properties()?));
-                    stmt.add_labels.push(Node::PropGraphLabelAndProperties(
-                        PropGraphLabelAndProperties {
-                            node_tag: NodeTag::PropGraphLabelAndProperties,
-                            label,
-                            properties,
-                            location: location as ParseLoc,
-                        },
-                    ));
-                }
-            } else if self.consume(TokenKind::Drop) {
-                self.expect(TokenKind::Label)?;
-                stmt.drop_label = Some(
-                    self.consume_col_id()
-                        .ok_or_else(|| self.error_here("DROP LABEL requires a name"))?,
-                );
-                stmt.drop_behavior = self.parse_drop_behavior();
-            } else if self.consume(TokenKind::Alter) {
-                self.expect(TokenKind::Label)?;
-                stmt.alter_label = Some(
-                    self.consume_col_id()
-                        .ok_or_else(|| self.error_here("ALTER LABEL requires a name"))?,
-                );
-                if self.consume(TokenKind::AddP) {
-                    stmt.add_properties = Some(Box::new(self.parse_prop_graph_add_properties()?));
-                } else if self.consume(TokenKind::Drop) {
-                    self.expect(TokenKind::Properties)?;
-                    self.expect(TokenKind::Char('('))?;
-                    stmt.drop_properties = self.parse_parenthesized_name_list_body()?;
-                    self.expect(TokenKind::Char(')'))?;
-                    stmt.drop_behavior = self.parse_drop_behavior();
                 } else {
-                    return Err(self.error_here("ALTER LABEL requires ADD or DROP PROPERTIES"));
+                    return Err(self.error_here("ADD requires VERTEX TABLES or EDGE TABLES"));
                 }
-            } else {
-                return Err(self.error_here("unsupported graph element alteration"));
             }
-        } else {
-            return Err(self.error_here("ALTER PROPERTY GRAPH requires ADD, DROP, or ALTER"));
+            TokenKind::Drop => {
+                self.advance();
+                let vertex = if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
+                    self.advance();
+                    true
+                } else if matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
+                    self.advance();
+                    false
+                } else {
+                    return Err(self.error_here("DROP requires VERTEX TABLES or EDGE TABLES"));
+                };
+                self.expect(TokenKind::Tables)?;
+                self.expect(TokenKind::Char('('))?;
+                let names = self.parse_parenthesized_name_list_body()?;
+                self.expect(TokenKind::Char(')'))?;
+                if vertex {
+                    stmt.drop_vertex_tables = names;
+                } else {
+                    stmt.drop_edge_tables = names;
+                }
+                stmt.drop_behavior = self.parse_drop_behavior();
+            }
+            TokenKind::Alter => {
+                self.advance();
+                stmt.element_kind =
+                    if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
+                        self.advance();
+                        AlterPropGraphElementKind::Vertex
+                    } else if matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship)
+                    {
+                        self.advance();
+                        AlterPropGraphElementKind::Edge
+                    } else {
+                        return Err(self.error_here("ALTER requires VERTEX or EDGE TABLE"));
+                    };
+                self.expect(TokenKind::Table)?;
+                stmt.element_alias = Some(
+                    self.consume_col_id()
+                        .ok_or_else(|| self.error_here("ALTER graph element requires an alias"))?,
+                );
+                match self.peek_kind() {
+                    TokenKind::AddP => {
+                        while self.consume(TokenKind::AddP) {
+                            let location = self.previous_location();
+                            self.expect(TokenKind::Label)?;
+                            let label = Some(
+                                self.consume_col_id()
+                                    .ok_or_else(|| self.error_here("ADD LABEL requires a name"))?,
+                            );
+                            let properties = Some(Box::new(self.parse_prop_graph_properties()?));
+                            stmt.add_labels.push(Node::PropGraphLabelAndProperties(
+                                PropGraphLabelAndProperties {
+                                    node_tag: NodeTag::PropGraphLabelAndProperties,
+                                    label,
+                                    properties,
+                                    location: location as ParseLoc,
+                                },
+                            ));
+                        }
+                    }
+                    TokenKind::Drop => {
+                        self.advance();
+                        self.expect(TokenKind::Label)?;
+                        stmt.drop_label = Some(
+                            self.consume_col_id()
+                                .ok_or_else(|| self.error_here("DROP LABEL requires a name"))?,
+                        );
+                        stmt.drop_behavior = self.parse_drop_behavior();
+                    }
+                    TokenKind::Alter => {
+                        self.advance();
+                        self.expect(TokenKind::Label)?;
+                        stmt.alter_label = Some(
+                            self.consume_col_id()
+                                .ok_or_else(|| self.error_here("ALTER LABEL requires a name"))?,
+                        );
+                        if self.consume(TokenKind::AddP) {
+                            stmt.add_properties =
+                                Some(Box::new(self.parse_prop_graph_add_properties()?));
+                        } else if self.consume(TokenKind::Drop) {
+                            self.expect(TokenKind::Properties)?;
+                            self.expect(TokenKind::Char('('))?;
+                            stmt.drop_properties = self.parse_parenthesized_name_list_body()?;
+                            self.expect(TokenKind::Char(')'))?;
+                            stmt.drop_behavior = self.parse_drop_behavior();
+                        } else {
+                            return Err(
+                                self.error_here("ALTER LABEL requires ADD or DROP PROPERTIES")
+                            );
+                        }
+                    }
+                    _ => {
+                        return Err(self.error_here("unsupported graph element alteration"));
+                    }
+                }
+            }
+            _ => {
+                return Err(self.error_here("ALTER PROPERTY GRAPH requires ADD, DROP, or ALTER"));
+            }
         }
         self.expect_statement_end()?;
         Ok(Node::AlterPropGraphStmt(stmt))

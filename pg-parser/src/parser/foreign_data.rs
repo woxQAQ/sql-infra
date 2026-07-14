@@ -129,37 +129,40 @@ impl Parser {
         let mut func_options = Vec::new();
         while !self.at_statement_end() && !self.at(TokenKind::Options) {
             let location = self.location();
-            let (name, arg) = if self.consume(TokenKind::Handler) {
-                let handler = self.parse_name_list();
-                if handler.is_empty() {
-                    return Err(self.error_here("HANDLER requires a function name"));
+            let (name, arg) = match self.peek_kind() {
+                kind @ (TokenKind::Handler | TokenKind::Validator | TokenKind::Connection) => {
+                    self.advance();
+                    let name = match kind {
+                        TokenKind::Handler => "handler",
+                        TokenKind::Validator => "validator",
+                        TokenKind::Connection => "connection",
+                        _ => unreachable!(),
+                    };
+                    let function = self.parse_name_list();
+                    if function.is_empty() {
+                        return Err(self.error_here(format!(
+                            "{} requires a function name",
+                            name.to_ascii_uppercase()
+                        )));
+                    }
+                    (name, Some(name_list_node(function)))
                 }
-                ("handler", Some(name_list_node(handler)))
-            } else if self.consume(TokenKind::Validator) {
-                let validator = self.parse_name_list();
-                if validator.is_empty() {
-                    return Err(self.error_here("VALIDATOR requires a function name"));
+                TokenKind::No => {
+                    self.advance();
+                    let name = match self.peek_kind() {
+                        TokenKind::Handler => "handler",
+                        TokenKind::Validator => "validator",
+                        TokenKind::Connection => "connection",
+                        _ => {
+                            return Err(self.error_here(
+                                "expected HANDLER, VALIDATOR, or CONNECTION after NO",
+                            ));
+                        }
+                    };
+                    self.advance();
+                    (name, None)
                 }
-                ("validator", Some(name_list_node(validator)))
-            } else if self.consume(TokenKind::Connection) {
-                let connection = self.parse_name_list();
-                if connection.is_empty() {
-                    return Err(self.error_here("CONNECTION requires a function name"));
-                }
-                ("connection", Some(name_list_node(connection)))
-            } else if self.consume(TokenKind::No) {
-                let name = if self.consume(TokenKind::Handler) {
-                    "handler"
-                } else if self.consume(TokenKind::Validator) {
-                    "validator"
-                } else if self.consume(TokenKind::Connection) {
-                    "connection"
-                } else {
-                    return Err(self.error_here("expected HANDLER, VALIDATOR, or CONNECTION"));
-                };
-                (name, None)
-            } else {
-                return Err(self.error_here("invalid FOREIGN DATA WRAPPER option"));
+                _ => return Err(self.error_here("invalid FOREIGN DATA WRAPPER option")),
             };
             func_options.push(make_def_elem(name, arg, location));
         }

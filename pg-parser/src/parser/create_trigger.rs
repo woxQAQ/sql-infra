@@ -209,48 +209,56 @@ impl Parser {
             let mut saw_deferrable = None;
             let mut saw_initially = None;
             loop {
-                if self.consume(TokenKind::Deferrable) {
-                    if saw_deferrable == Some(false) {
-                        return Err(self.error_here("conflicting constraint properties"));
-                    }
-                    saw_deferrable = Some(true);
-                    deferrable = true;
-                } else if self.consume(TokenKind::Not) {
-                    self.expect(TokenKind::Deferrable)?;
-                    if saw_deferrable == Some(true) {
-                        return Err(self.error_here("conflicting constraint properties"));
-                    }
-                    if saw_initially == Some(true) {
-                        return Err(self.error_here(
-                            "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
-                        ));
-                    }
-                    saw_deferrable = Some(false);
-                    deferrable = false;
-                } else if self.consume(TokenKind::Initially) {
-                    let deferred = if self.consume(TokenKind::Deferred) {
-                        true
-                    } else {
-                        self.expect(TokenKind::Immediate)?;
-                        false
-                    };
-                    if saw_initially.is_some_and(|previous| previous != deferred) {
-                        return Err(self.error_here("conflicting constraint properties"));
-                    }
-                    saw_initially = Some(deferred);
-                    initdeferred = deferred;
-                    if deferred {
+                match self.peek_kind() {
+                    TokenKind::Deferrable => {
+                        self.advance();
                         if saw_deferrable == Some(false) {
+                            return Err(self.error_here("conflicting constraint properties"));
+                        }
+                        saw_deferrable = Some(true);
+                        deferrable = true;
+                    }
+                    TokenKind::Not => {
+                        self.advance();
+                        self.expect(TokenKind::Deferrable)?;
+                        if saw_deferrable == Some(true) {
+                            return Err(self.error_here("conflicting constraint properties"));
+                        }
+                        if saw_initially == Some(true) {
                             return Err(self.error_here(
                                 "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
                             ));
                         }
-                        deferrable = true;
+                        saw_deferrable = Some(false);
+                        deferrable = false;
                     }
-                } else if self.consume(TokenKind::Enforced) {
-                    // Accepted by ConstraintAttributeSpec; CreateTrigStmt has no raw field for it.
-                } else {
-                    break;
+                    TokenKind::Initially => {
+                        self.advance();
+                        let deferred = if self.consume(TokenKind::Deferred) {
+                            true
+                        } else {
+                            self.expect(TokenKind::Immediate)?;
+                            false
+                        };
+                        if saw_initially.is_some_and(|previous| previous != deferred) {
+                            return Err(self.error_here("conflicting constraint properties"));
+                        }
+                        saw_initially = Some(deferred);
+                        initdeferred = deferred;
+                        if deferred {
+                            if saw_deferrable == Some(false) {
+                                return Err(self.error_here(
+                                    "constraint declared INITIALLY DEFERRED must be DEFERRABLE",
+                                ));
+                            }
+                            deferrable = true;
+                        }
+                    }
+                    TokenKind::Enforced => {
+                        self.advance();
+                        // Accepted by ConstraintAttributeSpec; CreateTrigStmt has no raw field for it.
+                    }
+                    _ => break,
                 }
             }
         }

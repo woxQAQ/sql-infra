@@ -467,23 +467,30 @@ impl Parser {
     //     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
     //     [ FOR { UPDATE | SHARE } [ OF table_name [, ...] ] [ NOWAIT ] [...] ]
     fn parse_select_into_clause(&mut self) -> PResult<IntoClause> {
-        let relpersistence = if self.consume(TokenKind::Temporary) || self.consume(TokenKind::Temp)
-        {
-            b't'
-        } else if self.consume(TokenKind::Local) {
-            if !(self.consume(TokenKind::Temporary) || self.consume(TokenKind::Temp)) {
-                return Err(self.error_here("LOCAL must be followed by TEMP or TEMPORARY"));
+        let relpersistence = match self.peek_kind() {
+            TokenKind::Temporary | TokenKind::Temp => {
+                self.advance();
+                b't'
             }
-            b't'
-        } else if self.consume(TokenKind::Global) {
-            if !(self.consume(TokenKind::Temporary) || self.consume(TokenKind::Temp)) {
-                return Err(self.error_here("GLOBAL must be followed by TEMP or TEMPORARY"));
+            scope @ (TokenKind::Local | TokenKind::Global) => {
+                self.advance();
+                if !(self.consume(TokenKind::Temporary) || self.consume(TokenKind::Temp)) {
+                    let scope = match scope {
+                        TokenKind::Local => "LOCAL",
+                        TokenKind::Global => "GLOBAL",
+                        _ => unreachable!(),
+                    };
+                    return Err(
+                        self.error_here(format!("{scope} must be followed by TEMP or TEMPORARY"))
+                    );
+                }
+                b't'
             }
-            b't'
-        } else if self.consume(TokenKind::Unlogged) {
-            b'u'
-        } else {
-            b'p'
+            TokenKind::Unlogged => {
+                self.advance();
+                b'u'
+            }
+            _ => b'p',
         };
         self.consume(TokenKind::Table);
         let mut relation = self

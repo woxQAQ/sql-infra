@@ -162,42 +162,50 @@ impl Parser {
         let mut inh_relations = Vec::new();
         let mut partbound = None;
         let mut of_typename = None;
-        let table_elts = if self.consume(TokenKind::Partition) {
-            self.expect(TokenKind::Of)?;
-            let parent = self
-                .try_parse_qualified_range_var()
-                .ok_or_else(|| self.error_here("expected a partitioned parent table"))?;
-            inh_relations.push(Node::RangeVar(parent));
-            let elements = if self.consume(TokenKind::Char('(')) {
-                self.parse_typed_table_elements()?
-            } else {
-                Vec::new()
-            };
-            partbound = Some(Box::new(self.parse_partition_bound()?));
-            elements
-        } else if self.consume(TokenKind::Of) {
-            let type_location = self.location();
-            let names = self.consume_name_parts();
-            if names.is_empty() {
-                return Err(self.error_here("CREATE TABLE OF requires a type name"));
+        let table_elts = match self.peek_kind() {
+            TokenKind::Partition => {
+                self.advance();
+                self.expect(TokenKind::Of)?;
+                let parent = self
+                    .try_parse_qualified_range_var()
+                    .ok_or_else(|| self.error_here("expected a partitioned parent table"))?;
+                inh_relations.push(Node::RangeVar(parent));
+                let elements = if self.consume(TokenKind::Char('(')) {
+                    self.parse_typed_table_elements()?
+                } else {
+                    Vec::new()
+                };
+                partbound = Some(Box::new(self.parse_partition_bound()?));
+                elements
             }
-            of_typename = Some(Box::new(TypeName {
-                node_tag: NodeTag::TypeName,
-                names: names.into_iter().map(make_string_node).collect(),
-                location: type_location as ParseLoc,
-                ..TypeName::default()
-            }));
-            if self.consume(TokenKind::Char('(')) {
-                self.parse_typed_table_elements()?
-            } else {
-                Vec::new()
+            TokenKind::Of => {
+                self.advance();
+                let type_location = self.location();
+                let names = self.consume_name_parts();
+                if names.is_empty() {
+                    return Err(self.error_here("CREATE TABLE OF requires a type name"));
+                }
+                of_typename = Some(Box::new(TypeName {
+                    node_tag: NodeTag::TypeName,
+                    names: names.into_iter().map(make_string_node).collect(),
+                    location: type_location as ParseLoc,
+                    ..TypeName::default()
+                }));
+                if self.consume(TokenKind::Char('(')) {
+                    self.parse_typed_table_elements()?
+                } else {
+                    Vec::new()
+                }
             }
-        } else if self.consume(TokenKind::Char('(')) {
-            self.parse_table_elements()?
-        } else {
-            return Err(
-                self.error_here("CREATE TABLE requires a table element list, OF, or PARTITION OF")
-            );
+            TokenKind::Char('(') => {
+                self.advance();
+                self.parse_table_elements()?
+            }
+            _ => {
+                return Err(self.error_here(
+                    "CREATE TABLE requires a table element list, OF, or PARTITION OF",
+                ));
+            }
         };
         if self.consume(TokenKind::Inherits) {
             self.expect(TokenKind::Char('('))?;

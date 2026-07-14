@@ -116,50 +116,62 @@ impl Parser {
             cfgname,
             ..AlterTsConfigurationStmt::default()
         };
-        if self.consume(TokenKind::AddP) {
-            self.expect(TokenKind::Mapping)?;
-            self.expect(TokenKind::For)?;
-            stmt.tokentype = self.parse_simple_name_list_until(&[TokenKind::With])?;
-            self.expect(TokenKind::With)?;
-            stmt.dicts = self.parse_any_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
-            stmt.kind = AlterTsConfigType::AddMapping;
-        } else if self.consume(TokenKind::Alter) {
-            self.expect(TokenKind::Mapping)?;
-            if self.consume(TokenKind::For) {
-                stmt.tokentype =
-                    self.parse_simple_name_list_until(&[TokenKind::With, TokenKind::Replace])?;
-                if self.consume(TokenKind::Replace) {
+        match self.peek_kind() {
+            TokenKind::AddP => {
+                self.advance();
+                self.expect(TokenKind::Mapping)?;
+                self.expect(TokenKind::For)?;
+                stmt.tokentype = self.parse_simple_name_list_until(&[TokenKind::With])?;
+                self.expect(TokenKind::With)?;
+                stmt.dicts =
+                    self.parse_any_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                stmt.kind = AlterTsConfigType::AddMapping;
+            }
+            TokenKind::Alter => {
+                self.advance();
+                self.expect(TokenKind::Mapping)?;
+                if self.consume(TokenKind::For) {
+                    stmt.tokentype =
+                        self.parse_simple_name_list_until(&[TokenKind::With, TokenKind::Replace])?;
+                    if self.consume(TokenKind::Replace) {
+                        let old = self.parse_one_any_name(&[TokenKind::With])?;
+                        self.expect(TokenKind::With)?;
+                        let new =
+                            self.parse_one_any_name(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                        stmt.kind = AlterTsConfigType::ReplaceDictForToken;
+                        stmt.dicts = vec![old, new];
+                        stmt.replace = true;
+                    } else {
+                        self.expect(TokenKind::With)?;
+                        stmt.kind = AlterTsConfigType::AlterMappingForToken;
+                        stmt.dicts = self
+                            .parse_any_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                        stmt.override_ = true;
+                    }
+                } else {
+                    self.expect(TokenKind::Replace)?;
                     let old = self.parse_one_any_name(&[TokenKind::With])?;
                     self.expect(TokenKind::With)?;
                     let new = self.parse_one_any_name(&[TokenKind::Char(';'), TokenKind::Eof])?;
-                    stmt.kind = AlterTsConfigType::ReplaceDictForToken;
+                    stmt.kind = AlterTsConfigType::ReplaceDict;
                     stmt.dicts = vec![old, new];
                     stmt.replace = true;
-                } else {
-                    self.expect(TokenKind::With)?;
-                    stmt.kind = AlterTsConfigType::AlterMappingForToken;
-                    stmt.dicts =
-                        self.parse_any_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
-                    stmt.override_ = true;
                 }
-            } else {
-                self.expect(TokenKind::Replace)?;
-                let old = self.parse_one_any_name(&[TokenKind::With])?;
-                self.expect(TokenKind::With)?;
-                let new = self.parse_one_any_name(&[TokenKind::Char(';'), TokenKind::Eof])?;
-                stmt.kind = AlterTsConfigType::ReplaceDict;
-                stmt.dicts = vec![old, new];
-                stmt.replace = true;
             }
-        } else if self.consume(TokenKind::Drop) {
-            self.expect(TokenKind::Mapping)?;
-            stmt.missing_ok = self.consume_if_exists()?;
-            self.expect(TokenKind::For)?;
-            stmt.tokentype =
-                self.parse_simple_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
-            stmt.kind = AlterTsConfigType::DropMapping;
-        } else {
-            return Err(self.error_here("configuration alteration requires ADD, ALTER, or DROP"));
+            TokenKind::Drop => {
+                self.advance();
+                self.expect(TokenKind::Mapping)?;
+                stmt.missing_ok = self.consume_if_exists()?;
+                self.expect(TokenKind::For)?;
+                stmt.tokentype =
+                    self.parse_simple_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                stmt.kind = AlterTsConfigType::DropMapping;
+            }
+            _ => {
+                return Err(
+                    self.error_here("configuration alteration requires ADD, ALTER, or DROP")
+                );
+            }
         }
         self.expect_statement_end()?;
         Ok(Node::AlterTsConfigurationStmt(stmt))

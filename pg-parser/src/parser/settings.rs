@@ -298,24 +298,31 @@ impl Parser {
     // SHOW ALL
     pub(super) fn parse_variable_show(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Show)?;
-        let name = if self.consume(TokenKind::All) {
-            Some("all".to_owned())
-        } else if self.consume(TokenKind::Time) {
-            self.expect(TokenKind::Zone)?;
-            Some("timezone".to_owned())
-        } else if self.consume(TokenKind::Transaction) {
-            self.expect(TokenKind::Isolation)?;
-            self.expect(TokenKind::Level)?;
-            Some("transaction_isolation".to_owned())
-        } else if self.consume(TokenKind::Session) {
-            self.expect(TokenKind::Authorization)?;
-            Some("session_authorization".to_owned())
-        } else {
-            Some(
-                self.consume_setting_name()
-                    .ok_or_else(|| self.error_here("SHOW requires a parameter name"))?,
-            )
-        };
+        let name = Some(match self.peek_kind() {
+            TokenKind::All => {
+                self.advance();
+                "all".to_owned()
+            }
+            TokenKind::Time => {
+                self.advance();
+                self.expect(TokenKind::Zone)?;
+                "timezone".to_owned()
+            }
+            TokenKind::Transaction => {
+                self.advance();
+                self.expect(TokenKind::Isolation)?;
+                self.expect(TokenKind::Level)?;
+                "transaction_isolation".to_owned()
+            }
+            TokenKind::Session => {
+                self.advance();
+                self.expect(TokenKind::Authorization)?;
+                "session_authorization".to_owned()
+            }
+            _ => self
+                .consume_setting_name()
+                .ok_or_else(|| self.error_here("SHOW requires a parameter name"))?,
+        });
         self.expect_statement_end()?;
         Ok(Node::VariableShowStmt(VariableShowStmt {
             node_tag: NodeTag::VariableShowStmt,

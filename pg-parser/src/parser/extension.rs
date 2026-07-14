@@ -18,34 +18,41 @@ impl Parser {
         let mut options = Vec::new();
         while !self.at_statement_end() {
             let location = self.location();
-            if self.consume(TokenKind::Schema) {
-                let schema = self
-                    .consume_col_id()
-                    .ok_or_else(|| self.error_here("SCHEMA requires a name"))?;
-                options.push(make_def_elem(
-                    "schema",
-                    Some(make_string_node(schema)),
-                    location,
-                ));
-            } else if self.consume(TokenKind::VersionP) {
-                let version = self
-                    .consume_non_reserved_word_or_sconst()
-                    .ok_or_else(|| self.error_here("VERSION requires a value"))?;
-                options.push(make_def_elem(
-                    "new_version",
-                    Some(make_string_node(version)),
-                    location,
-                ));
-            } else if self.consume(TokenKind::Cascade) {
-                options.push(make_def_elem(
-                    "cascade",
-                    Some(Node::Boolean(Boolean::new(true))),
-                    location,
-                ));
-            } else if self.consume(TokenKind::From) {
-                return Err(self.error_here("CREATE EXTENSION FROM is no longer supported"));
-            } else {
-                return Err(self.error_here("invalid CREATE EXTENSION option"));
+            match self.peek_kind() {
+                TokenKind::Schema => {
+                    self.advance();
+                    let schema = self
+                        .consume_col_id()
+                        .ok_or_else(|| self.error_here("SCHEMA requires a name"))?;
+                    options.push(make_def_elem(
+                        "schema",
+                        Some(make_string_node(schema)),
+                        location,
+                    ));
+                }
+                TokenKind::VersionP => {
+                    self.advance();
+                    let version = self
+                        .consume_non_reserved_word_or_sconst()
+                        .ok_or_else(|| self.error_here("VERSION requires a value"))?;
+                    options.push(make_def_elem(
+                        "new_version",
+                        Some(make_string_node(version)),
+                        location,
+                    ));
+                }
+                TokenKind::Cascade => {
+                    self.advance();
+                    options.push(make_def_elem(
+                        "cascade",
+                        Some(Node::Boolean(Boolean::new(true))),
+                        location,
+                    ));
+                }
+                TokenKind::From => {
+                    return Err(self.error_here("CREATE EXTENSION FROM is no longer supported"));
+                }
+                _ => return Err(self.error_here("invalid CREATE EXTENSION option")),
             }
         }
         Ok(Node::CreateExtensionStmt(CreateExtensionStmt {

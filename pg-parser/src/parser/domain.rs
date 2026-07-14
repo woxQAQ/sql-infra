@@ -174,23 +174,31 @@ impl Parser {
             }
             TokenKind::Drop => {
                 self.advance();
-                if self.consume(TokenKind::Default) {
-                    stmt.subtype = AlterDomainType::AlterDefault;
-                } else if self.consume(TokenKind::Not) {
-                    self.expect(TokenKind::NullP)?;
-                    stmt.subtype = AlterDomainType::DropNotNull;
-                } else if self.consume(TokenKind::Constraint) {
-                    stmt.subtype = AlterDomainType::DropConstraint;
-                    stmt.missing_ok = self.consume_if_exists()?;
-                    stmt.name = Some(
-                        self.consume_col_id()
-                            .ok_or_else(|| self.error_here("DROP CONSTRAINT requires a name"))?,
-                    );
-                    stmt.behavior = self.parse_drop_behavior();
-                } else {
-                    return Err(self.error_here(
-                        "ALTER DOMAIN DROP requires DEFAULT, NOT NULL, or CONSTRAINT",
-                    ));
+                match self.peek_kind() {
+                    TokenKind::Default => {
+                        self.advance();
+                        stmt.subtype = AlterDomainType::AlterDefault;
+                    }
+                    TokenKind::Not => {
+                        self.advance();
+                        self.expect(TokenKind::NullP)?;
+                        stmt.subtype = AlterDomainType::DropNotNull;
+                    }
+                    TokenKind::Constraint => {
+                        self.advance();
+                        stmt.subtype = AlterDomainType::DropConstraint;
+                        stmt.missing_ok = self.consume_if_exists()?;
+                        stmt.name =
+                            Some(self.consume_col_id().ok_or_else(|| {
+                                self.error_here("DROP CONSTRAINT requires a name")
+                            })?);
+                        stmt.behavior = self.parse_drop_behavior();
+                    }
+                    _ => {
+                        return Err(self.error_here(
+                            "ALTER DOMAIN DROP requires DEFAULT, NOT NULL, or CONSTRAINT",
+                        ));
+                    }
                 }
             }
             TokenKind::AddP => {

@@ -179,32 +179,40 @@ impl Parser {
         stops: &[TokenKind],
     ) -> PResult<VariableSetStmt> {
         if self.consume(TokenKind::Reset) {
-            let (kind, name) = if self.consume(TokenKind::All) {
-                (VariableSetKind::ResetAll, None)
-            } else if self.consume(TokenKind::Time) {
-                self.expect(TokenKind::Zone)?;
-                (VariableSetKind::Reset, Some("timezone".to_owned()))
-            } else if self.consume(TokenKind::Transaction) {
-                self.expect(TokenKind::Isolation)?;
-                self.expect(TokenKind::Level)?;
-                (
-                    VariableSetKind::Reset,
-                    Some("transaction_isolation".to_owned()),
-                )
-            } else if self.consume(TokenKind::Session) {
-                self.expect(TokenKind::Authorization)?;
-                (
-                    VariableSetKind::Reset,
-                    Some("session_authorization".to_owned()),
-                )
-            } else {
-                (
+            let (kind, name) = match self.peek_kind() {
+                TokenKind::All => {
+                    self.advance();
+                    (VariableSetKind::ResetAll, None)
+                }
+                TokenKind::Time => {
+                    self.advance();
+                    self.expect(TokenKind::Zone)?;
+                    (VariableSetKind::Reset, Some("timezone".to_owned()))
+                }
+                TokenKind::Transaction => {
+                    self.advance();
+                    self.expect(TokenKind::Isolation)?;
+                    self.expect(TokenKind::Level)?;
+                    (
+                        VariableSetKind::Reset,
+                        Some("transaction_isolation".to_owned()),
+                    )
+                }
+                TokenKind::Session => {
+                    self.advance();
+                    self.expect(TokenKind::Authorization)?;
+                    (
+                        VariableSetKind::Reset,
+                        Some("session_authorization".to_owned()),
+                    )
+                }
+                _ => (
                     VariableSetKind::Reset,
                     Some(
                         self.consume_setting_name()
                             .ok_or_else(|| self.error_here("RESET requires a parameter name"))?,
                     ),
-                )
+                ),
             };
             return Ok(VariableSetStmt {
                 node_tag: NodeTag::VariableSetStmt,

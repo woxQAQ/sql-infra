@@ -332,16 +332,14 @@ impl Parser {
         }
         if self.consume(TokenKind::TextP) {
             self.expect(TokenKind::Search)?;
-            let objtype = if self.consume(TokenKind::Parser) {
-                ObjectType::Tsparser
-            } else if self.consume(TokenKind::Dictionary) {
-                ObjectType::Tsdictionary
-            } else if self.consume(TokenKind::Template) {
-                ObjectType::Tstemplate
-            } else {
-                self.expect(TokenKind::Configuration)?;
-                ObjectType::Tsconfiguration
+            let objtype = match self.peek_kind() {
+                TokenKind::Parser => ObjectType::Tsparser,
+                TokenKind::Dictionary => ObjectType::Tsdictionary,
+                TokenKind::Template => ObjectType::Tstemplate,
+                TokenKind::Configuration => ObjectType::Tsconfiguration,
+                _ => return Err(self.error_here("invalid TEXT SEARCH object type")),
             };
+            self.advance();
             return Ok((objtype, DescribedIdentityKind::AnyName));
         }
         let objtype = match self.peek_kind() {

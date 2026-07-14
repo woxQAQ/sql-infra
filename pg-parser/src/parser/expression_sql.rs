@@ -235,45 +235,53 @@ impl ExprParser {
             }));
         }
         let first = self.parse_expr(36)?;
-        let args = if self.consume(TokenKind::From) {
-            let second = self.parse_expr(0)?;
-            let mut args = vec![first, second];
-            if self.consume(TokenKind::For) {
-                args.push(self.parse_expr(0)?);
+        let args = match self.peek_kind() {
+            TokenKind::From => {
+                self.advance();
+                let second = self.parse_expr(0)?;
+                let mut args = vec![first, second];
+                if self.consume(TokenKind::For) {
+                    args.push(self.parse_expr(0)?);
+                }
+                args
             }
-            args
-        } else if self.consume(TokenKind::For) {
-            let count = self.parse_expr(0)?;
-            vec![
-                first,
-                Node::AConst(AConst::integer(1, -1)),
-                Node::TypeCast(TypeCast {
-                    node_tag: NodeTag::TypeCast,
-                    arg: Some(Box::new(count)),
-                    type_name: Some(Box::new(TypeName {
-                        node_tag: NodeTag::TypeName,
-                        names: system_type_names("int4"),
+            TokenKind::For => {
+                self.advance();
+                let count = self.parse_expr(0)?;
+                vec![
+                    first,
+                    Node::AConst(AConst::integer(1, -1)),
+                    Node::TypeCast(TypeCast {
+                        node_tag: NodeTag::TypeCast,
+                        arg: Some(Box::new(count)),
+                        type_name: Some(Box::new(TypeName {
+                            node_tag: NodeTag::TypeName,
+                            names: system_type_names("int4"),
+                            location: -1,
+                            ..TypeName::default()
+                        })),
                         location: -1,
-                        ..TypeName::default()
-                    })),
-                    location: -1,
-                }),
-            ]
-        } else if self.consume(TokenKind::Similar) {
-            let pattern = self.parse_expr(36)?;
-            self.expect(TokenKind::Escape)?;
-            let escape = self.parse_expr(36)?;
-            vec![first, pattern, escape]
-        } else {
-            let args = self.parse_plain_function_arguments_after(first)?;
-            self.expect(TokenKind::Char(')'))?;
-            return Some(Node::FuncCall(FuncCall {
-                node_tag: NodeTag::FuncCall,
-                funcname: vec![make_string_node("substring")],
-                args,
-                location: location as ParseLoc,
-                ..FuncCall::default()
-            }));
+                    }),
+                ]
+            }
+            TokenKind::Similar => {
+                self.advance();
+                let pattern = self.parse_expr(36)?;
+                self.expect(TokenKind::Escape)?;
+                let escape = self.parse_expr(36)?;
+                vec![first, pattern, escape]
+            }
+            _ => {
+                let args = self.parse_plain_function_arguments_after(first)?;
+                self.expect(TokenKind::Char(')'))?;
+                return Some(Node::FuncCall(FuncCall {
+                    node_tag: NodeTag::FuncCall,
+                    funcname: vec![make_string_node("substring")],
+                    args,
+                    location: location as ParseLoc,
+                    ..FuncCall::default()
+                }));
+            }
         };
         self.expect(TokenKind::Char(')'))?;
         Some(self.make_sql_syntax_call("substring", args, location))

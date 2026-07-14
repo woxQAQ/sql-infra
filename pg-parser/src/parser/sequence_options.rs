@@ -90,15 +90,18 @@ impl Parser {
                 }
                 TokenKind::No => {
                     self.advance();
-                    if self.consume(TokenKind::Cycle) {
-                        ("cycle", Some(Node::Boolean(Boolean::new(false))))
-                    } else if self.consume(TokenKind::Maxvalue) {
-                        ("maxvalue", None)
-                    } else if self.consume(TokenKind::Minvalue) {
-                        ("minvalue", None)
-                    } else {
-                        return Err(self.error_here("expected CYCLE, MAXVALUE, or MINVALUE"));
-                    }
+                    let option = match self.peek_kind() {
+                        TokenKind::Cycle => ("cycle", Some(Node::Boolean(Boolean::new(false)))),
+                        TokenKind::Maxvalue => ("maxvalue", None),
+                        TokenKind::Minvalue => ("minvalue", None),
+                        _ => {
+                            return Err(
+                                self.error_here("expected CYCLE, MAXVALUE, or MINVALUE after NO")
+                            );
+                        }
+                    };
+                    self.advance();
+                    option
                 }
                 TokenKind::Increment => {
                     self.advance();

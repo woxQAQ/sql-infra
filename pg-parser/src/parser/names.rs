@@ -298,7 +298,16 @@ impl Parser {
                 self.advance();
                 return Some(ObjectType::Propgraph);
             }
-            TokenKind::TextP if self.peek_kind_n(1) == TokenKind::Search => {
+            TokenKind::TextP
+                if self.peek_kind_n(1) == TokenKind::Search
+                    && matches!(
+                        self.peek_kind_n(2),
+                        TokenKind::Parser
+                            | TokenKind::Dictionary
+                            | TokenKind::Template
+                            | TokenKind::Configuration
+                    ) =>
+            {
                 self.advance();
                 self.advance();
                 let ty = match self.advance().kind {
@@ -306,7 +315,7 @@ impl Parser {
                     TokenKind::Dictionary => ObjectType::Tsdictionary,
                     TokenKind::Template => ObjectType::Tstemplate,
                     TokenKind::Configuration => ObjectType::Tsconfiguration,
-                    _ => return None,
+                    _ => unreachable!(),
                 };
                 return Some(ty);
             }
@@ -399,6 +408,7 @@ impl Parser {
     }
 
     pub(super) fn consume_role_spec(&mut self) -> Option<RoleSpec> {
+        let start = self.pos;
         let location = self.location();
         let roletype = match self.peek_kind() {
             TokenKind::CurrentRole => {
@@ -432,6 +442,7 @@ impl Parser {
         };
         self.consume_non_reserved_word().and_then(|rolename| {
             if rolename == "none" {
+                self.pos = start;
                 return None;
             }
             let roletype = if rolename == "public" {
@@ -582,9 +593,14 @@ impl Parser {
     }
 
     pub(super) fn consume_setting_name(&mut self) -> Option<std::string::String> {
+        let start = self.pos;
         let mut parts = vec![self.consume_col_id()?];
         while self.consume(TokenKind::Char('.')) {
-            parts.push(self.consume_col_id()?);
+            let Some(part) = self.consume_col_id() else {
+                self.pos = start;
+                return None;
+            };
+            parts.push(part);
         }
         Some(parts.join("."))
     }

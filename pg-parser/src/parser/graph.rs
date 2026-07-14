@@ -95,45 +95,35 @@ impl Parser {
                 ..GraphElementPattern::default()
             });
         }
-        let (kind, close) = if self.consume(TokenKind::Char('(')) {
-            (
-                GraphElementPatternKind::VertexPattern,
-                Some(TokenKind::Char(')')),
-            )
-        } else if self.consume(TokenKind::Char('<')) {
-            self.expect(TokenKind::Char('-'))?;
-            if self.consume(TokenKind::Char('[')) {
+        let (kind, close) = match self.peek_kind() {
+            TokenKind::Char('(') => {
+                self.advance();
                 (
-                    GraphElementPatternKind::EdgePatternLeft,
-                    Some(TokenKind::Char(']')),
+                    GraphElementPatternKind::VertexPattern,
+                    Some(TokenKind::Char(')')),
                 )
-            } else {
-                let quantifier = self.parse_graph_pattern_quantifier()?;
-                return Ok(GraphElementPattern {
-                    node_tag: NodeTag::GraphElementPattern,
-                    kind: GraphElementPatternKind::EdgePatternLeft,
-                    quantifier,
-                    location: location as ParseLoc,
-                    ..GraphElementPattern::default()
-                });
             }
-        } else if self.consume(TokenKind::RightArrow) {
-            let quantifier = self.parse_graph_pattern_quantifier()?;
-            return Ok(GraphElementPattern {
-                node_tag: NodeTag::GraphElementPattern,
-                kind: GraphElementPatternKind::EdgePatternRight,
-                quantifier,
-                location: location as ParseLoc,
-                ..GraphElementPattern::default()
-            });
-        } else {
-            self.expect(TokenKind::Char('-'))?;
-            if self.consume(TokenKind::Char('[')) {
-                (
-                    GraphElementPatternKind::EdgePatternAny,
-                    Some(TokenKind::Char(']')),
-                )
-            } else if self.consume(TokenKind::Char('>')) {
+            TokenKind::Char('<') => {
+                self.advance();
+                self.expect(TokenKind::Char('-'))?;
+                if self.consume(TokenKind::Char('[')) {
+                    (
+                        GraphElementPatternKind::EdgePatternLeft,
+                        Some(TokenKind::Char(']')),
+                    )
+                } else {
+                    let quantifier = self.parse_graph_pattern_quantifier()?;
+                    return Ok(GraphElementPattern {
+                        node_tag: NodeTag::GraphElementPattern,
+                        kind: GraphElementPatternKind::EdgePatternLeft,
+                        quantifier,
+                        location: location as ParseLoc,
+                        ..GraphElementPattern::default()
+                    });
+                }
+            }
+            TokenKind::RightArrow => {
+                self.advance();
                 let quantifier = self.parse_graph_pattern_quantifier()?;
                 return Ok(GraphElementPattern {
                     node_tag: NodeTag::GraphElementPattern,
@@ -142,16 +132,35 @@ impl Parser {
                     location: location as ParseLoc,
                     ..GraphElementPattern::default()
                 });
-            } else {
-                let quantifier = self.parse_graph_pattern_quantifier()?;
-                return Ok(GraphElementPattern {
-                    node_tag: NodeTag::GraphElementPattern,
-                    kind: GraphElementPatternKind::EdgePatternAny,
-                    quantifier,
-                    location: location as ParseLoc,
-                    ..GraphElementPattern::default()
-                });
             }
+            TokenKind::Char('-') => {
+                self.advance();
+                if self.consume(TokenKind::Char('[')) {
+                    (
+                        GraphElementPatternKind::EdgePatternAny,
+                        Some(TokenKind::Char(']')),
+                    )
+                } else if self.consume(TokenKind::Char('>')) {
+                    let quantifier = self.parse_graph_pattern_quantifier()?;
+                    return Ok(GraphElementPattern {
+                        node_tag: NodeTag::GraphElementPattern,
+                        kind: GraphElementPatternKind::EdgePatternRight,
+                        quantifier,
+                        location: location as ParseLoc,
+                        ..GraphElementPattern::default()
+                    });
+                } else {
+                    let quantifier = self.parse_graph_pattern_quantifier()?;
+                    return Ok(GraphElementPattern {
+                        node_tag: NodeTag::GraphElementPattern,
+                        kind: GraphElementPatternKind::EdgePatternAny,
+                        quantifier,
+                        location: location as ParseLoc,
+                        ..GraphElementPattern::default()
+                    });
+                }
+            }
+            _ => return Err(self.error_here("expected a graph vertex or edge pattern")),
         };
 
         let variable = if close.is_some_and(|close| self.at(close))

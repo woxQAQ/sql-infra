@@ -309,6 +309,14 @@ impl Parser {
 // suffices to choose a production branch; a few ambiguous spots use
 // `peek_kind_n` / `has_top_level_token_before` for bounded extra lookahead.
 // No backtracking.
+//
+// Production code follows these cursor conventions:
+// - `consume` expresses optional syntax, repetition, delimiters, and compact
+//   binary choices;
+// - `match peek_kind()` dispatches required or multi-way grammar alternatives;
+// - `expect` consumes mandatory tokens after a production has been selected;
+// - fallible `consume_* -> Option<_>` helpers leave the cursor unchanged when
+//   returning `None`.
 
 impl Parser {
     /// Consume tokens from the current position until a **top-level** token in
@@ -614,6 +622,24 @@ mod tests {
             *stmts[1].stmt.clone().unwrap(),
             Node::SelectStmt(_)
         ));
+    }
+
+    #[test]
+    fn optional_consume_helpers_do_not_advance_when_they_return_none() {
+        let mut setting = Parser::new("foo.").unwrap();
+        let start = setting.pos;
+        assert_eq!(setting.consume_setting_name(), None);
+        assert_eq!(setting.pos, start);
+
+        let mut role = Parser::new("none").unwrap();
+        let start = role.pos;
+        assert_eq!(role.consume_role_spec(), None);
+        assert_eq!(role.pos, start);
+
+        let mut object_type = Parser::new("text search unknown").unwrap();
+        let start = object_type.pos;
+        assert_eq!(object_type.consume_object_type(), None);
+        assert_eq!(object_type.pos, start);
     }
 
     #[test]
