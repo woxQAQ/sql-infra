@@ -61,7 +61,7 @@ fn parse_expression_select(parser: &mut Parser) -> PResult<SelectStmt> {
         .first()
         .map_or_else(|| parser.location(), |token| token.location());
     tokens.insert(0, Token::synthetic(TokenKind::Select, location));
-    match parse_statement_node_tokens(tokens)? {
+    match parse_transformed_statement_tokens(tokens)? {
         Node::SelectStmt(select) => Ok(select),
         _ => unreachable!("synthetic SELECT must produce SelectStmt"),
     }

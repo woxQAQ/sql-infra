@@ -48,13 +48,17 @@ impl Parser {
             }
             Node::RangeVar(self.parse_relation_expr(true)?)
         } else if self.consume(TokenKind::Char('(')) {
-            let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
-            self.expect(TokenKind::Char(')'))?;
+            let inner = self.take_until_top_level_range(&[TokenKind::Char(')')]);
             if matches!(
-                inner.first().map(|token| token.kind),
+                self.tokens.get(inner.start).map(|token| token.kind),
                 Some(TokenKind::With | TokenKind::Select | TokenKind::Values | TokenKind::Table)
             ) {
-                let subquery = parse_select_statement_tokens(inner)?;
+                let mut nested = self.bounded_view(inner);
+                let subquery = nested.parse_statement(None)?;
+                if !nested.at(TokenKind::Eof) || !matches!(subquery, Node::SelectStmt(_)) {
+                    return Err(nested.error_here("expected a complete SELECT statement"));
+                }
+                self.expect(TokenKind::Char(')'))?;
                 Node::RangeSubselect(RangeSubselect {
                     node_tag: NodeTag::RangeSubselect,
                     lateral,
@@ -62,17 +66,11 @@ impl Parser {
                     alias: self.parse_optional_alias_clause()?,
                 })
             } else {
-                let item_location = inner
-                    .first()
-                    .map_or(self.location(), |token| token.location());
-                let location = inner.last().map_or(self.location(), Token::end_location);
-                let mut tokens = inner;
-                tokens.push(Token::synthetic(TokenKind::Eof, location));
-                let mut nested = Parser {
-                    tokens,
-                    pos: 0,
-                    completion: self.completion.clone(),
-                };
+                let item_location = self
+                    .tokens
+                    .get(inner.start)
+                    .map_or(self.location(), Token::location);
+                let mut nested = self.bounded_view(inner);
                 let mut item = nested.parse_from_item(&[TokenKind::Eof])?;
                 if !nested.at(TokenKind::Eof) {
                     return Err(ParseError::new(
@@ -86,6 +84,7 @@ impl Parser {
                         "parenthesized FROM item must be a joined table or subquery",
                     ));
                 }
+                self.expect(TokenKind::Char(')'))?;
                 if lateral {
                     match &mut item {
                         Node::RangeSubselect(range) => range.lateral = true,
@@ -216,12 +215,12 @@ impl Parser {
         self.expect(TokenKind::Char('('))?;
         let mut functions = Vec::new();
         loop {
-            let expression_tokens = self.take_until_top_level(&[
+            let expression_range = self.take_until_top_level_range(&[
                 TokenKind::As,
                 TokenKind::Char(','),
                 TokenKind::Char(')'),
             ]);
-            let expression = parse_expression_tokens(expression_tokens)?;
+            let expression = self.parse_expression_range(expression_range)?;
             if !is_function_expression_node(&expression) {
                 return Err(self.error_here("ROWS FROM items must be function expressions"));
             }

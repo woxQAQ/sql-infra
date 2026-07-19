@@ -45,9 +45,9 @@ impl Parser {
             if leading_binary {
                 return Err(self.error_here("BINARY is not allowed before a COPY query"));
             }
-            let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let range = self.take_until_top_level_range(&[TokenKind::Char(')')]);
+            let query = self.parse_preparable_statement_range(range)?;
             self.expect(TokenKind::Char(')'))?;
-            let query = parse_preparable_statement_tokens(tokens)?;
             (None, Some(Box::new(query)), Vec::new())
         } else {
             let relation = Some(Box::new(
@@ -156,9 +156,13 @@ impl Parser {
             let mut options = Vec::new();
             loop {
                 let location = self.location();
-                let tokens =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                options.push(Node::DefElem(parse_copy_generic_option(tokens, location)?));
+                let range =
+                    self.take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                let mut nested = self.bounded_view(range);
+                options.push(Node::DefElem(parse_copy_generic_option(
+                    &mut nested,
+                    location,
+                )?));
                 if !self.consume(TokenKind::Char(',')) {
                     break;
                 }
@@ -795,14 +799,7 @@ impl Parser {
     }
 }
 
-fn parse_copy_generic_option(mut tokens: Vec<Token>, location: usize) -> PResult<DefElem> {
-    let eof_location = tokens.last().map_or(location, Token::end_location);
-    tokens.push(Token::synthetic(TokenKind::Eof, eof_location));
-    let mut parser = Parser {
-        tokens,
-        pos: 0,
-        completion: None,
-    };
+fn parse_copy_generic_option(parser: &mut Parser, location: usize) -> PResult<DefElem> {
     let name = if parser.consume(TokenKind::FormatLa) {
         "format".to_owned()
     } else {

@@ -41,12 +41,12 @@ impl Parser {
         let mut items = Vec::new();
         while !self.at_any(stops) {
             let location = self.location();
-            let tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
-            if tokens.is_empty() {
+            let range = self.take_until_top_level_range(&extend_stops(stops, TokenKind::Char(',')));
+            if range.is_empty() {
                 return Err(self.error_here("expected an expression"));
             }
-            let (name, expr_tokens) = split_target_alias(tokens);
-            let val = match self.parse_expression_tokens_with_completion(expr_tokens)? {
+            let (name, expr_range) = self.split_target_alias_range(range);
+            let val = match self.parse_expression_range(expr_range)? {
                 Node::AStar(star) => Node::ColumnRef(ColumnRef {
                     node_tag: NodeTag::ColumnRef,
                     fields: vec![Node::AStar(star)],
@@ -80,11 +80,11 @@ impl Parser {
         }
         let mut items = Vec::new();
         while !self.at_any(stops) {
-            let tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
-            if tokens.is_empty() {
+            let range = self.take_until_top_level_range(&extend_stops(stops, TokenKind::Char(',')));
+            if range.is_empty() {
                 return Err(self.error_here("expected an expression"));
             }
-            items.push(self.parse_expression_tokens_with_completion(tokens)?);
+            items.push(self.parse_expression_range(range)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
@@ -160,8 +160,8 @@ impl Parser {
             }));
         }
 
-        let tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
-        self.parse_expression_tokens_with_completion(tokens)
+        let range = self.take_until_top_level_range(&extend_stops(stops, TokenKind::Char(',')));
+        self.parse_expression_range(range)
     }
 
     pub(super) fn parse_expr_box_strict_until(
@@ -171,44 +171,50 @@ impl Parser {
         if self.at_completion_cursor() {
             self.record_expression_completion();
         }
-        let tokens = self.take_until_top_level(stops);
-        self.parse_expression_tokens_with_completion(tokens)
-            .map(Box::new)
+        let range = self.take_until_top_level_range(stops);
+        self.parse_expression_range(range).map(Box::new)
     }
 
     pub(super) fn parse_b_expr_box_strict_until(
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<Box<Node>> {
-        let tokens = self.take_until_top_level(stops);
-        parse_b_expression_tokens(tokens).map(Box::new)
+        let range = self.take_until_top_level_range(stops);
+        self.parse_b_expression_range(range).map(Box::new)
     }
 
     pub(super) fn parse_sort_list_strict_until(
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
+        if self.at_completion_cursor() {
+            self.record_expression_completion();
+        }
         let mut items = Vec::new();
         while !self.at_any(stops) {
-            let mut tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
+            let range = self.take_until_top_level_range(&extend_stops(stops, TokenKind::Char(',')));
+            let mut expression_end = range.end;
             let mut location = -1;
             let mut sortby_dir = SortByDir::Default;
             let mut sortby_nulls = SortByNulls::Default;
             let mut use_op = Vec::new();
-            if tokens.len() >= 2 && tokens[tokens.len() - 2].kind == TokenKind::NullsP {
-                sortby_nulls = match tokens.last().map(|token| token.kind) {
-                    Some(TokenKind::FirstP) => SortByNulls::First,
-                    Some(TokenKind::LastP) => SortByNulls::Last,
+            if expression_end.saturating_sub(range.start) >= 2
+                && self.tokens[expression_end - 2].kind == TokenKind::NullsP
+            {
+                sortby_nulls = match self.tokens[expression_end - 1].kind {
+                    TokenKind::FirstP => SortByNulls::First,
+                    TokenKind::LastP => SortByNulls::Last,
                     _ => {
                         return Err(ParseError::ranged(
-                            tokens[tokens.len() - 2].range,
+                            self.tokens[expression_end - 2].range,
                             "NULLS requires FIRST or LAST",
                         ));
                     }
                 };
-                tokens.truncate(tokens.len() - 2);
+                expression_end -= 2;
             }
-            if let Some(token) = tokens.last()
+            if let Some(token) = self.tokens.get(expression_end.saturating_sub(1))
+                && expression_end > range.start
                 && (token.kind == TokenKind::Asc || token.kind == TokenKind::Desc)
             {
                 sortby_dir = if token.kind == TokenKind::Asc {
@@ -216,22 +222,33 @@ impl Parser {
                 } else {
                     SortByDir::Desc
                 };
-                tokens.pop();
+                expression_end -= 1;
             }
             if sortby_dir == SortByDir::Default
-                && let Some(using_index) = find_top_level_token(&tokens, TokenKind::Using)
+                && let Some(relative_using_index) = find_top_level_token(
+                    &self.tokens[range.start..expression_end],
+                    TokenKind::Using,
+                )
             {
-                let missing_operator_location = tokens[using_index].end_location();
-                let mut operator_tokens = tokens.split_off(using_index + 1);
-                tokens.pop();
-                location = operator_tokens
-                    .first()
+                let using_index = range.start + relative_using_index;
+                let missing_operator_location = self.tokens[using_index].end_location();
+                let mut operator_start = using_index + 1;
+                let mut operator_end = expression_end;
+                location = self
+                    .tokens
+                    .get(operator_start)
                     .map_or(missing_operator_location as ParseLoc, |token| {
                         token.location() as ParseLoc
                     });
-                if operator_tokens.first().map(|token| token.kind) == Some(TokenKind::Operator) {
-                    if operator_tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('('))
-                        || operator_tokens.last().map(|token| token.kind)
+                if self.tokens.get(operator_start).map(|token| token.kind)
+                    == Some(TokenKind::Operator)
+                {
+                    if self.tokens.get(operator_start + 1).map(|token| token.kind)
+                        != Some(TokenKind::Char('('))
+                        || self
+                            .tokens
+                            .get(operator_end.saturating_sub(1))
+                            .map(|token| token.kind)
                             != Some(TokenKind::Char(')'))
                     {
                         return Err(ParseError::new(
@@ -239,12 +256,15 @@ impl Parser {
                             "invalid OPERATOR decoration",
                         ));
                     }
-                    operator_tokens = operator_tokens[2..operator_tokens.len() - 1].to_vec();
+                    operator_start += 2;
+                    operator_end -= 1;
                 }
+                let operator_tokens = self.tokens[operator_start..operator_end].to_vec();
                 use_op = parse_operator_name_tokens(operator_tokens, location as usize)?;
                 sortby_dir = SortByDir::Using;
+                expression_end = using_index;
             }
-            let node = self.parse_expression_tokens_with_completion(tokens)?;
+            let node = self.parse_expression_range(range.start..expression_end)?;
             items.push(Node::SortBy(SortBy {
                 node_tag: NodeTag::SortBy,
                 node: Some(Box::new(node)),
@@ -264,5 +284,65 @@ impl Parser {
             return Err(self.error_here("ORDER BY requires at least one expression"));
         }
         Ok(items)
+    }
+
+    fn split_target_alias_range(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> (Option<std::string::String>, std::ops::Range<usize>) {
+        let tokens = &self.tokens[range.clone()];
+        let mut depth = 0usize;
+        let mut alias_index = None;
+        for (index, token) in tokens.iter().enumerate() {
+            match token.kind {
+                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
+                TokenKind::As if depth == 0 => alias_index = Some(index),
+                _ => {}
+            }
+        }
+        if let Some(index) = alias_index
+            && index + 2 == tokens.len()
+            && let Some(alias) = tokens.get(index + 1)
+        {
+            let accepted = matches!(alias.kind, TokenKind::Ident | TokenKind::UIdent)
+                || match &alias.value {
+                    Some(TokenValue::Keyword(word)) => lookup_keyword(word).is_some(),
+                    _ => false,
+                };
+            if accepted && let Some(name) = token_name(alias) {
+                return (Some(name), range.start..range.start + index);
+            }
+        }
+        if self.expression_range_is_valid(range.clone()) || tokens.len() < 2 {
+            return (None, range);
+        }
+        let alias = tokens.last().expect("checked token length");
+        let accepted = matches!(alias.kind, TokenKind::Ident | TokenKind::UIdent)
+            || match &alias.value {
+                Some(TokenValue::Keyword(word)) => lookup_keyword(word)
+                    .is_some_and(|keyword| keyword.bare_label == BareLabel::Bare),
+                _ => false,
+            };
+        let continues_expression = expression_boundary(alias.kind)
+            || matches!(
+                alias.kind,
+                TokenKind::Escape
+                    | TokenKind::Filter
+                    | TokenKind::Within
+                    | TokenKind::Over
+                    | TokenKind::Collate
+                    | TokenKind::Isnull
+                    | TokenKind::Notnull
+            );
+        let expression = range.start..range.end - 1;
+        if accepted
+            && !continues_expression
+            && self.expression_range_is_valid(expression.clone())
+            && let Some(name) = token_name(alias)
+        {
+            return (Some(name), expression);
+        }
+        (None, range)
     }
 }

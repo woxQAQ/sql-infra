@@ -177,8 +177,8 @@ impl Parser {
     // CALL name ( [ argument ] [, ...] )
     pub(super) fn parse_call(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Call)?;
-        let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
-        let funccall = match parse_expression_tokens(tokens)? {
+        let range = self.take_until_top_level_range(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let funccall = match self.parse_expression_range(range)? {
             Node::FuncCall(call)
                 if call.agg_filter.is_none()
                     && call.over.is_none()

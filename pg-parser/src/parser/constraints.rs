@@ -283,15 +283,18 @@ impl Parser {
                     return Err(self.error_here("EXCLUDE requires at least one element"));
                 }
                 loop {
-                    let expr_tokens = self.take_until_top_level(&[TokenKind::With]);
-                    let expr_location = expr_tokens
-                        .first()
-                        .map_or(self.location(), |token| token.location());
+                    let expr_range = self.take_until_top_level_range(&[TokenKind::With]);
+                    let expr_location = self
+                        .tokens
+                        .get(expr_range.start)
+                        .map_or(self.location(), Token::location);
                     let starts_parenthesized =
-                        expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
+                        self.tokens.get(expr_range.start).map(|token| token.kind)
+                            == Some(TokenKind::Char('('));
                     let starts_with_cast =
-                        expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-                    let index_elem = parse_index_elem_tokens(expr_tokens)?;
+                        self.tokens.get(expr_range.start).map(|token| token.kind)
+                            == Some(TokenKind::Cast);
+                    let index_elem = self.parse_index_elem_range(expr_range)?;
                     if let Some(expression) = index_elem.expr.as_deref()
                         && !starts_parenthesized
                         && !is_windowless_function_expression_node(expression, starts_with_cast)

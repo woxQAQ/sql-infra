@@ -60,7 +60,7 @@ impl Parser {
         let mut atomic_depth = 0usize;
         let mut case_depth = 0usize;
         let mut end = start + 1;
-        while end < self.tokens.len() {
+        while end < self.end {
             let kind = self.tokens[end].kind;
             match kind {
                 TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
@@ -69,7 +69,7 @@ impl Parser {
                 }
                 TokenKind::BeginP
                     if depth == 0
-                        && self.tokens.get(end + 1).map(|token| token.kind)
+                        && (end + 1 < self.end).then(|| self.tokens[end + 1].kind)
                             == Some(TokenKind::Atomic) =>
                 {
                     atomic_depth += 1;
@@ -93,7 +93,11 @@ impl Parser {
             end += 1;
         }
         self.pos = end;
-        let node = parse_statement_node_tokens(self.tokens[start..end].to_vec())?;
+        let mut nested = self.bounded_view(start..end);
+        let node = nested.parse_statement(None)?;
+        if !nested.at(TokenKind::Eof) {
+            return Err(nested.error_here("unexpected token after CREATE SCHEMA element"));
+        }
         if matches!(
             node,
             Node::CreateStmt(_)

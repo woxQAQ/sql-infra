@@ -10,7 +10,8 @@ impl Parser {
             );
             self.expect(TokenKind::As)?;
             let location = self.expect(TokenKind::Char('('))?.location();
-            let mut window = self.parse_window_specification_body(location)?;
+            let mut window =
+                self.parse_window_specification_body(location, TokenKind::Char(')'))?;
             window.name = name;
             windows.push(Node::WindowDef(window));
             if !self.consume(TokenKind::Char(',')) {
@@ -29,6 +30,7 @@ impl Parser {
     pub(super) fn parse_window_specification_body(
         &mut self,
         location: usize,
+        terminator: TokenKind,
     ) -> PResult<WindowDef> {
         let mut window = WindowDef {
             node_tag: NodeTag::WindowDef,
@@ -42,7 +44,7 @@ impl Parser {
             TokenKind::Rows,
             TokenKind::Range,
             TokenKind::Groups,
-            TokenKind::Char(')'),
+            terminator,
         ]) {
             window.refname = Some(
                 self.consume_col_id()
@@ -56,7 +58,7 @@ impl Parser {
                 TokenKind::Rows,
                 TokenKind::Range,
                 TokenKind::Groups,
-                TokenKind::Char(')'),
+                terminator,
             ])?;
             if window.partition_clause.is_empty() {
                 return Err(self.error_here("PARTITION BY requires an expression"));
@@ -68,7 +70,7 @@ impl Parser {
                 TokenKind::Rows,
                 TokenKind::Range,
                 TokenKind::Groups,
-                TokenKind::Char(')'),
+                terminator,
             ])?;
             if window.order_clause.is_empty() {
                 return Err(self.error_here("ORDER BY requires a sort expression"));
@@ -80,7 +82,13 @@ impl Parser {
         ) {
             self.parse_window_frame(&mut window)?;
         }
-        self.expect(TokenKind::Char(')'))?;
+        if terminator == TokenKind::Eof {
+            if !self.at(TokenKind::Eof) {
+                return Err(self.error_here("unexpected token after window specification"));
+            }
+        } else {
+            self.expect(terminator)?;
+        }
         Ok(window)
     }
 

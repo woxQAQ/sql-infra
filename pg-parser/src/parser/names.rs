@@ -56,12 +56,12 @@ impl Parser {
 
     pub(super) fn parse_function_expression(&mut self) -> PResult<Node> {
         let start = self.pos;
-        let remaining = &self.tokens[start..];
+        let remaining = &self.tokens[start..self.end];
         let open = find_top_level_token(remaining, TokenKind::Char('('))
             .ok_or_else(|| self.error_here("function expression requires '('"))?;
         let close = find_matching_close(remaining, open)
             .ok_or_else(|| self.error_here("unterminated function expression"))?;
-        let expression = parse_expression_tokens(remaining[..=close].to_vec())?;
+        let expression = self.parse_expression_range(start..start + close + 1)?;
         if !is_function_expression_node(&expression) {
             return Err(self.error_here("expected a function expression"));
         }
@@ -546,7 +546,8 @@ impl Parser {
         let mut kinds = Vec::new();
         let mut depth = 0usize;
         let mut i = self.pos;
-        while let Some(token) = self.tokens.get(i) {
+        while i < self.end {
+            let token = &self.tokens[i];
             let kind = token.kind;
             if kind == TokenKind::Eof || (depth == 0 && kind == TokenKind::Char(';')) {
                 break;

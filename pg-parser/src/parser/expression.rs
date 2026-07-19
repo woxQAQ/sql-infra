@@ -1,36 +1,101 @@
 use super::*;
 
 pub(super) struct ExprParser {
-    pub(super) tokens: Vec<Token>,
+    pub(super) tokens: Rc<[Token]>,
+    pub(super) start: usize,
     pub(super) pos: usize,
+    pub(super) end: usize,
+    pub(super) eof: Token,
     pub(super) error: Option<ParseError>,
     pub(super) completion: Option<SharedCompletionRecorder>,
 }
 
 impl ExprParser {
-    pub(super) fn new(mut tokens: Vec<Token>) -> Self {
-        let location = tokens.last().map_or(0, Token::end_location);
-        tokens.push(Token::synthetic(TokenKind::Eof, location));
+    /// Build a standalone expression parser for an owned/transformed stream.
+    /// Expressions sliced from an outer parser use `from_shared_range`.
+    pub(super) fn from_owned_tokens(mut tokens: Vec<Token>) -> Self {
+        let eof = match tokens.last() {
+            Some(token) if token.kind == TokenKind::Eof => token.clone(),
+            Some(token) => Token::synthetic(TokenKind::Eof, token.end_location()),
+            None => Token::synthetic(TokenKind::Eof, 0),
+        };
+        if tokens
+            .last()
+            .is_some_and(|token| token.kind == TokenKind::Eof)
+        {
+            tokens.pop();
+        }
+        let end = tokens.len();
         Self {
-            tokens,
+            tokens: Rc::from(tokens),
+            start: 0,
             pos: 0,
+            end,
+            eof,
             error: None,
             completion: None,
         }
     }
 
-    pub(super) fn new_completion(
-        mut tokens: Vec<Token>,
-        recorder: SharedCompletionRecorder,
+    pub(super) fn from_shared_range(
+        tokens: Rc<[Token]>,
+        range: std::ops::Range<usize>,
+        eof_location: usize,
+        completion: Option<SharedCompletionRecorder>,
     ) -> Self {
-        let location = tokens.last().map_or(0, Token::end_location);
-        tokens.push(Token::synthetic(TokenKind::Eof, location));
+        assert!(range.start <= range.end && range.end <= tokens.len());
         Self {
             tokens,
-            pos: 0,
+            start: range.start,
+            pos: range.start,
+            end: range.end,
+            eof: Token::synthetic(TokenKind::Eof, eof_location),
             error: None,
-            completion: Some(recorder),
+            completion,
         }
+    }
+
+    pub(super) fn parser_view(&self, range: std::ops::Range<usize>) -> Parser {
+        self.parser_view_with_completion(range, self.completion.clone())
+    }
+
+    fn parser_view_without_completion(&self, range: std::ops::Range<usize>) -> Parser {
+        self.parser_view_with_completion(range, None)
+    }
+
+    fn parser_view_with_completion(
+        &self,
+        range: std::ops::Range<usize>,
+        completion: Option<SharedCompletionRecorder>,
+    ) -> Parser {
+        assert!(
+            self.start <= range.start && range.start <= range.end && range.end <= self.end,
+            "parser view must be contained in its parent"
+        );
+        let eof_location = if range.end == self.end {
+            self.eof.location()
+        } else {
+            self.tokens[range.end].location()
+        };
+        Parser::from_shared_range(self.tokens.clone(), range, eof_location, completion)
+    }
+
+    pub(super) fn expression_view(&self, range: std::ops::Range<usize>) -> Self {
+        assert!(
+            self.start <= range.start && range.start <= range.end && range.end <= self.end,
+            "expression view must be contained in its parent"
+        );
+        let eof_location = if range.end == self.end {
+            self.eof.location()
+        } else {
+            self.tokens[range.end].location()
+        };
+        Self::from_shared_range(
+            self.tokens.clone(),
+            range,
+            eof_location,
+            self.completion.clone(),
+        )
     }
 
     pub(super) fn parse(self) -> PResult<Node> {
@@ -73,9 +138,21 @@ impl ExprParser {
         Ok(node)
     }
 
-    pub(super) fn parse_nested_select(&mut self, tokens: Vec<Token>) -> Option<Node> {
-        match parse_select_statement_tokens(tokens) {
-            Ok(node) => Some(node),
+    pub(super) fn parse_nested_select_range(
+        &mut self,
+        range: std::ops::Range<usize>,
+    ) -> Option<Node> {
+        let mut parser = self.parser_view(range);
+        match parser.parse_statement(None) {
+            Ok(node) if parser.at(TokenKind::Eof) && matches!(node, Node::SelectStmt(_)) => {
+                Some(node)
+            }
+            Ok(_) => {
+                if self.error.is_none() {
+                    self.error = Some(parser.error_here("expected a SELECT statement"));
+                }
+                None
+            }
             Err(error) => {
                 if self.error.is_none() {
                     self.error = Some(error);
@@ -83,6 +160,11 @@ impl ExprParser {
                 None
             }
         }
+    }
+
+    pub(super) fn select_range_is_valid(&self, range: std::ops::Range<usize>) -> bool {
+        let mut parser = self.parser_view_without_completion(range);
+        matches!(parser.parse_statement(None), Ok(Node::SelectStmt(_))) && parser.at(TokenKind::Eof)
     }
 
     pub(super) fn parse_expr(&mut self, min_bp: u8) -> Option<Node> {

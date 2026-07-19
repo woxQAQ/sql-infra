@@ -88,12 +88,24 @@ pub enum CompletionError {
 
 #[derive(Default)]
 pub(crate) struct CompletionRecorder {
+    cursor: Option<usize>,
     expectations: Vec<Expectation>,
 }
 
 pub(crate) type SharedCompletionRecorder = Rc<RefCell<CompletionRecorder>>;
 
 impl CompletionRecorder {
+    pub(crate) fn set_cursor(&mut self, cursor: usize) {
+        match self.cursor {
+            Some(existing) => debug_assert_eq!(existing, cursor),
+            None => self.cursor = Some(cursor),
+        }
+    }
+
+    pub(crate) fn is_cursor(&self, location: usize) -> bool {
+        self.cursor == Some(location)
+    }
+
     pub(crate) fn record(&mut self, expectation: Expectation) {
         if !self.expectations.contains(&expectation) {
             self.expectations.push(expectation);
@@ -1344,6 +1356,26 @@ mod tests {
             ("SELECT |", Expectation::Expression),
             ("SELECT value + |", Expectation::Expression),
             ("SELECT count(|", Expectation::Expression),
+            ("WITH x AS (SELECT |", Expectation::Expression),
+            ("SELECT (SELECT |", Expectation::Expression),
+            ("SELECT 1 IN (SELECT |", Expectation::Expression),
+            ("SELECT 1 = ANY (SELECT |", Expectation::Expression),
+            ("SELECT JSON_ARRAY(SELECT |", Expectation::Expression),
+            (
+                "CREATE RULE r AS ON UPDATE TO t DO (SELECT |",
+                Expectation::Expression,
+            ),
+            (
+                "SELECT sum(x) OVER (PARTITION BY |",
+                Expectation::Expression,
+            ),
+            ("SELECT json_arrayagg(x ORDER BY |", Expectation::Expression),
+            ("SELECT * FROM JSON_TABLE(|", Expectation::Expression),
+            ("SELECT * FROM ROWS FROM (|", Expectation::Expression),
+            ("SELECT * FROM XMLTABLE(|", Expectation::Expression),
+            ("CREATE STATISTICS s ON |", Expectation::Expression),
+            ("CALL |", Expectation::Expression),
+            ("UPDATE t SET value[|", Expectation::Expression),
             (
                 "SELECT * FROM |",
                 Expectation::Name(NameExpectation::Relation { schema: None }),
@@ -1359,7 +1391,8 @@ mod tests {
             ("CREATE |", Expectation::Token(TokenKind::Table)),
         ];
         for (marked, expected) in cases {
-            assert!(collect_from_parser(marked).contains(&expected), "{marked}");
+            let actual = collect_from_parser(marked);
+            assert!(actual.contains(&expected), "{marked}: {actual:?}");
         }
     }
 

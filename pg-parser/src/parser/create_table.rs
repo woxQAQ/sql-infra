@@ -358,9 +358,9 @@ impl Parser {
                 ..CreateTableAsStmt::default()
             }));
         }
-        let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
-        let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
-        let query = Some(Box::new(parse_select_statement_tokens(query_tokens)?));
+        let query_range = self.take_until_top_level_range(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let (query_range, skip_data) = split_with_data_suffix(&self.tokens, query_range);
+        let query = Some(Box::new(self.parse_select_statement_range(query_range)?));
         Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
             node_tag: NodeTag::CreateTableAsStmt,
             query,
@@ -459,9 +459,9 @@ impl Parser {
             None
         };
         self.expect(TokenKind::As)?;
-        let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
-        let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
-        let query = Some(Box::new(parse_select_statement_tokens(query_tokens)?));
+        let query_range = self.take_until_top_level_range(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let (query_range, skip_data) = split_with_data_suffix(&self.tokens, query_range);
+        let query = Some(Box::new(self.parse_select_statement_range(query_range)?));
         Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
             node_tag: NodeTag::CreateTableAsStmt,
             query,
@@ -481,21 +481,24 @@ impl Parser {
         }))
     }
 }
-pub(super) fn split_with_data_suffix(mut tokens: Vec<Token>) -> (Vec<Token>, bool) {
-    let len = tokens.len();
+fn split_with_data_suffix(
+    tokens: &[Token],
+    mut range: std::ops::Range<usize>,
+) -> (std::ops::Range<usize>, bool) {
+    let len = range.len();
     if len >= 3
-        && tokens[len - 3].kind == TokenKind::With
-        && tokens[len - 2].kind == TokenKind::No
-        && tokens[len - 1].kind == TokenKind::DataP
+        && tokens[range.end - 3].kind == TokenKind::With
+        && tokens[range.end - 2].kind == TokenKind::No
+        && tokens[range.end - 1].kind == TokenKind::DataP
     {
-        tokens.truncate(len - 3);
-        return (tokens, true);
+        range.end -= 3;
+        return (range, true);
     }
     if len >= 2
-        && tokens[len - 2].kind == TokenKind::With
-        && tokens[len - 1].kind == TokenKind::DataP
+        && tokens[range.end - 2].kind == TokenKind::With
+        && tokens[range.end - 1].kind == TokenKind::DataP
     {
-        tokens.truncate(len - 2);
+        range.end -= 2;
     }
-    (tokens, false)
+    (range, false)
 }

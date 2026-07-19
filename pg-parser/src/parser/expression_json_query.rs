@@ -243,14 +243,15 @@ impl ExprParser {
             let start = self.pos;
             let mut end = start;
             let mut depth = 0usize;
-            while end < self.tokens.len() {
+            while end < self.end {
                 let kind = self.tokens[end].kind;
                 if depth == 0
                     && (matches!(
                         kind,
                         TokenKind::Returning | TokenKind::Char(')') | TokenKind::Eof
                     ) || (matches!(kind, TokenKind::Absent | TokenKind::NullP)
-                        && self.tokens.get(end + 1).map(|token| token.kind) == Some(TokenKind::On)))
+                        && (end + 1 < self.end).then(|| self.tokens[end + 1].kind)
+                            == Some(TokenKind::On)))
                 {
                     break;
                 }
@@ -261,7 +262,8 @@ impl ExprParser {
                 }
                 end += 1;
             }
-            match parse_sort_list_tokens(self.tokens[start..end].to_vec()) {
+            let mut parser = self.parser_view(start..end);
+            match parser.parse_sort_list_strict_until(&[TokenKind::Eof]) {
                 Ok(items) => agg_order = items,
                 Err(error) => {
                     if self.error.is_none() {
@@ -304,18 +306,4 @@ impl ExprParser {
         constructor.over = self.parse_optional_over_clause()?;
         Some(())
     }
-}
-pub(super) fn parse_sort_list_tokens(mut tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.last().map_or(0, Token::end_location);
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser {
-        tokens,
-        pos: 0,
-        completion: None,
-    };
-    let items = parser.parse_sort_list_strict_until(&[TokenKind::Eof])?;
-    if !parser.at(TokenKind::Eof) {
-        return Err(parser.error_here("unexpected token after sort list"));
-    }
-    Ok(items)
 }

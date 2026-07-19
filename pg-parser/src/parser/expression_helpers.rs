@@ -209,85 +209,19 @@ pub(super) fn expression_boundary(kind: TokenKind) -> bool {
     )
 }
 
-pub(super) fn split_alias(tokens: Vec<Token>) -> (Option<std::string::String>, Vec<Token>) {
-    let mut depth = 0usize;
-    let mut alias_index = None;
-    for (index, token) in tokens.iter().enumerate() {
-        match token.kind {
-            TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
-            TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
-            TokenKind::As if depth == 0 => alias_index = Some(index),
-            _ => {}
-        }
-    }
-    if let Some(index) = alias_index
-        && index + 2 == tokens.len()
-        && let Some(token) = tokens.get(index + 1)
-    {
-        let accepted = matches!(token.kind, TokenKind::Ident | TokenKind::UIdent)
-            || match &token.value {
-                Some(TokenValue::Keyword(word)) => lookup_keyword(word).is_some(),
-                _ => false,
-            };
-        if accepted && let Some(name) = token_name(token) {
-            return (Some(name), tokens[..index].to_vec());
-        }
-    }
-    (None, tokens)
-}
-
-pub(super) fn split_target_alias(tokens: Vec<Token>) -> (Option<std::string::String>, Vec<Token>) {
-    let explicit = split_alias(tokens.clone());
-    if explicit.0.is_some() {
-        return explicit;
-    }
-    if parse_expression_tokens(tokens.clone()).is_ok() {
-        return (None, tokens);
-    }
-    if tokens.len() < 2 {
-        return (None, tokens);
-    }
-    let alias = tokens.last().expect("checked token length");
-    let accepted = matches!(alias.kind, TokenKind::Ident | TokenKind::UIdent)
-        || match &alias.value {
-            Some(TokenValue::Keyword(word)) => {
-                lookup_keyword(word).is_some_and(|keyword| keyword.bare_label == BareLabel::Bare)
-            }
-            _ => false,
-        };
-    let continues_expression = expression_boundary(alias.kind)
-        || matches!(
-            alias.kind,
-            TokenKind::Escape
-                | TokenKind::Filter
-                | TokenKind::Within
-                | TokenKind::Over
-                | TokenKind::Collate
-                | TokenKind::Isnull
-                | TokenKind::Notnull
-        );
-    if accepted && !continues_expression {
-        let expression = tokens[..tokens.len() - 1].to_vec();
-        if parse_expression_tokens(expression.clone()).is_ok()
-            && let Some(name) = token_name(alias)
-        {
-            return (Some(name), expression);
-        }
-    }
-    (None, tokens)
-}
-
 pub(super) fn parse_expression_tokens(tokens: Vec<Token>) -> PResult<Node> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
         return Err(ParseError::new(location, "expected an expression"));
     }
-    ExprParser::new(tokens).parse().map_err(|mut error| {
-        if error.location() == 0 {
-            error.reanchor(location);
-        }
-        error
-    })
+    ExprParser::from_owned_tokens(tokens)
+        .parse()
+        .map_err(|mut error| {
+            if error.location() == 0 {
+                error.reanchor(location);
+            }
+            error
+        })
 }
 
 pub(super) fn parse_b_expression_tokens(tokens: Vec<Token>) -> PResult<Node> {
@@ -298,45 +232,14 @@ pub(super) fn parse_b_expression_tokens(tokens: Vec<Token>) -> PResult<Node> {
             "expected a restricted expression",
         ));
     }
-    ExprParser::new(tokens).parse_b().map_err(|mut error| {
-        if error.location() == 0 {
-            error.reanchor(location);
-        }
-        error
-    })
-}
-
-pub(super) fn parse_c_expression_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
-    if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected a common expression"));
-    }
-    ExprParser::new(tokens).parse_c().map_err(|mut error| {
-        if error.location() == 0 {
-            error.reanchor(location);
-        }
-        error
-    })
-}
-
-pub(super) fn parse_select_fetch_first_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    if matches!(
-        tokens.as_slice(),
-        [
-            Token {
-                kind: TokenKind::Char('+') | TokenKind::Char('-'),
-                ..
-            },
-            Token {
-                kind: TokenKind::IConst | TokenKind::FConst,
-                ..
+    ExprParser::from_owned_tokens(tokens)
+        .parse_b()
+        .map_err(|mut error| {
+            if error.location() == 0 {
+                error.reanchor(location);
             }
-        ]
-    ) {
-        parse_expression_tokens(tokens)
-    } else {
-        parse_c_expression_tokens(tokens)
-    }
+            error
+        })
 }
 
 pub(super) fn parse_aexpr_const_tokens(tokens: Vec<Token>) -> PResult<Node> {

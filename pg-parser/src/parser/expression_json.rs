@@ -84,7 +84,7 @@ impl ExprParser {
             return true;
         }
         let mut depth = 0usize;
-        for token in &self.tokens[self.pos..] {
+        for token in &self.tokens[self.pos..self.end] {
             match token.kind {
                 TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
                 TokenKind::Char(')') | TokenKind::Char(']') => {
@@ -250,17 +250,16 @@ impl ExprParser {
 
     pub(super) fn parse_json_array_constructor(&mut self, location: usize) -> Option<Node> {
         if self.starts_statement() {
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
-            self.expect(TokenKind::Char(')'))?;
+            let range = self.take_until_balanced_range(TokenKind::Char(')'));
             let mut depth = 0usize;
-            let mut suffix_start = tokens.len();
-            for (index, token) in tokens.iter().enumerate() {
+            let mut suffix_start = range.end;
+            for (relative_index, token) in self.tokens[range.clone()].iter().enumerate() {
+                let index = range.start + relative_index;
                 match token.kind {
                     TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
                     TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
                     TokenKind::Format | TokenKind::Returning
-                        if depth == 0
-                            && parse_select_statement_tokens(tokens[..index].to_vec()).is_ok() =>
+                        if depth == 0 && self.select_range_is_valid(range.start..index) =>
                     {
                         suffix_start = index;
                         break;
@@ -268,8 +267,8 @@ impl ExprParser {
                     _ => {}
                 }
             }
-            let query = self.parse_nested_select(tokens[..suffix_start].to_vec())?;
-            let mut suffix = ExprParser::new(tokens[suffix_start..].to_vec());
+            let query = self.parse_nested_select_range(range.start..suffix_start)?;
+            let mut suffix = self.expression_view(suffix_start..range.end);
             let format = match suffix.parse_json_format() {
                 Some(format) => Some(Box::new(format.unwrap_or_else(default_json_format))),
                 None => {
@@ -291,6 +290,7 @@ impl ExprParser {
             if !suffix.at(TokenKind::Eof) {
                 return self.fail("unexpected token after JSON_ARRAY query clauses");
             }
+            self.expect(TokenKind::Char(')'))?;
             return Some(Node::JsonArrayQueryConstructor(JsonArrayQueryConstructor {
                 node_tag: NodeTag::JsonArrayQueryConstructor,
                 query: Some(Box::new(query)),
@@ -336,28 +336,40 @@ impl ExprParser {
         }))
     }
 }
-pub(super) fn parse_json_value_expr_tokens(tokens: Vec<Token>) -> PResult<JsonValueExpr> {
-    let location = tokens.first().map_or(0, |token| token.location());
-    if tokens.is_empty() {
-        return Err(ParseError::new(
-            location,
-            "expected a JSON value expression",
-        ));
+
+impl Parser {
+    pub(super) fn parse_json_value_expr_range(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> PResult<JsonValueExpr> {
+        let location = self
+            .tokens
+            .get(range.start)
+            .map_or_else(|| self.location(), Token::location);
+        if range.is_empty() {
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
+            }
+            return Err(ParseError::new(
+                location,
+                "expected a JSON value expression",
+            ));
+        }
+        let mut parser = self.expression_view(range);
+        let value = parser.parse_json_value_expr().ok_or_else(|| {
+            parser
+                .error
+                .take()
+                .unwrap_or_else(|| ParseError::new(location, "invalid JSON value expression"))
+        })?;
+        if !parser.at(TokenKind::Eof) {
+            return Err(ParseError::new(
+                parser.location(),
+                "unexpected token after JSON value expression",
+            ));
+        }
+        Ok(value)
     }
-    let mut parser = ExprParser::new(tokens);
-    let value = parser.parse_json_value_expr().ok_or_else(|| {
-        parser
-            .error
-            .take()
-            .unwrap_or_else(|| ParseError::new(location, "invalid JSON value expression"))
-    })?;
-    if !parser.at(TokenKind::Eof) {
-        return Err(ParseError::new(
-            parser.location(),
-            "unexpected token after JSON value expression",
-        ));
-    }
-    Ok(value)
 }
 
 pub(super) fn default_json_format() -> JsonFormat {

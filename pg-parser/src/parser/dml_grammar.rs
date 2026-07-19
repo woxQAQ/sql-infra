@@ -126,9 +126,9 @@ impl Parser {
             let infer_location = self.previous_location();
             let mut index_elems = Vec::new();
             while !self.at(TokenKind::Char(')')) {
-                let tokens =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                index_elems.push(Node::IndexElem(parse_index_elem_tokens(tokens)?));
+                let range =
+                    self.take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                index_elems.push(Node::IndexElem(self.parse_index_elem_range(range)?));
                 if !self.consume(TokenKind::Char(',')) {
                     break;
                 }
@@ -324,20 +324,23 @@ impl Parser {
                 indirection.push(make_string_node(name));
             } else if self.consume(TokenKind::Char('[')) {
                 let lower_or_index =
-                    self.take_until_top_level(&[TokenKind::Char(':'), TokenKind::Char(']')]);
+                    self.take_until_top_level_range(&[TokenKind::Char(':'), TokenKind::Char(']')]);
+                if lower_or_index.is_empty() && self.at_completion_cursor() {
+                    self.record_expression_completion();
+                }
                 let (is_slice, lidx, uidx) = if self.consume(TokenKind::Char(':')) {
-                    let upper = self.take_until_top_level(&[TokenKind::Char(']')]);
+                    let upper = self.take_until_top_level_range(&[TokenKind::Char(']')]);
                     (
                         true,
                         if lower_or_index.is_empty() {
                             None
                         } else {
-                            Some(Box::new(parse_expression_tokens(lower_or_index)?))
+                            Some(Box::new(self.parse_expression_range(lower_or_index)?))
                         },
                         if upper.is_empty() {
                             None
                         } else {
-                            Some(Box::new(parse_expression_tokens(upper)?))
+                            Some(Box::new(self.parse_expression_range(upper)?))
                         },
                     )
                 } else {
@@ -347,7 +350,7 @@ impl Parser {
                     (
                         false,
                         None,
-                        Some(Box::new(parse_expression_tokens(lower_or_index)?)),
+                        Some(Box::new(self.parse_expression_range(lower_or_index)?)),
                     )
                 };
                 self.expect(TokenKind::Char(']'))?;

@@ -105,14 +105,17 @@ impl Parser {
         }
         let mut elements = Vec::new();
         loop {
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            let location = tokens
-                .first()
-                .map_or(self.location(), |token| token.location());
+            let range =
+                self.take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let location = self
+                .tokens
+                .get(range.start)
+                .map_or(self.location(), Token::location);
             let starts_parenthesized =
-                tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
-            let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-            let element = parse_index_elem_tokens(tokens)?;
+                self.tokens.get(range.start).map(|token| token.kind) == Some(TokenKind::Char('('));
+            let starts_with_cast =
+                self.tokens.get(range.start).map(|token| token.kind) == Some(TokenKind::Cast);
+            let element = self.parse_index_elem_range(range)?;
             if let Some(expression) = element.expr.as_deref()
                 && !starts_parenthesized
                 && !is_windowless_function_expression_node(expression, starts_with_cast)
@@ -154,81 +157,83 @@ pub(super) fn node_to_index_elem(node: Node) -> Node {
     }
 }
 
-pub(super) fn parse_index_elem_tokens(tokens: Vec<Token>) -> PResult<IndexElem> {
-    let location = tokens.first().map_or(0, |token| token.location());
-    if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected an index element"));
-    }
-    let collate_index = find_top_level_token(&tokens, TokenKind::Collate);
-    let (expression, suffix_start) = if let Some(index) = collate_index {
-        if index == 0 {
-            return Err(ParseError::new(
-                location,
-                "COLLATE requires an index expression",
-            ));
+impl Parser {
+    pub(super) fn parse_index_elem_range(
+        &self,
+        range: std::ops::Range<usize>,
+    ) -> PResult<IndexElem> {
+        let tokens = &self.tokens[range.clone()];
+        let location = tokens.first().map_or(self.location(), Token::location);
+        if tokens.is_empty() {
+            return Err(ParseError::new(location, "expected an index element"));
         }
-        (parse_expression_tokens(tokens[..index].to_vec())?, index)
-    } else {
-        let mut parser = ExprParser::new(tokens.clone());
-        let expression = parser.parse_expr(0).ok_or_else(|| {
-            parser
-                .error
-                .take()
-                .unwrap_or_else(|| ParseError::new(location, "invalid index expression"))
-        })?;
-        (expression, parser.pos)
-    };
-    let Node::IndexElem(mut element) = node_to_index_elem(expression) else {
-        unreachable!("node_to_index_elem always returns IndexElem");
-    };
-    element.location = location as ParseLoc;
-
-    let mut suffix_tokens = tokens[suffix_start..].to_vec();
-    let end_location = suffix_tokens.last().map_or(location, Token::end_location);
-    suffix_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
-    let mut suffix = Parser {
-        tokens: suffix_tokens,
-        pos: 0,
-        completion: None,
-    };
-    if suffix.consume(TokenKind::Collate) {
-        element.collation = suffix.parse_name_list();
-        if element.collation.is_empty() {
-            return Err(suffix.error_here("COLLATE requires a collation name"));
-        }
-    }
-    if !suffix.at_any(&[
-        TokenKind::Asc,
-        TokenKind::Desc,
-        TokenKind::NullsP,
-        TokenKind::Eof,
-    ]) {
-        element.opclass = suffix.parse_name_list();
-        if element.opclass.is_empty() {
-            return Err(suffix.error_here("expected an operator class name"));
-        }
-        if suffix.at(TokenKind::Char('(')) {
-            element.opclassopts = suffix.parse_parenthesized_reloptions()?;
-        }
-    }
-    element.ordering = if suffix.consume(TokenKind::Asc) {
-        SortByDir::Asc
-    } else if suffix.consume(TokenKind::Desc) {
-        SortByDir::Desc
-    } else {
-        SortByDir::Default
-    };
-    if suffix.consume(TokenKind::NullsP) {
-        element.nulls_ordering = if suffix.consume(TokenKind::FirstP) {
-            SortByNulls::First
-        } else if suffix.consume(TokenKind::LastP) {
-            SortByNulls::Last
+        let collate_index = find_top_level_token(tokens, TokenKind::Collate);
+        let (expression, suffix_start) = if let Some(index) = collate_index {
+            if index == 0 {
+                return Err(ParseError::new(
+                    location,
+                    "COLLATE requires an index expression",
+                ));
+            }
+            (
+                self.parse_expression_range(range.start..range.start + index)?,
+                range.start + index,
+            )
         } else {
-            return Err(suffix.error_here("NULLS requires FIRST or LAST"));
+            let mut parser = self.expression_view(range.clone());
+            let expression = parser.parse_expr(0).ok_or_else(|| {
+                parser
+                    .error
+                    .take()
+                    .unwrap_or_else(|| ParseError::new(location, "invalid index expression"))
+            })?;
+            (expression, parser.pos)
         };
+        let Node::IndexElem(mut element) = node_to_index_elem(expression) else {
+            unreachable!("node_to_index_elem always returns IndexElem");
+        };
+        element.location = location as ParseLoc;
+
+        let mut suffix = self.bounded_view(suffix_start..range.end);
+        if suffix.consume(TokenKind::Collate) {
+            element.collation = suffix.parse_name_list();
+            if element.collation.is_empty() {
+                return Err(suffix.error_here("COLLATE requires a collation name"));
+            }
+        }
+        if !suffix.at_any(&[
+            TokenKind::Asc,
+            TokenKind::Desc,
+            TokenKind::NullsP,
+            TokenKind::Eof,
+        ]) {
+            element.opclass = suffix.parse_name_list();
+            if element.opclass.is_empty() {
+                return Err(suffix.error_here("expected an operator class name"));
+            }
+            if suffix.at(TokenKind::Char('(')) {
+                element.opclassopts = suffix.parse_parenthesized_reloptions()?;
+            }
+        }
+        element.ordering = if suffix.consume(TokenKind::Asc) {
+            SortByDir::Asc
+        } else if suffix.consume(TokenKind::Desc) {
+            SortByDir::Desc
+        } else {
+            SortByDir::Default
+        };
+        if suffix.consume(TokenKind::NullsP) {
+            element.nulls_ordering = if suffix.consume(TokenKind::FirstP) {
+                SortByNulls::First
+            } else if suffix.consume(TokenKind::LastP) {
+                SortByNulls::Last
+            } else {
+                return Err(suffix.error_here("NULLS requires FIRST or LAST"));
+            };
+        }
+        if !suffix.at(TokenKind::Eof) {
+            return Err(suffix.error_here("unexpected token after index element options"));
+        }
+        Ok(element)
     }
-    if !suffix.at(TokenKind::Eof) {
-        return Err(suffix.error_here("unexpected token after index element options"));
-    }
-    Ok(element)
 }

@@ -13,25 +13,25 @@ impl Parser {
             while !self.at(TokenKind::Char(')')) {
                 let target_location = self.location();
                 if self.consume(TokenKind::Default) {
-                    let tokens =
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                    let range = self
+                        .take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
                     namespaces.push(Node::ResTarget(ResTarget {
                         node_tag: NodeTag::ResTarget,
-                        val: Some(Box::new(parse_b_expression_tokens(tokens)?)),
+                        val: Some(Box::new(self.parse_b_expression_range(range)?)),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
                     }));
                 } else {
-                    let tokens =
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                    let (name, expr_tokens) = split_alias(tokens);
+                    let range = self
+                        .take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                    let (name, expression_range) = self.split_explicit_alias_range(range);
                     let name = name.ok_or_else(|| {
                         ParseError::new(target_location, "XML namespace requires AS alias")
                     })?;
                     namespaces.push(Node::ResTarget(ResTarget {
                         node_tag: NodeTag::ResTarget,
                         name: Some(name),
-                        val: Some(Box::new(parse_b_expression_tokens(expr_tokens)?)),
+                        val: Some(Box::new(self.parse_b_expression_range(expression_range)?)),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
                     }));
@@ -46,25 +46,25 @@ impl Parser {
             self.expect(TokenKind::Char(')'))?;
             self.expect(TokenKind::Char(','))?;
         }
-        let row_tokens = self.take_until_top_level(&[TokenKind::Passing]);
-        let rowexpr = Box::new(parse_c_expression_tokens(row_tokens)?);
+        let row_range = self.take_until_top_level_range(&[TokenKind::Passing]);
+        let rowexpr = Box::new(self.parse_c_expression_range(row_range)?);
         self.expect(TokenKind::Passing)?;
         if self.consume(TokenKind::By)
             && !(self.consume(TokenKind::RefP) || self.consume(TokenKind::ValueP))
         {
             return Err(self.error_here("BY requires REF or VALUE"));
         }
-        let mut doc_tokens = self.take_until_top_level(&[TokenKind::Columns]);
-        if doc_tokens.len() >= 2
-            && doc_tokens[doc_tokens.len() - 2].kind == TokenKind::By
+        let mut doc_range = self.take_until_top_level_range(&[TokenKind::Columns]);
+        if doc_range.end.saturating_sub(doc_range.start) >= 2
+            && self.tokens[doc_range.end - 2].kind == TokenKind::By
             && matches!(
-                doc_tokens[doc_tokens.len() - 1].kind,
+                self.tokens[doc_range.end - 1].kind,
                 TokenKind::RefP | TokenKind::ValueP
             )
         {
-            doc_tokens.truncate(doc_tokens.len() - 2);
+            doc_range.end -= 2;
         }
-        let docexpr = parse_c_expression_tokens(doc_tokens)?;
+        let docexpr = self.parse_c_expression_range(doc_range)?;
         self.expect(TokenKind::Columns)?;
         let mut columns = Vec::new();
         if self.at(TokenKind::Char(')')) {

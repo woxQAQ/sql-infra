@@ -88,9 +88,9 @@ impl ExprParser {
     pub(super) fn parse_parenthesized_expr(&mut self) -> Option<Node> {
         let location = self.expect(TokenKind::Char('('))?.location();
         if self.starts_statement() {
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
+            let range = self.take_until_balanced_range(TokenKind::Char(')'));
+            let subselect = self.parse_nested_select_range(range)?;
             self.expect(TokenKind::Char(')'))?;
-            let subselect = self.parse_nested_select(tokens)?;
             return Some(Node::SubLink(SubLink {
                 xpr: Expr::new(NodeTag::SubLink),
                 sub_link_type: SubLinkType::ExprSublink,
@@ -121,9 +121,10 @@ impl ExprParser {
         if !self.consume(TokenKind::Char('(')) {
             return None;
         }
-        let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        let range = self.take_until_balanced_range(TokenKind::Char(')'));
+        let subselect = self.parse_nested_select_range(range)?;
         self.expect(TokenKind::Char(')'))?;
-        self.parse_nested_select(tokens)
+        Some(subselect)
     }
 
     pub(super) fn parse_keyword_call_as_coalesce(&mut self) -> Option<Node> {
@@ -188,13 +189,14 @@ impl ExprParser {
             TokenKind::InP => {
                 let list_start = self.expect(TokenKind::Char('('))?.location();
                 if self.starts_statement() {
-                    let tokens = self.take_until_balanced(TokenKind::Char(')'));
+                    let range = self.take_until_balanced_range(TokenKind::Char(')'));
+                    let subselect = self.parse_nested_select_range(range)?;
                     self.expect(TokenKind::Char(')'))?;
                     let sublink = Node::SubLink(SubLink {
                         xpr: Expr::new(NodeTag::SubLink),
                         sub_link_type: SubLinkType::AnySublink,
                         testexpr: Some(Box::new(lhs)),
-                        subselect: self.parse_nested_select(tokens).map(Box::new),
+                        subselect: Some(Box::new(subselect)),
                         location: location as ParseLoc,
                         ..SubLink::default()
                     });
@@ -337,14 +339,15 @@ impl ExprParser {
         self.advance();
         self.expect(TokenKind::Char('('))?;
         if self.starts_statement() {
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
+            let range = self.take_until_balanced_range(TokenKind::Char(')'));
+            let subselect = self.parse_nested_select_range(range)?;
             self.expect(TokenKind::Char(')'))?;
             Some(Node::SubLink(SubLink {
                 xpr: Expr::new(NodeTag::SubLink),
                 sub_link_type,
                 testexpr: Some(Box::new(lhs)),
                 oper_name: operator_name,
-                subselect: self.parse_nested_select(tokens).map(Box::new),
+                subselect: Some(Box::new(subselect)),
                 location: location as ParseLoc,
                 ..SubLink::default()
             }))
@@ -559,7 +562,7 @@ impl ExprParser {
         let start = self.pos;
         let mut depth = 0usize;
         let mut best = None;
-        for end in start + 1..self.tokens.len() {
+        for end in start + 1..=self.end {
             let token = &self.tokens[end - 1];
             if end - 1 > start
                 && depth == 0
@@ -625,7 +628,12 @@ impl ExprParser {
     }
 
     pub(super) fn take_until_balanced(&mut self, stop: TokenKind) -> Vec<Token> {
-        let mut out = Vec::new();
+        let range = self.take_until_balanced_range(stop);
+        self.tokens[range].to_vec()
+    }
+
+    pub(super) fn take_until_balanced_range(&mut self, stop: TokenKind) -> std::ops::Range<usize> {
+        let start = self.pos;
         let mut depth = 0usize;
         while !self.at(TokenKind::Eof) {
             let kind = self.peek_kind();
@@ -637,9 +645,9 @@ impl ExprParser {
                 TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
                 _ => {}
             }
-            out.push(self.advance().clone());
+            self.advance();
         }
-        out
+        start..self.pos
     }
 
     pub(super) fn starts_statement(&self) -> bool {
@@ -674,8 +682,16 @@ impl ExprParser {
         self.peek_kind() == kind
     }
 
+    pub(super) fn at_completion_cursor(&self) -> bool {
+        self.at(TokenKind::Eof)
+            && self
+                .completion
+                .as_ref()
+                .is_some_and(|recorder| recorder.borrow().is_cursor(self.location()))
+    }
+
     pub(super) fn consume(&mut self, kind: TokenKind) -> bool {
-        if self.peek_kind() == TokenKind::Eof
+        if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
             recorder.borrow_mut().record(Expectation::Token(kind));
@@ -690,7 +706,7 @@ impl ExprParser {
     }
 
     pub(super) fn expect(&mut self, kind: TokenKind) -> Option<Token> {
-        if self.peek_kind() == TokenKind::Eof
+        if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
             recorder.borrow_mut().record(Expectation::Token(kind));
@@ -703,14 +719,21 @@ impl ExprParser {
     }
 
     pub(super) fn advance(&mut self) -> &Token {
-        if !self.at(TokenKind::Eof) {
+        if self.pos < self.end {
+            let consumed = self.pos;
             self.pos += 1;
+            &self.tokens[consumed]
+        } else {
+            &self.eof
         }
-        &self.tokens[self.pos.saturating_sub(1)]
     }
 
     pub(super) fn peek(&self) -> &Token {
-        &self.tokens[self.pos]
+        if self.pos < self.end {
+            &self.tokens[self.pos]
+        } else {
+            &self.eof
+        }
     }
 
     pub(super) fn peek_kind(&self) -> TokenKind {
@@ -718,10 +741,12 @@ impl ExprParser {
     }
 
     pub(super) fn peek_kind_n(&self, n: usize) -> TokenKind {
-        self.tokens
-            .get(self.pos + n)
-            .map(|token| token.kind)
-            .unwrap_or(TokenKind::Eof)
+        let index = self.pos.saturating_add(n);
+        if index < self.end {
+            self.tokens[index].kind
+        } else {
+            TokenKind::Eof
+        }
     }
 
     pub(super) fn location(&self) -> usize {
@@ -729,9 +754,10 @@ impl ExprParser {
     }
 
     pub(super) fn previous_location(&self) -> usize {
-        self.tokens
-            .get(self.pos.saturating_sub(1))
-            .map(|token| token.location())
-            .unwrap_or_else(|| self.location())
+        if self.pos > self.start {
+            self.tokens[self.pos - 1].location()
+        } else {
+            self.location()
+        }
     }
 }

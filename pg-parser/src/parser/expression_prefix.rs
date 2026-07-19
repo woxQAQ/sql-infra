@@ -51,7 +51,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_prefix(&mut self, restricted: bool) -> Option<Node> {
-        if self.peek_kind() == TokenKind::Eof && self.completion.is_some() {
+        if self.at_completion_cursor() {
             if let Some(recorder) = &self.completion {
                 let mut recorder = recorder.borrow_mut();
                 recorder.record(Expectation::Expression);

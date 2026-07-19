@@ -111,12 +111,13 @@ impl Parser {
         } else {
             cmd.subtype = AlterTableType::AddColumn;
             cmd.missing_ok = self.consume_if_not_exists()?;
-            let tokens = self.take_until_top_level(&[
+            let range = self.take_until_top_level_range(&[
                 TokenKind::Char(','),
                 TokenKind::Char(';'),
                 TokenKind::Eof,
             ]);
-            let Node::ColumnDef(column) = parse_table_element_tokens(tokens)? else {
+            let mut nested = self.bounded_view(range);
+            let Node::ColumnDef(column) = nested.parse_table_element_inner()? else {
                 return Err(self.error_here("ADD COLUMN requires a column definition"));
             };
             cmd.def = Some(Box::new(Node::ColumnDef(column)));

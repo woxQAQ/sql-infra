@@ -49,9 +49,14 @@ impl Parser {
         let actions = if self.consume(TokenKind::Nothing) {
             Vec::new()
         } else if self.consume(TokenKind::Char('(')) {
-            let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let range = self.take_until_top_level_range(&[TokenKind::Char(')')]);
+            let mut nested = self.bounded_view(range);
+            let actions = nested
+                .parse()?
+                .into_iter()
+                .filter_map(|stmt| stmt.stmt.map(|node| *node))
+                .collect::<NodeList>();
             self.expect(TokenKind::Char(')'))?;
-            let actions = parse_statement_list_tokens(tokens)?;
             if actions.iter().any(|action| !is_rule_action(action)) {
                 return Err(self.error_here("invalid statement in rule action list"));
             }
@@ -126,12 +131,12 @@ impl Parser {
             Vec::new()
         };
         self.expect(TokenKind::As)?;
-        let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
-        let (query_tokens, with_check_option) = split_view_check_option(tokens);
+        let query_range = self.take_until_top_level_range(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let (query_range, with_check_option) = split_view_check_option(&self.tokens, query_range);
         if recursive && with_check_option != ViewCheckOption::NoCheckOption {
             return Err(self.error_here("WITH CHECK OPTION is not supported on recursive views"));
         }
-        let query = parse_select_statement_tokens(query_tokens)?;
+        let query = self.parse_select_statement_range(query_range)?;
         let query = if recursive {
             make_recursive_view_select(&view_node, &aliases, query)?
         } else {
@@ -159,31 +164,37 @@ pub(super) fn is_rule_action(node: &Node) -> bool {
     )
 }
 
-pub(super) fn split_view_check_option(mut tokens: Vec<Token>) -> (Vec<Token>, ViewCheckOption) {
-    let len = tokens.len();
+fn split_view_check_option(
+    tokens: &[Token],
+    mut range: std::ops::Range<usize>,
+) -> (std::ops::Range<usize>, ViewCheckOption) {
+    let len = range.len();
     if len >= 4
-        && tokens[len - 4].kind == TokenKind::With
-        && matches!(tokens[len - 3].kind, TokenKind::Cascaded | TokenKind::Local)
-        && tokens[len - 2].kind == TokenKind::Check
-        && tokens[len - 1].kind == TokenKind::Option
+        && tokens[range.end - 4].kind == TokenKind::With
+        && matches!(
+            tokens[range.end - 3].kind,
+            TokenKind::Cascaded | TokenKind::Local
+        )
+        && tokens[range.end - 2].kind == TokenKind::Check
+        && tokens[range.end - 1].kind == TokenKind::Option
     {
-        let option = if tokens[len - 3].kind == TokenKind::Local {
+        let option = if tokens[range.end - 3].kind == TokenKind::Local {
             ViewCheckOption::LocalCheckOption
         } else {
             ViewCheckOption::CascadedCheckOption
         };
-        tokens.truncate(len - 4);
-        return (tokens, option);
+        range.end -= 4;
+        return (range, option);
     }
     if len >= 3
-        && tokens[len - 3].kind == TokenKind::With
-        && tokens[len - 2].kind == TokenKind::Check
-        && tokens[len - 1].kind == TokenKind::Option
+        && tokens[range.end - 3].kind == TokenKind::With
+        && tokens[range.end - 2].kind == TokenKind::Check
+        && tokens[range.end - 1].kind == TokenKind::Option
     {
-        tokens.truncate(len - 3);
-        return (tokens, ViewCheckOption::CascadedCheckOption);
+        range.end -= 3;
+        return (range, ViewCheckOption::CascadedCheckOption);
     }
-    (tokens, ViewCheckOption::NoCheckOption)
+    (range, ViewCheckOption::NoCheckOption)
 }
 
 pub(super) fn make_recursive_view_select(
@@ -238,18 +249,4 @@ pub(super) fn make_recursive_view_select(
         })),
         ..SelectStmt::default()
     }))
-}
-pub(super) fn parse_statement_list_tokens(mut tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.last().map_or(0, Token::end_location);
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser {
-        tokens,
-        pos: 0,
-        completion: None,
-    };
-    Ok(parser
-        .parse()?
-        .into_iter()
-        .filter_map(|stmt| stmt.stmt.map(|node| *node))
-        .collect())
 }

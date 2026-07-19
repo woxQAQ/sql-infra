@@ -17,11 +17,13 @@ impl Parser {
         let mut part_params = Vec::new();
         while !self.at(TokenKind::Char(')')) {
             let elem_location = self.location();
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let range =
+                self.take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
             let starts_parenthesized =
-                tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
-            let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-            let parsed = parse_index_elem_tokens(tokens)?;
+                self.tokens.get(range.start).map(|token| token.kind) == Some(TokenKind::Char('('));
+            let starts_with_cast =
+                self.tokens.get(range.start).map(|token| token.kind) == Some(TokenKind::Cast);
+            let parsed = self.parse_index_elem_range(range)?;
             if !parsed.opclassopts.is_empty()
                 || parsed.ordering != SortByDir::Default
                 || parsed.nulls_ordering != SortByNulls::Default

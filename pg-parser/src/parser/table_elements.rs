@@ -82,9 +82,10 @@ impl Parser {
                 }));
             } else {
                 let location = self.location();
-                let chunk =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                elements.push(parse_table_element_tokens(chunk).map_err(|mut error| {
+                let range =
+                    self.take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                let mut nested = self.bounded_view(range);
+                elements.push(nested.parse_table_element_inner().map_err(|mut error| {
                     if error.location() == 0 {
                         error.reanchor(location);
                     }
@@ -109,14 +110,18 @@ impl Parser {
         }
         while !self.at(TokenKind::Char(')')) {
             let location = self.location();
-            let chunk = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let range =
+                self.take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let mut nested = self.bounded_view(range);
             elements.push(
-                parse_typed_table_element_tokens(chunk).map_err(|mut error| {
-                    if error.location() == 0 {
-                        error.reanchor(location);
-                    }
-                    error
-                })?,
+                nested
+                    .parse_typed_table_element_inner()
+                    .map_err(|mut error| {
+                        if error.location() == 0 {
+                            error.reanchor(location);
+                        }
+                        error
+                    })?,
             );
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -310,24 +315,4 @@ impl Parser {
         }
         Ok((constraints, coll_clause))
     }
-}
-pub(super) fn parse_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.last().map_or(0, Token::end_location);
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser {
-        tokens,
-        pos: 0,
-        completion: None,
-    };
-    parser.parse_table_element_inner()
-}
-pub(super) fn parse_typed_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.last().map_or(0, Token::end_location);
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser {
-        tokens,
-        pos: 0,
-        completion: None,
-    };
-    parser.parse_typed_table_element_inner()
 }

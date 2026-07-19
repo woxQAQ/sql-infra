@@ -2,6 +2,8 @@ use crate::ast::*;
 use crate::completion::{ColumnContext, Expectation, NameExpectation, SharedCompletionRecorder};
 use crate::lexer::{Token, TokenValue, lex, lookup_keyword};
 use crate::{BareLabel, KeywordCategory, TextRange, TextSize, TokenKind};
+use std::ops::Range;
+use std::rc::Rc;
 
 mod access_method;
 mod aggregate_signatures;
@@ -81,13 +83,11 @@ mod xmltable_columns;
 use aggregate_signatures::*;
 use expression::ExprParser;
 use expression_helpers::*;
-use expression_json::{default_json_format, json_behavior_starts, parse_json_value_expr_tokens};
+use expression_json::{default_json_format, json_behavior_starts};
 use fragment_parser::*;
 use function_parameters::*;
-use index::*;
 use object_helpers::*;
 use settings::{parse_setting_value_tokens, parse_time_zone_value_tokens};
-use table_elements::*;
 use token_helpers::*;
 use type_tokens::*;
 use xmltable_columns::*;
@@ -209,8 +209,15 @@ enum DescribedIdentityKind {
 // ── Parser ────────────────────────────────────────────────────────────────
 
 pub struct Parser {
-    tokens: Vec<Token>,
+    // Every parser is a bounded `[start, end)` view over shared token storage.
+    // `eof` is virtual and never inserted into `tokens`; nested views inherit
+    // the completion recorder, whose cursor location distinguishes the real
+    // completion boundary from ordinary fragment boundaries.
+    tokens: Rc<[Token]>,
+    start: usize,
     pos: usize,
+    end: usize,
+    eof: Token,
     completion: Option<SharedCompletionRecorder>,
 }
 
@@ -240,19 +247,202 @@ pub struct ParsedStatement {
 
 impl Parser {
     pub fn new(sql: &str) -> PResult<Self> {
-        Ok(Self {
-            tokens: lex(sql)?,
-            pos: 0,
-            completion: None,
-        })
+        Ok(Self::from_tokens(lex(sql)?, None))
     }
 
     pub(crate) fn for_completion(tokens: Vec<Token>, recorder: SharedCompletionRecorder) -> Self {
+        Self::from_tokens(tokens, Some(recorder))
+    }
+
+    /// Build a new root parser for a deliberately transformed token stream.
+    /// Ordinary nested grammar must use [`Self::bounded_view`] instead.
+    pub(super) fn from_transformed_tokens(tokens: Vec<Token>) -> Self {
+        Self::from_tokens(tokens, None)
+    }
+
+    pub(super) fn from_shared_range(
+        tokens: Rc<[Token]>,
+        range: Range<usize>,
+        eof_location: usize,
+        completion: Option<SharedCompletionRecorder>,
+    ) -> Self {
+        assert!(range.start <= range.end && range.end <= tokens.len());
         Self {
             tokens,
-            pos: 0,
-            completion: Some(recorder),
+            start: range.start,
+            pos: range.start,
+            end: range.end,
+            eof: Token::synthetic(TokenKind::Eof, eof_location),
+            completion,
         }
+    }
+
+    fn from_tokens(mut tokens: Vec<Token>, completion: Option<SharedCompletionRecorder>) -> Self {
+        let eof = match tokens.last() {
+            Some(token) if token.kind == TokenKind::Eof => token.clone(),
+            Some(token) => Token::synthetic(TokenKind::Eof, token.end_location()),
+            None => Token::synthetic(TokenKind::Eof, 0),
+        };
+        if let Some(recorder) = &completion {
+            recorder.borrow_mut().set_cursor(eof.location());
+        }
+        if tokens
+            .last()
+            .is_some_and(|token| token.kind == TokenKind::Eof)
+        {
+            tokens.pop();
+        }
+        let end = tokens.len();
+        Self {
+            tokens: Rc::from(tokens),
+            start: 0,
+            pos: 0,
+            end,
+            eof,
+            completion,
+        }
+    }
+
+    pub(super) fn bounded_view(&self, range: Range<usize>) -> Self {
+        assert!(
+            self.start <= range.start && range.start <= range.end && range.end <= self.end,
+            "parser view must be contained in its parent"
+        );
+        let eof_location = self
+            .tokens
+            .get(range.end)
+            .map_or_else(|| self.eof.location(), Token::location);
+        Self {
+            tokens: self.tokens.clone(),
+            start: range.start,
+            pos: range.start,
+            end: range.end,
+            eof: Token::synthetic(TokenKind::Eof, eof_location),
+            completion: self.completion.clone(),
+        }
+    }
+
+    fn expression_view(&self, range: Range<usize>) -> ExprParser {
+        self.expression_view_with_completion(range, self.completion.clone())
+    }
+
+    fn expression_view_without_completion(&self, range: Range<usize>) -> ExprParser {
+        self.expression_view_with_completion(range, None)
+    }
+
+    fn expression_view_with_completion(
+        &self,
+        range: Range<usize>,
+        completion: Option<SharedCompletionRecorder>,
+    ) -> ExprParser {
+        assert!(
+            self.start <= range.start && range.start <= range.end && range.end <= self.end,
+            "expression view must be contained in its parent"
+        );
+        let eof_location = self
+            .tokens
+            .get(range.end)
+            .map_or_else(|| self.eof.location(), Token::location);
+        ExprParser::from_shared_range(self.tokens.clone(), range, eof_location, completion)
+    }
+
+    pub(super) fn expression_range_is_valid(&self, range: Range<usize>) -> bool {
+        !range.is_empty()
+            && self
+                .expression_view_without_completion(range)
+                .parse()
+                .is_ok()
+    }
+
+    pub(super) fn parse_expression_range(&self, range: Range<usize>) -> PResult<Node> {
+        let location = self
+            .tokens
+            .get(range.start)
+            .map_or_else(|| self.location(), Token::location);
+        if range.is_empty() {
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
+            }
+            return Err(ParseError::new(location, "expected an expression"));
+        }
+        self.expression_view(range).parse().map_err(|mut error| {
+            if error.location() == 0 {
+                error.reanchor(location);
+            }
+            error
+        })
+    }
+
+    pub(super) fn parse_b_expression_range(&self, range: Range<usize>) -> PResult<Node> {
+        let location = self
+            .tokens
+            .get(range.start)
+            .map_or_else(|| self.location(), Token::location);
+        if range.is_empty() {
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
+            }
+            return Err(ParseError::new(
+                location,
+                "expected a restricted expression",
+            ));
+        }
+        self.expression_view(range).parse_b().map_err(|mut error| {
+            if error.location() == 0 {
+                error.reanchor(location);
+            }
+            error
+        })
+    }
+
+    pub(super) fn parse_c_expression_range(&self, range: Range<usize>) -> PResult<Node> {
+        let location = self
+            .tokens
+            .get(range.start)
+            .map_or_else(|| self.location(), Token::location);
+        if range.is_empty() {
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
+            }
+            return Err(ParseError::new(location, "expected a common expression"));
+        }
+        self.expression_view(range).parse_c().map_err(|mut error| {
+            if error.location() == 0 {
+                error.reanchor(location);
+            }
+            error
+        })
+    }
+
+    pub(super) fn split_explicit_alias_range(
+        &self,
+        range: Range<usize>,
+    ) -> (Option<std::string::String>, Range<usize>) {
+        let tokens = &self.tokens[range.clone()];
+        let mut depth = 0usize;
+        let mut alias_index = None;
+        for (index, token) in tokens.iter().enumerate() {
+            match token.kind {
+                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
+                TokenKind::As if depth == 0 => alias_index = Some(index),
+                _ => {}
+            }
+        }
+        if let Some(index) = alias_index
+            && index + 2 == tokens.len()
+            && let Some(alias) = tokens.get(index + 1)
+        {
+            let accepted = matches!(alias.kind, TokenKind::Ident | TokenKind::UIdent)
+                || match &alias.value {
+                    Some(TokenValue::Keyword(word)) => lookup_keyword(word).is_some(),
+                    _ => false,
+                };
+            if accepted && let Some(name) = token_name(alias) {
+                return (Some(name), range.start..range.start + index);
+            }
+        }
+        (None, range)
     }
 
     pub(crate) fn parse_completion_statement(&mut self) -> PResult<Node> {
@@ -352,19 +542,24 @@ impl Parser {
     /// - `FROM`   following `DISTINCT`  → `DISTINCT FROM`, not a boundary
     /// - `NOT`    following `IS`        → `IS NOT` predicate, not a boundary
     pub(super) fn take_until_top_level(&mut self, stops: &[TokenKind]) -> Vec<Token> {
-        let mut out = Vec::new();
+        let range = self.take_until_top_level_range(stops);
+        self.tokens[range].to_vec()
+    }
+
+    /// Advance to the same boundary as [`Self::take_until_top_level`] but
+    /// return a bounded range into the shared token buffer instead of cloning
+    /// the fragment. The range can be passed to [`Self::bounded_view`].
+    pub(super) fn take_until_top_level_range(&mut self, stops: &[TokenKind]) -> Range<usize> {
+        let start = self.pos;
         let mut depth = 0usize;
+        let mut previous = None;
         while !self.at(TokenKind::Eof) {
             let kind = self.peek_kind();
             // Two-word combinations that need the previous token to disambiguate.
-            let within_group = kind == TokenKind::GroupP
-                && out.last().map(|token: &Token| token.kind) == Some(TokenKind::Within);
-            let collation_for = kind == TokenKind::For
-                && out.last().map(|token: &Token| token.kind) == Some(TokenKind::Collation);
-            let distinct_from = kind == TokenKind::From
-                && out.last().map(|token: &Token| token.kind) == Some(TokenKind::Distinct);
-            let is_not_predicate = kind == TokenKind::Not
-                && out.last().map(|token: &Token| token.kind) == Some(TokenKind::Is);
+            let within_group = kind == TokenKind::GroupP && previous == Some(TokenKind::Within);
+            let collation_for = kind == TokenKind::For && previous == Some(TokenKind::Collation);
+            let distinct_from = kind == TokenKind::From && previous == Some(TokenKind::Distinct);
+            let is_not_predicate = kind == TokenKind::Not && previous == Some(TokenKind::Is);
             // Top-level and a stop word (but not one of the special combos) → stop.
             if depth == 0
                 && stops.contains(&kind)
@@ -388,9 +583,10 @@ impl Parser {
                 }
                 _ => {}
             }
-            out.push(self.advance().clone());
+            previous = Some(kind);
+            self.advance();
         }
-        out
+        start..self.pos
     }
 
     /// True if the cursor is at a statement boundary (`;` or EOF).
@@ -433,7 +629,7 @@ impl Parser {
         stops: &[TokenKind],
     ) -> bool {
         let mut depth = 0usize;
-        for token in &self.tokens[self.pos..] {
+        for token in &self.tokens[self.pos..self.end] {
             match token.kind {
                 TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
                 TokenKind::Char(')') | TokenKind::Char(']') => {
@@ -481,15 +677,22 @@ impl Parser {
     /// At EOF stays at the last position (no out-of-bounds advance).
     /// This is the lowest-level consume; `consume` / `expect` are built on it.
     pub(super) fn advance(&mut self) -> &Token {
-        if !self.at(TokenKind::Eof) {
+        if self.pos < self.end {
+            let consumed = self.pos;
             self.pos += 1;
+            &self.tokens[consumed]
+        } else {
+            &self.eof
         }
-        &self.tokens[self.pos.saturating_sub(1)]
     }
 
     /// Reference to the current token (LA(1)).  Does not consume.
     pub(super) fn peek(&self) -> &Token {
-        &self.tokens[self.pos]
+        if self.pos < self.end {
+            &self.tokens[self.pos]
+        } else {
+            &self.eof
+        }
     }
 
     /// The current token's `TokenKind` — the most common lookahead entry point.
@@ -501,10 +704,12 @@ impl Parser {
     /// Returns `Eof` on overflow.  For the few productions that need extra
     /// lookahead to disambiguate.
     pub(super) fn peek_kind_n(&self, n: usize) -> TokenKind {
-        self.tokens
-            .get(self.pos + n)
-            .map(|token| token.kind)
-            .unwrap_or(TokenKind::Eof)
+        let index = self.pos.saturating_add(n);
+        if index < self.end {
+            self.tokens[index].kind
+        } else {
+            TokenKind::Eof
+        }
     }
 
     /// Byte offset of the current token in the source text.  Commonly used as
@@ -517,10 +722,11 @@ impl Parser {
     /// `advance` when you still need the start position of the just-parsed
     /// node.  Falls back to [`location`] when the cursor hasn't moved yet.
     pub(super) fn previous_location(&self) -> usize {
-        self.tokens
-            .get(self.pos.saturating_sub(1))
-            .map(|token| token.location())
-            .unwrap_or(self.location())
+        if self.pos > self.start {
+            self.tokens[self.pos - 1].location()
+        } else {
+            self.location()
+        }
     }
 
     /// Construct a `ParseError` anchored at the current token position.
@@ -530,7 +736,11 @@ impl Parser {
     }
 
     pub(super) fn at_completion_cursor(&self) -> bool {
-        self.completion.is_some() && self.at(TokenKind::Eof)
+        self.at(TokenKind::Eof)
+            && self
+                .completion
+                .as_ref()
+                .is_some_and(|recorder| recorder.borrow().is_cursor(self.location()))
     }
 
     pub(super) fn record_completion(&self, expectation: Expectation) {
@@ -554,17 +764,6 @@ impl Parser {
             schema: None,
         }));
         self.record_completion(Expectation::Name(NameExpectation::Schema));
-    }
-
-    pub(super) fn parse_expression_tokens_with_completion(
-        &self,
-        tokens: Vec<Token>,
-    ) -> PResult<Node> {
-        if let Some(recorder) = &self.completion {
-            ExprParser::new_completion(tokens, recorder.clone()).parse()
-        } else {
-            parse_expression_tokens(tokens)
-        }
     }
 }
 
@@ -717,6 +916,72 @@ mod tests {
         let start = object_type.pos;
         assert_eq!(object_type.consume_object_type(), None);
         assert_eq!(object_type.pos, start);
+    }
+
+    #[test]
+    fn bounded_view_uses_virtual_eof_without_reading_parent_tokens() {
+        let parent = Parser::new("select value").unwrap();
+        let mut nested = parent.bounded_view(0..1);
+
+        assert_eq!(nested.advance().kind, TokenKind::Select);
+        assert_eq!(nested.peek_kind(), TokenKind::Eof);
+        assert_eq!(nested.peek_kind_n(1), TokenKind::Eof);
+        assert_eq!(parent.peek_kind(), TokenKind::Select);
+        assert_ne!(parent.peek_kind_n(1), TokenKind::Eof);
+    }
+
+    #[test]
+    fn empty_bounded_view_anchors_eof_at_its_boundary() {
+        let parent = Parser::new("select value").unwrap();
+        let boundary = parent.tokens[1].location();
+        let nested = parent.bounded_view(1..1);
+
+        assert_eq!(nested.peek_kind(), TokenKind::Eof);
+        assert_eq!(nested.location(), boundary);
+    }
+
+    #[test]
+    fn bounded_view_shares_completion_but_only_records_at_the_real_cursor() {
+        let tokens = lex("select value").unwrap();
+        let recorder = Rc::new(std::cell::RefCell::new(
+            crate::completion::CompletionRecorder::default(),
+        ));
+        let parent = Parser::for_completion(tokens, recorder.clone());
+        let artificial_eof = parent.bounded_view(0..1);
+        let cursor_eof = parent.bounded_view(parent.end..parent.end);
+
+        assert!(Rc::ptr_eq(
+            artificial_eof.completion.as_ref().unwrap(),
+            &recorder
+        ));
+        assert!(!artificial_eof.at_completion_cursor());
+        assert!(cursor_eof.at_completion_cursor());
+    }
+
+    #[test]
+    fn expression_view_shares_tokens_and_cannot_read_its_suffix() {
+        let parent = Parser::new("1 + 2, 3").unwrap();
+        let mut expression = parent.expression_view(0..3);
+
+        assert!(Rc::ptr_eq(&parent.tokens, &expression.tokens));
+        assert!(matches!(expression.parse_expr(0), Some(Node::AExpr(_))));
+        assert_eq!(expression.peek_kind(), TokenKind::Eof);
+        assert_eq!(parent.peek_kind(), TokenKind::IConst);
+        assert_eq!(parent.tokens[3].kind, TokenKind::Char(','));
+    }
+
+    #[test]
+    fn shared_nested_parser_views_cover_statement_and_expression_fragments() {
+        for sql in [
+            "with x as (select 1) select * from x",
+            "select * from (a join b on a.id = b.id) j",
+            "create rule r as on update to t do (notify ch; notify ch2)",
+            "create table t (id int primary key, x text)",
+            "copy t from 'f' with (format csv, header true)",
+            "select sum(x) over (partition by y order by z rows between 1 preceding and current row) from t",
+        ] {
+            parse_one(sql).unwrap_or_else(|error| panic!("{sql}: {error}"));
+        }
     }
 
     #[test]

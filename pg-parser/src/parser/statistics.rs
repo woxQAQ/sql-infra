@@ -1,70 +1,5 @@
 use super::*;
 
-fn parse_stats_params(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location());
-    if tokens.is_empty() {
-        return Err(ParseError::new(
-            location,
-            "CREATE STATISTICS requires an ON item",
-        ));
-    }
-    if tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
-        return Err(ParseError::new(
-            location,
-            "statistics parameter list cannot end with ','",
-        ));
-    }
-    split_top_level_commas(tokens)
-        .into_iter()
-        .map(|tokens| {
-            let item_location = tokens.first().map_or(location, |token| token.location());
-            if tokens.len() == 1
-                && token_name_in_categories(
-                    &tokens[0],
-                    &[KeywordCategory::Unreserved, KeywordCategory::ColName],
-                )
-                .is_some()
-            {
-                return Ok(Node::StatsElem(StatsElem {
-                    node_tag: NodeTag::StatsElem,
-                    name: token_name(&tokens[0]),
-                    ..StatsElem::default()
-                }));
-            }
-
-            let expression = if tokens.first().map(|token| token.kind)
-                == Some(TokenKind::Char('('))
-            {
-                let close = find_matching_close(&tokens, 0).ok_or_else(|| {
-                    ParseError::new(item_location, "unterminated statistics expression")
-                })?;
-                if close + 1 != tokens.len() {
-                    return Err(ParseError::ranged(
-                        tokens[close + 1].range,
-                        "unexpected token after statistics expression",
-                    ));
-                }
-                parse_expression_tokens(tokens[1..close].to_vec())?
-            } else {
-                let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-                let expression = parse_expression_tokens(tokens)?;
-                if !is_windowless_function_expression_node(&expression, starts_with_cast) {
-                    return Err(ParseError::new(
-                        item_location,
-                        "statistics expressions must be parenthesized unless they are function calls",
-                    ));
-                }
-                expression
-            };
-            Ok(Node::StatsElem(StatsElem {
-                node_tag: NodeTag::StatsElem,
-                expr: Some(Box::new(expression)),
-                ..StatsElem::default()
-            }))
-        })
-        .collect()
-}
-
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createstatistics.html
@@ -106,9 +41,12 @@ impl Parser {
             Vec::new()
         };
         self.expect(TokenKind::On)?;
-        let stats_tokens =
-            self.take_until_top_level(&[TokenKind::From, TokenKind::Char(';'), TokenKind::Eof]);
-        let exprs = parse_stats_params(stats_tokens)?;
+        let stats_range = self.take_until_top_level_range(&[
+            TokenKind::From,
+            TokenKind::Char(';'),
+            TokenKind::Eof,
+        ]);
+        let exprs = self.parse_stats_params_range(stats_range)?;
         self.expect(TokenKind::From)?;
         let relations = self.parse_from_clause_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
         if relations.is_empty() {
@@ -123,6 +61,96 @@ impl Parser {
             if_not_exists,
             ..CreateStatsStmt::default()
         }))
+    }
+
+    fn parse_stats_params_range(&self, range: std::ops::Range<usize>) -> PResult<NodeList> {
+        let location = self
+            .tokens
+            .get(range.start)
+            .map_or_else(|| self.location(), Token::location);
+        if range.is_empty() {
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
+            }
+            return Err(ParseError::new(
+                location,
+                "CREATE STATISTICS requires an ON item",
+            ));
+        }
+        if self.tokens[range.end - 1].kind == TokenKind::Char(',') {
+            return Err(ParseError::new(
+                location,
+                "statistics parameter list cannot end with ','",
+            ));
+        }
+
+        let mut ranges = Vec::new();
+        let mut start = range.start;
+        let mut depth = 0usize;
+        for index in range.clone() {
+            match self.tokens[index].kind {
+                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
+                TokenKind::Char(',') if depth == 0 => {
+                    ranges.push(start..index);
+                    start = index + 1;
+                }
+                _ => {}
+            }
+        }
+        ranges.push(start..range.end);
+
+        ranges
+            .into_iter()
+            .map(|item_range| {
+                let tokens = &self.tokens[item_range.clone()];
+                let item_location = tokens.first().map_or(location, Token::location);
+                if tokens.len() == 1
+                    && token_name_in_categories(
+                        &tokens[0],
+                        &[KeywordCategory::Unreserved, KeywordCategory::ColName],
+                    )
+                    .is_some()
+                {
+                    return Ok(Node::StatsElem(StatsElem {
+                        node_tag: NodeTag::StatsElem,
+                        name: token_name(&tokens[0]),
+                        ..StatsElem::default()
+                    }));
+                }
+
+                let expression = if tokens.first().map(|token| token.kind)
+                    == Some(TokenKind::Char('('))
+                {
+                    let close = find_matching_close(tokens, 0).ok_or_else(|| {
+                        ParseError::new(item_location, "unterminated statistics expression")
+                    })?;
+                    if close + 1 != tokens.len() {
+                        return Err(ParseError::ranged(
+                            tokens[close + 1].range,
+                            "unexpected token after statistics expression",
+                        ));
+                    }
+                    self.parse_expression_range(item_range.start + 1..item_range.start + close)?
+                } else {
+                    let starts_with_cast =
+                        tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
+                    let expression = self.parse_expression_range(item_range)?;
+                    if !is_windowless_function_expression_node(&expression, starts_with_cast) {
+                        return Err(ParseError::new(
+                            item_location,
+                            "statistics expressions must be parenthesized unless they are function calls",
+                        ));
+                    }
+                    expression
+                };
+                Ok(Node::StatsElem(StatsElem {
+                    node_tag: NodeTag::StatsElem,
+                    expr: Some(Box::new(expression)),
+                    ..StatsElem::default()
+                }))
+            })
+            .collect()
     }
 
     // PostgreSQL 18 Synopsis

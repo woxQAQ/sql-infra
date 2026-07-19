@@ -60,9 +60,9 @@ impl Parser {
                 CteMaterialize::Default
             };
             self.expect(TokenKind::Char('('))?;
-            let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let inner = self.take_until_top_level_range(&[TokenKind::Char(')')]);
+            let ctequery = self.parse_preparable_statement_range(inner)?;
             self.expect(TokenKind::Char(')'))?;
-            let ctequery = parse_preparable_statement_tokens(inner)?;
             let search_clause = self.parse_cte_search_clause()?;
             let cycle_clause = self.parse_cte_cycle_clause()?;
             ctes.push(Node::CommonTableExpr(CommonTableExpr {
@@ -260,9 +260,10 @@ impl Parser {
 
     fn parse_select_primary(&mut self, with_clause: Option<WithClause>) -> PResult<SelectStmt> {
         if self.consume(TokenKind::Char('(')) {
-            let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let inner = self.take_until_top_level_range(&[TokenKind::Char(')')]);
+            let parsed = self.parse_select_statement_range(inner)?;
             self.expect(TokenKind::Char(')'))?;
-            return match parse_select_statement_tokens(inner)? {
+            return match parsed {
                 Node::SelectStmt(mut stmt) => {
                     if with_clause.is_some() && stmt.with_clause.is_some() {
                         return Err(self.error_here("multiple WITH clauses are not allowed"));
@@ -272,7 +273,7 @@ impl Parser {
                     }
                     Ok(stmt)
                 }
-                _ => unreachable!("parse_select_statement_tokens returned a non-select node"),
+                _ => unreachable!("parse_select_statement_range returned a non-select node"),
             };
         }
         let mut stmt = SelectStmt {
@@ -594,7 +595,7 @@ impl Parser {
                     return Err(self.error_here("multiple OFFSET clauses are not allowed"));
                 }
                 saw_offset = true;
-                let offset_tokens = self.take_until_top_level(&[
+                let offset_range = self.take_until_top_level_range(&[
                     TokenKind::Row,
                     TokenKind::Rows,
                     TokenKind::Limit,
@@ -608,9 +609,9 @@ impl Parser {
                 ]);
                 let has_row_suffix = self.at(TokenKind::Row) || self.at(TokenKind::Rows);
                 stmt.limit_offset = Some(Box::new(if has_row_suffix {
-                    parse_select_fetch_first_value_tokens(offset_tokens)?
+                    self.parse_select_fetch_first_value_range(offset_range)?
                 } else {
-                    parse_expression_tokens(offset_tokens)?
+                    self.parse_expression_range(offset_range)?
                 }));
                 if has_row_suffix {
                     self.advance();
@@ -628,9 +629,9 @@ impl Parser {
                     if matches!(self.peek_kind(), TokenKind::Row | TokenKind::Rows) {
                         Box::new(Node::AConst(AConst::integer(1, -1)))
                     } else {
-                        Box::new(parse_select_fetch_first_value_tokens(
-                            self.take_until_top_level(&[TokenKind::Row, TokenKind::Rows]),
-                        )?)
+                        let range =
+                            self.take_until_top_level_range(&[TokenKind::Row, TokenKind::Rows]);
+                        Box::new(self.parse_select_fetch_first_value_range(range)?)
                     },
                 );
                 if !(self.consume(TokenKind::Row) || self.consume(TokenKind::Rows)) {
@@ -645,6 +646,26 @@ impl Parser {
             }
         }
         Ok(())
+    }
+
+    fn parse_select_fetch_first_value_range(&self, range: std::ops::Range<usize>) -> PResult<Node> {
+        if matches!(
+            &self.tokens[range.clone()],
+            [
+                Token {
+                    kind: TokenKind::Char('+') | TokenKind::Char('-'),
+                    ..
+                },
+                Token {
+                    kind: TokenKind::IConst | TokenKind::FConst,
+                    ..
+                }
+            ]
+        ) {
+            self.parse_expression_range(range)
+        } else {
+            self.parse_c_expression_range(range)
+        }
     }
 }
 pub(super) fn select_set_operator(kind: TokenKind) -> Option<(SetOperation, u8)> {

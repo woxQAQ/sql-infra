@@ -247,10 +247,13 @@ impl ExprParser {
         }
         if self.at(TokenKind::Char('(')) {
             let location = self.advance().location();
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
-            self.expect(TokenKind::Char(')'))?;
-            match parse_window_specification_tokens(tokens, location) {
-                Ok(window) => Some(Some(Box::new(window))),
+            let range = self.take_until_balanced_range(TokenKind::Char(')'));
+            let mut parser = self.parser_view(range);
+            match parser.parse_window_specification_body(location, TokenKind::Eof) {
+                Ok(window) => {
+                    self.expect(TokenKind::Char(')'))?;
+                    Some(Some(Box::new(window)))
+                }
                 Err(error) => {
                     if self.error.is_none() {
                         self.error = Some(error);
@@ -284,7 +287,7 @@ impl ExprParser {
         let mut depth = 0usize;
         let mut top_level_string_seen = false;
         let mut best = None;
-        for end in start + 1..self.tokens.len() {
+        for end in start + 1..=self.end {
             let token = &self.tokens[end - 1];
             if end - 1 > start && depth == 0 && expression_boundary(token.kind) {
                 break;
@@ -314,22 +317,4 @@ impl ExprParser {
         self.pos = end;
         Some(node)
     }
-}
-pub(super) fn parse_window_specification_tokens(
-    mut tokens: Vec<Token>,
-    location: usize,
-) -> PResult<WindowDef> {
-    let end_location = tokens.last().map_or(location, Token::end_location);
-    tokens.push(Token::synthetic(TokenKind::Char(')'), end_location));
-    tokens.push(Token::synthetic(TokenKind::Eof, end_location));
-    let mut parser = Parser {
-        tokens,
-        pos: 0,
-        completion: None,
-    };
-    let window = parser.parse_window_specification_body(location)?;
-    if !parser.at(TokenKind::Eof) {
-        return Err(parser.error_here("unexpected token after window specification"));
-    }
-    Ok(window)
 }
