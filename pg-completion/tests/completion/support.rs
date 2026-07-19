@@ -131,7 +131,10 @@ impl Catalog for TestCatalog {
             CatalogQuery::Relations { prefix, schema, .. } => {
                 filter(&self.relations, prefix, schema)
             }
-            CatalogQuery::Columns { relation } => self.columns(relation),
+            CatalogQuery::Columns {
+                relation,
+                search_path,
+            } => self.columns(relation, search_path),
             CatalogQuery::Functions { prefix, schema, .. } => {
                 filter(&self.functions, prefix, schema)
             }
@@ -141,16 +144,30 @@ impl Catalog for TestCatalog {
 }
 
 impl TestCatalog {
-    fn columns(&self, relation: &QualifiedName) -> Vec<CatalogItem> {
+    fn columns(&self, relation: &QualifiedName, search_path: &[&str]) -> Vec<CatalogItem> {
+        let columns = if let Some(schema) = relation.schema.as_deref() {
+            self.find_columns(Some(schema), &relation.name)
+        } else {
+            search_path
+                .iter()
+                .find_map(|schema| self.find_columns(Some(schema), &relation.name))
+                .or_else(|| self.find_columns(None, &relation.name))
+        };
+        columns.cloned().unwrap_or_default()
+    }
+
+    fn find_columns(&self, schema: Option<&str>, relation: &str) -> Option<&Vec<CatalogItem>> {
         self.columns
-            .get(&(relation.schema.clone(), relation.name.clone()))
-            .or_else(|| {
-                self.columns.iter().find_map(|((_, name), columns)| {
-                    name.eq_ignore_ascii_case(&relation.name).then_some(columns)
-                })
+            .iter()
+            .find_map(|((candidate_schema, candidate_relation), columns)| {
+                let schema_matches = match (candidate_schema.as_deref(), schema) {
+                    (Some(candidate), Some(expected)) => candidate.eq_ignore_ascii_case(expected),
+                    (None, None) => true,
+                    _ => false,
+                };
+                (schema_matches && candidate_relation.eq_ignore_ascii_case(relation))
+                    .then_some(columns)
             })
-            .cloned()
-            .unwrap_or_default()
     }
 }
 
@@ -287,6 +304,18 @@ impl Completed {
             .iter()
             .filter(|item| item.label == label && item.kind == kind)
             .count()
+    }
+
+    pub fn assert_kind_labels(&self, kind: CompletionKind, expected: &[&str]) -> &Self {
+        let actual = self
+            .result
+            .items
+            .iter()
+            .filter(|item| item.kind == kind)
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected, "{:?}", self.marked);
+        self
     }
 
     fn find(&self, label: &str, kind: CompletionKind) -> Option<&CompletionItem> {

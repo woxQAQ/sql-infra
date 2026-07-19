@@ -10,6 +10,10 @@ fn relation_candidates_preserve_catalog_kinds() {
         .assert_has("users", CompletionKind::Table)
         .assert_lacks("orders", CompletionKind::Table);
     fixture
+        .complete("SELECT * FROM |")
+        .assert_lacks("name", CompletionKind::Column)
+        .assert_lacks("integer", CompletionKind::Type);
+    fixture
         .complete("SELECT * FROM active_|")
         .assert_has("active_users", CompletionKind::View);
     fixture
@@ -26,7 +30,13 @@ fn schemas_and_schema_qualified_relations_are_resolved_separately() {
     fixture
         .complete("SELECT * FROM audit.active_|")
         .assert_has("active_users", CompletionKind::View)
-        .assert_lacks("users", CompletionKind::Table);
+        .assert_lacks("users", CompletionKind::Table)
+        .assert_replaces("active_");
+    fixture
+        .complete("SELECT * FROM audit.|")
+        .assert_has("active_users", CompletionKind::View)
+        .assert_has("recent_orders", CompletionKind::MaterializedView)
+        .assert_replaces("");
 }
 
 #[test]
@@ -87,5 +97,35 @@ fn quoted_relation_completion_is_case_sensitive_and_quotes_insert_text() {
     let result = Fixture::default().complete("SELECT * FROM \"User|");
     let item = result.item("UserProfile", CompletionKind::Table);
     assert_eq!(item.insert_text, "\"UserProfile\"");
-    result.assert_lacks("users", CompletionKind::Table);
+    result
+        .assert_lacks("users", CompletionKind::Table)
+        .assert_replaces("\"User");
+}
+
+#[test]
+fn relation_insert_text_quotes_unsafe_catalog_identifiers() {
+    let mut fixture = Fixture::default();
+    for name in ["123users", "user profiles", "user\"profiles"] {
+        fixture
+            .catalog
+            .relation("public", name, CatalogItemKind::Table, &[]);
+    }
+
+    let result = fixture.complete("SELECT * FROM |");
+    assert_eq!(
+        result.item("123users", CompletionKind::Table).insert_text,
+        "\"123users\""
+    );
+    assert_eq!(
+        result
+            .item("user profiles", CompletionKind::Table)
+            .insert_text,
+        "\"user profiles\""
+    );
+    assert_eq!(
+        result
+            .item("user\"profiles", CompletionKind::Table)
+            .insert_text,
+        "\"user\"\"profiles\""
+    );
 }

@@ -19,6 +19,27 @@ fn syntax_only_results_are_marked_incomplete_when_names_need_a_catalog() {
         .assert_has("NULL", CompletionKind::Keyword)
         .assert_lacks("name", CompletionKind::Column)
         .assert_incomplete(true);
+
+    Fixture::default()
+        .complete("SELECT | FROM users")
+        .assert_incomplete(false);
+}
+
+#[test]
+fn completion_works_at_document_boundaries_and_after_statements() {
+    let fixture = Fixture::default();
+    fixture
+        .complete_without_catalog("|")
+        .assert_has("SELECT", CompletionKind::Keyword)
+        .assert_replaces("");
+    fixture
+        .complete_without_catalog("SELECT 1; SEL|")
+        .assert_has("SELECT", CompletionKind::Keyword)
+        .assert_replaces("SEL");
+    fixture
+        .complete("SELECT '中', |")
+        .assert_has("count", CompletionKind::Function)
+        .assert_replaces("");
 }
 
 #[test]
@@ -60,7 +81,12 @@ fn replacement_covers_the_whole_identifier_when_cursor_is_in_the_middle() {
 #[test]
 fn strings_and_comments_suppress_completion() {
     let fixture = Fixture::default();
-    for marked in ["SELECT 'na|' FROM users", "SELECT 1 -- na|\nFROM users"] {
+    for marked in [
+        "SELECT 'na|' FROM users",
+        "SELECT 1 -- na|\nFROM users",
+        "SELECT /* na| */ 1",
+        "SELECT $$na|$$",
+    ] {
         assert!(
             fixture.complete(marked).result.items.is_empty(),
             "{marked:?}"

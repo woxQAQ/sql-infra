@@ -33,6 +33,47 @@ fn types_complete_in_cast_and_ddl_slots() {
         fixture
             .complete(marked)
             .assert_has("integer", CompletionKind::Type)
-            .assert_lacks("order_status", CompletionKind::Type);
+            .assert_lacks("order_status", CompletionKind::Type)
+            .assert_kind_labels(CompletionKind::Type, &["integer"]);
     }
+}
+
+#[test]
+fn type_slots_exclude_other_catalog_families_and_honor_schema_qualification() {
+    let fixture = Fixture::default();
+    fixture
+        .complete("SELECT 1::|")
+        .assert_has("integer", CompletionKind::Type)
+        .assert_has("order_status", CompletionKind::Type)
+        .assert_lacks("count", CompletionKind::Function)
+        .assert_lacks("users", CompletionKind::Table)
+        .assert_lacks("id", CompletionKind::Column);
+    fixture
+        .complete("SELECT 1::pg_catalog.inte|")
+        .assert_has("integer", CompletionKind::Type)
+        .assert_lacks("order_status", CompletionKind::Type);
+}
+
+#[test]
+fn routine_and_type_insert_text_quotes_unsafe_identifiers() {
+    let mut fixture = Fixture::default();
+    fixture
+        .catalog
+        .function("public", "calculate total", "calculate total()", None);
+    fixture.catalog.ty("public", "order state");
+
+    assert_eq!(
+        fixture
+            .complete("SELECT calculate| ")
+            .item("calculate total", CompletionKind::Function)
+            .insert_text,
+        "\"calculate total\""
+    );
+    assert_eq!(
+        fixture
+            .complete("SELECT 1::order|")
+            .item("order state", CompletionKind::Type)
+            .insert_text,
+        "\"order state\""
+    );
 }

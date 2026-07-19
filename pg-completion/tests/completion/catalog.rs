@@ -35,3 +35,33 @@ fn memory_catalog_supports_every_public_metadata_family() {
         .complete_with("SELECT 1::customer_|", Some(&catalog))
         .assert_has("customer_state", CompletionKind::Type);
 }
+
+#[test]
+fn memory_catalog_resolves_unqualified_columns_by_search_path() {
+    let mut catalog = MemoryCatalog::new();
+    catalog.add_relation(
+        "public",
+        "customers",
+        CatalogItemKind::Table,
+        [("public_only".into(), "text".into())],
+    );
+    catalog.add_relation(
+        "audit",
+        "customers",
+        CatalogItemKind::View,
+        [("audit_only".into(), "text".into())],
+    );
+
+    Fixture::default()
+        .with_search_path(&["audit", "public"])
+        .complete_with("SELECT c.| FROM customers c", Some(&catalog))
+        .assert_kind_labels(CompletionKind::Column, &["audit_only"]);
+    Fixture::default()
+        .with_search_path(&["public", "audit"])
+        .complete_with("SELECT c.| FROM customers c", Some(&catalog))
+        .assert_kind_labels(CompletionKind::Column, &["public_only"]);
+    Fixture::default()
+        .with_search_path(&["public", "audit"])
+        .complete_with("SELECT c.| FROM audit.customers c", Some(&catalog))
+        .assert_kind_labels(CompletionKind::Column, &["audit_only"]);
+}

@@ -2,6 +2,8 @@
 mod catalog;
 #[path = "completion/columns.rs"]
 mod columns;
+#[path = "completion/contract.rs"]
+mod contract;
 #[path = "completion/errors.rs"]
 mod errors;
 #[path = "completion/ranking.rs"]

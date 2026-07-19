@@ -37,7 +37,8 @@ fn join_using_only_returns_columns_present_on_both_sides() {
         .complete("SELECT * FROM users u JOIN orders o USING (|")
         .assert_has("id", CompletionKind::Column)
         .assert_lacks("name", CompletionKind::Column)
-        .assert_lacks("amount", CompletionKind::Column);
+        .assert_lacks("amount", CompletionKind::Column)
+        .assert_kind_labels(CompletionKind::Column, &["id"]);
 }
 
 #[test]

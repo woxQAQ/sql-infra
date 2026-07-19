@@ -733,7 +733,15 @@ fn collect_tricky_expectations(
             .get(before.len().saturating_sub(2))
             .and_then(|token| token_name(Some(token)))
         {
-            if qualifier_is_relation_schema(&before) {
+            let before_qualifier = &before[..before.len().saturating_sub(2)];
+            if expects_type_name(before_qualifier) {
+                push_unique(
+                    &mut result,
+                    Expectation::Name(NameExpectation::Type {
+                        schema: Some(qualifier),
+                    }),
+                );
+            } else if qualifier_is_relation_schema(&before) {
                 push_unique(
                     &mut result,
                     Expectation::Name(NameExpectation::Relation {
@@ -806,6 +814,9 @@ fn collect_tricky_expectations(
 
     match last.kind {
         TokenKind::Select | TokenKind::Where | TokenKind::Having | TokenKind::On => {
+            add_expression_expectations(&mut result);
+        }
+        TokenKind::Char(',') if current_clause(&before) == Some(TokenKind::Select) => {
             add_expression_expectations(&mut result);
         }
         TokenKind::From | TokenKind::Join | TokenKind::Into | TokenKind::Update => {
@@ -1398,23 +1409,31 @@ mod tests {
 
     #[test]
     fn select_target_has_visible_columns_and_functions() {
-        let context = collect("SELECT | FROM users u");
-        assert!(
-            context
-                .expectations
-                .contains(&Expectation::Name(NameExpectation::Column(
-                    ColumnContext::VisibleScope
-                )))
-        );
-        assert!(
-            context
-                .expectations
-                .contains(&Expectation::Name(NameExpectation::Function {
-                    schema: None
-                }))
-        );
-        assert_eq!(context.scope.references[0].name.name, "users");
-        assert_eq!(context.scope.references[0].alias.as_deref(), Some("u"));
+        for marked in ["SELECT | FROM users u", "SELECT id, | FROM users u"] {
+            let context = collect(marked);
+            assert!(
+                context
+                    .expectations
+                    .contains(&Expectation::Name(NameExpectation::Column(
+                        ColumnContext::VisibleScope
+                    ))),
+                "{marked}"
+            );
+            assert!(
+                context
+                    .expectations
+                    .contains(&Expectation::Name(NameExpectation::Function {
+                        schema: None
+                    })),
+                "{marked}"
+            );
+            assert_eq!(context.scope.references[0].name.name, "users", "{marked}");
+            assert_eq!(
+                context.scope.references[0].alias.as_deref(),
+                Some("u"),
+                "{marked}"
+            );
+        }
     }
 
     #[test]
@@ -1579,6 +1598,21 @@ mod tests {
                 collect(marked)
                     .expectations
                     .contains(&Expectation::Name(NameExpectation::Type { schema: None })),
+                "{marked}"
+            );
+        }
+
+        for marked in [
+            "SELECT id::pg_catalog.inte| FROM users",
+            "SELECT CAST(id AS pg_catalog.inte|) FROM users",
+            "ALTER TABLE users ALTER COLUMN id TYPE pg_catalog.inte|",
+        ] {
+            assert!(
+                collect(marked)
+                    .expectations
+                    .contains(&Expectation::Name(NameExpectation::Type {
+                        schema: Some("pg_catalog".into()),
+                    })),
                 "{marked}"
             );
         }

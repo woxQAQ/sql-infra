@@ -84,6 +84,7 @@ pub enum CatalogQuery<'a> {
     },
     Columns {
         relation: &'a QualifiedName,
+        search_path: &'a [&'a str],
     },
     Functions {
         prefix: &'a str,
@@ -281,6 +282,7 @@ impl Resolver<'_> {
                     };
                     for column in self.search(CatalogQuery::Columns {
                         relation: &relation,
+                        search_path: self.request.search_path,
                     }) {
                         result.push(self.catalog_candidate(column, 650));
                     }
@@ -303,7 +305,10 @@ impl Resolver<'_> {
             }
             ColumnContext::TargetRelation => {
                 if let Some(relation) = &self.context.scope.target_relation {
-                    for column in self.search(CatalogQuery::Columns { relation }) {
+                    for column in self.search(CatalogQuery::Columns {
+                        relation,
+                        search_path: self.request.search_path,
+                    }) {
                         result.push(self.catalog_candidate(column, 680));
                     }
                 }
@@ -373,6 +378,7 @@ impl Resolver<'_> {
         }
         self.search(CatalogQuery::Columns {
             relation: &reference.name,
+            search_path: self.request.search_path,
         })
     }
 
@@ -638,16 +644,10 @@ impl Catalog for MemoryCatalog {
             CatalogQuery::Relations { prefix, schema, .. } => {
                 filter_items_in_schema(&self.relations, prefix, schema)
             }
-            CatalogQuery::Columns { relation } => self
-                .columns
-                .get(&(relation.schema.clone(), relation.name.clone()))
-                .or_else(|| {
-                    self.columns.iter().find_map(|((_, name), columns)| {
-                        name.eq_ignore_ascii_case(&relation.name).then_some(columns)
-                    })
-                })
-                .cloned()
-                .unwrap_or_default(),
+            CatalogQuery::Columns {
+                relation,
+                search_path,
+            } => self.columns_for_relation(relation, search_path),
             CatalogQuery::Functions { prefix, schema, .. } => {
                 filter_items_in_schema(&self.functions, prefix, schema)
             }
@@ -655,6 +655,38 @@ impl Catalog for MemoryCatalog {
                 filter_items_in_schema(&self.types, prefix, schema)
             }
         }
+    }
+}
+
+impl MemoryCatalog {
+    fn columns_for_relation(
+        &self,
+        relation: &QualifiedName,
+        search_path: &[&str],
+    ) -> Vec<CatalogItem> {
+        let columns = if let Some(schema) = relation.schema.as_deref() {
+            self.find_columns(Some(schema), &relation.name)
+        } else {
+            search_path
+                .iter()
+                .find_map(|schema| self.find_columns(Some(schema), &relation.name))
+                .or_else(|| self.find_columns(None, &relation.name))
+        };
+        columns.cloned().unwrap_or_default()
+    }
+
+    fn find_columns(&self, schema: Option<&str>, relation: &str) -> Option<&Vec<CatalogItem>> {
+        self.columns
+            .iter()
+            .find_map(|((candidate_schema, candidate_relation), columns)| {
+                let schema_matches = match (candidate_schema.as_deref(), schema) {
+                    (Some(candidate), Some(expected)) => candidate.eq_ignore_ascii_case(expected),
+                    (None, None) => true,
+                    _ => false,
+                };
+                (schema_matches && candidate_relation.eq_ignore_ascii_case(relation))
+                    .then_some(columns)
+            })
     }
 }
 
