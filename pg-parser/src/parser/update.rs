@@ -15,6 +15,10 @@ impl Parser {
     //                 { * | output_expression [ [ AS ] output_name ] } [, ...] ]
     pub(super) fn parse_update(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::Update)?;
+        if self.at_completion_cursor() {
+            self.record_relation_completion();
+            return Err(self.error_here("completion cursor"));
+        }
         let mut relation = Some(Box::new(
             self.try_parse_range_var(false)
                 .ok_or_else(|| self.error_here("UPDATE requires a relation name"))?,

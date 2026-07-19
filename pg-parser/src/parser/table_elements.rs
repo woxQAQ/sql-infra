@@ -2,6 +2,12 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_insert_column_list(&mut self) -> PResult<NodeList> {
+        if self.at_completion_cursor() {
+            self.record_completion(Expectation::Name(NameExpectation::Column(
+                ColumnContext::TargetRelation,
+            )));
+            return Err(self.error_here("completion cursor"));
+        }
         let mut cols = Vec::new();
         if self.at(TokenKind::Char(')')) {
             return Err(self.error_here("column list cannot be empty"));
@@ -308,12 +314,20 @@ impl Parser {
 pub(super) fn parse_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
     let location = tokens.last().map_or(0, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion: None,
+    };
     parser.parse_table_element_inner()
 }
 pub(super) fn parse_typed_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
     let location = tokens.last().map_or(0, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion: None,
+    };
     parser.parse_typed_table_element_inner()
 }

@@ -12,6 +12,24 @@ impl Parser {
         let relpersistence = self.parse_create_relpersistence()?;
         let trusted = self.consume(TokenKind::Trusted);
         let procedural = self.consume(TokenKind::Procedural);
+        if self.at_completion_cursor() {
+            for token in [
+                TokenKind::Table,
+                TokenKind::View,
+                TokenKind::Index,
+                TokenKind::Schema,
+                TokenKind::Database,
+                TokenKind::Function,
+                TokenKind::Procedure,
+                TokenKind::Sequence,
+                TokenKind::TypeP,
+                TokenKind::DomainP,
+                TokenKind::Extension,
+            ] {
+                self.record_completion(Expectation::Token(token));
+            }
+            return Err(self.error_here("completion cursor"));
+        }
         if (trusted || procedural) && self.peek_kind() != TokenKind::Language {
             return Err(self.error_here("TRUSTED/PROCEDURAL is only valid for CREATE LANGUAGE"));
         }

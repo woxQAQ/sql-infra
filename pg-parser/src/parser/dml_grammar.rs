@@ -244,6 +244,12 @@ impl Parser {
     }
 
     pub(super) fn parse_set_clause_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+        if self.at_completion_cursor() {
+            self.record_completion(Expectation::Name(NameExpectation::Column(
+                ColumnContext::TargetRelation,
+            )));
+            return Err(self.error_here("completion cursor"));
+        }
         let mut targets = Vec::new();
         while !self.at_any(stops) {
             if self.consume(TokenKind::Char('(')) {

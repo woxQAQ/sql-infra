@@ -798,7 +798,11 @@ impl Parser {
 fn parse_copy_generic_option(mut tokens: Vec<Token>, location: usize) -> PResult<DefElem> {
     let eof_location = tokens.last().map_or(location, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Eof, eof_location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion: None,
+    };
     let name = if parser.consume(TokenKind::FormatLa) {
         "format".to_owned()
     } else {

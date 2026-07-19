@@ -322,7 +322,11 @@ pub(super) fn parse_window_specification_tokens(
     let end_location = tokens.last().map_or(location, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Char(')'), end_location));
     tokens.push(Token::synthetic(TokenKind::Eof, end_location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion: None,
+    };
     let window = parser.parse_window_specification_body(location)?;
     if !parser.at(TokenKind::Eof) {
         return Err(parser.error_here("unexpected token after window specification"));

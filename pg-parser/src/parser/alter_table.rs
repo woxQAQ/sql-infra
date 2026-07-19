@@ -57,6 +57,10 @@ impl Parser {
 
     pub(super) fn parse_alter_table_after_kind(&mut self, objtype: ObjectType) -> PResult<Node> {
         let missing_ok = self.consume_if_exists()?;
+        if self.at_completion_cursor() {
+            self.record_relation_completion();
+            return Err(self.error_here("completion cursor"));
+        }
         let relation = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
             || self.error_here("ALTER relation requires a relation name"),
         )?));

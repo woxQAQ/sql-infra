@@ -24,6 +24,10 @@ impl Parser {
             return Err(self.error_here("CREATE INDEX IF NOT EXISTS requires an index name"));
         }
         self.expect(TokenKind::On)?;
+        if self.at_completion_cursor() {
+            self.record_relation_completion();
+            return Err(self.error_here("completion cursor"));
+        }
         let relation = Some(Box::new(
             self.try_parse_qualified_range_var()
                 .ok_or_else(|| self.error_here("CREATE INDEX requires a relation"))?,
@@ -185,6 +189,7 @@ pub(super) fn parse_index_elem_tokens(tokens: Vec<Token>) -> PResult<IndexElem> 
     let mut suffix = Parser {
         tokens: suffix_tokens,
         pos: 0,
+        completion: None,
     };
     if suffix.consume(TokenKind::Collate) {
         element.collation = suffix.parse_name_list();

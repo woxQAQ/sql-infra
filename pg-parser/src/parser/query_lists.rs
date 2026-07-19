@@ -35,6 +35,9 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
+        if self.at_completion_cursor() {
+            self.record_expression_completion();
+        }
         let mut items = Vec::new();
         while !self.at_any(stops) {
             let location = self.location();
@@ -43,7 +46,7 @@ impl Parser {
                 return Err(self.error_here("expected an expression"));
             }
             let (name, expr_tokens) = split_target_alias(tokens);
-            let val = match parse_expression_tokens(expr_tokens)? {
+            let val = match self.parse_expression_tokens_with_completion(expr_tokens)? {
                 Node::AStar(star) => Node::ColumnRef(ColumnRef {
                     node_tag: NodeTag::ColumnRef,
                     fields: vec![Node::AStar(star)],
@@ -72,13 +75,16 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
+        if self.at_completion_cursor() {
+            self.record_expression_completion();
+        }
         let mut items = Vec::new();
         while !self.at_any(stops) {
             let tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
             if tokens.is_empty() {
                 return Err(self.error_here("expected an expression"));
             }
-            items.push(parse_expression_tokens(tokens)?);
+            items.push(self.parse_expression_tokens_with_completion(tokens)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
@@ -90,6 +96,9 @@ impl Parser {
     }
 
     pub(super) fn parse_group_by_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+        if self.at_completion_cursor() {
+            self.record_expression_completion();
+        }
         let mut items = Vec::new();
         while !self.at_any(stops) {
             items.push(self.parse_group_by_item(stops)?);
@@ -152,15 +161,19 @@ impl Parser {
         }
 
         let tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
-        parse_expression_tokens(tokens)
+        self.parse_expression_tokens_with_completion(tokens)
     }
 
     pub(super) fn parse_expr_box_strict_until(
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<Box<Node>> {
+        if self.at_completion_cursor() {
+            self.record_expression_completion();
+        }
         let tokens = self.take_until_top_level(stops);
-        parse_expression_tokens(tokens).map(Box::new)
+        self.parse_expression_tokens_with_completion(tokens)
+            .map(Box::new)
     }
 
     pub(super) fn parse_b_expr_box_strict_until(
@@ -231,7 +244,7 @@ impl Parser {
                 use_op = parse_operator_name_tokens(operator_tokens, location as usize)?;
                 sortby_dir = SortByDir::Using;
             }
-            let node = parse_expression_tokens(tokens)?;
+            let node = self.parse_expression_tokens_with_completion(tokens)?;
             items.push(Node::SortBy(SortBy {
                 node_tag: NodeTag::SortBy,
                 node: Some(Box::new(node)),

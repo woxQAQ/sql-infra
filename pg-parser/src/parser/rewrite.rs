@@ -242,7 +242,11 @@ pub(super) fn make_recursive_view_select(
 pub(super) fn parse_statement_list_tokens(mut tokens: Vec<Token>) -> PResult<NodeList> {
     let location = tokens.last().map_or(0, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion: None,
+    };
     Ok(parser
         .parse()?
         .into_iter()

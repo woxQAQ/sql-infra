@@ -3,6 +3,22 @@ use super::*;
 impl Parser {
     pub(super) fn parse_alter(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Alter)?;
+        if self.at_completion_cursor() {
+            for token in [
+                TokenKind::Table,
+                TokenKind::Index,
+                TokenKind::View,
+                TokenKind::Schema,
+                TokenKind::Database,
+                TokenKind::Role,
+                TokenKind::TypeP,
+                TokenKind::DomainP,
+                TokenKind::Function,
+            ] {
+                self.record_completion(Expectation::Token(token));
+            }
+            return Err(self.error_here("completion cursor"));
+        }
         if self.peek_kind() == TokenKind::Default && self.peek_kind_n(1) == TokenKind::Privileges {
             return self.parse_alter_default_privileges();
         }

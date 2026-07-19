@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::completion::{ColumnContext, Expectation, NameExpectation, SharedCompletionRecorder};
 use crate::lexer::{Token, TokenValue, lex, lookup_keyword};
 use crate::{BareLabel, KeywordCategory, TextRange, TextSize, TokenKind};
 
@@ -210,6 +211,7 @@ enum DescribedIdentityKind {
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    completion: Option<SharedCompletionRecorder>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -241,7 +243,20 @@ impl Parser {
         Ok(Self {
             tokens: lex(sql)?,
             pos: 0,
+            completion: None,
         })
+    }
+
+    pub(crate) fn for_completion(tokens: Vec<Token>, recorder: SharedCompletionRecorder) -> Self {
+        Self {
+            tokens,
+            pos: 0,
+            completion: Some(recorder),
+        }
+    }
+
+    pub(crate) fn parse_completion_statement(&mut self) -> PResult<Node> {
+        self.parse_statement(None)
     }
 
     pub fn parse(&mut self) -> PResult<Vec<RawStmt>> {
@@ -436,6 +451,10 @@ impl Parser {
     /// `true`; otherwise leave the cursor unchanged and return `false`.
     /// Corresponds to "optional / see-one-consume-one" in grammar productions.
     pub(super) fn consume(&mut self, kind: TokenKind) -> bool {
+        if self.at_completion_cursor() {
+            self.record_completion(Expectation::Token(kind));
+            return false;
+        }
         if self.at(kind) {
             self.pos += 1;
             true
@@ -448,6 +467,9 @@ impl Parser {
     /// a clone; otherwise emit a syntax error with the expected vs actual kind.
     /// Corresponds to mandatory tokens in productions.
     pub(super) fn expect(&mut self, kind: TokenKind) -> PResult<Token> {
+        if self.at_completion_cursor() {
+            self.record_completion(Expectation::Token(kind));
+        }
         if self.at(kind) {
             Ok(self.advance().clone())
         } else {
@@ -506,6 +528,44 @@ impl Parser {
     pub(super) fn error_here(&self, message: impl Into<std::string::String>) -> ParseError {
         ParseError::ranged(self.peek().range, message)
     }
+
+    pub(super) fn at_completion_cursor(&self) -> bool {
+        self.completion.is_some() && self.at(TokenKind::Eof)
+    }
+
+    pub(super) fn record_completion(&self, expectation: Expectation) {
+        if let Some(recorder) = &self.completion {
+            recorder.borrow_mut().record(expectation);
+        }
+    }
+
+    pub(super) fn record_expression_completion(&self) {
+        self.record_completion(Expectation::Expression);
+        self.record_completion(Expectation::Name(NameExpectation::Column(
+            ColumnContext::VisibleScope,
+        )));
+        self.record_completion(Expectation::Name(NameExpectation::Function {
+            schema: None,
+        }));
+    }
+
+    pub(super) fn record_relation_completion(&self) {
+        self.record_completion(Expectation::Name(NameExpectation::Relation {
+            schema: None,
+        }));
+        self.record_completion(Expectation::Name(NameExpectation::Schema));
+    }
+
+    pub(super) fn parse_expression_tokens_with_completion(
+        &self,
+        tokens: Vec<Token>,
+    ) -> PResult<Node> {
+        if let Some(recorder) = &self.completion {
+            ExprParser::new_completion(tokens, recorder.clone()).parse()
+        } else {
+            parse_expression_tokens(tokens)
+        }
+    }
 }
 
 // ── Statement dispatch ────────────────────────────────────────────────────
@@ -516,6 +576,23 @@ impl Parser {
 
 impl Parser {
     pub(super) fn parse_statement(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
+        if self.at_completion_cursor() {
+            for token in [
+                TokenKind::Select,
+                TokenKind::With,
+                TokenKind::Insert,
+                TokenKind::Update,
+                TokenKind::DeleteP,
+                TokenKind::Create,
+                TokenKind::Alter,
+                TokenKind::Drop,
+                TokenKind::Values,
+                TokenKind::Explain,
+            ] {
+                self.record_completion(Expectation::Token(token));
+            }
+            return Err(self.error_here("completion cursor"));
+        }
         match self.peek_kind() {
             TokenKind::With => self.parse_with_statement(),
             TokenKind::Select | TokenKind::Values | TokenKind::Table | TokenKind::Char('(') => {

@@ -675,6 +675,12 @@ impl ExprParser {
     }
 
     pub(super) fn consume(&mut self, kind: TokenKind) -> bool {
+        if self.peek_kind() == TokenKind::Eof
+            && let Some(recorder) = &self.completion
+        {
+            recorder.borrow_mut().record(Expectation::Token(kind));
+            return false;
+        }
         if self.at(kind) {
             self.pos += 1;
             true
@@ -684,6 +690,11 @@ impl ExprParser {
     }
 
     pub(super) fn expect(&mut self, kind: TokenKind) -> Option<Token> {
+        if self.peek_kind() == TokenKind::Eof
+            && let Some(recorder) = &self.completion
+        {
+            recorder.borrow_mut().record(Expectation::Token(kind));
+        }
         if self.at(kind) {
             Some(self.advance().clone())
         } else {

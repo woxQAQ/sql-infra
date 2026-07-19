@@ -3,6 +3,21 @@ use super::*;
 impl Parser {
     pub(super) fn parse_drop(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Drop)?;
+        if self.at_completion_cursor() {
+            for token in [
+                TokenKind::Table,
+                TokenKind::View,
+                TokenKind::Index,
+                TokenKind::Schema,
+                TokenKind::Database,
+                TokenKind::Function,
+                TokenKind::TypeP,
+                TokenKind::DomainP,
+            ] {
+                self.record_completion(Expectation::Token(token));
+            }
+            return Err(self.error_here("completion cursor"));
+        }
         match self.peek_kind() {
             TokenKind::Database => self.parse_drop_database(),
             TokenKind::Cast => self.parse_drop_special(ObjectType::Cast),

@@ -6,7 +6,11 @@ pub(super) fn parse_statement_node_tokens(mut tokens: Vec<Token>) -> PResult<Nod
         return Err(ParseError::new(location, "expected a statement"));
     }
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion: None,
+    };
     let node = parser.parse_statement(None)?;
     if !parser.at(TokenKind::Eof) {
         return Err(parser.error_here("unexpected token after nested statement"));

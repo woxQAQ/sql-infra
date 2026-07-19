@@ -4,6 +4,7 @@ pub(super) struct ExprParser {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
     pub(super) error: Option<ParseError>,
+    pub(super) completion: Option<SharedCompletionRecorder>,
 }
 
 impl ExprParser {
@@ -14,6 +15,21 @@ impl ExprParser {
             tokens,
             pos: 0,
             error: None,
+            completion: None,
+        }
+    }
+
+    pub(super) fn new_completion(
+        mut tokens: Vec<Token>,
+        recorder: SharedCompletionRecorder,
+    ) -> Self {
+        let location = tokens.last().map_or(0, Token::end_location);
+        tokens.push(Token::synthetic(TokenKind::Eof, location));
+        Self {
+            tokens,
+            pos: 0,
+            error: None,
+            completion: Some(recorder),
         }
     }
 

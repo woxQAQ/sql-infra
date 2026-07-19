@@ -2,6 +2,17 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_from_clause_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+        if self.at_completion_cursor() {
+            self.record_completion(Expectation::Name(NameExpectation::Relation {
+                schema: None,
+            }));
+            self.record_completion(Expectation::Name(NameExpectation::Schema));
+            self.record_completion(Expectation::Name(NameExpectation::Function {
+                schema: None,
+            }));
+            self.record_completion(Expectation::Token(TokenKind::LateralP));
+            return Err(self.error_here("completion cursor"));
+        }
         let mut items = Vec::new();
         while !self.at_any(stops) {
             items.push(self.parse_from_item(stops)?);
@@ -57,7 +68,11 @@ impl Parser {
                 let location = inner.last().map_or(self.location(), Token::end_location);
                 let mut tokens = inner;
                 tokens.push(Token::synthetic(TokenKind::Eof, location));
-                let mut nested = Parser { tokens, pos: 0 };
+                let mut nested = Parser {
+                    tokens,
+                    pos: 0,
+                    completion: self.completion.clone(),
+                };
                 let mut item = nested.parse_from_item(&[TokenKind::Eof])?;
                 if !nested.at(TokenKind::Eof) {
                     return Err(ParseError::new(
