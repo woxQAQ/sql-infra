@@ -33,6 +33,25 @@ fn collect_rust_sources(path: &Path, output: &mut String) {
     }
 }
 
+fn collect_rust_sources_except(path: &Path, excluded: &[&str], output: &mut String) {
+    for entry in fs::read_dir(path).unwrap_or_else(|error| panic!("read {path:?}: {error}")) {
+        let path = entry.expect("directory entry").path();
+        if path.is_dir() {
+            collect_rust_sources_except(&path, excluded, output);
+        } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs")
+            && !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| excluded.contains(&name))
+        {
+            output.push_str(
+                &fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path:?}: {error}")),
+            );
+            output.push('\n');
+        }
+    }
+}
+
 fn parser_source() -> String {
     let source_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut parser = fs::read_to_string(source_dir.join("parser.rs"))
@@ -313,17 +332,7 @@ fn every_raw_statement_type_appears_in_non_smoke_statement_tests() {
     let ast = include_str!("../../src/ast/mod.rs");
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/statements");
     let mut tests = String::new();
-    for entry in fs::read_dir(&test_dir).expect("statement test directory") {
-        let path = entry.expect("statement test entry").path();
-        if path.extension().and_then(|extension| extension.to_str()) == Some("rs")
-            && !matches!(
-                path.file_name().and_then(|name| name.to_str()),
-                Some("coverage.rs" | "smoke.rs")
-            )
-        {
-            tests.push_str(&fs::read_to_string(&path).expect("statement test source"));
-        }
-    }
+    collect_rust_sources_except(&test_dir, &["coverage.rs", "smoke.rs"], &mut tests);
 
     let analysis_only_statements = BTreeSet::from(["SetOperationStmt"]);
     let missing = ast
@@ -344,19 +353,13 @@ fn every_raw_statement_type_appears_in_non_smoke_statement_tests() {
 fn every_raw_statement_field_is_exercised_by_statement_tests() {
     let ast = include_str!("../../src/ast/mod.rs");
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/statements");
-    let mut test_blocks = Vec::new();
-    for entry in fs::read_dir(&test_dir).expect("statement test directory") {
-        let path = entry.expect("statement test entry").path();
-        if path.extension().and_then(|extension| extension.to_str()) == Some("rs")
-            && !matches!(
-                path.file_name().and_then(|name| name.to_str()),
-                Some("coverage.rs" | "smoke.rs")
-            )
-        {
-            let source = fs::read_to_string(&path).expect("statement test source");
-            test_blocks.extend(source.split("#[test]").skip(1).map(str::to_owned));
-        }
-    }
+    let mut tests = String::new();
+    collect_rust_sources_except(&test_dir, &["coverage.rs", "smoke.rs"], &mut tests);
+    let test_blocks = tests
+        .split("#[test]")
+        .skip(1)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
 
     let analysis_only_statements = BTreeSet::from(["SetOperationStmt"]);
     let analysis_only_fields = BTreeSet::from([
@@ -445,14 +448,7 @@ fn every_nested_raw_field_is_exercised_or_analysis_only() {
     let parser = parser_source();
     let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/statements");
     let mut tests = String::new();
-    for entry in fs::read_dir(&test_dir).expect("statement test directory") {
-        let path = entry.expect("statement test entry").path();
-        if path.extension().and_then(|extension| extension.to_str()) == Some("rs")
-            && path.file_name().and_then(|name| name.to_str()) != Some("coverage.rs")
-        {
-            tests.push_str(&fs::read_to_string(&path).expect("statement test source"));
-        }
-    }
+    collect_rust_sources_except(&test_dir, &["coverage.rs"], &mut tests);
 
     let analysis_only = [
         "CaseExpr.casecollid",
