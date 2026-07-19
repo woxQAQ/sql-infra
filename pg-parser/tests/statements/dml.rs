@@ -3,13 +3,11 @@ use pg_parser::{
     ReturningOptionKind,
 };
 
-use super::common::parse_statement;
+use super::common::{expect_node, parse_node, parse_statement};
 
 #[test]
 fn insert_accepts_the_grammar_valid_empty_select_source() {
-    let Node::InsertStmt(stmt) = parse_statement("insert into items select") else {
-        panic!("expected InsertStmt");
-    };
+    let stmt = parse_node!("insert into items select", InsertStmt);
     assert!(matches!(
         stmt.select_stmt.as_deref(),
         Some(Node::SelectStmt(select)) if select.target_list.is_empty()
@@ -38,9 +36,7 @@ fn dml_statements_preserve_with_clauses() {
 
 #[test]
 fn dml_target_aliases_follow_statement_specific_colid_rules() {
-    let Node::UpdateStmt(update) = parse_statement("update items abort set id = 1") else {
-        panic!("expected UpdateStmt");
-    };
+    let update = parse_node!("update items abort set id = 1", UpdateStmt);
     assert_eq!(
         update
             .relation
@@ -50,9 +46,7 @@ fn dml_target_aliases_follow_statement_specific_colid_rules() {
         Some("abort")
     );
 
-    let Node::UpdateStmt(set_column) = parse_statement("update items set set = 1") else {
-        panic!("expected SET-column UpdateStmt");
-    };
+    let set_column = parse_node!("update items set set = 1", UpdateStmt);
     assert!(
         set_column
             .relation
@@ -60,9 +54,7 @@ fn dml_target_aliases_follow_statement_specific_colid_rules() {
             .is_some_and(|relation| relation.alias.is_none())
     );
 
-    let Node::DeleteStmt(delete) = parse_statement("delete from items set") else {
-        panic!("expected DeleteStmt with SET alias");
-    };
+    let delete = parse_node!("delete from items set", DeleteStmt);
     assert_eq!(
         delete
             .relation
@@ -72,11 +64,10 @@ fn dml_target_aliases_follow_statement_specific_colid_rules() {
         Some("set")
     );
 
-    let Node::MergeStmt(merge) =
-        parse_statement("merge into items set using source on true when matched then do nothing")
-    else {
-        panic!("expected MergeStmt with SET alias");
-    };
+    let merge = parse_node!(
+        "merge into items set using source on true when matched then do nothing",
+        MergeStmt
+    );
     assert_eq!(
         merge
             .relation
@@ -89,11 +80,10 @@ fn dml_target_aliases_follow_statement_specific_colid_rules() {
 
 #[test]
 fn insert_stmt_populates_relation_source_conflict_and_returning() {
-    let Node::InsertStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "insert into public.items (id, name) values (1, 'one') on conflict do nothing returning id",
-    ) else {
-        panic!("expected InsertStmt");
-    };
+        InsertStmt
+    );
     assert!(stmt.relation.is_some());
     assert_eq!(stmt.cols.len(), 2);
     assert!(stmt.select_stmt.is_some());
@@ -103,36 +93,26 @@ fn insert_stmt_populates_relation_source_conflict_and_returning() {
 
 #[test]
 fn insert_stmt_preserves_column_field_and_subscript_indirection() {
-    let Node::InsertStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "insert into items (payload.name, nums[1], nums[2:4]) values ('x', 1, array[2, 3, 4])",
-    ) else {
-        panic!("expected InsertStmt");
-    };
+        InsertStmt
+    );
     assert_eq!(stmt.cols.len(), 3);
-    let Node::ResTarget(field) = &stmt.cols[0] else {
-        panic!("expected ResTarget");
-    };
+    let field = expect_node!(&stmt.cols[0], ResTarget);
     assert!(matches!(field.indirection.as_slice(), [Node::String(_)]));
     assert!(field.location >= 0);
-    let Node::ResTarget(index) = &stmt.cols[1] else {
-        panic!("expected ResTarget");
-    };
+    let index = expect_node!(&stmt.cols[1], ResTarget);
     assert!(matches!(
         index.indirection.as_slice(),
         [Node::AIndices(index)] if !index.is_slice
     ));
-    let Node::ResTarget(slice) = &stmt.cols[2] else {
-        panic!("expected ResTarget");
-    };
+    let slice = expect_node!(&stmt.cols[2], ResTarget);
     assert!(matches!(
         slice.indirection.as_slice(),
         [Node::AIndices(index)] if index.is_slice
     ));
 
-    let Node::InsertStmt(quoted) = parse_statement("insert into items (\"select\") values (1)")
-    else {
-        panic!("expected InsertStmt");
-    };
+    let quoted = parse_node!("insert into items (\"select\") values (1)", InsertStmt);
     assert!(matches!(
         quoted.cols.as_slice(),
         [Node::ResTarget(target)] if target.name.as_deref() == Some("select")
@@ -141,11 +121,10 @@ fn insert_stmt_preserves_column_field_and_subscript_indirection() {
 
 #[test]
 fn insert_stmt_requires_as_for_alias_and_accepts_parenthesized_select_source() {
-    let Node::InsertStmt(stmt) =
-        parse_statement("insert into items as target (id) (select id from source)")
-    else {
-        panic!("expected InsertStmt");
-    };
+    let stmt = parse_node!(
+        "insert into items as target (id) (select id from source)",
+        InsertStmt
+    );
     assert_eq!(
         stmt.relation
             .as_deref()
@@ -202,9 +181,7 @@ fn insert_stmt_requires_as_for_alias_and_accepts_parenthesized_select_source() {
             true,
         ),
     ] {
-        let Node::InsertStmt(stmt) = parse_statement(sql) else {
-            panic!("expected InsertStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, InsertStmt);
         assert_eq!(stmt.cols.len(), columns, "{sql}");
         assert_eq!(stmt.override_, override_, "{sql}");
         assert_eq!(stmt.select_stmt.is_some(), has_source, "{sql}");
@@ -220,9 +197,7 @@ fn insert_stmt_requires_as_for_alias_and_accepts_parenthesized_select_source() {
 #[test]
 fn insert_stmt_populates_override_inference_update_and_returning_options() {
     let sql = "insert into items (id, name) overriding system value values (1, 'one') on conflict (id) where id > 0 do update set name = 'updated' where items.id > 0 returning with (old as previous, new as current) id";
-    let Node::InsertStmt(stmt) = parse_statement(sql) else {
-        panic!("expected InsertStmt");
-    };
+    let stmt = parse_node!(sql, InsertStmt);
     assert_eq!(stmt.override_, OverridingKind::SystemValue);
     let conflict = stmt.on_conflict_clause.expect("OnConflictClause");
     assert_eq!(conflict.action, OnConflictAction::Update);
@@ -237,23 +212,17 @@ fn insert_stmt_populates_override_inference_update_and_returning_options() {
     let returning = stmt.returning_clause.expect("ReturningClause");
     assert_eq!(returning.options.len(), 2);
     assert_eq!(returning.exprs.len(), 1);
-    let Node::ReturningOption(old) = &returning.options[0] else {
-        panic!("expected ReturningOption");
-    };
+    let old = expect_node!(&returning.options[0], ReturningOption);
     assert_eq!(old.option, ReturningOptionKind::Old);
     assert_eq!(old.value.as_deref(), Some("previous"));
     assert_eq!(old.location as usize, sql.find("old as").unwrap());
-    let Node::ReturningOption(new) = &returning.options[1] else {
-        panic!("expected ReturningOption");
-    };
+    let new = expect_node!(&returning.options[1], ReturningOption);
     assert_eq!(new.option, ReturningOptionKind::New);
     assert_eq!(new.location as usize, sql.find("new as").unwrap());
 
     let on_constraint_sql =
         "insert into items values (1) on conflict on constraint items_pkey do nothing";
-    let Node::InsertStmt(on_constraint) = parse_statement(on_constraint_sql) else {
-        panic!("expected ON CONSTRAINT InsertStmt");
-    };
+    let on_constraint = parse_node!(on_constraint_sql, InsertStmt);
     let infer = on_constraint
         .on_conflict_clause
         .as_deref()
@@ -270,9 +239,7 @@ fn insert_stmt_populates_override_inference_update_and_returning_options() {
         lower(code) app.custom_ops asc nulls last,
         (id + 1)
     ) where active do nothing";
-    let Node::InsertStmt(inference) = parse_statement(inference_sql) else {
-        panic!("expected inference IndexElem InsertStmt");
-    };
+    let inference = parse_node!(inference_sql, InsertStmt);
     let infer = inference
         .on_conflict_clause
         .as_deref()
@@ -313,22 +280,20 @@ fn insert_stmt_populates_override_inference_update_and_returning_options() {
 
 #[test]
 fn insert_on_conflict_select_preserves_lock_strength_and_filter() {
-    let Node::InsertStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "insert into items (id) values (1) on conflict (id) do select for no key update where items.active returning id",
-    ) else {
-        panic!("expected InsertStmt");
-    };
+        InsertStmt
+    );
     let conflict = stmt.on_conflict_clause.expect("OnConflictClause");
     assert_eq!(conflict.action, OnConflictAction::Select);
     assert_eq!(conflict.lock_strength, LockClauseStrength::Fornokeyupdate);
     assert!(conflict.target_list.is_empty());
     assert!(conflict.where_clause.is_some());
 
-    let Node::InsertStmt(unlocked) =
-        parse_statement("insert into items values (1) on conflict do select")
-    else {
-        panic!("expected unlocked InsertStmt");
-    };
+    let unlocked = parse_node!(
+        "insert into items values (1) on conflict do select",
+        InsertStmt
+    );
     let conflict = unlocked.on_conflict_clause.expect("OnConflictClause");
     assert_eq!(conflict.action, OnConflictAction::Select);
     assert_eq!(conflict.lock_strength, LockClauseStrength::None);
@@ -337,25 +302,19 @@ fn insert_on_conflict_select_preserves_lock_strength_and_filter() {
 #[test]
 fn update_stmt_populates_assignments_from_filter_and_returning() {
     let sql = "update public.items set name = 'updated' from audit where items.id = audit.id returning items.id";
-    let Node::UpdateStmt(stmt) = parse_statement(sql) else {
-        panic!("expected UpdateStmt");
-    };
+    let stmt = parse_node!(sql, UpdateStmt);
     assert!(stmt.relation.is_some());
     assert_eq!(stmt.target_list.len(), 1);
     assert_eq!(stmt.from_clause.len(), 1);
     assert!(stmt.where_clause.is_some());
     assert!(stmt.returning_clause.is_some());
 
-    let Node::ResTarget(target) = &stmt.target_list[0] else {
-        panic!("expected ResTarget");
-    };
+    let target = expect_node!(&stmt.target_list[0], ResTarget);
     assert_eq!(target.name.as_deref(), Some("name"));
     assert!(target.val.is_some());
     assert_eq!(target.location as usize, sql.find("name =").unwrap());
 
-    let Node::UpdateStmt(quoted) = parse_statement("update items set \"select\" = 1") else {
-        panic!("expected UpdateStmt");
-    };
+    let quoted = parse_node!("update items set \"select\" = 1", UpdateStmt);
     assert!(matches!(
         quoted.target_list.as_slice(),
         [Node::ResTarget(target)] if target.name.as_deref() == Some("select")
@@ -365,20 +324,11 @@ fn update_stmt_populates_assignments_from_filter_and_returning() {
 #[test]
 fn update_stmt_builds_multi_assign_refs() {
     let sql = "update items set (name, status) = row('updated', 'active')";
-    let Node::UpdateStmt(stmt) = parse_statement(sql) else {
-        panic!("expected UpdateStmt");
-    };
+    let stmt = parse_node!(sql, UpdateStmt);
     assert_eq!(stmt.target_list.len(), 2);
     for (index, target) in stmt.target_list.iter().enumerate() {
-        let Node::ResTarget(target) = target else {
-            panic!("expected ResTarget");
-        };
-        let Some(value) = &target.val else {
-            panic!("expected MultiAssignRef");
-        };
-        let Node::MultiAssignRef(reference) = value.as_ref() else {
-            panic!("expected MultiAssignRef");
-        };
+        let target = expect_node!(target, ResTarget);
+        let reference = expect_node!(target.val.as_deref(), Some(MultiAssignRef));
         assert_eq!(reference.colno, index as i32 + 1);
         assert_eq!(reference.ncolumns, 2);
         assert!(reference.source.is_some());
@@ -389,40 +339,29 @@ fn update_stmt_builds_multi_assign_refs() {
 
 #[test]
 fn update_stmt_preserves_field_subscript_and_slice_assignment_indirection() {
-    let Node::UpdateStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "update items set payload.name = 'x', nums[2] = 5, nums[1:3] = array[1, 2, 3], (left_side.field, right_side[1]) = row('l', 'r')",
-    ) else {
-        panic!("expected UpdateStmt");
-    };
+        UpdateStmt
+    );
     assert_eq!(stmt.target_list.len(), 5);
-    let Node::ResTarget(field) = &stmt.target_list[0] else {
-        panic!("expected ResTarget");
-    };
+    let field = expect_node!(&stmt.target_list[0], ResTarget);
     assert!(matches!(field.indirection.as_slice(), [Node::String(_)]));
-    let Node::ResTarget(index) = &stmt.target_list[1] else {
-        panic!("expected ResTarget");
-    };
+    let index = expect_node!(&stmt.target_list[1], ResTarget);
     assert!(matches!(
         index.indirection.as_slice(),
         [Node::AIndices(index)] if !index.is_slice && index.uidx.is_some()
     ));
-    let Node::ResTarget(slice) = &stmt.target_list[2] else {
-        panic!("expected ResTarget");
-    };
+    let slice = expect_node!(&stmt.target_list[2], ResTarget);
     assert!(matches!(
         slice.indirection.as_slice(),
         [Node::AIndices(index)] if index.is_slice && index.lidx.is_some() && index.uidx.is_some()
     ));
-    let Node::ResTarget(multi_field) = &stmt.target_list[3] else {
-        panic!("expected ResTarget");
-    };
+    let multi_field = expect_node!(&stmt.target_list[3], ResTarget);
     assert!(matches!(
         multi_field.indirection.as_slice(),
         [Node::String(_)]
     ));
-    let Node::ResTarget(multi_index) = &stmt.target_list[4] else {
-        panic!("expected ResTarget");
-    };
+    let multi_index = expect_node!(&stmt.target_list[4], ResTarget);
     assert!(matches!(
         multi_index.indirection.as_slice(),
         [Node::AIndices(_)]
@@ -431,19 +370,11 @@ fn update_stmt_preserves_field_subscript_and_slice_assignment_indirection() {
 
 #[test]
 fn update_and_delete_build_default_and_current_of_nodes() {
-    let Node::UpdateStmt(update) = parse_statement("update items set status = default") else {
-        panic!("expected UpdateStmt");
-    };
-    let Node::ResTarget(target) = &update.target_list[0] else {
-        panic!("expected ResTarget");
-    };
+    let update = parse_node!("update items set status = default", UpdateStmt);
+    let target = expect_node!(&update.target_list[0], ResTarget);
     assert!(matches!(target.val.as_deref(), Some(Node::SetToDefault(_))));
 
-    let Node::DeleteStmt(delete) =
-        parse_statement("delete from items where current of item_cursor")
-    else {
-        panic!("expected DeleteStmt");
-    };
+    let delete = parse_node!("delete from items where current of item_cursor", DeleteStmt);
     assert!(matches!(
         delete.where_clause.as_deref(),
         Some(Node::CurrentOfExpr(current))
@@ -452,11 +383,10 @@ fn update_and_delete_build_default_and_current_of_nodes() {
                 && current.cvarno == 0
     ));
 
-    let Node::UpdateStmt(update) =
-        parse_statement("update items set status = 'active' where current of item_cursor")
-    else {
-        panic!("expected UpdateStmt");
-    };
+    let update = parse_node!(
+        "update items set status = 'active' where current of item_cursor",
+        UpdateStmt
+    );
     assert!(matches!(
         update.where_clause.as_deref(),
         Some(Node::CurrentOfExpr(current))
@@ -469,9 +399,7 @@ fn update_and_delete_build_default_and_current_of_nodes() {
 #[test]
 fn update_and_delete_populate_for_portion_of_clause() {
     let update_sql = "update items for portion of valid_time from lower_bound to upper_bound as current_items set status = 'active'";
-    let Node::UpdateStmt(update) = parse_statement(update_sql) else {
-        panic!("expected UpdateStmt");
-    };
+    let update = parse_node!(update_sql, UpdateStmt);
     let portion = update.for_portion_of.expect("ForPortionOfClause");
     assert_eq!(portion.range_name.as_deref(), Some("valid_time"));
     assert_eq!(
@@ -494,9 +422,7 @@ fn update_and_delete_populate_for_portion_of_clause() {
     );
 
     let delete_sql = "delete from items for portion of valid_time (requested_period)";
-    let Node::DeleteStmt(delete) = parse_statement(delete_sql) else {
-        panic!("expected DeleteStmt");
-    };
+    let delete = parse_node!(delete_sql, DeleteStmt);
     let portion = delete.for_portion_of.expect("ForPortionOfClause");
     assert!(portion.target.is_some());
     assert_eq!(
@@ -511,11 +437,10 @@ fn update_and_delete_populate_for_portion_of_clause() {
 
 #[test]
 fn delete_stmt_populates_using_filter_and_returning() {
-    let Node::DeleteStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "delete from public.items using audit where items.id = audit.id returning items.id",
-    ) else {
-        panic!("expected DeleteStmt");
-    };
+        DeleteStmt
+    );
     assert!(stmt.relation.is_some());
     assert_eq!(stmt.using_clause.len(), 1);
     assert!(stmt.where_clause.is_some());
@@ -549,11 +474,10 @@ fn dml_returning_options_are_preserved_across_statement_families() {
 
 #[test]
 fn merge_stmt_populates_match_kinds_actions_and_values() {
-    let Node::MergeStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "merge into target t using source s on t.id = s.id when matched and s.deleted = true then delete when matched then update set name = s.name when not matched by target then insert (id, name) overriding system value values (s.id, s.name) when not matched by source then do nothing returning t.id",
-    ) else {
-        panic!("expected MergeStmt");
-    };
+        MergeStmt
+    );
     assert!(stmt.relation.is_some());
     assert!(stmt.source_relation.is_some());
     assert!(stmt.join_condition.is_some());
@@ -566,36 +490,27 @@ fn merge_stmt_populates_match_kinds_actions_and_values() {
         (MergeMatchKind::NotMatchedBySource, CmdType::Nothing),
     ];
     for (node, expected) in stmt.merge_when_clauses.iter().zip(expected) {
-        let Node::MergeWhenClause(clause) = node else {
-            panic!("expected MergeWhenClause");
-        };
+        let clause = expect_node!(node, MergeWhenClause);
         assert_eq!((clause.match_kind, clause.command_type), expected);
     }
-    let Node::MergeWhenClause(conditional_delete) = &stmt.merge_when_clauses[0] else {
-        panic!("expected MergeWhenClause");
-    };
+    let conditional_delete = expect_node!(&stmt.merge_when_clauses[0], MergeWhenClause);
     assert!(matches!(
         conditional_delete.condition.as_deref(),
         Some(Node::AExpr(_))
     ));
-    let Node::MergeWhenClause(unconditional_update) = &stmt.merge_when_clauses[1] else {
-        panic!("expected MergeWhenClause");
-    };
+    let unconditional_update = expect_node!(&stmt.merge_when_clauses[1], MergeWhenClause);
     assert!(unconditional_update.condition.is_none());
 
-    let Node::MergeWhenClause(insert) = &stmt.merge_when_clauses[2] else {
-        panic!("expected MergeWhenClause");
-    };
+    let insert = expect_node!(&stmt.merge_when_clauses[2], MergeWhenClause);
     assert_eq!(insert.target_list.len(), 2);
     assert_eq!(insert.values.len(), 2);
     assert_eq!(insert.override_, OverridingKind::SystemValue);
     assert!(stmt.returning_clause.is_some());
 
-    let Node::MergeStmt(join_source) = parse_statement(
+    let join_source = parse_node!(
         "merge into target t using source_a a join source_b b on a.id = b.id on t.id = a.id when matched then do nothing",
-    ) else {
-        panic!("expected MergeStmt with joined source");
-    };
+        MergeStmt
+    );
     assert!(matches!(
         join_source.source_relation.as_deref(),
         Some(Node::JoinExpr(join)) if join.quals.is_some()
@@ -643,9 +558,7 @@ fn merge_stmt_populates_match_kinds_actions_and_values() {
             OverridingKind::NotSet,
         ),
     ] {
-        let Node::MergeStmt(stmt) = parse_statement(sql) else {
-            panic!("expected MergeStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, MergeStmt);
         let [Node::MergeWhenClause(clause)] = stmt.merge_when_clauses.as_slice() else {
             panic!("expected one MergeWhenClause for {sql}");
         };

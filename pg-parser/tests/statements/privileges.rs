@@ -1,14 +1,13 @@
 use pg_parser::{DropBehavior, GrantTargetType, Node, ObjectType, RoleSpecType};
 
-use super::common::parse_statement;
+use super::common::{expect_node, parse_node};
 
 #[test]
 fn grant_stmt_populates_privileges_target_grantees_option_and_grantor() {
-    let Node::GrantStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "grant select(id), update(name) on table app.items to alice, group analysts with grant option granted by admin",
-    ) else {
-        panic!("expected GrantStmt");
-    };
+        GrantStmt
+    );
     assert!(stmt.is_grant);
     assert_eq!(stmt.targtype, GrantTargetType::Object);
     assert_eq!(stmt.objtype, ObjectType::Table);
@@ -19,39 +18,34 @@ fn grant_stmt_populates_privileges_target_grantees_option_and_grantor() {
     assert!(stmt.grant_option);
     assert!(stmt.grantor.is_some());
 
-    let Node::AccessPriv(select) = &stmt.privileges[0] else {
-        panic!("expected AccessPriv");
-    };
+    let select = expect_node!(&stmt.privileges[0], AccessPriv);
     assert_eq!(select.priv_name.as_deref(), Some("select"));
     assert_eq!(select.cols.len(), 1);
 
-    let Node::GrantStmt(quoted) =
-        parse_statement("grant \"from\"(\"select\") on table app.items to alice")
-    else {
-        panic!("expected GrantStmt");
-    };
+    let quoted = parse_node!(
+        "grant \"from\"(\"select\") on table app.items to alice",
+        GrantStmt
+    );
     assert!(matches!(
         quoted.privileges.as_slice(),
         [Node::AccessPriv(privilege)]
             if privilege.priv_name.as_deref() == Some("from") && privilege.cols.len() == 1
     ));
 
-    let Node::GrantStmt(all_columns) =
-        parse_statement("grant all privileges (id, name) on table app.items to alice")
-    else {
-        panic!("expected GrantStmt");
-    };
+    let all_columns = parse_node!(
+        "grant all privileges (id, name) on table app.items to alice",
+        GrantStmt
+    );
     assert!(matches!(
         all_columns.privileges.as_slice(),
         [Node::AccessPriv(privilege)]
             if privilege.priv_name.is_none() && privilege.cols.len() == 2
     ));
 
-    let Node::GrantStmt(alter_system) =
-        parse_statement("grant alter system on parameter work_mem to admin")
-    else {
-        panic!("expected GrantStmt");
-    };
+    let alter_system = parse_node!(
+        "grant alter system on parameter work_mem to admin",
+        GrantStmt
+    );
     assert!(matches!(
         alter_system.privileges.as_slice(),
         [Node::AccessPriv(privilege)]
@@ -63,9 +57,7 @@ fn grant_stmt_populates_privileges_target_grantees_option_and_grantor() {
 #[test]
 fn grant_role_spec_locations_follow_each_role_token() {
     let sql = "grant select on table t to alice, current_role, current_user, session_user, public";
-    let Node::GrantStmt(stmt) = parse_statement(sql) else {
-        panic!("expected GrantStmt");
-    };
+    let stmt = parse_node!(sql, GrantStmt);
     let expected = [
         ("alice", RoleSpecType::Cstring),
         ("current_role", RoleSpecType::CurrentRole),
@@ -75,9 +67,7 @@ fn grant_role_spec_locations_follow_each_role_token() {
     ];
     assert_eq!(stmt.grantees.len(), expected.len());
     for (node, (token, role_type)) in stmt.grantees.iter().zip(expected) {
-        let Node::RoleSpec(role) = node else {
-            panic!("expected RoleSpec");
-        };
+        let role = expect_node!(node, RoleSpec);
         assert_eq!(role.roletype, role_type);
         assert_eq!(role.location as usize, sql.find(token).unwrap());
     }
@@ -96,9 +86,7 @@ fn grant_targets_preserve_object_family_specific_raw_nodes() {
             ObjectType::Propgraph,
         ),
     ] {
-        let Node::GrantStmt(stmt) = parse_statement(sql) else {
-            panic!("expected GrantStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, GrantStmt);
         assert_eq!(stmt.objtype, expected_type, "{sql}");
         assert!(
             matches!(stmt.objects.as_slice(), [Node::RangeVar(_)]),
@@ -129,9 +117,7 @@ fn grant_targets_preserve_object_family_specific_raw_nodes() {
             ObjectType::Tablespace,
         ),
     ] {
-        let Node::GrantStmt(stmt) = parse_statement(sql) else {
-            panic!("expected GrantStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, GrantStmt);
         assert_eq!(stmt.objtype, expected_type, "{sql}");
         assert!(
             matches!(stmt.objects.as_slice(), [Node::String(_)]),
@@ -153,9 +139,7 @@ fn grant_targets_preserve_object_family_specific_raw_nodes() {
             ObjectType::Routine,
         ),
     ] {
-        let Node::GrantStmt(stmt) = parse_statement(sql) else {
-            panic!("expected GrantStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, GrantStmt);
         assert_eq!(stmt.objtype, expected_type, "{sql}");
         assert!(
             matches!(stmt.objects.as_slice(), [Node::ObjectWithArgs(_)]),
@@ -167,9 +151,7 @@ fn grant_targets_preserve_object_family_specific_raw_nodes() {
         ("grant usage on domain app.d to alice", ObjectType::Domain),
         ("grant usage on type app.t to alice", ObjectType::Type),
     ] {
-        let Node::GrantStmt(stmt) = parse_statement(sql) else {
-            panic!("expected GrantStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, GrantStmt);
         assert_eq!(stmt.objtype, expected_type, "{sql}");
         assert!(
             matches!(stmt.objects.as_slice(), [Node::AArrayExpr(_)]),
@@ -177,22 +159,17 @@ fn grant_targets_preserve_object_family_specific_raw_nodes() {
         );
     }
 
-    let Node::GrantStmt(large_objects) =
-        parse_statement("grant select on large object 42, -7 to alice")
-    else {
-        panic!("expected GrantStmt");
-    };
+    let large_objects = parse_node!("grant select on large object 42, -7 to alice", GrantStmt);
     assert_eq!(large_objects.objtype, ObjectType::Largeobject);
     assert!(matches!(
         large_objects.objects.as_slice(),
         [Node::Integer(first), Node::Integer(second)] if first.ival == 42 && second.ival == -7
     ));
 
-    let Node::GrantStmt(parameters) =
-        parse_statement("grant set on parameter app.work_mem, search_path to alice")
-    else {
-        panic!("expected GrantStmt");
-    };
+    let parameters = parse_node!(
+        "grant set on parameter app.work_mem, search_path to alice",
+        GrantStmt
+    );
     assert_eq!(parameters.objtype, ObjectType::ParameterAcl);
     assert!(matches!(
         parameters.objects.as_slice(),
@@ -201,11 +178,10 @@ fn grant_targets_preserve_object_family_specific_raw_nodes() {
                 && second.sval.as_deref() == Some("search_path")
     ));
 
-    let Node::GrantStmt(all_tables) =
-        parse_statement("grant select on all tables in schema app, audit to alice")
-    else {
-        panic!("expected GrantStmt");
-    };
+    let all_tables = parse_node!(
+        "grant select on all tables in schema app, audit to alice",
+        GrantStmt
+    );
     assert_eq!(all_tables.targtype, GrantTargetType::AllInSchema);
     assert!(matches!(
         all_tables.objects.as_slice(),
@@ -215,11 +191,10 @@ fn grant_targets_preserve_object_family_specific_raw_nodes() {
 
 #[test]
 fn revoke_stmt_populates_grant_option_grantor_and_behavior() {
-    let Node::GrantStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "revoke grant option for select on table app.items from public granted by admin cascade",
-    ) else {
-        panic!("expected GrantStmt");
-    };
+        GrantStmt
+    );
     assert!(!stmt.is_grant);
     assert!(stmt.grant_option);
     assert!(stmt.grantor.is_some());
@@ -233,11 +208,10 @@ fn revoke_stmt_populates_grant_option_grantor_and_behavior() {
 
 #[test]
 fn grant_role_stmt_populates_roles_options_and_grantor() {
-    let Node::GrantRoleStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "grant app_reader, app_writer to alice with admin option, inherit true granted by admin",
-    ) else {
-        panic!("expected GrantRoleStmt");
-    };
+        GrantRoleStmt
+    );
     assert!(stmt.is_grant);
     assert_eq!(stmt.granted_roles.len(), 2);
     assert_eq!(stmt.grantee_roles.len(), 1);
@@ -247,22 +221,20 @@ fn grant_role_stmt_populates_roles_options_and_grantor() {
 
 #[test]
 fn revoke_role_stmt_populates_revoked_option_and_behavior() {
-    let Node::GrantRoleStmt(stmt) =
-        parse_statement("revoke admin option for app_reader from alice cascade")
-    else {
-        panic!("expected GrantRoleStmt");
-    };
+    let stmt = parse_node!(
+        "revoke admin option for app_reader from alice cascade",
+        GrantRoleStmt
+    );
     assert!(!stmt.is_grant);
     assert_eq!(stmt.granted_roles.len(), 1);
     assert_eq!(stmt.grantee_roles.len(), 1);
     assert_eq!(stmt.opt.len(), 1);
     assert_eq!(stmt.behavior, DropBehavior::Cascade);
 
-    let Node::GrantRoleStmt(quoted) =
-        parse_statement("revoke \"select\" option for app_reader from alice")
-    else {
-        panic!("expected GrantRoleStmt");
-    };
+    let quoted = parse_node!(
+        "revoke \"select\" option for app_reader from alice",
+        GrantRoleStmt
+    );
     assert!(matches!(
         quoted.opt.as_slice(),
         [Node::DefElem(option)] if option.defname.as_deref() == Some("select")
@@ -271,11 +243,10 @@ fn revoke_role_stmt_populates_revoked_option_and_behavior() {
 
 #[test]
 fn alter_default_privileges_populates_scope_options_and_grant_action() {
-    let Node::AlterDefaultPrivilegesStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "alter default privileges for role current_user, owner2 in schema app, audit grant select, update on tables to reader with grant option",
-    ) else {
-        panic!("expected AlterDefaultPrivilegesStmt");
-    };
+        AlterDefaultPrivilegesStmt
+    );
     assert_eq!(stmt.options.len(), 2);
     assert!(matches!(
         stmt.options.as_slice(),
@@ -283,17 +254,13 @@ fn alter_default_privileges_populates_scope_options_and_grant_action() {
             if roles.defname.as_deref() == Some("roles")
                 && schemas.defname.as_deref() == Some("schemas")
     ));
-    let Node::DefElem(roles) = &stmt.options[0] else {
-        panic!("expected roles DefElem");
-    };
+    let roles = expect_node!(&stmt.options[0], DefElem);
     assert!(matches!(
         roles.arg.as_deref(),
         Some(Node::AArrayExpr(array))
             if matches!(array.elements.as_slice(), [Node::RoleSpec(_), Node::RoleSpec(_)])
     ));
-    let Node::DefElem(schemas) = &stmt.options[1] else {
-        panic!("expected schemas DefElem");
-    };
+    let schemas = expect_node!(&stmt.options[1], DefElem);
     assert!(matches!(
         schemas.arg.as_deref(),
         Some(Node::AArrayExpr(array))
@@ -316,9 +283,7 @@ fn alter_default_privileges_populates_scope_options_and_grant_action() {
         ("large objects", ObjectType::Largeobject),
     ] {
         let sql = format!("alter default privileges grant usage on {target} to reader");
-        let Node::AlterDefaultPrivilegesStmt(stmt) = parse_statement(&sql) else {
-            panic!("expected AlterDefaultPrivilegesStmt for {sql}");
-        };
+        let stmt = parse_node!(&sql, AlterDefaultPrivilegesStmt);
         assert_eq!(
             stmt.action.as_deref().expect("action").objtype,
             expected,
@@ -326,11 +291,10 @@ fn alter_default_privileges_populates_scope_options_and_grant_action() {
         );
     }
 
-    let Node::AlterDefaultPrivilegesStmt(revoke) = parse_statement(
+    let revoke = parse_node!(
         "alter default privileges revoke grant option for usage on types from reader cascade",
-    ) else {
-        panic!("expected AlterDefaultPrivilegesStmt");
-    };
+        AlterDefaultPrivilegesStmt
+    );
     let action = revoke.action.as_deref().expect("revoke action");
     assert!(!action.is_grant);
     assert!(action.grant_option);

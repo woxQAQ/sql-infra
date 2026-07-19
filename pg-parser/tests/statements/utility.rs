@@ -5,13 +5,11 @@ use pg_parser::{
     ObjectType, ReindexObjectType, RepackCommand, TransactionStmtKind, ValUnion, VariableSetKind,
 };
 
-use super::common::parse_statement;
+use super::common::{expect_node, parse_node};
 
 #[test]
 fn declare_cursor_accepts_the_grammar_valid_empty_select_query() {
-    let Node::DeclareCursorStmt(stmt) = parse_statement("declare c cursor for select") else {
-        panic!("expected DeclareCursorStmt");
-    };
+    let stmt = parse_node!("declare c cursor for select", DeclareCursorStmt);
     assert!(matches!(
         stmt.query.as_deref(),
         Some(Node::SelectStmt(select)) if select.target_list.is_empty()
@@ -20,17 +18,13 @@ fn declare_cursor_accepts_the_grammar_valid_empty_select_query() {
 
 #[test]
 fn prepare_and_explain_accept_the_grammar_valid_empty_select() {
-    let Node::PrepareStmt(prepare) = parse_statement("prepare empty_plan as select") else {
-        panic!("expected PrepareStmt");
-    };
+    let prepare = parse_node!("prepare empty_plan as select", PrepareStmt);
     assert!(matches!(
         prepare.query.as_deref(),
         Some(Node::SelectStmt(select)) if select.target_list.is_empty()
     ));
 
-    let Node::ExplainStmt(explain) = parse_statement("explain select") else {
-        panic!("expected ExplainStmt");
-    };
+    let explain = parse_node!("explain select", ExplainStmt);
     assert!(matches!(
         explain.query.as_deref(),
         Some(Node::SelectStmt(select)) if select.target_list.is_empty()
@@ -38,19 +32,15 @@ fn prepare_and_explain_accept_the_grammar_valid_empty_select() {
 }
 
 fn def(node: &Node) -> &DefElem {
-    let Node::DefElem(definition) = node else {
-        panic!("expected DefElem");
-    };
-    definition
+    expect_node!(node, DefElem)
 }
 
 #[test]
 fn copy_stmt_populates_relation_query_columns_program_options_and_filter() {
-    let Node::CopyStmt(table_copy) = parse_statement(
+    let table_copy = parse_node!(
         "copy app.items (id, name) from program 'cat data.csv' with (format csv, header true, delimiter ',') where id > 0",
-    ) else {
-        panic!("expected CopyStmt");
-    };
+        CopyStmt
+    );
     assert!(table_copy.relation.is_some());
     assert!(table_copy.query.is_none());
     assert_eq!(table_copy.attlist.len(), 2);
@@ -60,11 +50,10 @@ fn copy_stmt_populates_relation_query_columns_program_options_and_filter() {
     assert_eq!(table_copy.options.len(), 3);
     assert!(table_copy.where_clause.is_some());
 
-    let Node::CopyStmt(query_copy) =
-        parse_statement("copy (select id from app.items) to stdout with (format csv)")
-    else {
-        panic!("expected CopyStmt");
-    };
+    let query_copy = parse_node!(
+        "copy (select id from app.items) to stdout with (format csv)",
+        CopyStmt
+    );
     assert!(query_copy.relation.is_none());
     assert!(matches!(
         query_copy.query.as_deref(),
@@ -86,9 +75,7 @@ fn copy_stmt_populates_relation_query_columns_program_options_and_filter() {
             "merge",
         ),
     ] {
-        let Node::CopyStmt(copy) = parse_statement(sql) else {
-            panic!("expected CopyStmt for {sql}");
-        };
+        let copy = parse_node!(sql, CopyStmt);
         let matches_expected = matches!(
             (expected, copy.query.as_deref()),
             ("insert", Some(Node::InsertStmt(_)))
@@ -102,11 +89,10 @@ fn copy_stmt_populates_relation_query_columns_program_options_and_filter() {
 
 #[test]
 fn copy_generic_options_preserve_every_raw_argument_shape() {
-    let Node::CopyStmt(copy) = parse_statement(
+    let copy = parse_node!(
         "copy app.items to stdout with (header, format csv, freeze true, reject_limit 12, null default, force_quote *, force_not_null (id, name))",
-    ) else {
-        panic!("expected CopyStmt");
-    };
+        CopyStmt
+    );
     assert_eq!(copy.options.len(), 7);
     assert!(def(&copy.options[0]).arg.is_none());
     assert!(matches!(
@@ -126,11 +112,10 @@ fn copy_generic_options_preserve_every_raw_argument_shape() {
         Some(Node::AArrayExpr(values)) if values.elements.len() == 2
     ));
 
-    let Node::CopyStmt(legacy) =
-        parse_statement("copy binary app.items from stdin using delimiters '|' with null as 'N'")
-    else {
-        panic!("expected legacy CopyStmt");
-    };
+    let legacy = parse_node!(
+        "copy binary app.items from stdin using delimiters '|' with null as 'N'",
+        CopyStmt
+    );
     assert_eq!(legacy.options.len(), 3);
     assert_eq!(def(&legacy.options[0]).defname.as_deref(), Some("format"));
     assert_eq!(
@@ -139,22 +124,20 @@ fn copy_generic_options_preserve_every_raw_argument_shape() {
     );
     assert_eq!(def(&legacy.options[2]).defname.as_deref(), Some("null"));
 
-    let Node::CopyStmt(force) = parse_statement(
+    let force = parse_node!(
         "copy app.items to stdout csv force quote id, name force not null * force null archived_at encoding 'UTF8'",
-    ) else {
-        panic!("expected old-style CopyStmt");
-    };
+        CopyStmt
+    );
     assert_eq!(force.options.len(), 5);
     assert!(matches!(
         def(&force.options[1]).arg.as_deref(),
         Some(Node::AArrayExpr(columns)) if columns.elements.len() == 2
     ));
 
-    let Node::CopyStmt(literal_columns) =
-        parse_statement("copy app.items to stdout force null 1, 2.5, 'legacy_name'")
-    else {
-        panic!("expected legacy CopyStmt");
-    };
+    let literal_columns = parse_node!(
+        "copy app.items to stdout force null 1, 2.5, 'legacy_name'",
+        CopyStmt
+    );
     assert!(matches!(
         def(&literal_columns.options[0]).arg.as_deref(),
         Some(Node::AArrayExpr(columns))
@@ -176,9 +159,7 @@ fn copy_generic_options_preserve_every_raw_argument_shape() {
 
 #[test]
 fn call_stmt_preserves_the_raw_function_call_only() {
-    let Node::CallStmt(stmt) = parse_statement("call app.process_order(42, urgent => true)") else {
-        panic!("expected CallStmt");
-    };
+    let stmt = parse_node!("call app.process_order(42, urgent => true)", CallStmt);
     let call = stmt.funccall.as_deref().expect("raw FuncCall");
     assert_eq!(call.funcname.len(), 2);
     assert_eq!(call.args.len(), 2);
@@ -188,9 +169,7 @@ fn call_stmt_preserves_the_raw_function_call_only() {
     assert!(stmt.funcexpr.is_none());
     assert!(stmt.outargs.is_empty());
 
-    let Node::CallStmt(ordered) = parse_statement("call app.collect(1 order by 2 desc)") else {
-        panic!("expected ordered CallStmt");
-    };
+    let ordered = parse_node!("call app.collect(1 order by 2 desc)", CallStmt);
     assert_eq!(
         ordered
             .funccall
@@ -201,9 +180,7 @@ fn call_stmt_preserves_the_raw_function_call_only() {
         1
     );
 
-    let Node::CallStmt(variadic) = parse_statement("call app.collect(1, variadic values)") else {
-        panic!("expected variadic CallStmt");
-    };
+    let variadic = parse_node!("call app.collect(1, variadic values)", CallStmt);
     assert!(
         variadic
             .funccall
@@ -212,9 +189,7 @@ fn call_stmt_preserves_the_raw_function_call_only() {
             .func_variadic
     );
 
-    let Node::CallStmt(distinct) = parse_statement("call app.collect(distinct value)") else {
-        panic!("expected distinct CallStmt");
-    };
+    let distinct = parse_node!("call app.collect(distinct value)", CallStmt);
     assert!(
         distinct
             .funccall
@@ -223,27 +198,22 @@ fn call_stmt_preserves_the_raw_function_call_only() {
             .agg_distinct
     );
 
-    let Node::CallStmt(all) = parse_statement("call app.collect(all value order by value)") else {
-        panic!("expected ALL CallStmt");
-    };
+    let all = parse_node!("call app.collect(all value order by value)", CallStmt);
     let all = all.funccall.as_deref().expect("ALL FuncCall");
     assert!(!all.agg_distinct);
     assert_eq!(all.args.len(), 1);
     assert_eq!(all.agg_order.len(), 1);
 
-    let Node::CallStmt(star) = parse_statement("call app.collect(*)") else {
-        panic!("expected star CallStmt");
-    };
+    let star = parse_node!("call app.collect(*)", CallStmt);
     assert!(star.funccall.as_deref().expect("star FuncCall").agg_star);
 }
 
 #[test]
 fn set_constraints_preserves_qualified_names_and_mode() {
-    let Node::ConstraintsSetStmt(stmt) =
-        parse_statement("set constraints app.orders_fk, local_fk deferred")
-    else {
-        panic!("expected ConstraintsSetStmt");
-    };
+    let stmt = parse_node!(
+        "set constraints app.orders_fk, local_fk deferred",
+        ConstraintsSetStmt
+    );
     assert!(stmt.deferred);
     assert!(matches!(
         stmt.constraints.as_slice(),
@@ -256,17 +226,14 @@ fn set_constraints_preserves_qualified_names_and_mode() {
                 && second.inh
     ));
 
-    let Node::ConstraintsSetStmt(all) = parse_statement("set constraints all immediate") else {
-        panic!("expected ALL ConstraintsSetStmt");
-    };
+    let all = parse_node!("set constraints all immediate", ConstraintsSetStmt);
     assert!(!all.deferred);
     assert!(all.constraints.is_empty());
 
-    let Node::ConstraintsSetStmt(qualified) =
-        parse_statement("set constraints catalog.app.orders_fk immediate")
-    else {
-        panic!("expected three-part ConstraintsSetStmt");
-    };
+    let qualified = parse_node!(
+        "set constraints catalog.app.orders_fk immediate",
+        ConstraintsSetStmt
+    );
     assert!(matches!(
         qualified.constraints.as_slice(),
         [Node::RangeVar(name)]
@@ -278,9 +245,7 @@ fn set_constraints_preserves_qualified_names_and_mode() {
 
 #[test]
 fn do_stmt_preserves_flexible_option_order() {
-    let Node::DoStmt(code_first) = parse_statement("do 'begin null; end' language plpgsql") else {
-        panic!("expected DoStmt");
-    };
+    let code_first = parse_node!("do 'begin null; end' language plpgsql", DoStmt);
     assert_eq!(code_first.args.len(), 2);
     assert_eq!(def(&code_first.args[0]).defname.as_deref(), Some("as"));
     assert_eq!(
@@ -288,10 +253,7 @@ fn do_stmt_preserves_flexible_option_order() {
         Some("language")
     );
 
-    let Node::DoStmt(language_first) = parse_statement("do language 'plpgsql' 'begin null; end'")
-    else {
-        panic!("expected DoStmt");
-    };
+    let language_first = parse_node!("do language 'plpgsql' 'begin null; end'", DoStmt);
     assert_eq!(language_first.args.len(), 2);
     assert_eq!(
         def(&language_first.args[0]).defname.as_deref(),
@@ -299,11 +261,10 @@ fn do_stmt_preserves_flexible_option_order() {
     );
     assert_eq!(def(&language_first.args[1]).defname.as_deref(), Some("as"));
 
-    let Node::DoStmt(repeated) =
-        parse_statement("do 'first' language sql 'second' language 'plpgsql'")
-    else {
-        panic!("expected repeated-option DoStmt");
-    };
+    let repeated = parse_node!(
+        "do 'first' language sql 'second' language 'plpgsql'",
+        DoStmt
+    );
     assert_eq!(repeated.args.len(), 4);
     assert_eq!(def(&repeated.args[0]).location, 3);
     assert_eq!(def(&repeated.args[1]).location, 11);
@@ -313,25 +274,21 @@ fn do_stmt_preserves_flexible_option_order() {
 
 #[test]
 fn vacuum_and_analyze_populate_options_relations_and_columns() {
-    let Node::VacuumStmt(vacuum) =
-        parse_statement("vacuum (full true, analyze true) app.items(id, name), app.other")
-    else {
-        panic!("expected VacuumStmt");
-    };
+    let vacuum = parse_node!(
+        "vacuum (full true, analyze true) app.items(id, name), app.other",
+        VacuumStmt
+    );
     assert!(vacuum.is_vacuumcmd);
     assert_eq!(vacuum.options.len(), 2);
     assert_eq!(vacuum.rels.len(), 2);
-    let Node::VacuumRelation(first) = &vacuum.rels[0] else {
-        panic!("expected VacuumRelation");
-    };
+    let first = expect_node!(&vacuum.rels[0], VacuumRelation);
     assert_eq!(first.va_cols.len(), 2);
     assert!(first.relation.as_deref().expect("relation").inh);
 
-    let Node::VacuumStmt(legacy) =
-        parse_statement("vacuum full freeze verbose analyze only app.items, app.other *")
-    else {
-        panic!("expected VacuumStmt");
-    };
+    let legacy = parse_node!(
+        "vacuum full freeze verbose analyze only app.items, app.other *",
+        VacuumStmt
+    );
     assert_eq!(legacy.options.len(), 4);
     assert!(legacy.options.iter().all(|option| matches!(
         option,
@@ -344,18 +301,15 @@ fn vacuum_and_analyze_populate_options_relations_and_columns() {
                 && second.relation.as_deref().expect("relation").inh
     ));
 
-    let Node::VacuumStmt(analyze) = parse_statement("analyze verbose app.items(id)") else {
-        panic!("expected VacuumStmt");
-    };
+    let analyze = parse_node!("analyze verbose app.items(id)", VacuumStmt);
     assert!(!analyze.is_vacuumcmd);
     assert_eq!(analyze.options.len(), 1);
     assert_eq!(analyze.rels.len(), 1);
 
-    let Node::VacuumStmt(british) =
-        parse_statement("analyse (verbose, buffer_usage_limit '8MB', sample_rate 0.25) app.items")
-    else {
-        panic!("expected VacuumStmt");
-    };
+    let british = parse_node!(
+        "analyse (verbose, buffer_usage_limit '8MB', sample_rate 0.25) app.items",
+        VacuumStmt
+    );
     assert!(!british.is_vacuumcmd);
     assert_eq!(british.options.len(), 3);
     assert!(matches!(
@@ -369,11 +323,10 @@ fn vacuum_and_analyze_populate_options_relations_and_columns() {
 
 #[test]
 fn explain_checkpoint_and_discard_populate_utility_options() {
-    let Node::ExplainStmt(explain) =
-        parse_statement("explain (analyze true, verbose true) select * from app.items")
-    else {
-        panic!("expected ExplainStmt");
-    };
+    let explain = parse_node!(
+        "explain (analyze true, verbose true) select * from app.items",
+        ExplainStmt
+    );
     assert_eq!(explain.options.len(), 2);
     assert!(matches!(
         explain.query.as_deref(),
@@ -415,9 +368,7 @@ fn explain_checkpoint_and_discard_populate_utility_options() {
             pg_parser::NodeTag::MergeStmt,
         ),
     ] {
-        let Node::ExplainStmt(explain) = parse_statement(sql) else {
-            panic!("expected ExplainStmt for {sql}");
-        };
+        let explain = parse_node!(sql, ExplainStmt);
         assert_eq!(
             explain.query.as_deref().map(Node::tag),
             Some(expected_tag),
@@ -425,14 +376,10 @@ fn explain_checkpoint_and_discard_populate_utility_options() {
         );
     }
 
-    let Node::CheckPointStmt(bare_checkpoint) = parse_statement("checkpoint") else {
-        panic!("expected CheckPointStmt");
-    };
+    let bare_checkpoint = parse_node!("checkpoint", CheckPointStmt);
     assert!(bare_checkpoint.options.is_empty());
 
-    let Node::CheckPointStmt(checkpoint) = parse_statement("checkpoint (fast true)") else {
-        panic!("expected CheckPointStmt");
-    };
+    let checkpoint = parse_node!("checkpoint (fast true)", CheckPointStmt);
     assert_eq!(checkpoint.options.len(), 1);
 
     for (sql, expected) in [
@@ -442,20 +389,17 @@ fn explain_checkpoint_and_discard_populate_utility_options() {
         ("discard temp", DiscardMode::Temp),
         ("discard temporary", DiscardMode::Temp),
     ] {
-        let Node::DiscardStmt(discard) = parse_statement(sql) else {
-            panic!("expected DiscardStmt for {sql}");
-        };
+        let discard = parse_node!(sql, DiscardStmt);
         assert_eq!(discard.target, expected, "{sql}");
     }
 }
 
 #[test]
 fn lock_notify_listen_unlisten_and_load_require_and_store_arguments() {
-    let Node::LockStmt(lock) = parse_statement(
+    let lock = parse_node!(
         "lock table only app.items, app.other * in share row exclusive mode nowait",
-    ) else {
-        panic!("expected LockStmt");
-    };
+        LockStmt
+    );
     assert_eq!(lock.relations.len(), 2);
     assert_eq!(lock.mode, 6);
     assert!(lock.nowait);
@@ -475,22 +419,17 @@ fn lock_notify_listen_unlisten_and_load_require_and_store_arguments() {
         ("access exclusive", 8),
     ] {
         let sql = format!("lock app.items in {mode} mode");
-        let Node::LockStmt(lock) = parse_statement(&sql) else {
-            panic!("expected LockStmt for {sql}");
-        };
+        let lock = parse_node!(&sql, LockStmt);
         assert_eq!(lock.mode, expected, "{sql}");
         assert!(!lock.nowait, "{sql}");
     }
-    let Node::LockStmt(default_lock) = parse_statement("lock app.items") else {
-        panic!("expected LockStmt");
-    };
+    let default_lock = parse_node!("lock app.items", LockStmt);
     assert_eq!(default_lock.mode, 8);
 
-    let Node::LockStmt(default_nowait) =
-        parse_statement("lock table only (app.items), app.children * nowait")
-    else {
-        panic!("expected LockStmt");
-    };
+    let default_nowait = parse_node!(
+        "lock table only (app.items), app.children * nowait",
+        LockStmt
+    );
     assert_eq!(default_nowait.mode, 8);
     assert!(default_nowait.nowait);
     assert!(matches!(
@@ -502,48 +441,35 @@ fn lock_notify_listen_unlisten_and_load_require_and_store_arguments() {
                 && second.location == 29
     ));
 
-    let Node::ListenStmt(listen) = parse_statement("listen item_changes") else {
-        panic!("expected ListenStmt");
-    };
+    let listen = parse_node!("listen item_changes", ListenStmt);
     assert_eq!(listen.conditionname.as_deref(), Some("item_changes"));
 
-    let Node::NotifyStmt(notify) = parse_statement("notify item_changes, 'updated'") else {
-        panic!("expected NotifyStmt");
-    };
+    let notify = parse_node!("notify item_changes, 'updated'", NotifyStmt);
     assert_eq!(notify.conditionname.as_deref(), Some("item_changes"));
     assert_eq!(notify.payload.as_deref(), Some("updated"));
 
-    let Node::NotifyStmt(empty_notify) = parse_statement("notify item_changes") else {
-        panic!("expected NotifyStmt");
-    };
+    let empty_notify = parse_node!("notify item_changes", NotifyStmt);
     assert!(empty_notify.payload.is_none());
 
-    let Node::UnlistenStmt(unlisten) = parse_statement("unlisten *") else {
-        panic!("expected UnlistenStmt");
-    };
+    let unlisten = parse_node!("unlisten *", UnlistenStmt);
     assert!(unlisten.conditionname.is_none());
 
-    let Node::UnlistenStmt(named_unlisten) = parse_statement("unlisten item_changes") else {
-        panic!("expected UnlistenStmt");
-    };
+    let named_unlisten = parse_node!("unlisten item_changes", UnlistenStmt);
     assert_eq!(
         named_unlisten.conditionname.as_deref(),
         Some("item_changes")
     );
 
-    let Node::LoadStmt(load) = parse_statement("load 'extension.so'") else {
-        panic!("expected LoadStmt");
-    };
+    let load = parse_node!("load 'extension.so'", LoadStmt);
     assert_eq!(load.filename.as_deref(), Some("extension.so"));
 }
 
 #[test]
 fn refresh_reindex_and_truncate_populate_all_raw_fields() {
-    let Node::RefreshMatViewStmt(refresh) =
-        parse_statement("refresh materialized view concurrently app.summary with no data")
-    else {
-        panic!("expected RefreshMatViewStmt");
-    };
+    let refresh = parse_node!(
+        "refresh materialized view concurrently app.summary with no data",
+        RefreshMatViewStmt
+    );
     assert!(refresh.concurrent);
     assert!(refresh.skip_data);
     assert!(refresh.relation.is_some());
@@ -561,18 +487,15 @@ fn refresh_reindex_and_truncate_populate_all_raw_fields() {
             true,
         ),
     ] {
-        let Node::RefreshMatViewStmt(stmt) = parse_statement(sql) else {
-            panic!("expected RefreshMatViewStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, RefreshMatViewStmt);
         assert_eq!(stmt.concurrent, concurrent, "{sql}");
         assert_eq!(stmt.skip_data, skip_data, "{sql}");
     }
 
-    let Node::ReindexStmt(reindex) =
-        parse_statement("reindex (verbose true) table concurrently app.items")
-    else {
-        panic!("expected ReindexStmt");
-    };
+    let reindex = parse_node!(
+        "reindex (verbose true) table concurrently app.items",
+        ReindexStmt
+    );
     assert_eq!(reindex.kind, ReindexObjectType::Table);
     assert!(reindex.relation.is_some());
     assert_eq!(reindex.params.len(), 2);
@@ -626,19 +549,16 @@ fn refresh_reindex_and_truncate_populate_all_raw_fields() {
         ),
     ];
     for (sql, kind, has_relation, name) in cases {
-        let Node::ReindexStmt(stmt) = parse_statement(sql) else {
-            panic!("expected ReindexStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, ReindexStmt);
         assert_eq!(stmt.kind, kind, "{sql}");
         assert_eq!(stmt.relation.is_some(), has_relation, "{sql}");
         assert_eq!(stmt.name.as_deref(), name, "{sql}");
     }
 
-    let Node::ReindexStmt(options) =
-        parse_statement("reindex (verbose, workers -2, mode 'safe') table app.items")
-    else {
-        panic!("expected ReindexStmt");
-    };
+    let options = parse_node!(
+        "reindex (verbose, workers -2, mode 'safe') table app.items",
+        ReindexStmt
+    );
     assert!(matches!(
         options.params.as_slice(),
         [Node::DefElem(verbose), Node::DefElem(workers), Node::DefElem(mode)]
@@ -647,11 +567,10 @@ fn refresh_reindex_and_truncate_populate_all_raw_fields() {
                 && matches!(mode.arg.as_deref(), Some(Node::String(value)) if value.sval.as_deref() == Some("safe"))
     ));
 
-    let Node::TruncateStmt(truncate) =
-        parse_statement("truncate table only app.items, app.other * restart identity cascade")
-    else {
-        panic!("expected TruncateStmt");
-    };
+    let truncate = parse_node!(
+        "truncate table only app.items, app.other * restart identity cascade",
+        TruncateStmt
+    );
     assert_eq!(truncate.relations.len(), 2);
     assert!(matches!(
         truncate.relations.as_slice(),
@@ -660,43 +579,35 @@ fn refresh_reindex_and_truncate_populate_all_raw_fields() {
     assert!(truncate.restart_seqs);
     assert_eq!(truncate.behavior, DropBehavior::Cascade);
 
-    let Node::TruncateStmt(defaults) = parse_statement("truncate app.items") else {
-        panic!("expected TruncateStmt");
-    };
+    let defaults = parse_node!("truncate app.items", TruncateStmt);
     assert!(!defaults.restart_seqs);
     assert_eq!(defaults.behavior, DropBehavior::Restrict);
 
-    let Node::TruncateStmt(continue_identity) =
-        parse_statement("truncate app.items continue identity restrict")
-    else {
-        panic!("expected TruncateStmt");
-    };
+    let continue_identity = parse_node!(
+        "truncate app.items continue identity restrict",
+        TruncateStmt
+    );
     assert!(!continue_identity.restart_seqs);
     assert_eq!(continue_identity.behavior, DropBehavior::Restrict);
 }
 
 #[test]
 fn repack_reassign_comment_and_security_label_populate_targets() {
-    let Node::RepackStmt(all_relations) = parse_statement("repack") else {
-        panic!("expected RepackStmt");
-    };
+    let all_relations = parse_node!("repack", RepackStmt);
     assert_eq!(all_relations.command, RepackCommand::Repack);
     assert!(all_relations.relation.is_none());
     assert!(!all_relations.usingindex);
     assert!(all_relations.indexname.is_none());
 
-    let Node::RepackStmt(single_relation) = parse_statement("repack app.items") else {
-        panic!("expected RepackStmt");
-    };
+    let single_relation = parse_node!("repack app.items", RepackStmt);
     assert!(single_relation.relation.is_some());
     assert!(!single_relation.usingindex);
     assert!(single_relation.indexname.is_none());
 
-    let Node::RepackStmt(repack) =
-        parse_statement("repack (verbose true) app.items(id) using index item_idx")
-    else {
-        panic!("expected RepackStmt");
-    };
+    let repack = parse_node!(
+        "repack (verbose true) app.items(id) using index item_idx",
+        RepackStmt
+    );
     assert_eq!(repack.command, RepackCommand::Repack);
     assert!(repack.usingindex);
     assert_eq!(repack.indexname.as_deref(), Some("item_idx"));
@@ -709,9 +620,7 @@ fn repack_reassign_comment_and_security_label_populate_targets() {
         Some(1)
     );
 
-    let Node::RepackStmt(repack_only) = parse_statement("repack only app.items using index") else {
-        panic!("expected RepackStmt");
-    };
+    let repack_only = parse_node!("repack only app.items using index", RepackStmt);
     assert!(repack_only.usingindex);
     assert!(repack_only.indexname.is_none());
     assert!(
@@ -723,9 +632,7 @@ fn repack_reassign_comment_and_security_label_populate_targets() {
             .inh
     );
 
-    let Node::RepackStmt(all_using_index) = parse_statement("repack using index") else {
-        panic!("expected RepackStmt");
-    };
+    let all_using_index = parse_node!("repack using index", RepackStmt);
     assert!(all_using_index.relation.is_none());
     assert!(all_using_index.usingindex);
 
@@ -737,35 +644,28 @@ fn repack_reassign_comment_and_security_label_populate_targets() {
         "cluster (verbose true) app.items using item_idx",
         "cluster verbose item_idx on app.items",
     ] {
-        let Node::RepackStmt(cluster) = parse_statement(sql) else {
-            panic!("expected RepackStmt for {sql}");
-        };
+        let cluster = parse_node!(sql, RepackStmt);
         assert_eq!(cluster.command, RepackCommand::Cluster, "{sql}");
         assert!(cluster.usingindex, "{sql}");
     }
 
-    let Node::RepackStmt(old_cluster) = parse_statement("cluster verbose item_idx on app.items")
-    else {
-        panic!("expected RepackStmt");
-    };
+    let old_cluster = parse_node!("cluster verbose item_idx on app.items", RepackStmt);
     assert_eq!(old_cluster.indexname.as_deref(), Some("item_idx"));
     assert_eq!(old_cluster.params.len(), 1);
     assert!(old_cluster.relation.is_some());
 
-    let Node::RepackStmt(option_cluster) =
-        parse_statement("cluster (verbose true, workers 2) app.items using item_idx")
-    else {
-        panic!("expected RepackStmt");
-    };
+    let option_cluster = parse_node!(
+        "cluster (verbose true, workers 2) app.items using item_idx",
+        RepackStmt
+    );
     assert_eq!(option_cluster.params.len(), 2);
     assert_eq!(option_cluster.indexname.as_deref(), Some("item_idx"));
     assert!(option_cluster.relation.is_some());
 
-    let Node::ReassignOwnedStmt(reassign) =
-        parse_statement("reassign owned by old_owner, current_user to new_owner")
-    else {
-        panic!("expected ReassignOwnedStmt");
-    };
+    let reassign = parse_node!(
+        "reassign owned by old_owner, current_user to new_owner",
+        ReassignOwnedStmt
+    );
     assert_eq!(reassign.roles.len(), 2);
     assert!(matches!(
         reassign.roles.as_slice(),
@@ -773,20 +673,18 @@ fn repack_reassign_comment_and_security_label_populate_targets() {
     ));
     assert!(reassign.newrole.is_some());
 
-    let Node::CommentStmt(comment) =
-        parse_statement("comment on table app.items is 'application items'")
-    else {
-        panic!("expected CommentStmt");
-    };
+    let comment = parse_node!(
+        "comment on table app.items is 'application items'",
+        CommentStmt
+    );
     assert_eq!(comment.objtype, ObjectType::Table);
     assert!(comment.object.is_some());
     assert_eq!(comment.comment.as_deref(), Some("application items"));
 
-    let Node::SecLabelStmt(label) = parse_statement(
+    let label = parse_node!(
         "security label for selinux on table app.items is 'system_u:object_r:table_t:s0'",
-    ) else {
-        panic!("expected SecLabelStmt");
-    };
+        SecLabelStmt
+    );
     assert_eq!(label.provider.as_deref(), Some("selinux"));
     assert_eq!(label.objtype, ObjectType::Table);
     assert!(label.object.is_some());
@@ -795,11 +693,10 @@ fn repack_reassign_comment_and_security_label_populate_targets() {
 
 #[test]
 fn comment_and_security_label_build_object_type_specific_identities() {
-    let Node::CommentStmt(function) =
-        parse_statement("comment on function app.normalize(int, text) is 'normalizer'")
-    else {
-        panic!("expected function CommentStmt");
-    };
+    let function = parse_node!(
+        "comment on function app.normalize(int, text) is 'normalizer'",
+        CommentStmt
+    );
     assert_eq!(function.objtype, ObjectType::Function);
     assert!(matches!(
         function.object.as_deref(),
@@ -807,11 +704,10 @@ fn comment_and_security_label_build_object_type_specific_identities() {
             if object.objname.len() == 2 && object.objargs.len() == 2
     ));
 
-    let Node::CommentStmt(cast) =
-        parse_statement("comment on cast (int as text) is 'integer to text'")
-    else {
-        panic!("expected cast CommentStmt");
-    };
+    let cast = parse_node!(
+        "comment on cast (int as text) is 'integer to text'",
+        CommentStmt
+    );
     assert_eq!(cast.objtype, ObjectType::Cast);
     assert!(matches!(
         cast.object.as_deref(),
@@ -819,22 +715,20 @@ fn comment_and_security_label_build_object_type_specific_identities() {
             if types.elements.iter().all(|node| matches!(node, Node::TypeName(_)))
     ));
 
-    let Node::CommentStmt(table_constraint) =
-        parse_statement("comment on constraint positive_amount on app.orders is 'positive amount'")
-    else {
-        panic!("expected table constraint CommentStmt");
-    };
+    let table_constraint = parse_node!(
+        "comment on constraint positive_amount on app.orders is 'positive amount'",
+        CommentStmt
+    );
     assert_eq!(table_constraint.objtype, ObjectType::Tabconstraint);
     assert!(matches!(
         table_constraint.object.as_deref(),
         Some(Node::AArrayExpr(identity)) if identity.elements.len() == 3
     ));
 
-    let Node::CommentStmt(domain_constraint) = parse_statement(
+    let domain_constraint = parse_node!(
         "comment on constraint valid_value on domain app.positive_int is 'valid value'",
-    ) else {
-        panic!("expected domain constraint CommentStmt");
-    };
+        CommentStmt
+    );
     assert_eq!(domain_constraint.objtype, ObjectType::Domconstraint);
     assert!(matches!(
         domain_constraint.object.as_deref(),
@@ -842,43 +736,37 @@ fn comment_and_security_label_build_object_type_specific_identities() {
             if matches!(identity.elements.first(), Some(Node::TypeName(_)))
     ));
 
-    let Node::CommentStmt(trigger) =
-        parse_statement("comment on trigger audit on app.orders is null")
-    else {
-        panic!("expected trigger CommentStmt");
-    };
+    let trigger = parse_node!(
+        "comment on trigger audit on app.orders is null",
+        CommentStmt
+    );
     assert_eq!(trigger.objtype, ObjectType::Trigger);
     assert!(trigger.comment.is_none());
 
-    let Node::CommentStmt(opclass) =
-        parse_statement("comment on operator class app.int_ops using btree is 'integer ops'")
-    else {
-        panic!("expected operator class CommentStmt");
-    };
+    let opclass = parse_node!(
+        "comment on operator class app.int_ops using btree is 'integer ops'",
+        CommentStmt
+    );
     assert_eq!(opclass.objtype, ObjectType::Opclass);
     assert!(matches!(
         opclass.object.as_deref(),
         Some(Node::AArrayExpr(identity)) if identity.elements.len() == 3
     ));
 
-    let Node::CommentStmt(operator) =
-        parse_statement("comment on operator app.-(none, int) is 'integer negation'")
-    else {
-        panic!("expected operator CommentStmt");
-    };
-    let Some(Node::ObjectWithArgs(signature)) = operator.object.as_deref() else {
-        panic!("expected operator signature");
-    };
+    let operator = parse_node!(
+        "comment on operator app.-(none, int) is 'integer negation'",
+        CommentStmt
+    );
+    let signature = expect_node!(operator.object.as_deref(), Some(ObjectWithArgs));
     assert!(matches!(
         signature.objargs.as_slice(),
         [None, Some(Node::TypeName(_))]
     ));
 
-    let Node::CommentStmt(transform) = parse_statement(
+    let transform = parse_node!(
         "comment on transform for app.custom_type language plpgsql is 'custom transform'",
-    ) else {
-        panic!("expected transform CommentStmt");
-    };
+        CommentStmt
+    );
     assert_eq!(transform.objtype, ObjectType::Transform);
     assert!(matches!(
         transform.object.as_deref(),
@@ -886,11 +774,10 @@ fn comment_and_security_label_build_object_type_specific_identities() {
             if matches!(identity.elements.first(), Some(Node::TypeName(_)))
     ));
 
-    let Node::SecLabelStmt(function_label) = parse_statement(
+    let function_label = parse_node!(
         "security label for 'selinux' on function app.normalize(int, text) is 'system_u:object_r:function_t:s0'",
-    ) else {
-        panic!("expected function SecLabelStmt");
-    };
+        SecLabelStmt
+    );
     assert_eq!(function_label.provider.as_deref(), Some("selinux"));
     assert_eq!(function_label.objtype, ObjectType::Function);
     assert!(matches!(
@@ -949,19 +836,14 @@ fn comment_and_security_label_cover_every_grammar_object_family() {
     ];
 
     for (object, expected_type) in common_objects {
-        let Node::CommentStmt(comment) =
-            parse_statement(&format!("comment on {object} is 'comment'"))
-        else {
-            panic!("expected CommentStmt for {object}");
-        };
+        let comment = parse_node!(&format!("comment on {object} is 'comment'"), CommentStmt);
         assert_eq!(comment.objtype, expected_type, "COMMENT ON {object}");
         assert!(comment.object.is_some(), "COMMENT ON {object}");
 
-        let Node::SecLabelStmt(label) =
-            parse_statement(&format!("security label on {object} is 'label'"))
-        else {
-            panic!("expected SecLabelStmt for {object}");
-        };
+        let label = parse_node!(
+            &format!("security label on {object} is 'label'"),
+            SecLabelStmt
+        );
         assert_eq!(label.objtype, expected_type, "SECURITY LABEL ON {object}");
         assert!(label.object.is_some(), "SECURITY LABEL ON {object}");
     }
@@ -994,11 +876,7 @@ fn comment_and_security_label_cover_every_grammar_object_family() {
         ("cast (int as text)", ObjectType::Cast),
     ];
     for (object, expected_type) in comment_only_objects {
-        let Node::CommentStmt(comment) =
-            parse_statement(&format!("comment on {object} is 'comment'"))
-        else {
-            panic!("expected CommentStmt for {object}");
-        };
+        let comment = parse_node!(&format!("comment on {object} is 'comment'"), CommentStmt);
         assert_eq!(comment.objtype, expected_type, "COMMENT ON {object}");
         assert!(comment.object.is_some(), "COMMENT ON {object}");
     }
@@ -1006,11 +884,10 @@ fn comment_and_security_label_cover_every_grammar_object_family() {
 
 #[test]
 fn import_do_return_and_wait_populate_all_clauses() {
-    let Node::ImportForeignSchemaStmt(import) = parse_statement(
+    let import = parse_node!(
         "import foreign schema remote limit to (items, app.events) from server foreign_srv into staging options (case 'lower')",
-    ) else {
-        panic!("expected ImportForeignSchemaStmt");
-    };
+        ImportForeignSchemaStmt
+    );
     assert_eq!(import.remote_schema.as_deref(), Some("remote"));
     assert_eq!(import.server_name.as_deref(), Some("foreign_srv"));
     assert_eq!(import.local_schema.as_deref(), Some("staging"));
@@ -1022,43 +899,33 @@ fn import_do_return_and_wait_populate_all_clauses() {
     ));
     assert_eq!(import.options.len(), 1);
 
-    let Node::ImportForeignSchemaStmt(import) = parse_statement(
+    let import = parse_node!(
         "import foreign schema remote except (only items, app.events *) from server foreign_srv into staging",
-    ) else {
-        panic!("expected ImportForeignSchemaStmt");
-    };
+        ImportForeignSchemaStmt
+    );
     assert_eq!(import.list_type, ImportForeignSchemaType::Except);
     assert!(matches!(
         import.table_list.as_slice(),
         [Node::RangeVar(first), Node::RangeVar(second)] if !first.inh && second.inh
     ));
 
-    let Node::DoStmt(do_stmt) = parse_statement("do language plpgsql 'begin perform 1; end'")
-    else {
-        panic!("expected DoStmt");
-    };
+    let do_stmt = parse_node!("do language plpgsql 'begin perform 1; end'", DoStmt);
     assert_eq!(do_stmt.args.len(), 2);
 
-    let Node::DoStmt(language_only) = parse_statement("do language plpgsql") else {
-        panic!("expected DoStmt");
-    };
+    let language_only = parse_node!("do language plpgsql", DoStmt);
     assert!(matches!(
         language_only.args.as_slice(),
         [Node::DefElem(option)] if option.defname.as_deref() == Some("language")
     ));
 
-    let Node::WaitStmt(wait) = parse_statement("wait for lsn '0/16B6C50' with (timeout 1000)")
-    else {
-        panic!("expected WaitStmt");
-    };
+    let wait = parse_node!("wait for lsn '0/16B6C50' with (timeout 1000)", WaitStmt);
     assert_eq!(wait.lsn_literal.as_deref(), Some("0/16B6C50"));
     assert_eq!(wait.options.len(), 1);
 
-    let Node::WaitStmt(wait) = parse_statement(
+    let wait = parse_node!(
         "wait for lsn '0/16B6C51' with (timeout -1.5, polling true, mode 'strict', trace)",
-    ) else {
-        panic!("expected WaitStmt with every utility option argument shape");
-    };
+        WaitStmt
+    );
     assert_eq!(wait.options.len(), 4);
     assert!(matches!(
         def(&wait.options[0]).arg.as_deref(),
@@ -1070,19 +937,16 @@ fn import_do_return_and_wait_populate_all_clauses() {
     ));
     assert!(def(&wait.options[3]).arg.is_none());
 
-    let Node::WaitStmt(wait) = parse_statement("wait for lsn '0/16B6C52'") else {
-        panic!("expected optionless WaitStmt");
-    };
+    let wait = parse_node!("wait for lsn '0/16B6C52'", WaitStmt);
     assert!(wait.options.is_empty());
 }
 
 #[test]
 fn cursor_statements_populate_options_direction_counts_and_names() {
-    let Node::DeclareCursorStmt(declare) = parse_statement(
+    let declare = parse_node!(
         "declare item_cursor binary scroll cursor with hold for select id from app.items",
-    ) else {
-        panic!("expected DeclareCursorStmt");
-    };
+        DeclareCursorStmt
+    );
     assert_eq!(declare.portalname.as_deref(), Some("item_cursor"));
     assert_eq!(
         declare.options,
@@ -1093,38 +957,29 @@ fn cursor_statements_populate_options_direction_counts_and_names() {
         Some(Node::SelectStmt(_))
     ));
 
-    let Node::FetchStmt(fetch) = parse_statement("fetch backward all from item_cursor") else {
-        panic!("expected FetchStmt");
-    };
+    let fetch = parse_node!("fetch backward all from item_cursor", FetchStmt);
     assert_eq!(fetch.direction, FetchDirection::Backward);
     assert_eq!(fetch.how_many, i64::MAX);
     assert_eq!(fetch.direction_keyword, FetchDirectionKeywords::BackwardAll);
     assert!(!fetch.ismove);
     assert_eq!(fetch.location, -1);
 
-    let Node::FetchStmt(movement) = parse_statement("move absolute -2 in item_cursor") else {
-        panic!("expected FetchStmt");
-    };
+    let movement = parse_node!("move absolute -2 in item_cursor", FetchStmt);
     assert_eq!(movement.direction, FetchDirection::Absolute);
     assert_eq!(movement.how_many, -2);
     assert!(movement.ismove);
     assert_eq!(movement.location, 14);
 
-    let Node::ClosePortalStmt(close) = parse_statement("close all") else {
-        panic!("expected ClosePortalStmt");
-    };
+    let close = parse_node!("close all", ClosePortalStmt);
     assert!(close.portalname.is_none());
 
-    let Node::ClosePortalStmt(close) = parse_statement("close item_cursor") else {
-        panic!("expected ClosePortalStmt");
-    };
+    let close = parse_node!("close item_cursor", ClosePortalStmt);
     assert_eq!(close.portalname.as_deref(), Some("item_cursor"));
 
-    let Node::DeclareCursorStmt(all_modes) = parse_statement(
+    let all_modes = parse_node!(
         "declare mode_cursor no scroll insensitive asensitive cursor without hold for select 1",
-    ) else {
-        panic!("expected DeclareCursorStmt");
-    };
+        DeclareCursorStmt
+    );
     assert_eq!(
         all_modes.options,
         CURSOR_OPT_NO_SCROLL
@@ -1140,9 +995,7 @@ fn cursor_statements_populate_options_direction_counts_and_names() {
         "declare c cursor for values (1), (2)",
         "declare c cursor for table app.items",
     ] {
-        let Node::DeclareCursorStmt(stmt) = parse_statement(sql) else {
-            panic!("expected DeclareCursorStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, DeclareCursorStmt);
         assert!(
             matches!(stmt.query.as_deref(), Some(Node::SelectStmt(_))),
             "{sql}"
@@ -1210,9 +1063,7 @@ fn fetch_and_move_locations_follow_fetch_args_productions() {
         ),
     ];
     for (sql, keyword, count, location) in cases {
-        let Node::FetchStmt(stmt) = parse_statement(sql) else {
-            panic!("expected FetchStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, FetchStmt);
         assert_eq!(stmt.direction_keyword, keyword, "{sql}");
         assert_eq!(stmt.how_many, count, "{sql}");
         assert_eq!(stmt.location, location, "{sql}");
@@ -1225,9 +1076,7 @@ fn fetch_and_move_locations_follow_fetch_args_productions() {
         ("move forward 7 in item_cursor", 13),
         ("move backward -8 item_cursor", 14),
     ] {
-        let Node::FetchStmt(stmt) = parse_statement(sql) else {
-            panic!("expected FetchStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, FetchStmt);
         assert_eq!(stmt.location, location, "{sql}");
     }
 
@@ -1263,9 +1112,7 @@ fn fetch_and_move_locations_follow_fetch_args_productions() {
             FetchDirectionKeywords::Backward,
         ),
     ] {
-        let Node::FetchStmt(stmt) = parse_statement(sql) else {
-            panic!("expected FetchStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, FetchStmt);
         assert_eq!(stmt.direction, direction, "{sql}");
         assert_eq!(stmt.how_many, count, "{sql}");
         assert_eq!(stmt.direction_keyword, keyword, "{sql}");
@@ -1274,31 +1121,25 @@ fn fetch_and_move_locations_follow_fetch_args_productions() {
 
 #[test]
 fn show_and_transaction_statements_populate_special_names_modes_and_identifiers() {
-    let Node::VariableSetStmt(timezone) =
-        parse_statement("set time zone interval '02:30' hour to minute")
-    else {
-        panic!("expected VariableSetStmt");
-    };
+    let timezone = parse_node!(
+        "set time zone interval '02:30' hour to minute",
+        VariableSetStmt
+    );
     assert_eq!(timezone.kind, VariableSetKind::SetValue);
     assert_eq!(timezone.name.as_deref(), Some("timezone"));
     assert!(matches!(timezone.args.as_slice(), [Node::TypeCast(_)]));
 
-    let Node::VariableShowStmt(show) = parse_statement("show transaction isolation level") else {
-        panic!("expected VariableShowStmt");
-    };
+    let show = parse_node!("show transaction isolation level", VariableShowStmt);
     assert_eq!(show.name.as_deref(), Some("transaction_isolation"));
 
-    let Node::TransactionStmt(begin) = parse_statement(
+    let begin = parse_node!(
         "begin transaction isolation level repeatable read, read only not deferrable",
-    ) else {
-        panic!("expected TransactionStmt");
-    };
+        TransactionStmt
+    );
     assert_eq!(begin.kind, TransactionStmtKind::Begin);
     assert_eq!(begin.options.len(), 3);
     assert_eq!(begin.location, -1);
-    let Node::DefElem(isolation) = &begin.options[0] else {
-        panic!("expected isolation DefElem");
-    };
+    let isolation = expect_node!(&begin.options[0], DefElem);
     assert_eq!(
         isolation.location,
         "begin transaction isolation level repeatable read, read only not deferrable"
@@ -1314,25 +1155,19 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
                     .unwrap() as i32
     ));
 
-    let Node::TransactionStmt(commit) = parse_statement("commit work and chain") else {
-        panic!("expected TransactionStmt");
-    };
+    let commit = parse_node!("commit work and chain", TransactionStmt);
     assert_eq!(commit.kind, TransactionStmtKind::Commit);
     assert!(commit.chain);
     assert_eq!(commit.location, -1);
 
     let rollback_sql = "rollback transaction to savepoint s1";
-    let Node::TransactionStmt(rollback) = parse_statement(rollback_sql) else {
-        panic!("expected TransactionStmt");
-    };
+    let rollback = parse_node!(rollback_sql, TransactionStmt);
     assert_eq!(rollback.kind, TransactionStmtKind::RollbackTo);
     assert_eq!(rollback.savepoint_name.as_deref(), Some("s1"));
     assert_eq!(rollback.location, rollback_sql.find("s1").unwrap() as i32);
 
     let prepare_sql = "prepare transaction 'gid-1'";
-    let Node::TransactionStmt(prepare) = parse_statement(prepare_sql) else {
-        panic!("expected TransactionStmt");
-    };
+    let prepare = parse_node!(prepare_sql, TransactionStmt);
     assert_eq!(
         prepare.location,
         prepare_sql.find("'gid-1'").unwrap() as i32
@@ -1340,17 +1175,14 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
     assert_eq!(prepare.kind, TransactionStmtKind::Prepare);
     assert_eq!(prepare.gid.as_deref(), Some("gid-1"));
 
-    let Node::TransactionStmt(commit_prepared) = parse_statement("commit prepared 'gid-1'") else {
-        panic!("expected TransactionStmt");
-    };
+    let commit_prepared = parse_node!("commit prepared 'gid-1'", TransactionStmt);
     assert_eq!(commit_prepared.kind, TransactionStmtKind::CommitPrepared);
     assert_eq!(commit_prepared.gid.as_deref(), Some("gid-1"));
 
-    let Node::TransactionStmt(start) =
-        parse_statement("start transaction isolation level read uncommitted read write deferrable")
-    else {
-        panic!("expected TransactionStmt");
-    };
+    let start = parse_node!(
+        "start transaction isolation level read uncommitted read write deferrable",
+        TransactionStmt
+    );
     assert_eq!(start.kind, TransactionStmtKind::Start);
     assert_eq!(start.options.len(), 3);
 
@@ -1361,9 +1193,7 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
         ("serializable", "serializable"),
     ] {
         let sql = format!("begin isolation level {level}");
-        let Node::TransactionStmt(stmt) = parse_statement(&sql) else {
-            panic!("expected TransactionStmt for {sql}");
-        };
+        let stmt = parse_node!(&sql, TransactionStmt);
         let [Node::DefElem(option)] = stmt.options.as_slice() else {
             panic!("expected one transaction option for {sql}");
         };
@@ -1382,9 +1212,7 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
         ("not deferrable", "transaction_deferrable", 0),
     ] {
         let sql = format!("start transaction {mode}");
-        let Node::TransactionStmt(stmt) = parse_statement(&sql) else {
-            panic!("expected TransactionStmt for {sql}");
-        };
+        let stmt = parse_node!(&sql, TransactionStmt);
         let [Node::DefElem(option)] = stmt.options.as_slice() else {
             panic!("expected one transaction option for {sql}");
         };
@@ -1405,9 +1233,7 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
         ("end work and no chain", TransactionStmtKind::Commit, false),
         ("rollback and chain", TransactionStmtKind::Rollback, true),
     ] {
-        let Node::TransactionStmt(stmt) = parse_statement(sql) else {
-            panic!("expected TransactionStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, TransactionStmt);
         assert_eq!(stmt.kind, expected_kind, "{sql}");
         assert_eq!(stmt.chain, chain, "{sql}");
         assert_eq!(stmt.location, -1, "{sql}");
@@ -1431,18 +1257,14 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
             "point_a",
         ),
     ] {
-        let Node::TransactionStmt(stmt) = parse_statement(sql) else {
-            panic!("expected TransactionStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, TransactionStmt);
         assert_eq!(stmt.kind, expected_kind, "{sql}");
         assert_eq!(stmt.savepoint_name.as_deref(), Some(name), "{sql}");
         assert_eq!(stmt.location, sql.find(name).unwrap() as i32, "{sql}");
     }
 
     let rollback_prepared_sql = "rollback prepared 'gid-2'";
-    let Node::TransactionStmt(rollback_prepared) = parse_statement(rollback_prepared_sql) else {
-        panic!("expected TransactionStmt");
-    };
+    let rollback_prepared = parse_node!(rollback_prepared_sql, TransactionStmt);
     assert_eq!(
         rollback_prepared.kind,
         TransactionStmtKind::RollbackPrepared
@@ -1480,15 +1302,11 @@ fn variable_set_locations_follow_postgres_set_rest_productions() {
         ("reset session authorization", -1),
     ];
     for (sql, location) in cases {
-        let Node::VariableSetStmt(stmt) = parse_statement(sql) else {
-            panic!("expected VariableSetStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, VariableSetStmt);
         assert_eq!(stmt.location, location, "{sql}");
     }
 
-    let Node::VariableSetStmt(xml) = parse_statement("set xml option document") else {
-        panic!("expected VariableSetStmt");
-    };
+    let xml = parse_node!("set xml option document", VariableSetStmt);
     assert!(matches!(
         xml.args.as_slice(),
         [Node::AConst(value)] if value.location == 15
@@ -1547,44 +1365,32 @@ fn variable_set_reset_and_show_follow_special_value_grammars() {
             false,
         ),
     ] {
-        let Node::VariableSetStmt(stmt) = parse_statement(sql) else {
-            panic!("expected VariableSetStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, VariableSetStmt);
         assert_eq!(stmt.name.as_deref(), Some(name), "{sql}");
         assert_eq!(stmt.kind, expected_kind, "{sql}");
         assert_eq!(stmt.is_local, is_local, "{sql}");
     }
 
-    let Node::VariableSetStmt(values) = parse_statement("set local app.work_mem to '4MB', 8, on")
-    else {
-        panic!("expected generic VariableSetStmt");
-    };
+    let values = parse_node!("set local app.work_mem to '4MB', 8, on", VariableSetStmt);
     assert_eq!(values.args.len(), 3);
 
-    let Node::VariableSetStmt(reset) = parse_statement("reset app.work_mem") else {
-        panic!("expected qualified RESET");
-    };
+    let reset = parse_node!("reset app.work_mem", VariableSetStmt);
     assert_eq!(reset.name.as_deref(), Some("app.work_mem"));
     assert_eq!(reset.kind, VariableSetKind::Reset);
 
-    let Node::VariableShowStmt(show) = parse_statement("show app.work_mem") else {
-        panic!("expected qualified SHOW");
-    };
+    let show = parse_node!("show app.work_mem", VariableShowStmt);
     assert_eq!(show.name.as_deref(), Some("app.work_mem"));
 
-    let Node::VariableShowStmt(show_all) = parse_statement("show all") else {
-        panic!("expected SHOW ALL");
-    };
+    let show_all = parse_node!("show all", VariableShowStmt);
     assert_eq!(show_all.name.as_deref(), Some("all"));
 }
 
 #[test]
 fn prepare_execute_and_deallocate_require_and_store_complete_payloads() {
-    let Node::PrepareStmt(prepare) =
-        parse_statement("prepare find_order (int, text) as select * from orders where id = $1")
-    else {
-        panic!("expected PrepareStmt");
-    };
+    let prepare = parse_node!(
+        "prepare find_order (int, text) as select * from orders where id = $1",
+        PrepareStmt
+    );
     assert_eq!(prepare.name.as_deref(), Some("find_order"));
     assert_eq!(prepare.argtypes.len(), 2);
     assert!(matches!(
@@ -1592,36 +1398,26 @@ fn prepare_execute_and_deallocate_require_and_store_complete_payloads() {
         Some(Node::SelectStmt(_))
     ));
 
-    let Node::ExecuteStmt(execute) = parse_statement("execute find_order(7, 'open')") else {
-        panic!("expected ExecuteStmt");
-    };
+    let execute = parse_node!("execute find_order(7, 'open')", ExecuteStmt);
     assert_eq!(execute.name.as_deref(), Some("find_order"));
     assert_eq!(execute.params.len(), 2);
 
-    let Node::DeallocateStmt(named) = parse_statement("deallocate prepare find_order") else {
-        panic!("expected DeallocateStmt");
-    };
+    let named = parse_node!("deallocate prepare find_order", DeallocateStmt);
     assert_eq!(named.name.as_deref(), Some("find_order"));
     assert!(!named.isall);
     assert_eq!(named.location, 19);
 
-    let Node::DeallocateStmt(all) = parse_statement("deallocate all") else {
-        panic!("expected DeallocateStmt");
-    };
+    let all = parse_node!("deallocate all", DeallocateStmt);
     assert!(all.name.is_none());
     assert!(all.isall);
     assert_eq!(all.location, -1);
 
-    let Node::DeallocateStmt(prepared_all) = parse_statement("deallocate prepare all") else {
-        panic!("expected DeallocateStmt");
-    };
+    let prepared_all = parse_node!("deallocate prepare all", DeallocateStmt);
     assert!(prepared_all.name.is_none());
     assert!(prepared_all.isall);
     assert_eq!(prepared_all.location, -1);
 
-    let Node::DeallocateStmt(named) = parse_statement("deallocate find_order") else {
-        panic!("expected DeallocateStmt");
-    };
+    let named = parse_node!("deallocate find_order", DeallocateStmt);
     assert_eq!(named.location, 11);
 
     for (sql, expected_query) in [
@@ -1635,9 +1431,7 @@ fn prepare_execute_and_deallocate_require_and_store_complete_payloads() {
             "MergeStmt",
         ),
     ] {
-        let Node::PrepareStmt(prepare) = parse_statement(sql) else {
-            panic!("expected PrepareStmt for {sql}");
-        };
+        let prepare = parse_node!(sql, PrepareStmt);
         let actual_query = match prepare.query.as_deref() {
             Some(Node::SelectStmt(_)) => "SelectStmt",
             Some(Node::InsertStmt(_)) => "InsertStmt",
@@ -1652,48 +1446,32 @@ fn prepare_execute_and_deallocate_require_and_store_complete_payloads() {
 
 #[test]
 fn utility_statement_names_follow_colid_categories() {
-    let Node::VariableSetStmt(setting) = parse_statement("set \"select\" to 'value'") else {
-        panic!("expected VariableSetStmt");
-    };
+    let setting = parse_node!("set \"select\" to 'value'", VariableSetStmt);
     assert_eq!(setting.name.as_deref(), Some("select"));
 
-    let Node::TransactionStmt(savepoint) = parse_statement("savepoint \"select\"") else {
-        panic!("expected TransactionStmt");
-    };
+    let savepoint = parse_node!("savepoint \"select\"", TransactionStmt);
     assert_eq!(savepoint.savepoint_name.as_deref(), Some("select"));
 
-    let Node::PrepareStmt(prepared) = parse_statement("prepare \"select\" as select 1") else {
-        panic!("expected PrepareStmt");
-    };
+    let prepared = parse_node!("prepare \"select\" as select 1", PrepareStmt);
     assert_eq!(prepared.name.as_deref(), Some("select"));
 
-    let Node::ListenStmt(listen) = parse_statement("listen \"select\"") else {
-        panic!("expected ListenStmt");
-    };
+    let listen = parse_node!("listen \"select\"", ListenStmt);
     assert_eq!(listen.conditionname.as_deref(), Some("select"));
 
-    let Node::NotifyStmt(notify) = parse_statement("notify \"select\", ''") else {
-        panic!("expected NotifyStmt");
-    };
+    let notify = parse_node!("notify \"select\", ''", NotifyStmt);
     assert_eq!(notify.conditionname.as_deref(), Some("select"));
     assert_eq!(notify.payload.as_deref(), Some(""));
 
-    let Node::UnlistenStmt(unlisten) = parse_statement("unlisten \"select\"") else {
-        panic!("expected UnlistenStmt");
-    };
+    let unlisten = parse_node!("unlisten \"select\"", UnlistenStmt);
     assert_eq!(unlisten.conditionname.as_deref(), Some("select"));
 
-    let Node::DeclareCursorStmt(cursor) = parse_statement("declare \"select\" cursor for select 1")
-    else {
-        panic!("expected DeclareCursorStmt");
-    };
+    let cursor = parse_node!("declare \"select\" cursor for select 1", DeclareCursorStmt);
     assert_eq!(cursor.portalname.as_deref(), Some("select"));
 
-    let Node::ImportForeignSchemaStmt(import) =
-        parse_statement("import foreign schema \"select\" from server \"from\" into \"where\"")
-    else {
-        panic!("expected ImportForeignSchemaStmt");
-    };
+    let import = parse_node!(
+        "import foreign schema \"select\" from server \"from\" into \"where\"",
+        ImportForeignSchemaStmt
+    );
     assert_eq!(import.remote_schema.as_deref(), Some("select"));
     assert_eq!(import.server_name.as_deref(), Some("from"));
     assert_eq!(import.local_schema.as_deref(), Some("where"));

@@ -47,6 +47,43 @@ fn contains_identifier(source: &str, identifier: &str) -> bool {
         .any(|word| word == identifier)
 }
 
+fn node_extraction_macro_mentions(source: &str, macro_name: &str, variant: &str) -> bool {
+    let marker = format!("{macro_name}!");
+    source.split(&marker).skip(1).any(|tail| {
+        let Some(open) = tail.find('(') else {
+            return false;
+        };
+        let mut depth = 0usize;
+        let mut close = None;
+        for (offset, character) in tail[open..].char_indices() {
+            match character {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        close = Some(open + offset);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(close) = close else {
+            return false;
+        };
+        tail[open + 1..close]
+            .rsplit_once(',')
+            .is_some_and(|(_, argument)| {
+                let argument = argument.trim();
+                argument == variant
+                    || argument
+                        .strip_prefix("Some(")
+                        .and_then(|argument| argument.strip_suffix(')'))
+                        .is_some_and(|argument| argument.trim() == variant)
+            })
+    })
+}
+
 fn contains_braced_constructor(source: &str, name: &str) -> bool {
     source.match_indices(name).any(|(index, _)| {
         let before = source[..index].chars().next_back();
@@ -389,7 +426,10 @@ fn every_parser_produced_nested_node_has_explicit_test_coverage() {
     );
     let covered: BTreeSet<_> = constructors
         .iter()
-        .filter(|name| tests.contains(&format!("Node::{name}")))
+        .filter(|name| {
+            tests.contains(&format!("Node::{name}"))
+                || node_extraction_macro_mentions(&tests, "expect_node", name)
+        })
         .cloned()
         .collect();
     let missing: BTreeSet<_> = constructors.difference(&covered).cloned().collect();

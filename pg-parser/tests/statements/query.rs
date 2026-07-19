@@ -8,7 +8,7 @@ use pg_parser::{
     WithClause, XmlExprOp,
 };
 
-use super::common::parse_statement;
+use super::common::{expect_node, parse_node};
 
 #[test]
 fn raw_select_statement_locations_follow_postgresql_semicolon_rules() {
@@ -79,11 +79,10 @@ fn set_shape(stmt: &pg_parser::SelectStmt) -> String {
 
 #[test]
 fn select_stmt_populates_query_clauses() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select distinct a, b + 1 as next_b from app.items where active = true group by a, b having count(*) > 0 order by a desc nulls last limit 10 offset 2",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
 
     assert!(!stmt.distinct_clause.is_empty());
     assert_eq!(stmt.target_list.len(), 2);
@@ -98,11 +97,10 @@ fn select_stmt_populates_query_clauses() {
 
 #[test]
 fn select_stmt_populates_into_clause_relation_and_persistence() {
-    let Node::SelectStmt(stmt) =
-        parse_statement("select id into temporary table app.snapshot from app.items")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(
+        "select id into temporary table app.snapshot from app.items",
+        SelectStmt
+    );
     let into = stmt.into_clause.as_deref().expect("INTO clause");
     let relation = into.rel.as_deref().expect("INTO relation");
     assert_eq!(relation.schemaname.as_deref(), Some("app"));
@@ -112,9 +110,7 @@ fn select_stmt_populates_into_clause_relation_and_persistence() {
         matches!(stmt.from_clause.first(), Some(Node::RangeVar(range)) if range.relpersistence == b'p')
     );
 
-    let Node::SelectStmt(stmt) = parse_statement("select 1 into unlogged snapshot") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select 1 into unlogged snapshot", SelectStmt);
     assert_eq!(
         stmt.into_clause
             .as_deref()
@@ -126,18 +122,14 @@ fn select_stmt_populates_into_clause_relation_and_persistence() {
 
 #[test]
 fn select_limit_offset_and_fetch_follow_exact_grammar_forms() {
-    let Node::SelectStmt(stmt) = parse_statement("select 1 limit all offset 2 rows") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select 1 limit all offset 2 rows", SelectStmt);
     assert!(matches!(
         stmt.limit_count.as_deref(),
         Some(Node::AConst(value)) if value.isnull
     ));
     assert!(stmt.limit_offset.is_some());
 
-    let Node::SelectStmt(stmt) = parse_statement("select 1 fetch first row only") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select 1 fetch first row only", SelectStmt);
     assert!(matches!(
         stmt.limit_count.as_deref(),
         Some(Node::AConst(value))
@@ -145,42 +137,31 @@ fn select_limit_offset_and_fetch_follow_exact_grammar_forms() {
     ));
     assert_eq!(stmt.limit_option, pg_parser::LimitOption::Count);
 
-    let Node::SelectStmt(stmt) = parse_statement("select 1 order by 1 fetch next 5 rows with ties")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(
+        "select 1 order by 1 fetch next 5 rows with ties",
+        SelectStmt
+    );
     assert!(stmt.limit_count.is_some());
     assert_eq!(stmt.limit_option, pg_parser::LimitOption::WithTies);
 
-    let Node::SelectStmt(offset_then_limit) = parse_statement("select 1 offset 2 rows limit 5")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let offset_then_limit = parse_node!("select 1 offset 2 rows limit 5", SelectStmt);
     assert!(offset_then_limit.limit_offset.is_some());
     assert!(offset_then_limit.limit_count.is_some());
 
-    let Node::SelectStmt(offset_then_fetch) =
-        parse_statement("select 1 offset 2 rows fetch next 3 rows only")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let offset_then_fetch =
+        parse_node!("select 1 offset 2 rows fetch next 3 rows only", SelectStmt);
     assert!(offset_then_fetch.limit_offset.is_some());
     assert!(offset_then_fetch.limit_count.is_some());
 
-    let Node::SelectStmt(locking_then_limit) =
-        parse_statement("select * from items for update of items nowait offset 2 limit 5")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let locking_then_limit = parse_node!(
+        "select * from items for update of items nowait offset 2 limit 5",
+        SelectStmt
+    );
     assert_eq!(locking_then_limit.locking_clause.len(), 1);
     assert!(locking_then_limit.limit_offset.is_some());
     assert!(locking_then_limit.limit_count.is_some());
 
-    let Node::SelectStmt(read_only_then_limit) =
-        parse_statement("select * from items for read only limit 5")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let read_only_then_limit = parse_node!("select * from items for read only limit 5", SelectStmt);
     assert!(read_only_then_limit.locking_clause.is_empty());
     assert!(read_only_then_limit.limit_count.is_some());
 
@@ -192,9 +173,7 @@ fn select_limit_offset_and_fetch_follow_exact_grammar_forms() {
         "select 1 fetch first (a + b) rows only",
         "select 1 offset (a + b) rows",
     ] {
-        let Node::SelectStmt(stmt) = parse_statement(sql) else {
-            panic!("expected SelectStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, SelectStmt);
         assert!(
             stmt.limit_count.is_some() || stmt.limit_offset.is_some(),
             "{sql}"
@@ -204,26 +183,18 @@ fn select_limit_offset_and_fetch_follow_exact_grammar_forms() {
 
 #[test]
 fn select_without_targets_is_allowed_only_by_the_plain_select_production() {
-    let Node::SelectStmt(empty) = parse_statement("select") else {
-        panic!("expected empty SelectStmt");
-    };
+    let empty = parse_node!("select", SelectStmt);
     assert!(empty.target_list.is_empty());
     assert!(empty.from_clause.is_empty());
 
-    let Node::SelectStmt(all) = parse_statement("select all") else {
-        panic!("expected SELECT ALL SelectStmt");
-    };
+    let all = parse_node!("select all", SelectStmt);
     assert!(all.target_list.is_empty());
 
-    let Node::SelectStmt(with) = parse_statement("with x as (select) select") else {
-        panic!("expected WITH SelectStmt");
-    };
+    let with = parse_node!("with x as (select) select", SelectStmt);
     assert!(with.with_clause.is_some());
     assert!(with.target_list.is_empty());
 
-    let Node::SelectStmt(union) = parse_statement("select union all select") else {
-        panic!("expected set-operation SelectStmt");
-    };
+    let union = parse_node!("select union all select", SelectStmt);
     assert_eq!(union.op, SetOperation::Union);
     assert!(union.all);
     assert!(
@@ -239,38 +210,27 @@ fn select_without_targets_is_allowed_only_by_the_plain_select_production() {
             .is_some_and(|side| side.target_list.is_empty())
     );
 
-    let Node::SelectStmt(into) = parse_statement("select into temporary empty_table") else {
-        panic!("expected SELECT INTO SelectStmt");
-    };
+    let into = parse_node!("select into temporary empty_table", SelectStmt);
     assert!(into.target_list.is_empty());
     assert!(into.into_clause.is_some());
 
-    let Node::SelectStmt(filtered) = parse_statement("select where true") else {
-        panic!("expected filtered empty-target SelectStmt");
-    };
+    let filtered = parse_node!("select where true", SelectStmt);
     assert!(filtered.target_list.is_empty());
     assert!(filtered.where_clause.is_some());
 
-    let Node::SelectStmt(grouped) = parse_statement("select group by 1 having true window w as ()")
-    else {
-        panic!("expected grouped empty-target SelectStmt");
-    };
+    let grouped = parse_node!("select group by 1 having true window w as ()", SelectStmt);
     assert!(grouped.target_list.is_empty());
     assert_eq!(grouped.group_clause.len(), 1);
     assert!(grouped.having_clause.is_some());
     assert_eq!(grouped.window_clause.len(), 1);
 
-    let Node::SelectStmt(ordered) = parse_statement("select order by 1 limit 1 for update") else {
-        panic!("expected ordered empty-target SelectStmt");
-    };
+    let ordered = parse_node!("select order by 1 limit 1 for update", SelectStmt);
     assert!(ordered.target_list.is_empty());
     assert_eq!(ordered.sort_clause.len(), 1);
     assert!(ordered.limit_count.is_some());
     assert_eq!(ordered.locking_clause.len(), 1);
 
-    let Node::SelectStmt(stmt) = parse_statement("select from items") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select from items", SelectStmt);
     assert!(stmt.target_list.is_empty());
     assert_eq!(stmt.from_clause.len(), 1);
 }
@@ -278,9 +238,7 @@ fn select_without_targets_is_allowed_only_by_the_plain_select_production() {
 #[test]
 fn select_core_reference_and_target_locations_follow_the_expression_start() {
     let sql = "select app.f(t.value) as result, t.other label, * from t";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     let [
         Node::ResTarget(function_target),
         Node::ResTarget(column_target),
@@ -293,9 +251,7 @@ fn select_core_reference_and_target_locations_follow_the_expression_start() {
         function_target.location as usize,
         sql.find("app.f").unwrap()
     );
-    let Some(Node::FuncCall(function)) = function_target.val.as_deref() else {
-        panic!("expected FuncCall");
-    };
+    let function = expect_node!(function_target.val.as_deref(), Some(FuncCall));
     assert_eq!(function.location as usize, sql.find("app.f").unwrap());
     let [Node::ColumnRef(argument)] = function.args.as_slice() else {
         panic!("expected ColumnRef argument");
@@ -306,37 +262,25 @@ fn select_core_reference_and_target_locations_follow_the_expression_start() {
         column_target.location as usize,
         sql.find("t.other").unwrap()
     );
-    let Some(Node::ColumnRef(column)) = column_target.val.as_deref() else {
-        panic!("expected ColumnRef target");
-    };
+    let column = expect_node!(column_target.val.as_deref(), Some(ColumnRef));
     assert_eq!(column.location as usize, sql.find("t.other").unwrap());
     assert_eq!(star_target.location as usize, sql.find('*').unwrap());
-    let Some(Node::ColumnRef(star)) = star_target.val.as_deref() else {
-        panic!("expected star ColumnRef");
-    };
+    let star = expect_node!(star_target.val.as_deref(), Some(ColumnRef));
     assert_eq!(star.location as usize, sql.find('*').unwrap());
 }
 
 #[test]
 fn select_cast_collation_and_operator_locations_follow_grammar_tokens() {
     let sql = "select value::setof app.kind collate app.c, cast(value as numeric(4, 2)), a + b";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     let target_value = |index: usize| {
-        let Node::ResTarget(target) = &stmt.target_list[index] else {
-            panic!("expected ResTarget");
-        };
+        let target = expect_node!(&stmt.target_list[index], ResTarget);
         target.val.as_deref().expect("target value")
     };
 
-    let Node::CollateClause(collation) = target_value(0) else {
-        panic!("expected CollateClause");
-    };
+    let collation = expect_node!(target_value(0), CollateClause);
     assert_eq!(collation.location as usize, sql.find("collate").unwrap());
-    let Some(Node::TypeCast(postfix)) = collation.arg.as_deref() else {
-        panic!("expected postfix TypeCast");
-    };
+    let postfix = expect_node!(collation.arg.as_deref(), Some(TypeCast));
     assert_eq!(postfix.location as usize, sql.find("::").unwrap());
     let postfix_type = postfix.type_name.as_deref().expect("postfix TypeName");
     assert!(postfix_type.setof);
@@ -345,18 +289,14 @@ fn select_cast_collation_and_operator_locations_follow_grammar_tokens() {
         sql.find("app.kind").unwrap()
     );
 
-    let Node::TypeCast(cast) = target_value(1) else {
-        panic!("expected CAST TypeCast");
-    };
+    let cast = expect_node!(target_value(1), TypeCast);
     assert_eq!(cast.location as usize, sql.find("cast").unwrap());
     assert_eq!(
         cast.type_name.as_deref().expect("CAST TypeName").location as usize,
         sql.find("numeric").unwrap()
     );
 
-    let Node::AExpr(operator) = target_value(2) else {
-        panic!("expected operator AExpr");
-    };
+    let operator = expect_node!(target_value(2), AExpr);
     assert_eq!(operator.location as usize, sql.rfind('+').unwrap());
 }
 
@@ -364,13 +304,9 @@ fn select_cast_collation_and_operator_locations_follow_grammar_tokens() {
 fn select_order_by_preserves_using_operator_direction_and_nulls() {
     let sql =
         "select a, b from t order by a using < nulls first, b desc nulls last, f(direction) asc";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     assert_eq!(stmt.sort_clause.len(), 3);
-    let Node::SortBy(using) = &stmt.sort_clause[0] else {
-        panic!("expected SortBy");
-    };
+    let using = expect_node!(&stmt.sort_clause[0], SortBy);
     assert_eq!(using.sortby_dir, pg_parser::SortByDir::Using);
     assert_eq!(using.sortby_nulls, pg_parser::SortByNulls::First);
     assert!(matches!(
@@ -378,15 +314,11 @@ fn select_order_by_preserves_using_operator_direction_and_nulls() {
         [Node::String(value)] if value.sval.as_deref() == Some("<")
     ));
     assert_eq!(using.location as usize, sql.find("< nulls").unwrap());
-    let Node::SortBy(desc) = &stmt.sort_clause[1] else {
-        panic!("expected SortBy");
-    };
+    let desc = expect_node!(&stmt.sort_clause[1], SortBy);
     assert_eq!(desc.sortby_dir, pg_parser::SortByDir::Desc);
     assert_eq!(desc.sortby_nulls, pg_parser::SortByNulls::Last);
     assert_eq!(desc.location, -1);
-    let Node::SortBy(function) = &stmt.sort_clause[2] else {
-        panic!("expected SortBy");
-    };
+    let function = expect_node!(&stmt.sort_clause[2], SortBy);
     assert_eq!(function.sortby_dir, pg_parser::SortByDir::Asc);
     assert_eq!(function.location, -1);
     assert!(matches!(function.node.as_deref(), Some(Node::FuncCall(_))));
@@ -395,9 +327,7 @@ fn select_order_by_preserves_using_operator_direction_and_nulls() {
 #[test]
 fn select_stmt_builds_grouping_sets_rollup_cube_and_group_by_all() {
     let sql = "select a, b, c, d from t group by distinct grouping sets ((a, b), rollup(c, d), cube(a, c), ())";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     assert!(stmt.group_distinct);
     let [Node::GroupingSet(sets)] = stmt.group_clause.as_slice() else {
         panic!("expected top-level GroupingSet");
@@ -409,48 +339,34 @@ fn select_stmt_builds_grouping_sets_rollup_cube_and_group_by_all() {
         sets.content[0],
         Node::RowExpr(ref row) if row.row_format == pg_parser::CoercionForm::ImplicitCast
     ));
-    let Node::GroupingSet(rollup) = &sets.content[1] else {
-        panic!("expected ROLLUP GroupingSet");
-    };
+    let rollup = expect_node!(&sets.content[1], GroupingSet);
     assert_eq!(rollup.kind, GroupingSetKind::Rollup);
     assert_eq!(rollup.content.len(), 2);
     assert_eq!(rollup.location as usize, sql.find("rollup").unwrap());
-    let Node::GroupingSet(cube) = &sets.content[2] else {
-        panic!("expected CUBE GroupingSet");
-    };
+    let cube = expect_node!(&sets.content[2], GroupingSet);
     assert_eq!(cube.kind, GroupingSetKind::Cube);
     assert_eq!(cube.content.len(), 2);
     assert_eq!(cube.location as usize, sql.find("cube").unwrap());
-    let Node::GroupingSet(empty) = &sets.content[3] else {
-        panic!("expected empty GroupingSet");
-    };
+    let empty = expect_node!(&sets.content[3], GroupingSet);
     assert_eq!(empty.kind, GroupingSetKind::Empty);
     assert!(empty.content.is_empty());
     assert_eq!(empty.location as usize, sql.rfind("()").unwrap());
 
-    let Node::SelectStmt(stmt) = parse_statement("select count(*) from t group by all") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select count(*) from t group by all", SelectStmt);
     assert!(stmt.group_by_all);
     assert!(stmt.group_clause.is_empty());
 }
 
 #[test]
 fn select_stmt_respects_set_operation_precedence_and_associativity() {
-    let Node::SelectStmt(except) = parse_statement("select 1 except select 2 except select 3")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let except = parse_node!("select 1 except select 2 except select 3", SelectStmt);
     assert_eq!(
         set_shape(&except),
         "Except(Except(leaf,leaf),leaf)",
         "EXCEPT must be left associative"
     );
 
-    let Node::SelectStmt(intersect) = parse_statement("select 1 intersect select 2 union select 3")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let intersect = parse_node!("select 1 intersect select 2 union select 3", SelectStmt);
     assert_eq!(intersect.op, SetOperation::Union);
     assert_eq!(
         set_shape(&intersect),
@@ -461,11 +377,10 @@ fn select_stmt_respects_set_operation_precedence_and_associativity() {
 
 #[test]
 fn select_stmt_supports_parenthesized_top_level_and_set_operands() {
-    let Node::SelectStmt(stmt) =
-        parse_statement("(select 1 order by 1 limit 1) union all (select 2 order by 1 limit 1)")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(
+        "(select 1 order by 1 limit 1) union all (select 2 order by 1 limit 1)",
+        SelectStmt
+    );
     assert_eq!(stmt.op, SetOperation::Union);
     assert!(stmt.all);
     let left = stmt.larg.as_deref().expect("left operand");
@@ -475,9 +390,7 @@ fn select_stmt_supports_parenthesized_top_level_and_set_operands() {
     assert_eq!(right.sort_clause.len(), 1);
     assert!(right.limit_count.is_some());
 
-    let Node::SelectStmt(stmt) = parse_statement("select 1 union (select 2 order by 1)") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select 1 union (select 2 order by 1)", SelectStmt);
     assert_eq!(stmt.op, SetOperation::Union);
     assert_eq!(
         stmt.rarg
@@ -492,9 +405,7 @@ fn select_stmt_supports_parenthesized_top_level_and_set_operands() {
         "with x as (select 1) (select * from x)",
         "with x as (select 1) ((select * from x)) order by 1",
     ] {
-        let Node::SelectStmt(stmt) = parse_statement(sql) else {
-            panic!("expected WITH parenthesized SelectStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, SelectStmt);
         assert!(stmt.with_clause.is_some(), "{sql}");
         assert!(!stmt.target_list.is_empty(), "{sql}");
     }
@@ -503,26 +414,21 @@ fn select_stmt_supports_parenthesized_top_level_and_set_operands() {
 #[test]
 fn select_stmt_parses_cte_aliases_and_materialization() {
     let sql = "with recursive source(id, parent_id) as not materialized (select id, parent_id from tree) select id from source";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     let with: Box<WithClause> = stmt.with_clause.expect("WITH clause");
     assert!(with.recursive);
     assert_eq!(with.location, sql.find("with").unwrap() as i32);
-    let Node::CommonTableExpr(cte) = &with.ctes[0] else {
-        panic!("expected CommonTableExpr");
-    };
+    let cte = expect_node!(&with.ctes[0], CommonTableExpr);
     assert_eq!(cte.ctename.as_deref(), Some("source"));
     assert_eq!(cte.location, sql.find("source").unwrap() as i32);
     assert_eq!(cte.aliascolnames.len(), 2);
     assert_eq!(cte.ctematerialized, CteMaterialize::Never);
     assert!(cte.ctequery.is_some());
 
-    let Node::SelectStmt(quoted) =
-        parse_statement("with \"select\"(\"from\") as (select 1) select * from \"select\"")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let quoted = parse_node!(
+        "with \"select\"(\"from\") as (select 1) select * from \"select\"",
+        SelectStmt
+    );
     let quoted_with = quoted.with_clause.expect("WithClause");
     let [Node::CommonTableExpr(cte)] = quoted_with.ctes.as_slice() else {
         panic!("expected CommonTableExpr");
@@ -535,9 +441,7 @@ fn select_stmt_parses_cte_aliases_and_materialization() {
 
     for name in ["time", "ordinality"] {
         let sql = format!("with {name} as (select 1) select * from {name}");
-        let Node::SelectStmt(stmt) = parse_statement(&sql) else {
-            panic!("expected lookahead-keyword CTE SelectStmt for {name}");
-        };
+        let stmt = parse_node!(&sql, SelectStmt);
         let with = stmt.with_clause.expect("WithClause");
         let [Node::CommonTableExpr(cte)] = with.ctes.as_slice() else {
             panic!("expected CommonTableExpr for {name}");
@@ -549,13 +453,9 @@ fn select_stmt_parses_cte_aliases_and_materialization() {
 #[test]
 fn select_stmt_populates_cte_search_and_cycle_clauses() {
     let sql = "with recursive walk(id) as (values (1) union all select id + 1 from walk where id < 3) search breadth first by id set visit_order cycle id set is_cycle to text 'yes' default text 'no' using visit_path select * from walk";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     let with = stmt.with_clause.expect("WITH clause");
-    let Node::CommonTableExpr(cte) = &with.ctes[0] else {
-        panic!("expected CommonTableExpr");
-    };
+    let cte = expect_node!(&with.ctes[0], CommonTableExpr);
     let search: &CteSearchClause = cte.search_clause.as_deref().expect("SEARCH clause");
     assert!(search.search_breadth_first);
     assert_eq!(search.location, sql.find("search").unwrap() as i32);
@@ -576,15 +476,12 @@ fn select_stmt_populates_cte_search_and_cycle_clauses() {
     ));
     assert_eq!(cycle.cycle_path_column.as_deref(), Some("visit_path"));
 
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "with recursive walk(id) as (values (1)) search depth first by id set visit_order cycle id set is_cycle using visit_path select * from walk",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let with = stmt.with_clause.expect("WITH clause");
-    let Node::CommonTableExpr(cte) = &with.ctes[0] else {
-        panic!("expected CommonTableExpr");
-    };
+    let cte = expect_node!(&with.ctes[0], CommonTableExpr);
     assert!(
         !cte.search_clause
             .as_deref()
@@ -604,14 +501,10 @@ fn select_stmt_populates_cte_search_and_cycle_clauses() {
 
 #[test]
 fn select_stmt_parses_values_and_table_forms() {
-    let Node::SelectStmt(values) = parse_statement("values (1, 'a'), (2, 'b')") else {
-        panic!("expected SelectStmt");
-    };
+    let values = parse_node!("values (1, 'a'), (2, 'b')", SelectStmt);
     assert_eq!(values.values_lists.len(), 2);
 
-    let Node::SelectStmt(table) = parse_statement("table public.items") else {
-        panic!("expected SelectStmt");
-    };
+    let table = parse_node!("table public.items", SelectStmt);
     assert_eq!(table.from_clause.len(), 1);
     let [Node::ResTarget(target)] = table.target_list.as_slice() else {
         panic!("TABLE must build an implicit SELECT * target");
@@ -623,19 +516,13 @@ fn select_stmt_parses_values_and_table_forms() {
                 && column.location == -1
     ));
 
-    let Node::SelectStmt(only) = parse_statement("table only (public.items)") else {
-        panic!("expected SelectStmt");
-    };
+    let only = parse_node!("table only (public.items)", SelectStmt);
     assert!(matches!(
         only.from_clause.as_slice(),
         [Node::RangeVar(range)] if !range.inh && range.alias.is_none()
     ));
 
-    let Node::SelectStmt(explicit_inheritance) =
-        parse_statement("select i.id from public.items * as i")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let explicit_inheritance = parse_node!("select i.id from public.items * as i", SelectStmt);
     assert!(matches!(
         explicit_inheritance.from_clause.as_slice(),
         [Node::RangeVar(range)]
@@ -643,11 +530,7 @@ fn select_stmt_parses_values_and_table_forms() {
                 && matches!(range.alias.as_deref(), Some(alias) if alias.aliasname.as_deref() == Some("i"))
     ));
 
-    let Node::SelectStmt(only_with_alias) =
-        parse_statement("select i.id from only (public.items) as i")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let only_with_alias = parse_node!("select i.id from only (public.items) as i", SelectStmt);
     assert!(matches!(
         only_with_alias.from_clause.as_slice(),
         [Node::RangeVar(range)] if !range.inh && range.alias.is_some()
@@ -656,23 +539,13 @@ fn select_stmt_parses_values_and_table_forms() {
 
 #[test]
 fn select_stmt_builds_raw_case_null_boolean_and_default_expression_nodes() {
-    let Node::SelectStmt(stmt) =
-        parse_statement("select case when a is null then default else 0 end, flag is not true")
-    else {
-        panic!("expected SelectStmt");
-    };
-    let Node::ResTarget(case_target) = &stmt.target_list[0] else {
-        panic!("expected ResTarget");
-    };
-    let Some(case_value) = &case_target.val else {
-        panic!("expected CaseExpr");
-    };
-    let Node::CaseExpr(case) = case_value.as_ref() else {
-        panic!("expected CaseExpr");
-    };
-    let Node::CaseWhen(when) = &case.args[0] else {
-        panic!("expected CaseWhen");
-    };
+    let stmt = parse_node!(
+        "select case when a is null then default else 0 end, flag is not true",
+        SelectStmt
+    );
+    let case_target = expect_node!(&stmt.target_list[0], ResTarget);
+    let case = expect_node!(case_target.val.as_deref(), Some(CaseExpr));
+    let when = expect_node!(&case.args[0], CaseWhen);
     assert!(matches!(
         when.expr.as_deref(),
         Some(Node::NullTest(test))
@@ -684,19 +557,14 @@ fn select_stmt_builds_raw_case_null_boolean_and_default_expression_nodes() {
     ));
     assert!(matches!(case.defresult.as_deref(), Some(Node::AConst(_))));
 
-    let Node::SelectStmt(without_else) = parse_statement("select case value when 1 then 'one' end")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let without_else = parse_node!("select case value when 1 then 'one' end", SelectStmt);
     assert!(matches!(
         without_else.target_list.as_slice(),
         [Node::ResTarget(target)]
             if matches!(target.val.as_deref(), Some(Node::CaseExpr(case)) if case.arg.is_some() && case.defresult.is_none())
     ));
 
-    let Node::ResTarget(boolean_target) = &stmt.target_list[1] else {
-        panic!("expected ResTarget");
-    };
+    let boolean_target = expect_node!(&stmt.target_list[1], ResTarget);
     assert!(matches!(
         boolean_target.val.as_deref(),
         Some(Node::BooleanTest(test)) if test.booltesttype == BoolTestType::NotTrue
@@ -706,15 +574,9 @@ fn select_stmt_builds_raw_case_null_boolean_and_default_expression_nodes() {
 #[test]
 fn select_stmt_builds_named_args_grouping_and_sql_value_functions() {
     let sql = "select f(first => 1, second := 2), grouping(category), current_timestamp(3)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::ResTarget(function_target) = &stmt.target_list[0] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::FuncCall(function)) = function_target.val.as_deref() else {
-        panic!("expected FuncCall");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
+    let function_target = expect_node!(&stmt.target_list[0], ResTarget);
+    let function = expect_node!(function_target.val.as_deref(), Some(FuncCall));
     assert_eq!(function.args.len(), 2);
     assert!(
         function
@@ -734,17 +596,13 @@ fn select_stmt_builds_named_args_grouping_and_sql_value_functions() {
     assert_eq!(first.location as usize, sql.find("first").unwrap());
     assert_eq!(second.location as usize, sql.find("second").unwrap());
 
-    let Node::ResTarget(grouping_target) = &stmt.target_list[1] else {
-        panic!("expected ResTarget");
-    };
+    let grouping_target = expect_node!(&stmt.target_list[1], ResTarget);
     assert!(matches!(
         grouping_target.val.as_deref(),
         Some(Node::GroupingFunc(_))
     ));
 
-    let Node::ResTarget(timestamp_target) = &stmt.target_list[2] else {
-        panic!("expected ResTarget");
-    };
+    let timestamp_target = expect_node!(&stmt.target_list[2], ResTarget);
     assert!(matches!(
         timestamp_target.val.as_deref(),
         Some(Node::SqlValueFunction(value))
@@ -756,12 +614,8 @@ fn select_stmt_builds_named_args_grouping_and_sql_value_functions() {
 #[test]
 fn select_stmt_builds_range_table_sample() {
     let sql = "select * from items tablesample system(10) repeatable(42)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::RangeTableSample(sample) = &stmt.from_clause[0] else {
-        panic!("expected RangeTableSample");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
+    let sample = expect_node!(&stmt.from_clause[0], RangeTableSample);
     assert!(sample.relation.is_some());
     assert_eq!(sample.method.len(), 1);
     assert_eq!(sample.args.len(), 1);
@@ -771,14 +625,11 @@ fn select_stmt_builds_range_table_sample() {
 
 #[test]
 fn select_stmt_builds_rows_from_function_pairs_and_column_definitions() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select * from rows from (f(1) as (a int, b text collate c), g(2)) with ordinality as rf",
-    ) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::RangeFunction(range) = &stmt.from_clause[0] else {
-        panic!("expected RangeFunction");
-    };
+        SelectStmt
+    );
+    let range = expect_node!(&stmt.from_clause[0], RangeFunction);
     assert!(range.is_rowsfrom);
     assert!(range.ordinality);
     assert_eq!(range.functions.len(), 2);
@@ -789,21 +640,15 @@ fn select_stmt_builds_rows_from_function_pairs_and_column_definitions() {
             .and_then(|alias| alias.aliasname.as_deref()),
         Some("rf")
     );
-    let Node::AArrayExpr(first_pair) = &range.functions[0] else {
-        panic!("expected function/coldef pair");
-    };
+    let first_pair = expect_node!(&range.functions[0], AArrayExpr);
     assert!(matches!(first_pair.elements[0], Node::FuncCall(_)));
-    let Node::AArrayExpr(coldefs) = &first_pair.elements[1] else {
-        panic!("expected column definition list");
-    };
+    let coldefs = expect_node!(&first_pair.elements[1], AArrayExpr);
     assert_eq!(coldefs.elements.len(), 2);
     assert!(matches!(
         coldefs.elements[1],
         Node::ColumnDef(ref column) if column.coll_clause.is_some()
     ));
-    let Node::AArrayExpr(second_pair) = &range.functions[1] else {
-        panic!("expected function/coldef pair");
-    };
+    let second_pair = expect_node!(&range.functions[1], AArrayExpr);
     assert!(matches!(
         second_pair.elements[1],
         Node::AArrayExpr(ref coldefs) if coldefs.elements.is_empty()
@@ -812,19 +657,15 @@ fn select_stmt_builds_rows_from_function_pairs_and_column_definitions() {
 
 #[test]
 fn select_range_function_preserves_function_pairs_alias_columns_and_coldefs() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select * from f() as named(a, b), g() as typed(x int), h() as (y text), q(distinct a order by b) as agg",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     assert_eq!(stmt.from_clause.len(), 4);
     let ranges = stmt
         .from_clause
         .iter()
-        .map(|item| match item {
-            Node::RangeFunction(range) => range,
-            other => panic!("expected RangeFunction, got {other:?}"),
-        })
+        .map(|item| expect_node!(item, RangeFunction))
         .collect::<Vec<_>>();
     assert!(!ranges[0].is_rowsfrom);
     assert!(matches!(
@@ -845,18 +686,13 @@ fn select_range_function_preserves_function_pairs_alias_columns_and_coldefs() {
     );
     assert!(ranges[2].alias.is_none());
     assert_eq!(ranges[2].coldeflist.len(), 1);
-    let Node::AArrayExpr(aggregate_pair) = &ranges[3].functions[0] else {
-        panic!("expected function pair");
-    };
+    let aggregate_pair = expect_node!(&ranges[3].functions[0], AArrayExpr);
     assert!(matches!(
         aggregate_pair.elements[0],
         Node::FuncCall(ref call) if call.agg_distinct && call.agg_order.len() == 1
     ));
 
-    let Node::SelectStmt(quoted) = parse_statement("select * from f() as \"select\"(\"from\")")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let quoted = parse_node!("select * from f() as \"select\"(\"from\")", SelectStmt);
     let [Node::RangeFunction(range)] = quoted.from_clause.as_slice() else {
         panic!("expected RangeFunction");
     };
@@ -867,18 +703,13 @@ fn select_range_function_preserves_function_pairs_alias_columns_and_coldefs() {
         [Node::String(name)] if name.sval.as_deref() == Some("from")
     ));
 
-    let Node::SelectStmt(lateral) = parse_statement("select * from lateral f() as lf") else {
-        panic!("expected lateral RangeFunction SelectStmt");
-    };
+    let lateral = parse_node!("select * from lateral f() as lf", SelectStmt);
     let [Node::RangeFunction(range)] = lateral.from_clause.as_slice() else {
         panic!("expected lateral RangeFunction");
     };
     assert!(range.lateral);
 
-    let Node::SelectStmt(keyword_alias) = parse_statement("select abort.value from f() abort")
-    else {
-        panic!("expected keyword-aliased RangeFunction SelectStmt");
-    };
+    let keyword_alias = parse_node!("select abort.value from f() abort", SelectStmt);
     let [Node::RangeFunction(range)] = keyword_alias.from_clause.as_slice() else {
         panic!("expected keyword-aliased RangeFunction");
     };
@@ -890,11 +721,10 @@ fn select_range_function_preserves_function_pairs_alias_columns_and_coldefs() {
         Some("abort")
     );
 
-    let Node::SelectStmt(keyword_aliases) =
-        parse_statement("select value.a from items value(a), other abort")
-    else {
-        panic!("expected keyword aliases SelectStmt");
-    };
+    let keyword_aliases = parse_node!(
+        "select value.a from items value(a), other abort",
+        SelectStmt
+    );
     let [Node::RangeVar(first), Node::RangeVar(second)] = keyword_aliases.from_clause.as_slice()
     else {
         panic!("expected aliased RangeVars");
@@ -914,15 +744,9 @@ fn select_range_function_preserves_function_pairs_alias_columns_and_coldefs() {
 #[test]
 fn select_stmt_builds_xml_expression_and_serialize_nodes() {
     let sql = "select xmlelement(name item, xmlattributes(id as item_id), name), xmlforest(id as item_id, name), xmlserialize(content xmlparse(content '<a/>' preserve whitespace) as text indent)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::ResTarget(element_target) = &stmt.target_list[0] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::XmlExpr(element)) = element_target.val.as_deref() else {
-        panic!("expected XmlExpr");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
+    let element_target = expect_node!(&stmt.target_list[0], ResTarget);
+    let element = expect_node!(element_target.val.as_deref(), Some(XmlExpr));
     assert_eq!(element.name.as_deref(), Some("item"));
     assert_eq!(element.named_args.len(), 1);
     let [Node::ResTarget(attribute)] = element.named_args.as_slice() else {
@@ -937,12 +761,8 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
     assert_eq!(element.node_tag, 0);
     assert_eq!(element.typmod, 0);
 
-    let Node::ResTarget(forest_target) = &stmt.target_list[1] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::XmlExpr(forest)) = forest_target.val.as_deref() else {
-        panic!("expected XmlExpr");
-    };
+    let forest_target = expect_node!(&stmt.target_list[1], ResTarget);
+    let forest = expect_node!(forest_target.val.as_deref(), Some(XmlExpr));
     assert_eq!(forest.named_args.len(), 2);
     let [Node::ResTarget(id), Node::ResTarget(name)] = forest.named_args.as_slice() else {
         panic!("expected XMLFOREST ResTarget nodes");
@@ -954,12 +774,8 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
     );
     assert!(forest.arg_names.is_empty());
 
-    let Node::ResTarget(serialize_target) = &stmt.target_list[2] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::XmlSerialize(serialize)) = serialize_target.val.as_deref() else {
-        panic!("expected XmlSerialize");
-    };
+    let serialize_target = expect_node!(&stmt.target_list[2], ResTarget);
+    let serialize = expect_node!(serialize_target.val.as_deref(), Some(XmlSerialize));
     assert!(serialize.indent);
     assert!(matches!(serialize.expr.as_deref(), Some(Node::XmlExpr(_))));
     assert!(serialize.type_name.is_some());
@@ -968,11 +784,10 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
         sql.find("xmlserialize").unwrap()
     );
 
-    let Node::SelectStmt(reserved_label) =
-        parse_statement("select xmlelement(name select), xmlforest(id as from)")
-    else {
-        panic!("expected reserved XML label SelectStmt");
-    };
+    let reserved_label = parse_node!(
+        "select xmlelement(name select), xmlforest(id as from)",
+        SelectStmt
+    );
     assert!(matches!(
         reserved_label.target_list.as_slice(),
         [Node::ResTarget(element), Node::ResTarget(forest)]
@@ -984,26 +799,19 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
 
 #[test]
 fn select_xmlroot_always_preserves_the_raw_standalone_argument() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select xmlroot(doc, version '1.0'), xmlroot(doc, version '1.0', standalone yes), xmlroot(doc, version '1.0', standalone no), xmlroot(doc, version '1.0', standalone no value)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let standalone_values = stmt
         .target_list
         .iter()
         .map(|target| {
-            let Node::ResTarget(target) = target else {
-                panic!("expected ResTarget");
-            };
-            let Some(Node::XmlExpr(expression)) = target.val.as_deref() else {
-                panic!("expected XmlExpr");
-            };
+            let target = expect_node!(target, ResTarget);
+            let expression = expect_node!(target.val.as_deref(), Some(XmlExpr));
             assert_eq!(expression.op, XmlExprOp::Xmlroot);
             assert_eq!(expression.args.len(), 3);
-            let Node::AConst(value) = &expression.args[2] else {
-                panic!("expected standalone AConst");
-            };
+            let value = expect_node!(&expression.args[2], AConst);
             assert_eq!(value.location, -1);
             let ValUnion::Integer(value) = &value.val else {
                 panic!("expected standalone integer");
@@ -1017,12 +825,8 @@ fn select_xmlroot_always_preserves_the_raw_standalone_argument() {
 #[test]
 fn select_stmt_builds_xmltable_range_and_column_nodes() {
     let sql = "select * from xmltable(xmlnamespaces('urn:items' as item_ns), '/items/item' passing document_xml columns ord for ordinality, id int path '@id' not null, name text default 'unknown' path 'name') as item_rows";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::RangeTableFunc(table) = &stmt.from_clause[0] else {
-        panic!("expected RangeTableFunc");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
+    let table = expect_node!(&stmt.from_clause[0], RangeTableFunc);
     assert!(table.rowexpr.is_some());
     assert!(table.docexpr.is_some());
     assert!(!table.lateral);
@@ -1037,9 +841,7 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
         Some("item_rows")
     );
 
-    let Node::RangeTableFuncCol(ordinality) = &table.columns[0] else {
-        panic!("expected RangeTableFuncCol");
-    };
+    let ordinality = expect_node!(&table.columns[0], RangeTableFuncCol);
     assert!(ordinality.for_ordinality);
     assert_eq!(ordinality.colname.as_deref(), Some("ord"));
     assert_eq!(
@@ -1047,17 +849,13 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
         sql.find("ord for ordinality").unwrap() as i32
     );
 
-    let Node::RangeTableFuncCol(id) = &table.columns[1] else {
-        panic!("expected RangeTableFuncCol");
-    };
+    let id = expect_node!(&table.columns[1], RangeTableFuncCol);
     assert!(id.type_name.is_some());
     assert!(id.colexpr.is_some());
     assert!(id.is_not_null);
     assert_eq!(id.location as usize, sql.find("id int path").unwrap());
 
-    let Node::RangeTableFuncCol(name) = &table.columns[2] else {
-        panic!("expected RangeTableFuncCol");
-    };
+    let name = expect_node!(&table.columns[2], RangeTableFuncCol);
     assert!(name.coldefexpr.is_some());
     assert!(name.colexpr.is_some());
     assert_eq!(name.location as usize, sql.find("name text").unwrap());
@@ -1069,9 +867,7 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
         "passing by ref doc by value",
     ] {
         let sql = format!("select * from xmltable('/x' {passing} columns id int)");
-        let Node::SelectStmt(stmt) = parse_statement(&sql) else {
-            panic!("expected SelectStmt for {sql}");
-        };
+        let stmt = parse_node!(&sql, SelectStmt);
         assert!(matches!(
             stmt.from_clause.as_slice(),
             [Node::RangeTableFunc(table)]
@@ -1080,12 +876,8 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
     }
 
     let sql = "select * from xmltable(xmlnamespaces(1 is distinct from 2 as cmp, default (true and false)), '/x' passing doc columns compared boolean path 1 = 1, grouped boolean default (true and false), nullable text path null)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::RangeTableFunc(table) = &stmt.from_clause[0] else {
-        panic!("expected RangeTableFunc");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
+    let table = expect_node!(&stmt.from_clause[0], RangeTableFunc);
     assert_eq!(table.namespaces.len(), 2);
     assert!(matches!(
         table.namespaces.as_slice(),
@@ -1111,21 +903,16 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
                 && matches!(nullable.colexpr.as_deref(), Some(Node::AConst(value)) if value.isnull)
     ));
 
-    let Node::SelectStmt(parenthesized) = parse_statement(
+    let parenthesized = parse_node!(
         "select * from xmltable(('/x' || '/item') passing (doc_a || doc_b) columns id int)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::RangeTableFunc(table) = &parenthesized.from_clause[0] else {
-        panic!("expected RangeTableFunc");
-    };
+        SelectStmt
+    );
+    let table = expect_node!(&parenthesized.from_clause[0], RangeTableFunc);
     assert!(matches!(table.rowexpr.as_deref(), Some(Node::AExpr(_))));
     assert!(matches!(table.docexpr.as_deref(), Some(Node::AExpr(_))));
 
     let sql = "select * from lateral xmltable('/x' passing doc columns id int) as xt";
-    let Node::SelectStmt(lateral) = parse_statement(sql) else {
-        panic!("expected lateral XMLTABLE SelectStmt");
-    };
+    let lateral = parse_node!(sql, SelectStmt);
     let [Node::RangeTableFunc(table)] = lateral.from_clause.as_slice() else {
         panic!("expected lateral RangeTableFunc");
     };
@@ -1136,12 +923,8 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
 #[test]
 fn select_stmt_builds_graph_table_pattern_and_elements() {
     let sql = "select * from graph_table(social match (person is person_label)-[edge is knows]->(friend is person_label) where person.active = true columns (person.id as person_id, friend.id as friend_id)) as graph_rows";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::RangeGraphTable(table) = &stmt.from_clause[0] else {
-        panic!("expected RangeGraphTable");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
+    let table = expect_node!(&stmt.from_clause[0], RangeGraphTable);
     assert!(table.graph_name.is_some());
     assert_eq!(table.columns.len(), 2);
     assert_eq!(table.location as usize, sql.find("graph_table").unwrap());
@@ -1155,39 +938,28 @@ fn select_stmt_builds_graph_table_pattern_and_elements() {
     let pattern = table.graph_pattern.as_ref().expect("GraphPattern");
     assert_eq!(pattern.path_pattern_list.len(), 1);
     assert!(pattern.where_clause.is_some());
-    let Node::AArrayExpr(path) = &pattern.path_pattern_list[0] else {
-        panic!("expected graph path list");
-    };
+    let path = expect_node!(&pattern.path_pattern_list[0], AArrayExpr);
     assert_eq!(path.elements.len(), 3);
     assert!(
         path.elements
             .iter()
             .all(|element| matches!(element, Node::GraphElementPattern(_)))
     );
-    let Node::GraphElementPattern(vertex) = &path.elements[0] else {
-        panic!("expected vertex GraphElementPattern");
-    };
+    let vertex = expect_node!(&path.elements[0], GraphElementPattern);
     assert_eq!(vertex.location as usize, sql.find("(person").unwrap());
-    let Node::GraphElementPattern(edge) = &path.elements[1] else {
-        panic!("expected edge GraphElementPattern");
-    };
+    let edge = expect_node!(&path.elements[1], GraphElementPattern);
     assert_eq!(edge.location as usize, sql.find("-[edge").unwrap());
 
-    let Node::SelectStmt(nested_stmt) = parse_statement(
+    let nested_stmt = parse_node!(
         "select * from graph_table(social match ((person is person_label | employee)-[edge]->(friend)){1,2} columns (person.id as person_id))",
-    ) else {
-        panic!("expected nested graph SelectStmt");
-    };
-    let Node::RangeGraphTable(nested_table) = &nested_stmt.from_clause[0] else {
-        panic!("expected nested RangeGraphTable");
-    };
+        SelectStmt
+    );
+    let nested_table = expect_node!(&nested_stmt.from_clause[0], RangeGraphTable);
     let nested_pattern = nested_table
         .graph_pattern
         .as_ref()
         .expect("nested GraphPattern");
-    let Node::AArrayExpr(nested_path) = &nested_pattern.path_pattern_list[0] else {
-        panic!("expected nested graph path list");
-    };
+    let nested_path = expect_node!(&nested_pattern.path_pattern_list[0], AArrayExpr);
     let [Node::GraphElementPattern(parenthesized)] = nested_path.elements.as_slice() else {
         panic!("expected one parenthesized graph element");
     };
@@ -1215,12 +987,8 @@ fn select_stmt_builds_graph_table_pattern_and_elements() {
         (c)<-{,3}(d),
         (e)-{4}(f)
         columns (a.id))";
-    let Node::SelectStmt(abbreviated) = parse_statement(abbreviated_sql) else {
-        panic!("expected abbreviated-edge SelectStmt");
-    };
-    let Node::RangeGraphTable(table) = &abbreviated.from_clause[0] else {
-        panic!("expected abbreviated-edge RangeGraphTable");
-    };
+    let abbreviated = parse_node!(abbreviated_sql, SelectStmt);
+    let table = expect_node!(&abbreviated.from_clause[0], RangeGraphTable);
     let pattern = table.graph_pattern.as_ref().expect("GraphPattern");
     let expected = [
         (GraphElementPatternKind::EdgePatternRight, 2, 2, "->{2}"),
@@ -1228,12 +996,8 @@ fn select_stmt_builds_graph_table_pattern_and_elements() {
         (GraphElementPatternKind::EdgePatternAny, 4, 4, "-{4}"),
     ];
     for (path, (kind, lower, upper, needle)) in pattern.path_pattern_list.iter().zip(expected) {
-        let Node::AArrayExpr(path) = path else {
-            panic!("expected abbreviated graph path");
-        };
-        let Node::GraphElementPattern(edge) = &path.elements[1] else {
-            panic!("expected abbreviated edge GraphElementPattern");
-        };
+        let path = expect_node!(path, AArrayExpr);
+        let edge = expect_node!(&path.elements[1], GraphElementPattern);
         assert_eq!(edge.kind, kind);
         assert!(matches!(
             edge.quantifier.as_slice(),
@@ -1249,19 +1013,14 @@ fn select_stmt_builds_graph_table_pattern_and_elements() {
 
 #[test]
 fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select json(doc format json encoding utf8 with unique keys), json_scalar(42), json_serialize(doc format json returning text format json), json_object('id' value id absent on null with unique keys returning jsonb), json_array(id, name null on null returning jsonb), json_array(select id from items), json_objectagg(name value id absent on null with unique keys returning jsonb), json_arrayagg(id order by name absent on null returning jsonb), merge_action() from items",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     assert_eq!(stmt.target_list.len(), 9);
 
-    let Node::ResTarget(parse_target) = &stmt.target_list[0] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonParseExpr(parse)) = parse_target.val.as_deref() else {
-        panic!("expected JsonParseExpr");
-    };
+    let parse_target = expect_node!(&stmt.target_list[0], ResTarget);
+    let parse = expect_node!(parse_target.val.as_deref(), Some(JsonParseExpr));
     assert!(parse.unique_keys);
     let value = parse.expr.as_ref().expect("JsonValueExpr");
     assert!(matches!(
@@ -1272,20 +1031,14 @@ fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
     assert_eq!(format.format_type, JsonFormatType::Json);
     assert_eq!(format.encoding, JsonEncoding::Utf8);
 
-    let Node::ResTarget(scalar_target) = &stmt.target_list[1] else {
-        panic!("expected ResTarget");
-    };
+    let scalar_target = expect_node!(&stmt.target_list[1], ResTarget);
     assert!(matches!(
         scalar_target.val.as_deref(),
         Some(Node::JsonScalarExpr(_))
     ));
 
-    let Node::ResTarget(serialize_target) = &stmt.target_list[2] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonSerializeExpr(serialize)) = serialize_target.val.as_deref() else {
-        panic!("expected JsonSerializeExpr");
-    };
+    let serialize_target = expect_node!(&stmt.target_list[2], ResTarget);
+    let serialize = expect_node!(serialize_target.val.as_deref(), Some(JsonSerializeExpr));
     let output = serialize.output.as_ref().expect("JsonOutput");
     assert!(output.type_name.is_some());
     let returning: &JsonReturning = output.returning.as_deref().expect("JsonReturning");
@@ -1299,12 +1052,8 @@ fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
         Some(JsonFormatType::Json)
     );
 
-    let Node::ResTarget(object_target) = &stmt.target_list[3] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonObjectConstructor(object)) = object_target.val.as_deref() else {
-        panic!("expected JsonObjectConstructor");
-    };
+    let object_target = expect_node!(&stmt.target_list[3], ResTarget);
+    let object = expect_node!(object_target.val.as_deref(), Some(JsonObjectConstructor));
     assert!(object.absent_on_null);
     assert!(object.unique);
     assert!(object.output.is_some());
@@ -1314,12 +1063,8 @@ fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
             if matches!(pair.key.as_deref(), Some(Node::AConst(_)))
     ));
 
-    let Node::ResTarget(array_target) = &stmt.target_list[4] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonArrayConstructor(array)) = array_target.val.as_deref() else {
-        panic!("expected JsonArrayConstructor");
-    };
+    let array_target = expect_node!(&stmt.target_list[4], ResTarget);
+    let array = expect_node!(array_target.val.as_deref(), Some(JsonArrayConstructor));
     assert_eq!(array.exprs.len(), 2);
     assert!(!array.absent_on_null);
     assert!(
@@ -1329,13 +1074,11 @@ fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
             .all(|expr| matches!(expr, Node::JsonValueExpr(_)))
     );
 
-    let Node::ResTarget(query_array_target) = &stmt.target_list[5] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonArrayQueryConstructor(query_array)) = query_array_target.val.as_deref()
-    else {
-        panic!("expected JsonArrayQueryConstructor");
-    };
+    let query_array_target = expect_node!(&stmt.target_list[5], ResTarget);
+    let query_array = expect_node!(
+        query_array_target.val.as_deref(),
+        Some(JsonArrayQueryConstructor)
+    );
     assert!(matches!(
         query_array.query.as_deref(),
         Some(Node::SelectStmt(_))
@@ -1346,21 +1089,13 @@ fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
             if format.format_type == JsonFormatType::Default && format.location == -1
     ));
 
-    let Node::ResTarget(object_agg_target) = &stmt.target_list[6] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonObjectAgg(object_agg)) = object_agg_target.val.as_deref() else {
-        panic!("expected JsonObjectAgg");
-    };
+    let object_agg_target = expect_node!(&stmt.target_list[6], ResTarget);
+    let object_agg = expect_node!(object_agg_target.val.as_deref(), Some(JsonObjectAgg));
     assert!(object_agg.constructor.is_some());
     assert!(object_agg.arg.is_some());
 
-    let Node::ResTarget(array_agg_target) = &stmt.target_list[7] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonArrayAgg(array_agg)) = array_agg_target.val.as_deref() else {
-        panic!("expected JsonArrayAgg");
-    };
+    let array_agg_target = expect_node!(&stmt.target_list[7], ResTarget);
+    let array_agg = expect_node!(array_agg_target.val.as_deref(), Some(JsonArrayAgg));
     assert_eq!(
         array_agg
             .constructor
@@ -1371,9 +1106,7 @@ fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
         1
     );
 
-    let Node::ResTarget(merge_action_target) = &stmt.target_list[8] else {
-        panic!("expected ResTarget");
-    };
+    let merge_action_target = expect_node!(&stmt.target_list[8], ResTarget);
     assert!(matches!(
         merge_action_target.val.as_deref(),
         Some(Node::MergeSupportFunc(function))
@@ -1383,11 +1116,10 @@ fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
 
 #[test]
 fn select_legacy_json_object_builds_a_system_function_call() {
-    let Node::SelectStmt(stmt) =
-        parse_statement("select json_object(key_array => array['id'], value_array := array[42])")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(
+        "select json_object(key_array => array['id'], value_array := array[42])",
+        SelectStmt
+    );
     assert!(matches!(
         stmt.target_list.as_slice(),
         [Node::ResTarget(target)]
@@ -1403,9 +1135,7 @@ fn select_legacy_json_object_builds_a_system_function_call() {
 
 #[test]
 fn select_json_value_expr_default_format_uses_synthetic_location() {
-    let Node::SelectStmt(stmt) = parse_statement("select json_array(value returning jsonb)") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select json_array(value returning jsonb)", SelectStmt);
     assert!(matches!(
         stmt.target_list.as_slice(),
         [Node::ResTarget(target)]
@@ -1427,9 +1157,7 @@ fn select_json_value_expr_default_format_uses_synthetic_location() {
 #[test]
 fn select_json_array_query_preserves_format_and_returning_clauses() {
     let sql = "select json_array(select id from items format json returning jsonb format json)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     assert!(matches!(
         stmt.target_list.as_slice(),
         [Node::ResTarget(target)]
@@ -1450,16 +1178,10 @@ fn select_json_array_query_preserves_format_and_returning_clauses() {
 #[test]
 fn select_stmt_builds_sql_json_function_arguments_and_behaviors() {
     let sql = "select json_query(doc format json, '$.item' passing threshold as select returning text format json with conditional array wrapper keep quotes on scalar string null on empty error on error), json_exists(doc, '$.item' passing threshold as threshold true on error), json_value(doc, '$.item' returning int default 0 on empty error on error)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
 
-    let Node::ResTarget(query_target) = &stmt.target_list[0] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonFuncExpr(query)) = query_target.val.as_deref() else {
-        panic!("expected JsonFuncExpr");
-    };
+    let query_target = expect_node!(&stmt.target_list[0], ResTarget);
+    let query = expect_node!(query_target.val.as_deref(), Some(JsonFuncExpr));
     assert_eq!(query.op, JsonExprOp::QueryOp);
     assert!(query.context_item.is_some());
     assert!(matches!(query.pathspec.as_deref(), Some(Node::AConst(_))));
@@ -1483,12 +1205,8 @@ fn select_stmt_builds_sql_json_function_arguments_and_behaviors() {
         Some(JsonBehaviorType::Error)
     );
 
-    let Node::ResTarget(exists_target) = &stmt.target_list[1] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonFuncExpr(exists)) = exists_target.val.as_deref() else {
-        panic!("expected JsonFuncExpr");
-    };
+    let exists_target = expect_node!(&stmt.target_list[1], ResTarget);
+    let exists = expect_node!(exists_target.val.as_deref(), Some(JsonFuncExpr));
     assert_eq!(exists.op, JsonExprOp::ExistsOp);
     assert!(exists.output.is_none());
     assert_eq!(
@@ -1496,12 +1214,8 @@ fn select_stmt_builds_sql_json_function_arguments_and_behaviors() {
         Some(JsonBehaviorType::True)
     );
 
-    let Node::ResTarget(value_target) = &stmt.target_list[2] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonFuncExpr(value)) = value_target.val.as_deref() else {
-        panic!("expected JsonFuncExpr");
-    };
+    let value_target = expect_node!(&stmt.target_list[2], ResTarget);
+    let value = expect_node!(value_target.val.as_deref(), Some(JsonFuncExpr));
     assert_eq!(value.op, JsonExprOp::ValueOp);
     assert_eq!(
         value.on_empty.as_ref().map(|behavior| behavior.btype),
@@ -1519,12 +1233,8 @@ fn select_stmt_builds_sql_json_function_arguments_and_behaviors() {
 #[test]
 fn select_stmt_builds_json_table_and_all_column_kinds() {
     let sql = "select * from lateral json_table(doc format json, '$.items[*]' as root passing 7 as threshold columns (ord for ordinality, id int path '$.id', payload jsonb format json path '$' with conditional array wrapper keep quotes null on empty error on error, present boolean exists path '$.id' false on error, nested path '$.children[*]' as child columns (child_id int path '$.id'))) as rows";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::JsonTable(table) = &stmt.from_clause[0] else {
-        panic!("expected JsonTable");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
+    let table = expect_node!(&stmt.from_clause[0], JsonTable);
     assert!(table.lateral);
     assert!(table.context_item.is_some());
     assert_eq!(table.passing.len(), 1);
@@ -1557,42 +1267,31 @@ fn select_stmt_builds_json_table_and_all_column_kinds() {
         JsonTableColumnType::Nested,
     ];
     for (column, expected_type) in table.columns.iter().zip(expected) {
-        let Node::JsonTableColumn(column) = column else {
-            panic!("expected JsonTableColumn");
-        };
+        let column = expect_node!(column, JsonTableColumn);
         assert_eq!(column.coltype, expected_type);
     }
 
-    let Node::JsonTableColumn(formatted) = &table.columns[2] else {
-        panic!("expected formatted JsonTableColumn");
-    };
+    let formatted = expect_node!(&table.columns[2], JsonTableColumn);
     assert_eq!(formatted.wrapper, JsonWrapper::Conditional);
     assert_eq!(formatted.quotes, JsonQuotes::Keep);
     assert!(formatted.on_empty.is_some());
     assert!(formatted.on_error.is_some());
 
-    let Node::JsonTableColumn(nested) = &table.columns[4] else {
-        panic!("expected nested JsonTableColumn");
-    };
+    let nested = expect_node!(&table.columns[4], JsonTableColumn);
     assert_eq!(nested.columns.len(), 1);
 }
 
 #[test]
 fn select_stmt_builds_strict_join_and_locking_nodes() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select a.id from app.a a left join app.b b using (id) as matched natural join app.c c for no key update of app.a, app.b skip locked",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     assert_eq!(stmt.from_clause.len(), 1);
-    let Node::JoinExpr(outer) = &stmt.from_clause[0] else {
-        panic!("expected outer JoinExpr");
-    };
+    let outer = expect_node!(&stmt.from_clause[0], JoinExpr);
     assert!(outer.is_natural);
     assert!(matches!(outer.rarg.as_deref(), Some(Node::RangeVar(_))));
-    let Some(Node::JoinExpr(inner)) = outer.larg.as_deref() else {
-        panic!("expected inner JoinExpr");
-    };
+    let inner = expect_node!(outer.larg.as_deref(), Some(JoinExpr));
     assert_eq!(inner.using_clause.len(), 1);
     assert!(matches!(inner.rarg.as_deref(), Some(Node::RangeVar(_))));
     assert_eq!(
@@ -1604,9 +1303,7 @@ fn select_stmt_builds_strict_join_and_locking_nodes() {
     );
 
     assert_eq!(stmt.locking_clause.len(), 1);
-    let Node::LockingClause(lock) = &stmt.locking_clause[0] else {
-        panic!("expected LockingClause");
-    };
+    let lock = expect_node!(&stmt.locking_clause[0], LockingClause);
     assert_eq!(lock.strength, LockClauseStrength::Fornokeyupdate);
     assert_eq!(lock.wait_policy, LockWaitPolicy::Skip);
     assert_eq!(lock.locked_rels.len(), 2);
@@ -1616,18 +1313,16 @@ fn select_stmt_builds_strict_join_and_locking_nodes() {
             .all(|rel| matches!(rel, Node::RangeVar(_)))
     );
 
-    let Node::SelectStmt(multiple) =
-        parse_statement("select * from app.a, app.b for update of app.a for share of app.b")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let multiple = parse_node!(
+        "select * from app.a, app.b for update of app.a for share of app.b",
+        SelectStmt
+    );
     assert_eq!(multiple.locking_clause.len(), 2);
 
-    let Node::SelectStmt(on_chain) = parse_statement(
+    let on_chain = parse_node!(
         "select * from app.a a join app.b b on a.id = b.id left join app.c c on b.id = c.id",
-    ) else {
-        panic!("expected chained ON-join SelectStmt");
-    };
+        SelectStmt
+    );
     let [Node::JoinExpr(outer)] = on_chain.from_clause.as_slice() else {
         panic!("expected outer chained JoinExpr");
     };
@@ -1638,13 +1333,9 @@ fn select_stmt_builds_strict_join_and_locking_nodes() {
 #[test]
 fn select_stmt_populates_window_frame_bounds_and_exclusion() {
     let sql = "select v from measurements window w as (partition by sensor order by measured_at rows between 2 preceding and current row exclude ties)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     assert_eq!(stmt.window_clause.len(), 1);
-    let Node::WindowDef(window) = &stmt.window_clause[0] else {
-        panic!("expected WindowDef");
-    };
+    let window = expect_node!(&stmt.window_clause[0], WindowDef);
     assert_eq!(window.name.as_deref(), Some("w"));
     assert_eq!(window.partition_clause.len(), 1);
     assert_eq!(window.order_clause.len(), 1);
@@ -1656,22 +1347,17 @@ fn select_stmt_populates_window_frame_bounds_and_exclusion() {
     assert!(window.end_offset.is_none());
     assert_eq!(window.location as usize, sql.find("(partition").unwrap());
 
-    let Node::SelectStmt(quoted) =
-        parse_statement("select count(*) over \"select\" window \"select\" as ()")
-    else {
-        panic!("expected quoted-window SelectStmt");
-    };
-    let Node::ResTarget(target) = &quoted.target_list[0] else {
-        panic!("expected ResTarget");
-    };
+    let quoted = parse_node!(
+        "select count(*) over \"select\" window \"select\" as ()",
+        SelectStmt
+    );
+    let target = expect_node!(&quoted.target_list[0], ResTarget);
     assert!(matches!(
         target.val.as_deref(),
         Some(Node::FuncCall(call))
             if call.over.as_deref().and_then(|window| window.name.as_deref()) == Some("select")
     ));
-    let Some(Node::FuncCall(call)) = target.val.as_deref() else {
-        panic!("expected FuncCall");
-    };
+    let call = expect_node!(target.val.as_deref(), Some(FuncCall));
     let over = call.over.as_deref().expect("OVER WindowDef");
     assert_eq!(
         over.location as usize,
@@ -1684,13 +1370,12 @@ fn select_stmt_populates_window_frame_bounds_and_exclusion() {
         [Node::WindowDef(window)] if window.name.as_deref() == Some("select")
     ));
 
-    let Node::SelectStmt(inherited) = parse_statement(
+    let inherited = parse_node!(
         "select sum(v) over (derived rows unbounded preceding)
          from measurements
          window base as (partition by sensor), derived as (base order by measured_at)",
-    ) else {
-        panic!("expected inherited-window SelectStmt");
-    };
+        SelectStmt
+    );
     assert!(matches!(
         inherited.window_clause.as_slice(),
         [Node::WindowDef(base), Node::WindowDef(derived)]
@@ -1699,9 +1384,7 @@ fn select_stmt_populates_window_frame_bounds_and_exclusion() {
                 && derived.name.as_deref() == Some("derived")
                 && derived.refname.as_deref() == Some("base")
     ));
-    let Node::ResTarget(inherited_target) = &inherited.target_list[0] else {
-        panic!("expected ResTarget");
-    };
+    let inherited_target = expect_node!(&inherited.target_list[0], ResTarget);
     assert!(matches!(
         inherited_target.val.as_deref(),
         Some(Node::FuncCall(call))
@@ -1712,16 +1395,16 @@ fn select_stmt_populates_window_frame_bounds_and_exclusion() {
 #[test]
 fn select_exposes_core_raw_expression_and_range_node_shapes() {
     let sql = "select *, $1, coalesce(a, 0), greatest(a, b), row(a, b), (select 1), a collate c, a::int from generate_series(1, 2) g, (select 1) s where a = 1 and b = 2 order by a desc nulls last";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     assert_eq!(stmt.target_list.len(), 8);
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -1764,11 +1447,10 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
     ));
     assert!(matches!(stmt.sort_clause[0], Node::SortBy(_)));
 
-    let Node::SelectStmt(nested_lateral) =
-        parse_statement("select * from lateral ((select 1)) as nested(value)")
-    else {
-        panic!("expected nested lateral subquery SelectStmt");
-    };
+    let nested_lateral = parse_node!(
+        "select * from lateral ((select 1)) as nested(value)",
+        SelectStmt
+    );
     let [Node::RangeSubselect(range)] = nested_lateral.from_clause.as_slice() else {
         panic!("expected RangeSubselect");
     };
@@ -1777,9 +1459,7 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
     assert_eq!(alias.aliasname.as_deref(), Some("nested"));
     assert_eq!(alias.colnames.len(), 1);
 
-    let Node::SelectStmt(flat) = parse_statement("select 1 where a and b and c or d or e") else {
-        panic!("expected SelectStmt");
-    };
+    let flat = parse_node!("select 1 where a and b and c or d or e", SelectStmt);
     assert!(matches!(
         flat.where_clause.as_deref(),
         Some(Node::BoolExpr(disjunction))
@@ -1793,9 +1473,7 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
                 )
     ));
 
-    let Node::SelectStmt(qualified) = parse_statement("select app.select") else {
-        panic!("expected qualified-name SelectStmt");
-    };
+    let qualified = parse_node!("select app.select", SelectStmt);
     assert!(matches!(
         qualified.target_list.as_slice(),
         [Node::ResTarget(target)]
@@ -1805,9 +1483,7 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
             )
     ));
 
-    let Node::SelectStmt(aliases) = parse_statement("select 1 answer, 2 as select") else {
-        panic!("expected aliased SelectStmt");
-    };
+    let aliases = parse_node!("select 1 answer, 2 as select", SelectStmt);
     assert!(matches!(
         aliases.target_list.as_slice(),
         [Node::ResTarget(bare), Node::ResTarget(explicit)]
@@ -1818,11 +1494,10 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
 
 #[test]
 fn select_join_expr_preserves_type_qualification_and_raw_defaults() {
-    let Node::SelectStmt(stmt) =
-        parse_statement("select * from app.a left join app.b on app.a.id = app.b.id")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(
+        "select * from app.a left join app.b on app.a.id = app.b.id",
+        SelectStmt
+    );
     let [Node::JoinExpr(join)] = stmt.from_clause.as_slice() else {
         panic!("expected JoinExpr");
     };
@@ -1835,9 +1510,7 @@ fn select_join_expr_preserves_type_qualification_and_raw_defaults() {
 
 #[test]
 fn select_nullif_preserves_postgresql_raw_aexpr_fields() {
-    let Node::SelectStmt(stmt) = parse_statement("select nullif(left_value, right_value)") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select nullif(left_value, right_value)", SelectStmt);
     assert!(matches!(
         stmt.target_list.as_slice(),
         [Node::ResTarget(target)]
@@ -1857,48 +1530,41 @@ fn select_nullif_preserves_postgresql_raw_aexpr_fields() {
 
 #[test]
 fn select_builds_array_indices_slices_and_expression_indirection() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select items[1], items[2:4], items[:], items[1:2][3].field, (row(a, b)).field, $1[1]",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
 
-    let Node::AIndirection(single) = values[0] else {
-        panic!("expected AIndirection");
-    };
+    let single = expect_node!(values[0], AIndirection);
     assert!(matches!(single.arg.as_deref(), Some(Node::ColumnRef(_))));
     assert!(matches!(
         single.indirection.as_slice(),
         [Node::AIndices(index)] if !index.is_slice && index.lidx.is_none() && index.uidx.is_some()
     ));
 
-    let Node::AIndirection(slice) = values[1] else {
-        panic!("expected AIndirection");
-    };
+    let slice = expect_node!(values[1], AIndirection);
     assert!(matches!(
         slice.indirection.as_slice(),
         [Node::AIndices(index)] if index.is_slice && index.lidx.is_some() && index.uidx.is_some()
     ));
 
-    let Node::AIndirection(open_slice) = values[2] else {
-        panic!("expected AIndirection");
-    };
+    let open_slice = expect_node!(values[2], AIndirection);
     assert!(matches!(
         open_slice.indirection.as_slice(),
         [Node::AIndices(index)] if index.is_slice && index.lidx.is_none() && index.uidx.is_none()
     ));
 
-    let Node::AIndirection(chained) = values[3] else {
-        panic!("expected AIndirection");
-    };
+    let chained = expect_node!(values[3], AIndirection);
     assert_eq!(chained.indirection.len(), 3);
     assert!(matches!(chained.indirection[0], Node::AIndices(_)));
     assert!(matches!(chained.indirection[1], Node::AIndices(_)));
@@ -1918,18 +1584,13 @@ fn select_builds_array_indices_slices_and_expression_indirection() {
 
 #[test]
 fn select_literal_tokens_build_the_correct_a_const_value_variants() {
-    let Node::SelectStmt(stmt) = parse_statement("select 1, 1.5, 'text', B'101', X'ff'") else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!("select 1, 1.5, 'text', B'101', X'ff'", SelectStmt);
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => match target.val.as_deref() {
-                Some(Node::AConst(value)) => &value.val,
-                other => panic!("expected AConst, got {other:?}"),
-            },
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            let target = expect_node!(target, ResTarget);
+            &expect_node!(target.val.as_deref(), Some(AConst)).val
         })
         .collect::<Vec<_>>();
     assert!(matches!(values[0], ValUnion::Integer(_)));
@@ -1944,9 +1605,7 @@ fn select_literal_tokens_build_the_correct_a_const_value_variants() {
         ValUnion::BitString(value) if value.bsval.as_deref() == Some("xff")
     ));
 
-    let Node::SelectStmt(signed) = parse_statement("select -42, -1.5, +42") else {
-        panic!("expected signed SelectStmt");
-    };
+    let signed = parse_node!("select -42, -1.5, +42", SelectStmt);
     assert!(matches!(
         signed.target_list.as_slice(),
         [Node::ResTarget(integer), Node::ResTarget(float), Node::ResTarget(positive)]
@@ -1966,21 +1625,16 @@ fn select_literal_tokens_build_the_correct_a_const_value_variants() {
 
 #[test]
 fn select_typed_literals_build_raw_type_cast_nodes() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select date '2026-07-10', numeric(5, 2) '12.34', interval '2' day,
                 pg_catalog.text 'hello', char 'abc', bit '101', char(3) 'abc', bit(3) '101'",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     assert_eq!(stmt.target_list.len(), 8);
     let mut type_names = Vec::new();
     for target in &stmt.target_list {
-        let Node::ResTarget(target) = target else {
-            panic!("expected ResTarget");
-        };
-        let Some(Node::TypeCast(cast)) = target.val.as_deref() else {
-            panic!("expected typed literal TypeCast");
-        };
+        let target = expect_node!(target, ResTarget);
+        let cast = expect_node!(target.val.as_deref(), Some(TypeCast));
         type_names.push(cast.type_name.as_deref().expect("typed literal type"));
         assert!(matches!(cast.arg.as_deref(), Some(Node::AConst(_))));
     }
@@ -1992,20 +1646,16 @@ fn select_typed_literals_build_raw_type_cast_nodes() {
 
 #[test]
 fn select_casts_preserve_type_modifiers_arrays_and_time_zone() {
-    let Node::SelectStmt(stmt) =
-        parse_statement("select amount::numeric(10, 2)[], created_at::timestamp(3) with time zone")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(
+        "select amount::numeric(10, 2)[], created_at::timestamp(3) with time zone",
+        SelectStmt
+    );
     let casts = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => match target.val.as_deref() {
-                Some(Node::TypeCast(cast)) => cast,
-                other => panic!("expected TypeCast, got {other:?}"),
-            },
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            let target = expect_node!(target, ResTarget);
+            expect_node!(target.val.as_deref(), Some(TypeCast))
         })
         .collect::<Vec<_>>();
     let numeric = casts[0].type_name.as_deref().expect("numeric type");
@@ -2021,15 +1671,15 @@ fn select_casts_preserve_type_modifiers_arrays_and_time_zone() {
 #[test]
 fn select_builds_xml_document_and_json_is_predicates() {
     let sql = "select xmlcol is document, xmlcol is not document, doc is json, doc is json array, doc is json object with unique keys, doc is not json scalar";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -2071,17 +1721,18 @@ fn select_builds_xml_document_and_json_is_predicates() {
 
 #[test]
 fn select_in_subqueries_build_sublinks_and_scalar_lists_build_aexpr() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select id in (select id from other), id not in (select id from other), id in (1, 2), id not in (1, 2)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -2116,17 +1767,18 @@ fn select_in_subqueries_build_sublinks_and_scalar_lists_build_aexpr() {
 
 #[test]
 fn select_scalar_exists_array_and_quantified_sublinks_preserve_raw_fields() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select (select array[10, 20])[1], exists(select 1), array(select id from items), id = any(select id from items), id <> all(select id from items), id = any(array[1, 2])",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
 
@@ -2183,17 +1835,18 @@ fn select_scalar_exists_array_and_quantified_sublinks_preserve_raw_fields() {
 
 #[test]
 fn select_builds_at_time_zone_and_explicit_operator_precedence() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select ts at time zone 'UTC', ts at local, 2 ^ 3 * 4, doc -> 'key', flags | mask",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -2231,7 +1884,7 @@ fn select_builds_at_time_zone_and_explicit_operator_precedence() {
 
 #[test]
 fn select_qualified_prefix_and_quantified_operators_follow_postgresql_precedence() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select 1 + 2 ## 3,
                 1 operator(pg_catalog.+) 2 * 3,
                 @-@ value,
@@ -2239,15 +1892,16 @@ fn select_qualified_prefix_and_quantified_operators_follow_postgresql_precedence
                 -value::int,
                 name like any(array['a', 'b']),
                 id operator(pg_catalog.=) any(select id from other)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
 
@@ -2296,17 +1950,18 @@ fn select_qualified_prefix_and_quantified_operators_follow_postgresql_precedence
                 && matches!(link.subselect.as_deref(), Some(Node::SelectStmt(_)))
     ));
 
-    let Node::SelectStmt(predicates) = parse_statement(
+    let predicates = parse_node!(
         "select a = b in (1, 2), a in (1, 2) = true, a is distinct from b = c, value not between symmetric low and high",
-    ) else {
-        panic!("expected predicate precedence SelectStmt");
-    };
+        SelectStmt
+    );
     let values = predicates
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -2341,20 +1996,16 @@ fn select_qualified_prefix_and_quantified_operators_follow_postgresql_precedence
 
 #[test]
 fn select_like_ilike_and_similar_preserve_raw_operators_and_escape_calls() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select name like 'a%', name not like 'a!%' escape '!', name ilike 'a%', name similar to '(a|b)%' escape '!'",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let expressions = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => match target.val.as_deref() {
-                Some(Node::AExpr(expression)) => expression,
-                other => panic!("expected AExpr, got {other:?}"),
-            },
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            let target = expect_node!(target, ResTarget);
+            expect_node!(target.val.as_deref(), Some(AExpr))
         })
         .collect::<Vec<_>>();
     let operator = |expression: &pg_parser::AExpr| {
@@ -2377,17 +2028,18 @@ fn select_like_ilike_and_similar_preserve_raw_operators_and_escape_calls() {
 
 #[test]
 fn select_is_normalized_builds_sql_syntax_function_calls() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select value is normalized, value is nfc normalized, value is not nfkd normalized",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -2410,20 +2062,16 @@ fn select_is_normalized_builds_sql_syntax_function_calls() {
 
 #[test]
 fn select_function_calls_populate_aggregate_filter_nulls_and_window_fields() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select f(a, variadic rest order by key desc nulls last) filter (where active) ignore nulls over (partition by grp order by key rows between 1 preceding and current row), percentile_cont(0.5) within group (order by score) respect nulls over win, count(*)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let calls = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => match target.val.as_deref() {
-                Some(Node::FuncCall(call)) => call,
-                other => panic!("expected FuncCall, got {other:?}"),
-            },
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            let target = expect_node!(target, ResTarget);
+            expect_node!(target.val.as_deref(), Some(FuncCall))
         })
         .collect::<Vec<_>>();
 
@@ -2455,23 +2103,16 @@ fn select_function_calls_populate_aggregate_filter_nulls_and_window_fields() {
 #[test]
 fn select_function_order_by_using_preserves_qualified_operators_and_locations() {
     let sql = "select array_agg(value order by key using operator(pg_catalog.<) nulls first), percentile_cont(0.5) within group (order by score using ->)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     let calls = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => match target.val.as_deref() {
-                Some(Node::FuncCall(call)) => call,
-                other => panic!("expected FuncCall, got {other:?}"),
-            },
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            let target = expect_node!(target, ResTarget);
+            expect_node!(target.val.as_deref(), Some(FuncCall))
         })
         .collect::<Vec<_>>();
-    let Node::SortBy(qualified) = &calls[0].agg_order[0] else {
-        panic!("expected qualified SortBy");
-    };
+    let qualified = expect_node!(&calls[0].agg_order[0], SortBy);
     assert_eq!(qualified.sortby_dir, pg_parser::SortByDir::Using);
     assert_eq!(qualified.location as usize, sql.find("operator").unwrap());
     assert!(matches!(
@@ -2481,9 +2122,7 @@ fn select_function_order_by_using_preserves_qualified_operators_and_locations() 
                 && operator.sval.as_deref() == Some("<")
     ));
 
-    let Node::SortBy(arrow) = &calls[1].agg_order[0] else {
-        panic!("expected arrow SortBy");
-    };
+    let arrow = expect_node!(&calls[1].agg_order[0], SortBy);
     assert_eq!(arrow.sortby_dir, pg_parser::SortByDir::Using);
     assert_eq!(arrow.location as usize, sql.rfind("->").unwrap());
     assert!(matches!(
@@ -2494,17 +2133,12 @@ fn select_function_order_by_using_preserves_qualified_operators_and_locations() 
 
 #[test]
 fn select_json_aggregates_populate_filter_order_and_window_fields() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select json_objectagg(k value v) filter (where active) over (partition by grp), json_arrayagg(v order by key) filter (where active) over win",
-    ) else {
-        panic!("expected SelectStmt");
-    };
-    let Node::ResTarget(object_target) = &stmt.target_list[0] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonObjectAgg(object)) = object_target.val.as_deref() else {
-        panic!("expected JsonObjectAgg");
-    };
+        SelectStmt
+    );
+    let object_target = expect_node!(&stmt.target_list[0], ResTarget);
+    let object = expect_node!(object_target.val.as_deref(), Some(JsonObjectAgg));
     let object_constructor = object.constructor.as_deref().expect("constructor");
     assert!(object_constructor.agg_filter.is_some());
     assert_eq!(
@@ -2515,12 +2149,8 @@ fn select_json_aggregates_populate_filter_order_and_window_fields() {
         Some(1)
     );
 
-    let Node::ResTarget(array_target) = &stmt.target_list[1] else {
-        panic!("expected ResTarget");
-    };
-    let Some(Node::JsonArrayAgg(array)) = array_target.val.as_deref() else {
-        panic!("expected JsonArrayAgg");
-    };
+    let array_target = expect_node!(&stmt.target_list[1], ResTarget);
+    let array = expect_node!(array_target.val.as_deref(), Some(JsonArrayAgg));
     let array_constructor = array.constructor.as_deref().expect("constructor");
     assert_eq!(array_constructor.agg_order.len(), 1);
     assert!(array_constructor.agg_filter.is_some());
@@ -2536,27 +2166,19 @@ fn select_json_aggregates_populate_filter_order_and_window_fields() {
 #[test]
 fn select_json_arrayagg_preserves_complete_sort_by_nodes() {
     let sql = "select json_arrayagg(value order by name desc nulls last, id using operator(pg_catalog.<) absent on null returning jsonb)";
-    let Node::SelectStmt(stmt) = parse_statement(sql) else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(sql, SelectStmt);
     let [Node::ResTarget(target)] = stmt.target_list.as_slice() else {
         panic!("expected ResTarget");
     };
-    let Some(Node::JsonArrayAgg(aggregate)) = target.val.as_deref() else {
-        panic!("expected JsonArrayAgg");
-    };
+    let aggregate = expect_node!(target.val.as_deref(), Some(JsonArrayAgg));
     assert!(aggregate.absent_on_null);
     let constructor = aggregate.constructor.as_deref().expect("constructor");
     assert_eq!(constructor.agg_order.len(), 2);
-    let Node::SortBy(descending) = &constructor.agg_order[0] else {
-        panic!("expected SortBy");
-    };
+    let descending = expect_node!(&constructor.agg_order[0], SortBy);
     assert_eq!(descending.sortby_dir, pg_parser::SortByDir::Desc);
     assert_eq!(descending.sortby_nulls, pg_parser::SortByNulls::Last);
     assert_eq!(descending.location, -1);
-    let Node::SortBy(using) = &constructor.agg_order[1] else {
-        panic!("expected SortBy");
-    };
+    let using = expect_node!(&constructor.agg_order[1], SortBy);
     assert_eq!(using.sortby_dir, pg_parser::SortByDir::Using);
     assert_eq!(using.location as usize, sql.find("operator").unwrap());
     assert!(matches!(
@@ -2569,17 +2191,18 @@ fn select_json_arrayagg_preserves_complete_sort_by_nodes() {
 
 #[test]
 fn select_quantified_comparisons_distinguish_subqueries_and_array_expressions() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select id = any(select id from other), id <> all(select id from other), id = any(array[1, 2]), id > some(array[1, 2])",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -2608,18 +2231,13 @@ fn select_quantified_comparisons_distinguish_subqueries_and_array_expressions() 
 
 #[test]
 fn select_overlaps_builds_sql_syntax_function_call() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select (start_at, end_at) overlaps (other_start, other_end), row(start_at, end_at) overlaps row(other_start, other_end)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     for target in &stmt.target_list {
-        let Node::ResTarget(target) = target else {
-            panic!("expected ResTarget");
-        };
-        let Some(Node::FuncCall(call)) = target.val.as_deref() else {
-            panic!("expected FuncCall");
-        };
+        let target = expect_node!(target, ResTarget);
+        let call = expect_node!(target.val.as_deref(), Some(FuncCall));
         assert_eq!(call.args.len(), 4);
         assert_eq!(call.funcformat, pg_parser::CoercionForm::SqlSyntax);
     }
@@ -2627,20 +2245,16 @@ fn select_overlaps_builds_sql_syntax_function_call() {
 
 #[test]
 fn select_array_expressions_preserve_nested_shape_and_list_locations() {
-    let Node::SelectStmt(stmt) =
-        parse_statement("select array[], array[1, 2], array[[1, 2], [3, 4]]")
-    else {
-        panic!("expected SelectStmt");
-    };
+    let stmt = parse_node!(
+        "select array[], array[1, 2], array[[1, 2], [3, 4]]",
+        SelectStmt
+    );
     let arrays = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => match target.val.as_deref() {
-                Some(Node::AArrayExpr(array)) => array,
-                other => panic!("expected AArrayExpr, got {other:?}"),
-            },
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            let target = expect_node!(target, ResTarget);
+            expect_node!(target.val.as_deref(), Some(AArrayExpr))
         })
         .collect::<Vec<_>>();
     assert!(arrays[0].elements.is_empty());
@@ -2658,17 +2272,18 @@ fn select_array_expressions_preserve_nested_shape_and_list_locations() {
 
 #[test]
 fn select_special_sql_functions_build_cast_extract_normalize_and_user_nodes() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select cast(value as numeric(10, 2)[]), treat(value as text), extract(year from ts), normalize(value), normalize(value, nfc), user, system_user, collation for (value)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let values = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -2698,9 +2313,7 @@ fn select_special_sql_functions_build_cast_extract_normalize_and_user_nodes() {
             if call.funcformat == pg_parser::CoercionForm::SqlSyntax && call.args.len() == 1
     ));
 
-    let Node::SelectStmt(extension) = parse_statement("select extract('epoch' from ts)") else {
-        panic!("expected EXTRACT extension SelectStmt");
-    };
+    let extension = parse_node!("select extract('epoch' from ts)", SelectStmt);
     assert!(matches!(
         extension.target_list.as_slice(),
         [Node::ResTarget(target)]
@@ -2710,20 +2323,16 @@ fn select_special_sql_functions_build_cast_extract_normalize_and_user_nodes() {
 
 #[test]
 fn select_position_overlay_and_substring_preserve_sql_syntax_argument_rewrites() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select position('a' in text_value), overlay(text_value placing 'x' from 2 for 1), overlay(text_value, 'x', 2), substring(text_value from 2 for 3), substring(text_value for 3), substring(text_value similar pattern escape esc), substring(text_value, 2, 3)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let calls = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => match target.val.as_deref() {
-                Some(Node::FuncCall(call)) => call,
-                other => panic!("expected FuncCall, got {other:?}"),
-            },
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            let target = expect_node!(target, ResTarget);
+            expect_node!(target.val.as_deref(), Some(FuncCall))
         })
         .collect::<Vec<_>>();
     assert_eq!(calls[0].args.len(), 2);
@@ -2738,17 +2347,18 @@ fn select_position_overlay_and_substring_preserve_sql_syntax_argument_rewrites()
     assert_eq!(calls[5].args.len(), 3);
     assert_eq!(calls[6].funcformat, pg_parser::CoercionForm::ExplicitCall);
 
-    let Node::SelectStmt(restricted) = parse_statement(
+    let restricted = parse_node!(
         "select position(a = b in c = d), position(a is distinct from b in c is document), x between y = z and q, position((a and b) in c)",
-    ) else {
-        panic!("expected restricted-expression SelectStmt");
-    };
+        SelectStmt
+    );
     let values = restricted
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            expect_node!(target, ResTarget)
+                .val
+                .as_deref()
+                .expect("target value")
         })
         .collect::<Vec<_>>();
     assert!(matches!(
@@ -2780,18 +2390,13 @@ fn select_position_overlay_and_substring_preserve_sql_syntax_argument_rewrites()
 
 #[test]
 fn select_overlay_and_substring_plain_calls_preserve_named_arguments() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select overlay(source => text_value, replacement := 'x', position_arg => 2), substring(source => text_value, start_arg := 2, count_arg => 3)",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     for target in &stmt.target_list {
-        let Node::ResTarget(target) = target else {
-            panic!("expected ResTarget");
-        };
-        let Some(Node::FuncCall(call)) = target.val.as_deref() else {
-            panic!("expected FuncCall");
-        };
+        let target = expect_node!(target, ResTarget);
+        let call = expect_node!(target.val.as_deref(), Some(FuncCall));
         assert_eq!(call.funcformat, pg_parser::CoercionForm::ExplicitCall);
         assert_eq!(call.args.len(), 3);
         assert!(
@@ -2804,20 +2409,16 @@ fn select_overlay_and_substring_plain_calls_preserve_named_arguments() {
 
 #[test]
 fn select_trim_and_xmlexists_preserve_sql_syntax_rewrites() {
-    let Node::SelectStmt(stmt) = parse_statement(
+    let stmt = parse_node!(
         "select trim(both 'x' from value), trim(leading from value), trim(trailing 'x' from value), trim(value), xmlexists('/a' passing doc), xmlexists('/a' passing by ref doc by value), xmlexists(('/' || 'a') passing (doc_a || doc_b))",
-    ) else {
-        panic!("expected SelectStmt");
-    };
+        SelectStmt
+    );
     let calls = stmt
         .target_list
         .iter()
-        .map(|target| match target {
-            Node::ResTarget(target) => match target.val.as_deref() {
-                Some(Node::FuncCall(call)) => call,
-                other => panic!("expected FuncCall, got {other:?}"),
-            },
-            other => panic!("expected ResTarget, got {other:?}"),
+        .map(|target| {
+            let target = expect_node!(target, ResTarget);
+            expect_node!(target.val.as_deref(), Some(FuncCall))
         })
         .collect::<Vec<_>>();
     assert_eq!(calls[0].args.len(), 2);

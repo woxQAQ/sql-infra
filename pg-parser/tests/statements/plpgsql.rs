@@ -2,6 +2,8 @@ use pg_parser::{
     Node, NodeTag, parse_plpgsql_assignment, parse_plpgsql_expression, parse_type_name,
 };
 
+use super::common::expect_node;
+
 #[test]
 fn plpgsql_assignment_mode_builds_complete_raw_statement() {
     let raw = parse_plpgsql_assignment(
@@ -13,9 +15,7 @@ fn plpgsql_assignment_mode_builds_complete_raw_statement() {
     assert_eq!(raw.node_tag, NodeTag::RawStmt);
     assert_eq!(raw.stmt_location, 0);
     assert_eq!(raw.stmt_len, 0);
-    let Some(Node::PlAssignStmt(stmt)) = raw.stmt.as_deref() else {
-        panic!("expected PlAssignStmt");
-    };
+    let stmt = expect_node!(raw.stmt.as_deref(), Some(PlAssignStmt));
     assert_eq!(stmt.node_tag, NodeTag::PlAssignStmt);
     assert_eq!(stmt.name.as_deref(), Some("record"));
     assert_eq!(stmt.nnames, 2);
@@ -40,9 +40,7 @@ fn plpgsql_assignment_mode_accepts_each_raw_mode_and_equals_form() {
         ("$1 := 4", 1, "$1"),
     ] {
         let raw = parse_plpgsql_assignment(sql, nnames).expect(sql);
-        let Some(Node::PlAssignStmt(stmt)) = raw.stmt.as_deref() else {
-            panic!("expected PlAssignStmt for {sql}");
-        };
+        let stmt = expect_node!(raw.stmt.as_deref(), Some(PlAssignStmt));
         assert_eq!(stmt.name.as_deref(), Some(expected_name), "{sql}");
         assert_eq!(stmt.nnames, nnames, "{sql}");
         assert!(stmt.val.is_some(), "{sql}");
@@ -72,9 +70,7 @@ fn remaining_raw_parse_modes_parse_plpgsql_expressions_and_type_names() {
         "distinct value from app.items where active order by value fetch first 1 row only",
     )
     .expect("parse PL/pgSQL expression mode");
-    let Some(Node::SelectStmt(select)) = raw.stmt.as_deref() else {
-        panic!("expected SelectStmt");
-    };
+    let select = expect_node!(raw.stmt.as_deref(), Some(SelectStmt));
     assert_eq!(select.distinct_clause.len(), 1);
     assert_eq!(select.target_list.len(), 1);
     assert_eq!(select.from_clause.len(), 1);

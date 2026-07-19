@@ -25,3 +25,49 @@ pub fn assert_statement_cases(cases: &[StatementCase]) {
         assert_eq!(node.tag(), case.expected, "wrong node for {:?}", case.sql);
     }
 }
+
+pub fn assert_parse_errors(cases: &[&str]) {
+    for sql in cases {
+        let error = parse_error(sql);
+        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
+    }
+}
+
+// Keep AST field assertions in each scenario, but centralize the repetitive
+// top-level and nested Node variant extraction here.
+macro_rules! parse_node {
+    ($sql:expr, $variant:ident) => {{
+        let sql = $sql;
+        match $crate::common::parse_statement(sql) {
+            pg_parser::Node::$variant(value) => value,
+            node => panic!(
+                "expected {} for {sql:?}, got {:?}",
+                stringify!($variant),
+                node.tag()
+            ),
+        }
+    }};
+}
+
+macro_rules! expect_node {
+    ($node:expr, Some($variant:ident)) => {{
+        match $node {
+            Some(pg_parser::Node::$variant(value)) => value,
+            Some(node) => panic!(
+                "expected Some({}), got Some({:?})",
+                stringify!($variant),
+                node.tag()
+            ),
+            None => panic!("expected Some({}), got None", stringify!($variant)),
+        }
+    }};
+    ($node:expr, $variant:ident) => {{
+        match $node {
+            pg_parser::Node::$variant(value) => value,
+            node => panic!("expected {}, got {:?}", stringify!($variant), node.tag()),
+        }
+    }};
+}
+
+pub(crate) use expect_node;
+pub(crate) use parse_node;

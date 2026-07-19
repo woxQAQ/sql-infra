@@ -1,8 +1,8 @@
-use super::common::parse_error;
+use super::common::assert_parse_errors;
 
 #[test]
 fn incomplete_select_forms_are_rejected() {
-    for sql in [
+    assert_parse_errors(&[
         "values",
         "values ()",
         "values (1,)",
@@ -275,15 +275,12 @@ fn incomplete_select_forms_are_rejected() {
         "select * from graph_table(g match (p is person |) columns (p.id))",
         "select * from graph_table(g match ((p)-(q) columns (p.id))",
         "select * from graph_table(g match (p){1,} columns (p.id))",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }
 
 #[test]
 fn malformed_alter_table_commands_are_rejected_without_token_skipping() {
-    for sql in [
+    assert_parse_errors(&[
         "alter table t add column",
         "alter table t add column c",
         "alter table t drop column",
@@ -316,15 +313,12 @@ fn malformed_alter_table_commands_are_rejected_without_token_skipping() {
         "alter table t alter column id add generated as identity",
         "alter table t alter column id add generated always as identity ()",
         "alter table t alter column id set generated",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }
 
 #[test]
 fn malformed_create_table_elements_are_rejected() {
-    for sql in [
+    assert_parse_errors(&[
         "create table t (id)",
         "create table t (id int,)",
         "create table t (id int default)",
@@ -374,15 +368,12 @@ fn malformed_create_table_elements_are_rejected() {
         "create table t (id int, exclude (t.id with =))",
         "create table t (id int, exclude (lower(id) over () with =))",
         "create table t (id int, exclude (id with plus))",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }
 
 #[test]
 fn malformed_type_names_are_rejected_without_dropping_tokens() {
-    for sql in [
+    assert_parse_errors(&[
         "create table t (value int garbage)",
         "create table t (value app..custom_type)",
         "create table t (value int(3))",
@@ -400,15 +391,12 @@ fn malformed_type_names_are_rejected_without_dropping_tokens() {
         "create table t (value setof)",
         "create function f(value app..custom_type) returns int language sql as 'select 1'",
         "create function f(value int garbage) returns int language sql as 'select 1'",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }
 
 #[test]
 fn malformed_object_name_and_signature_lists_are_rejected() {
-    for sql in [
+    assert_parse_errors(&[
         "drop table app.",
         "drop table app.items nonsense",
         "drop table app.items,",
@@ -445,15 +433,12 @@ fn malformed_object_name_and_signature_lists_are_rejected() {
         "grant execute on function +(int, int) to alice",
         "grant select on all tables in schema to alice",
         "reassign owned by alice, to bob",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }
 
 #[test]
 fn malformed_comment_and_security_label_identities_are_rejected() {
-    for sql in [
+    assert_parse_errors(&[
         "comment on table app. is 'x'",
         "comment on table select is 'x'",
         "comment on table app.* is 'x'",
@@ -483,15 +468,12 @@ fn malformed_comment_and_security_label_identities_are_rejected() {
         "security label on cast (int as text) is 'x'",
         "security label on transform for app.t language sql is 'x'",
         "security label for on table t is 'x'",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }
 
 #[test]
 fn incomplete_with_and_dml_forms_are_rejected() {
-    for sql in [
+    assert_parse_errors(&[
         "with x select 1",
         "with x as select 1",
         "with x() as (select 1) select * from x",
@@ -566,10 +548,7 @@ fn incomplete_with_and_dml_forms_are_rejected() {
         "merge into t using s on true when not matched then insert values ()",
         "merge into t using s on true when not matched then insert (id) default values",
         "merge into t using s on true when not matched then insert overriding user value default values",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }
 
 #[test]
@@ -581,22 +560,19 @@ fn top_level_statements_require_semicolon_separators() {
 
 #[test]
 fn malformed_privilege_name_categories_are_rejected() {
-    for sql in [
+    assert_parse_errors(&[
         "grant from on table items to alice",
         "grant select(select) on table items to alice",
         "grant select(app.id) on table items to alice",
         "grant all privileges (app.id) on table items to alice",
         "grant alter system(work_mem) on parameter work_mem to admin",
         "revoke select option for app_reader from alice",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }
 
 #[test]
 fn incomplete_create_alter_drop_and_utility_forms_are_rejected() {
-    for sql in [
+    assert_parse_errors(&[
         "create database",
         "create database select",
         "create database app select = 'value'",
@@ -1305,8 +1281,5 @@ fn incomplete_create_alter_drop_and_utility_forms_are_rejected() {
         "create materialized view mv",
         "create materialized view mv as",
         "create materialized view mv as update t set value = 1",
-    ] {
-        let error = parse_error(sql);
-        assert!(!error.message.is_empty(), "{sql:?} returned an empty error");
-    }
+    ]);
 }

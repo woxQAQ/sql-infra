@@ -1,32 +1,29 @@
 use pg_parser::{DropBehavior, Node, ObjectType, RoleSpecType};
 
-use super::common::parse_statement;
+use super::common::{expect_node, parse_node};
 
 #[test]
 fn drop_cast_transform_and_operator_family_preserve_object_identities() {
-    let Node::DropStmt(cast) =
-        parse_statement("drop cast if exists (app.source_type as text) cascade")
-    else {
-        panic!("expected DropStmt");
-    };
+    let cast = parse_node!(
+        "drop cast if exists (app.source_type as text) cascade",
+        DropStmt
+    );
     assert_eq!(cast.remove_type, ObjectType::Cast);
     assert!(cast.missing_ok);
     assert_eq!(cast.behavior, DropBehavior::Cascade);
     assert!(matches!(&cast.objects[0], Node::AArrayExpr(types) if types.elements.len() == 2));
 
-    let Node::DropStmt(transform) =
-        parse_statement("drop transform if exists for app.currency language sql restrict")
-    else {
-        panic!("expected DropStmt");
-    };
+    let transform = parse_node!(
+        "drop transform if exists for app.currency language sql restrict",
+        DropStmt
+    );
     assert_eq!(transform.remove_type, ObjectType::Transform);
     assert!(matches!(&transform.objects[0], Node::AArrayExpr(parts) if parts.elements.len() == 2));
 
-    let Node::DropStmt(opclass) =
-        parse_statement("drop operator class if exists app.text_ops using btree cascade")
-    else {
-        panic!("expected DropStmt");
-    };
+    let opclass = parse_node!(
+        "drop operator class if exists app.text_ops using btree cascade",
+        DropStmt
+    );
     assert_eq!(opclass.remove_type, ObjectType::Opclass);
     assert!(opclass.missing_ok);
     assert!(matches!(&opclass.objects[0], Node::AArrayExpr(parts) if parts.elements.len() == 3));
@@ -34,10 +31,7 @@ fn drop_cast_transform_and_operator_family_preserve_object_identities() {
 
 #[test]
 fn drop_index_concurrently_is_recorded_in_postgresql_token_order() {
-    let Node::DropStmt(index) = parse_statement("drop index concurrently if exists app.orders_idx")
-    else {
-        panic!("expected DropStmt");
-    };
+    let index = parse_node!("drop index concurrently if exists app.orders_idx", DropStmt);
     assert_eq!(index.remove_type, ObjectType::Index);
     assert!(index.concurrent);
     assert!(index.missing_ok);
@@ -45,11 +39,10 @@ fn drop_index_concurrently_is_recorded_in_postgresql_token_order() {
 
 #[test]
 fn drop_function_distinguishes_unspecified_and_empty_argument_lists() {
-    let Node::DropStmt(stmt) =
-        parse_statement("drop function app.unspecified, app.parameterless()")
-    else {
-        panic!("expected DropStmt");
-    };
+    let stmt = parse_node!(
+        "drop function app.unspecified, app.parameterless()",
+        DropStmt
+    );
     assert!(matches!(
         stmt.objects.as_slice(),
         [Node::ObjectWithArgs(unspecified), Node::ObjectWithArgs(parameterless)]
@@ -64,9 +57,7 @@ fn drop_function_distinguishes_unspecified_and_empty_argument_lists() {
 
 #[test]
 fn drop_unary_operator_preserves_the_missing_argument_position() {
-    let Node::DropStmt(stmt) = parse_statement("drop operator if exists -(none, integer)") else {
-        panic!("expected DropStmt");
-    };
+    let stmt = parse_node!("drop operator if exists -(none, integer)", DropStmt);
     assert_eq!(stmt.remove_type, ObjectType::Operator);
     assert!(matches!(
         stmt.objects.as_slice(),
@@ -79,11 +70,10 @@ fn drop_unary_operator_preserves_the_missing_argument_position() {
 
 #[test]
 fn drop_aggregate_preserves_star_and_ordered_argument_signatures() {
-    let Node::DropStmt(stmt) =
-        parse_statement("drop aggregate app.count_rows(*), app.percentile(float8 order by float8)")
-    else {
-        panic!("expected DropStmt");
-    };
+    let stmt = parse_node!(
+        "drop aggregate app.count_rows(*), app.percentile(float8 order by float8)",
+        DropStmt
+    );
     assert_eq!(stmt.remove_type, ObjectType::Aggregate);
     assert!(matches!(
         stmt.objects.as_slice(),
@@ -108,9 +98,7 @@ fn generic_drop_preserves_object_family_specific_identity_nodes() {
         ("drop publication pub1", ObjectType::Publication),
         ("drop server srv1", ObjectType::ForeignServer),
     ] {
-        let Node::DropStmt(stmt) = parse_statement(sql) else {
-            panic!("expected DropStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, DropStmt);
         assert_eq!(stmt.remove_type, expected_type, "{sql}");
         assert!(
             matches!(stmt.objects.as_slice(), [Node::String(_)]),
@@ -135,9 +123,7 @@ fn generic_drop_preserves_object_family_specific_identity_nodes() {
             ObjectType::Tsconfiguration,
         ),
     ] {
-        let Node::DropStmt(stmt) = parse_statement(sql) else {
-            panic!("expected DropStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, DropStmt);
         assert_eq!(stmt.remove_type, expected_type, "{sql}");
         assert!(
             matches!(stmt.objects.as_slice(), [Node::AArrayExpr(_)]),
@@ -149,9 +135,7 @@ fn generic_drop_preserves_object_family_specific_identity_nodes() {
         ("drop type app.item_type[]", ObjectType::Type),
         ("drop domain app.positive_int", ObjectType::Domain),
     ] {
-        let Node::DropStmt(stmt) = parse_statement(sql) else {
-            panic!("expected DropStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, DropStmt);
         assert_eq!(stmt.remove_type, expected_type, "{sql}");
         assert!(
             matches!(stmt.objects.as_slice(), [Node::TypeName(_)]),
@@ -167,9 +151,7 @@ fn generic_drop_preserves_object_family_specific_identity_nodes() {
         ("drop rule if exists r on app.items", ObjectType::Rule),
         ("drop policy if exists p on app.items", ObjectType::Policy),
     ] {
-        let Node::DropStmt(stmt) = parse_statement(sql) else {
-            panic!("expected DropStmt for {sql}");
-        };
+        let stmt = parse_node!(sql, DropStmt);
         assert_eq!(stmt.remove_type, expected_type, "{sql}");
         assert!(stmt.missing_ok, "{sql}");
         assert!(matches!(
@@ -181,9 +163,7 @@ fn generic_drop_preserves_object_family_specific_identity_nodes() {
 
 #[test]
 fn dedicated_drop_statements_require_and_store_all_names() {
-    let Node::DropdbStmt(database) = parse_statement("drop database if exists \"select\"") else {
-        panic!("expected DropdbStmt");
-    };
+    let database = parse_node!("drop database if exists \"select\"", DropdbStmt);
     assert_eq!(database.dbname.as_deref(), Some("select"));
     assert!(database.missing_ok);
 
@@ -191,25 +171,18 @@ fn dedicated_drop_statements_require_and_store_all_names() {
         "drop database analytics (force)",
         "drop database if exists analytics with (force)",
     ] {
-        let Node::DropdbStmt(database) = parse_statement(sql) else {
-            panic!("expected DropdbStmt for {sql}");
-        };
+        let database = parse_node!(sql, DropdbStmt);
         assert!(matches!(
             database.options.as_slice(),
             [Node::DefElem(option)]
                 if option.defname.as_deref() == Some("force") && option.arg.is_none()
         ));
         let expected_location = sql.find("force").unwrap() as i32;
-        let Node::DefElem(option) = &database.options[0] else {
-            unreachable!()
-        };
+        let option = expect_node!(&database.options[0], DefElem);
         assert_eq!(option.location, expected_location, "{sql}");
     }
 
-    let Node::DropRoleStmt(roles) = parse_statement("drop role if exists alice, current_user")
-    else {
-        panic!("expected DropRoleStmt");
-    };
+    let roles = parse_node!("drop role if exists alice, current_user", DropRoleStmt);
     assert!(roles.missing_ok);
     assert!(matches!(
         roles.roles.as_slice(),
@@ -218,9 +191,7 @@ fn dedicated_drop_statements_require_and_store_all_names() {
                 && current.roletype == RoleSpecType::CurrentUser
     ));
 
-    let Node::DropOwnedStmt(owned) = parse_statement("drop owned by alice, public cascade") else {
-        panic!("expected DropOwnedStmt");
-    };
+    let owned = parse_node!("drop owned by alice, public cascade", DropOwnedStmt);
     assert_eq!(owned.behavior, DropBehavior::Cascade);
     assert!(matches!(
         owned.roles.as_slice(),
@@ -229,33 +200,24 @@ fn dedicated_drop_statements_require_and_store_all_names() {
                 && public.roletype == RoleSpecType::Public
     ));
 
-    let Node::DropTableSpaceStmt(tablespace) =
-        parse_statement("drop tablespace if exists fast_space")
-    else {
-        panic!("expected DropTableSpaceStmt");
-    };
+    let tablespace = parse_node!("drop tablespace if exists fast_space", DropTableSpaceStmt);
     assert_eq!(tablespace.tablespacename.as_deref(), Some("fast_space"));
     assert!(tablespace.missing_ok);
 
-    let Node::DropTableSpaceStmt(quoted_tablespace) = parse_statement("drop tablespace \"select\"")
-    else {
-        panic!("expected DropTableSpaceStmt");
-    };
+    let quoted_tablespace = parse_node!("drop tablespace \"select\"", DropTableSpaceStmt);
     assert_eq!(quoted_tablespace.tablespacename.as_deref(), Some("select"));
 
-    let Node::DropSubscriptionStmt(subscription) =
-        parse_statement("drop subscription if exists logical_sub cascade")
-    else {
-        panic!("expected DropSubscriptionStmt");
-    };
+    let subscription = parse_node!(
+        "drop subscription if exists logical_sub cascade",
+        DropSubscriptionStmt
+    );
     assert_eq!(subscription.subname.as_deref(), Some("logical_sub"));
     assert_eq!(subscription.behavior, DropBehavior::Cascade);
 
-    let Node::DropUserMappingStmt(mapping) =
-        parse_statement("drop user mapping if exists for user server remote")
-    else {
-        panic!("expected DropUserMappingStmt");
-    };
+    let mapping = parse_node!(
+        "drop user mapping if exists for user server remote",
+        DropUserMappingStmt
+    );
     assert_eq!(
         mapping.user.as_deref().map(|user| user.roletype),
         Some(RoleSpecType::CurrentUser)
