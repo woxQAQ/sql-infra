@@ -33,11 +33,10 @@ impl Parser {
                 .ok_or_else(|| self.error_here("CREATE RULE requires a target relation"))?,
         ));
         let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[
-                TokenKind::Do,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?)
+            Some(self.parse_expr_box_strict_until_at(
+                CompletionSlot::RuleWhere,
+                &[TokenKind::Do, TokenKind::Char(';'), TokenKind::Eof],
+            )?)
         } else {
             None
         };

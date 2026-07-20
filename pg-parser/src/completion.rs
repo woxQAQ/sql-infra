@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    KEYWORDS, KeywordCategory, TextRange, TextSize, Token, TokenKind, TokenValue, lex,
+    KEYWORDS, KeywordCategory, ObjectType, TextRange, TextSize, Token, TokenKind, TokenValue, lex,
     lookup_keyword,
 };
 
@@ -12,7 +12,243 @@ pub struct CompletionContext {
     pub prefix: String,
     pub statement: TextRange,
     pub expectations: Vec<Expectation>,
+    pub slots: Vec<CompletionSlot>,
     pub scope: ScopeSnapshot,
+}
+
+macro_rules! define_completion_slots {
+    ($($slot:ident,)*) => {
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+        pub enum CompletionSlot {
+            $($slot,)*
+        }
+
+        impl CompletionSlot {
+            pub const ALL: &'static [Self] = &[$(Self::$slot,)*];
+        }
+    };
+}
+
+define_completion_slots! {
+    StatementStart,
+    CreateObjectKind,
+    AlterObjectKind,
+    DropObjectKind,
+    FromItem,
+    SelectTarget,
+    SelectTargetAfterComma,
+    SelectDistinctOn,
+    SelectDistinctOnAfterComma,
+    SelectWhere,
+    SelectGroupBy,
+    SelectGroupByAfterComma,
+    SelectHaving,
+    SelectOrderBy,
+    SelectOrderByAfterComma,
+    SelectLimit,
+    SelectOffset,
+    SelectFetchCount,
+    ValuesExpression,
+    ValuesExpressionAfterComma,
+    WindowPartitionExpression,
+    WindowPartitionExpressionAfterComma,
+    WindowOrderExpression,
+    WindowOrderExpressionAfterComma,
+    WindowFrameStartOffset,
+    WindowFrameEndOffset,
+    TableSampleArgument,
+    TableSampleArgumentAfterComma,
+    TableSampleRepeatable,
+    RowsFromFunction,
+    RowsFromFunctionAfterComma,
+    JoinOn,
+    XmlTableNamespace,
+    XmlTableNamespaceAfterComma,
+    XmlTableRowExpression,
+    XmlTableDocumentExpression,
+    FunctionArgument,
+    FunctionArgumentAfterComma,
+    FunctionOrderBy,
+    FunctionOrderByAfterComma,
+    WithinGroupOrderBy,
+    WithinGroupOrderByAfterComma,
+    FunctionFilter,
+    ArrayElement,
+    ArrayElementAfterComma,
+    ParenthesizedExpression,
+    ParenthesizedExpressionAfterComma,
+    CoalesceArgument,
+    CoalesceArgumentAfterComma,
+    MinmaxArgument,
+    MinmaxArgumentAfterComma,
+    NullifArgument,
+    NullifArgumentAfterComma,
+    InListExpression,
+    InListExpressionAfterComma,
+    GroupingArgument,
+    GroupingArgumentAfterComma,
+    CaseOperand,
+    CaseWhenCondition,
+    CaseThenResult,
+    CaseElseResult,
+    CastArgument,
+    ExtractArgument,
+    NormalizeArgument,
+    PositionNeedle,
+    PositionHaystack,
+    OverlaySource,
+    OverlayReplacement,
+    OverlayStart,
+    OverlayCount,
+    SubstringSource,
+    SubstringStart,
+    SubstringCount,
+    SubstringPattern,
+    SubstringEscape,
+    TrimArgument,
+    TrimArgumentAfterComma,
+    TrimSource,
+    TrimSourceAfterComma,
+    XmlExistsXpath,
+    XmlExistsDocument,
+    RowElement,
+    RowElementAfterComma,
+    XmlConcatArgument,
+    XmlConcatArgumentAfterComma,
+    XmlElementContent,
+    XmlElementContentAfterComma,
+    XmlAttributeExpression,
+    XmlAttributeExpressionAfterComma,
+    XmlForestExpression,
+    XmlForestExpressionAfterComma,
+    XmlParseValue,
+    XmlPiValue,
+    XmlRootDocument,
+    XmlRootVersion,
+    XmlSerializeValue,
+    ExecuteParameter,
+    ExecuteParameterAfterComma,
+    PartitionListValue,
+    PartitionListValueAfterComma,
+    PartitionRangeFromValue,
+    PartitionRangeFromValueAfterComma,
+    PartitionRangeToValue,
+    PartitionRangeToValueAfterComma,
+    MergeInsertValue,
+    MergeInsertValueAfterComma,
+    ReturningExpression,
+    ReturningExpressionAfterComma,
+    GraphTableColumnExpression,
+    GraphTableColumnExpressionAfterComma,
+    PropertyGraphPropertyExpression,
+    PropertyGraphPropertyExpressionAfterComma,
+    JsonArrayAggOrderBy,
+    JsonArrayAggOrderByAfterComma,
+    CteName,
+    CteAliasColumn,
+    CteAliasColumnAfterComma,
+    CteContinuation,
+    UpdateWhere,
+    DeleteWhere,
+    ForPortionTarget,
+    ForPortionStart,
+    ForPortionEnd,
+    OnConflictInferenceWhere,
+    OnConflictUpdateWhere,
+    OnConflictSelectWhere,
+    UpdateSetTarget,
+    UpdateSetTargetAfterComma,
+    UpdateSetValue,
+    OnConflictSetTarget,
+    OnConflictSetTargetAfterComma,
+    OnConflictSetValue,
+    MergeSetTarget,
+    MergeSetTargetAfterComma,
+    MergeSetValue,
+    AssignmentSubscriptLowerOrIndex,
+    AssignmentSliceUpper,
+    MergeJoinCondition,
+    MergeWhenCondition,
+    AlterColumnUsing,
+    AlterColumnDefault,
+    AlterColumnExpression,
+    PublicationRowFilter,
+    RuleWhere,
+    ColumnDefault,
+    ColumnCheck,
+    ColumnGenerated,
+    TableCheck,
+    ExclusionWhere,
+    TriggerWhen,
+    IndexPredicate,
+    DomainDefault,
+    DomainCheck,
+    AlterDomainDefault,
+    AlterDomainCheck,
+    CopyWhere,
+    CreatePolicyUsing,
+    CreatePolicyCheck,
+    AlterPolicyUsing,
+    AlterPolicyCheck,
+    ReturnExpression,
+    GraphTableWhere,
+    GraphPathWhere,
+    GraphElementWhere,
+    JsonTableContext,
+    JsonTablePassingArgument,
+    JsonTablePassingArgumentAfterComma,
+    StatisticsExpression,
+    StatisticsExpressionAfterComma,
+    CreateIndexElement,
+    CreateIndexElementAfterComma,
+    ExclusionElement,
+    ExclusionElementAfterComma,
+    OnConflictInferenceElement,
+    OnConflictInferenceElementAfterComma,
+    PartitionKeyExpression,
+    PartitionKeyExpressionAfterComma,
+    JsonTableDefaultBehavior,
+    CallRoutine,
+    InsertTargetRelation,
+    UpdateTargetRelation,
+    DeleteTargetRelation,
+    IndexRelation,
+    AlterTableRelation,
+    InsertColumn,
+}
+
+impl CompletionSlot {
+    fn column_context(self) -> ColumnContext {
+        if matches!(
+            self,
+            Self::AlterColumnUsing
+                | Self::AlterColumnDefault
+                | Self::AlterColumnExpression
+                | Self::PublicationRowFilter
+                | Self::RuleWhere
+                | Self::ColumnCheck
+                | Self::ColumnGenerated
+                | Self::TableCheck
+                | Self::ExclusionWhere
+                | Self::TriggerWhen
+                | Self::IndexPredicate
+                | Self::CreateIndexElement
+                | Self::CreateIndexElementAfterComma
+                | Self::ExclusionElement
+                | Self::ExclusionElementAfterComma
+                | Self::OnConflictInferenceElement
+                | Self::OnConflictInferenceElementAfterComma
+                | Self::CopyWhere
+                | Self::CreatePolicyUsing
+                | Self::CreatePolicyCheck
+                | Self::AlterPolicyUsing
+                | Self::AlterPolicyCheck
+        ) {
+            ColumnContext::TargetRelation
+        } else {
+            ColumnContext::VisibleScope
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -29,6 +265,21 @@ pub enum NameExpectation {
     Column(ColumnContext),
     Function { schema: Option<String> },
     Type { schema: Option<String> },
+    Declaration(DeclarationKind),
+}
+
+impl NameExpectation {
+    pub fn is_reference(&self) -> bool {
+        !matches!(self, Self::Declaration(_))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum DeclarationKind {
+    Cte,
+    Alias,
+    Column,
+    Object(ObjectType),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -90,6 +341,7 @@ pub enum CompletionError {
 pub(crate) struct CompletionRecorder {
     cursor: Option<usize>,
     expectations: Vec<Expectation>,
+    slots: Vec<CompletionSlot>,
 }
 
 pub(crate) type SharedCompletionRecorder = Rc<RefCell<CompletionRecorder>>;
@@ -106,18 +358,22 @@ impl CompletionRecorder {
         self.cursor == Some(location)
     }
 
-    pub(crate) fn record(&mut self, expectation: Expectation) {
+    pub(crate) fn record_at(&mut self, slot: CompletionSlot, expectation: Expectation) {
+        if !self.slots.contains(&slot) {
+            self.slots.push(slot);
+        }
         if !self.expectations.contains(&expectation) {
             self.expectations.push(expectation);
         }
     }
 
-    pub(crate) fn record_expression(&mut self) {
-        self.record_expression_with_tokens(expression_start_tokens().iter().copied());
+    pub(crate) fn record_expression_at(&mut self, slot: CompletionSlot) {
+        self.record_expression_with_tokens(slot, expression_start_tokens().iter().copied());
     }
 
-    pub(crate) fn record_restricted_expression(&mut self) {
+    pub(crate) fn record_restricted_expression_at(&mut self, slot: CompletionSlot) {
         self.record_expression_with_tokens(
+            slot,
             expression_start_tokens()
                 .iter()
                 .copied()
@@ -125,16 +381,22 @@ impl CompletionRecorder {
         );
     }
 
-    fn record_expression_with_tokens(&mut self, tokens: impl IntoIterator<Item = TokenKind>) {
-        self.record(Expectation::Expression);
-        self.record(Expectation::Name(NameExpectation::Column(
-            ColumnContext::VisibleScope,
-        )));
-        self.record(Expectation::Name(NameExpectation::Function {
-            schema: None,
-        }));
+    fn record_expression_with_tokens(
+        &mut self,
+        slot: CompletionSlot,
+        tokens: impl IntoIterator<Item = TokenKind>,
+    ) {
+        self.record_at(slot, Expectation::Expression);
+        self.record_at(
+            slot,
+            Expectation::Name(NameExpectation::Column(slot.column_context())),
+        );
+        self.record_at(
+            slot,
+            Expectation::Name(NameExpectation::Function { schema: None }),
+        );
         for token in tokens {
-            self.record(Expectation::Token(token));
+            self.record_at(slot, Expectation::Token(token));
         }
     }
 }
@@ -244,22 +506,25 @@ pub fn collect_completion(
         .replace("\"\"", "\"");
     let (statement, statement_tokens) = statement_at(sql, cursor_usize, &tokens);
     let scope = collect_scope(&statement_tokens, cursor_usize);
-    let expectations = if suppress_completion_at_cursor(sql, cursor_usize) {
-        Vec::new()
+    let (expectations, slots) = if suppress_completion_at_cursor(sql, cursor_usize) {
+        (Vec::new(), Vec::new())
     } else {
-        let mut expectations = collect_parser_expectations(&statement_tokens, replacement_start);
+        let (mut expectations, slots) =
+            collect_parser_expectations(&statement_tokens, replacement_start);
         let parser_expects_expression = expectations.contains(&Expectation::Expression);
-        for fallback in collect_tricky_expectations(
-            &statement_tokens,
-            replacement_start,
-            &scope,
-            parser_expects_expression,
-        ) {
-            if !expectations.contains(&fallback) {
-                expectations.push(fallback);
+        if !slots.contains(&CompletionSlot::CteContinuation) {
+            for fallback in collect_tricky_expectations(
+                &statement_tokens,
+                replacement_start,
+                &scope,
+                parser_expects_expression,
+            ) {
+                if !expectations.contains(&fallback) {
+                    expectations.push(fallback);
+                }
             }
         }
-        expectations
+        (expectations, slots)
     };
 
     Ok(CompletionContext {
@@ -267,11 +532,15 @@ pub fn collect_completion(
         prefix,
         statement,
         expectations,
+        slots,
         scope,
     })
 }
 
-fn collect_parser_expectations(tokens: &[Token], offset: usize) -> Vec<Expectation> {
+fn collect_parser_expectations(
+    tokens: &[Token],
+    offset: usize,
+) -> (Vec<Expectation>, Vec<CompletionSlot>) {
     let mut prefix: Vec<Token> = tokens
         .iter()
         .filter(|token| token.location() < offset)
@@ -282,8 +551,14 @@ fn collect_parser_expectations(tokens: &[Token], offset: usize) -> Vec<Expectati
     let mut parser = crate::parser::Parser::for_completion(prefix, recorder.clone());
     let _ = parser.parse_completion_statement();
     Rc::try_unwrap(recorder)
-        .map(|recorder| recorder.into_inner().expectations)
-        .unwrap_or_else(|recorder| recorder.borrow().expectations.clone())
+        .map(|recorder| {
+            let recorder = recorder.into_inner();
+            (recorder.expectations, recorder.slots)
+        })
+        .unwrap_or_else(|recorder| {
+            let recorder = recorder.borrow();
+            (recorder.expectations.clone(), recorder.slots.clone())
+        })
 }
 
 pub fn keyword_text(kind: TokenKind) -> Option<&'static str> {
@@ -781,8 +1056,12 @@ fn parse_alias(
 }
 
 fn collect_target_relation(tokens: &[DepthToken]) -> Option<QualifiedName> {
-    let (statement, first) = top_level_dml_statement(tokens)
-        .or_else(|| tokens.first().map(|token| (0, token.token.kind)))?;
+    let first_token = tokens.first()?;
+    let (statement, first) = if first_token.token.kind == TokenKind::With {
+        top_level_dml_statement(tokens)?
+    } else {
+        (0, first_token.token.kind)
+    };
     let start = match first {
         TokenKind::Insert => find_top_level_token_after(tokens, statement, TokenKind::Into)? + 1,
         TokenKind::Update => statement + 1,
@@ -809,6 +1088,36 @@ fn collect_target_relation(tokens: &[DepthToken]) -> Option<QualifiedName> {
             if tokens
                 .iter()
                 .any(|token| token.depth == 0 && token.token.kind == TokenKind::Policy) =>
+        {
+            tokens
+                .iter()
+                .position(|token| token.depth == 0 && token.token.kind == TokenKind::On)
+                .map(|index| index + 1)?
+        }
+        TokenKind::Alter
+            if tokens
+                .iter()
+                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Policy) =>
+        {
+            tokens
+                .iter()
+                .position(|token| token.depth == 0 && token.token.kind == TokenKind::On)
+                .map(|index| index + 1)?
+        }
+        TokenKind::Create
+            if tokens
+                .iter()
+                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Rule) =>
+        {
+            tokens
+                .iter()
+                .position(|token| token.depth == 0 && token.token.kind == TokenKind::To)
+                .map(|index| index + 1)?
+        }
+        TokenKind::Create
+            if tokens
+                .iter()
+                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Trigger) =>
         {
             tokens
                 .iter()
@@ -1168,9 +1477,15 @@ fn target_relation_columns_visible(tokens: &[&Token]) -> bool {
         TokenKind::Create => top_level_tokens_after(tokens, statement).any(|token| {
             matches!(
                 token.kind,
-                TokenKind::Index | TokenKind::Policy | TokenKind::Publication
+                TokenKind::Index
+                    | TokenKind::Policy
+                    | TokenKind::Publication
+                    | TokenKind::Rule
+                    | TokenKind::Trigger
             )
         }),
+        TokenKind::Alter => top_level_tokens_after(tokens, statement)
+            .any(|token| matches!(token.kind, TokenKind::Table | TokenKind::Policy)),
         _ => false,
     }
 }
@@ -1689,7 +2004,7 @@ mod tests {
         let sql = marked.replacen('|', "", 1);
         let tokens = completion_tokens(&sql, cursor);
         let (_, statement_tokens) = statement_at(&sql, cursor, &tokens);
-        collect_parser_expectations(&statement_tokens, cursor)
+        collect_parser_expectations(&statement_tokens, cursor).0
     }
 
     #[test]
@@ -1732,7 +2047,10 @@ mod tests {
             ("SELECT * FROM ROWS FROM (|", Expectation::Expression),
             ("SELECT * FROM XMLTABLE(|", Expectation::Expression),
             ("CREATE STATISTICS s ON |", Expectation::Expression),
-            ("CALL |", Expectation::Expression),
+            (
+                "CALL |",
+                Expectation::Name(NameExpectation::Function { schema: None }),
+            ),
             ("UPDATE t SET value[|", Expectation::Expression),
             (
                 "SELECT * FROM |",

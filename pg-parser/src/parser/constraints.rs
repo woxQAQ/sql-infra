@@ -103,8 +103,10 @@ impl Parser {
                 constraint.is_enforced = true;
                 constraint.initially_valid = true;
                 self.expect(TokenKind::Char('('))?;
-                constraint.raw_expr =
-                    Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                constraint.raw_expr = Some(self.parse_expr_box_strict_until_at(
+                    CompletionSlot::ColumnCheck,
+                    &[TokenKind::Char(')')],
+                )?);
                 self.expect(TokenKind::Char(')'))?;
                 if self.consume(TokenKind::No) {
                     self.expect(TokenKind::Inherit)?;
@@ -114,21 +116,24 @@ impl Parser {
             TokenKind::Default => {
                 self.advance();
                 constraint.contype = ConstrType::Default;
-                constraint.raw_expr = Some(self.parse_b_expr_box_strict_until(&[
-                    TokenKind::Constraint,
-                    TokenKind::Collate,
-                    TokenKind::Not,
-                    TokenKind::NullP,
-                    TokenKind::Unique,
-                    TokenKind::Primary,
-                    TokenKind::Check,
-                    TokenKind::Generated,
-                    TokenKind::References,
-                    TokenKind::Deferrable,
-                    TokenKind::Initially,
-                    TokenKind::Enforced,
-                    TokenKind::Eof,
-                ])?);
+                constraint.raw_expr = Some(self.parse_b_expr_box_strict_until_at(
+                    CompletionSlot::ColumnDefault,
+                    &[
+                        TokenKind::Constraint,
+                        TokenKind::Collate,
+                        TokenKind::Not,
+                        TokenKind::NullP,
+                        TokenKind::Unique,
+                        TokenKind::Primary,
+                        TokenKind::Check,
+                        TokenKind::Generated,
+                        TokenKind::References,
+                        TokenKind::Deferrable,
+                        TokenKind::Initially,
+                        TokenKind::Enforced,
+                        TokenKind::Eof,
+                    ],
+                )?);
             }
             TokenKind::Generated => {
                 self.advance();
@@ -159,8 +164,10 @@ impl Parser {
                     }
                     constraint.contype = ConstrType::Generated;
                     self.expect(TokenKind::Char('('))?;
-                    constraint.raw_expr =
-                        Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                    constraint.raw_expr = Some(self.parse_expr_box_strict_until_at(
+                        CompletionSlot::ColumnGenerated,
+                        &[TokenKind::Char(')')],
+                    )?);
                     self.expect(TokenKind::Char(')'))?;
                     constraint.generated_kind = if self.consume(TokenKind::Stored) {
                         b's'
@@ -221,8 +228,10 @@ impl Parser {
                 constraint.contype = ConstrType::Check;
                 constraint.is_enforced = true;
                 self.expect(TokenKind::Char('('))?;
-                constraint.raw_expr =
-                    Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                constraint.raw_expr = Some(self.parse_expr_box_strict_until_at(
+                    CompletionSlot::TableCheck,
+                    &[TokenKind::Char(')')],
+                )?);
                 self.expect(TokenKind::Char(')'))?;
             }
             TokenKind::Not => {
@@ -294,7 +303,12 @@ impl Parser {
                     let starts_with_cast =
                         self.tokens.get(expr_range.start).map(|token| token.kind)
                             == Some(TokenKind::Cast);
-                    let index_elem = self.parse_index_elem_range(expr_range)?;
+                    let slot = if constraint.exclusions.is_empty() {
+                        CompletionSlot::ExclusionElement
+                    } else {
+                        CompletionSlot::ExclusionElementAfterComma
+                    };
+                    let index_elem = self.parse_index_elem_range(slot, expr_range)?;
                     if let Some(expression) = index_elem.expr.as_deref()
                         && !starts_parenthesized
                         && !is_windowless_function_expression_node(expression, starts_with_cast)
@@ -343,8 +357,10 @@ impl Parser {
                 self.parse_index_constraint_options(&mut constraint)?;
                 if self.consume(TokenKind::Where) {
                     self.expect(TokenKind::Char('('))?;
-                    constraint.where_clause =
-                        Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                    constraint.where_clause = Some(self.parse_expr_box_strict_until_at(
+                        CompletionSlot::ExclusionWhere,
+                        &[TokenKind::Char(')')],
+                    )?);
                     self.expect(TokenKind::Char(')'))?;
                 }
             }

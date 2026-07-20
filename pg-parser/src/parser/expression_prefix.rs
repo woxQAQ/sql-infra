@@ -2,10 +2,19 @@ use super::expression::ExprParser;
 use super::*;
 
 impl ExprParser {
+    pub(super) fn parse_c_expr_at(&mut self, slot: CompletionSlot) -> Option<Node> {
+        let previous = self.completion_slot.replace(slot);
+        let result = self.parse_c_expr();
+        self.completion_slot = previous;
+        result
+    }
+
     pub(super) fn parse_c_expr(&mut self) -> Option<Node> {
         if self.at_completion_cursor() {
             if let Some(recorder) = &self.completion {
-                recorder.borrow_mut().record_restricted_expression();
+                recorder
+                    .borrow_mut()
+                    .record_restricted_expression_at(self.active_completion_slot());
             }
             return self.fail("completion cursor");
         }
@@ -60,9 +69,13 @@ impl ExprParser {
         if self.at_completion_cursor() {
             if let Some(recorder) = &self.completion {
                 if restricted {
-                    recorder.borrow_mut().record_restricted_expression();
+                    recorder
+                        .borrow_mut()
+                        .record_restricted_expression_at(self.active_completion_slot());
                 } else {
-                    recorder.borrow_mut().record_expression();
+                    recorder
+                        .borrow_mut()
+                        .record_expression_at(self.active_completion_slot());
                 }
             }
             return self.fail("completion cursor");
@@ -224,7 +237,11 @@ impl ExprParser {
             TokenKind::Row => {
                 let location = self.advance().location();
                 self.expect(TokenKind::Char('('))?;
-                let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+                let args = self.parse_expr_list_until_at(
+                    CompletionSlot::RowElement,
+                    CompletionSlot::RowElementAfterComma,
+                    TokenKind::Char(')'),
+                )?;
                 self.expect(TokenKind::Char(')'))?;
                 Some(Node::RowExpr(RowExpr {
                     xpr: Expr::new(NodeTag::RowExpr),

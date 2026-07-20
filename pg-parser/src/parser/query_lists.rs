@@ -11,7 +11,11 @@ impl Parser {
     pub(super) fn parse_values_lists(&mut self) -> PResult<NodeList> {
         let mut values = Vec::new();
         while self.consume(TokenKind::Char('(')) {
-            let elements = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            let elements = self.parse_expr_list_strict_until_at(
+                CompletionSlot::ValuesExpression,
+                CompletionSlot::ValuesExpressionAfterComma,
+                &[TokenKind::Char(')')],
+            )?;
             if elements.is_empty() {
                 return Err(self.error_here("VALUES row requires at least one expression"));
             }
@@ -33,10 +37,12 @@ impl Parser {
 
     pub(super) fn parse_res_target_list_strict_until(
         &mut self,
+        first_slot: CompletionSlot,
+        continuation_slot: CompletionSlot,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
         if self.at_completion_cursor() {
-            self.record_expression_completion();
+            self.record_expression_completion_at(first_slot);
         }
         let mut items = Vec::new();
         while !self.at_any(stops) {
@@ -46,7 +52,12 @@ impl Parser {
                 return Err(self.error_here("expected an expression"));
             }
             let (name, expr_range) = self.split_target_alias_range(range);
-            let val = match self.parse_expression_range(expr_range)? {
+            let slot = if items.is_empty() {
+                first_slot
+            } else {
+                continuation_slot
+            };
+            let val = match self.parse_expression_range_at(slot, expr_range)? {
                 Node::AStar(star) => Node::ColumnRef(ColumnRef {
                     node_tag: NodeTag::ColumnRef,
                     fields: vec![Node::AStar(star)],
@@ -65,7 +76,7 @@ impl Parser {
                 break;
             }
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_expression_completion_at(continuation_slot);
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an expression after ','"));
@@ -74,12 +85,14 @@ impl Parser {
         Ok(items)
     }
 
-    pub(super) fn parse_expr_list_strict_until(
+    pub(super) fn parse_expr_list_strict_until_at(
         &mut self,
+        first_slot: CompletionSlot,
+        continuation_slot: CompletionSlot,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
         if self.at_completion_cursor() {
-            self.record_expression_completion();
+            self.record_expression_completion_at(first_slot);
         }
         let mut items = Vec::new();
         while !self.at_any(stops) {
@@ -87,12 +100,17 @@ impl Parser {
             if range.is_empty() {
                 return Err(self.error_here("expected an expression"));
             }
-            items.push(self.parse_expression_range(range)?);
+            let slot = if items.is_empty() {
+                first_slot
+            } else {
+                continuation_slot
+            };
+            items.push(self.parse_expression_range_at(slot, range)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_expression_completion_at(continuation_slot);
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an expression after ','"));
@@ -101,18 +119,28 @@ impl Parser {
         Ok(items)
     }
 
-    pub(super) fn parse_group_by_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+    pub(super) fn parse_group_by_list_until(
+        &mut self,
+        first_slot: CompletionSlot,
+        continuation_slot: CompletionSlot,
+        stops: &[TokenKind],
+    ) -> PResult<NodeList> {
         if self.at_completion_cursor() {
-            self.record_expression_completion();
+            self.record_expression_completion_at(first_slot);
         }
         let mut items = Vec::new();
         while !self.at_any(stops) {
-            items.push(self.parse_group_by_item(stops)?);
+            let slot = if items.is_empty() {
+                first_slot
+            } else {
+                continuation_slot
+            };
+            items.push(self.parse_group_by_item(slot, stops)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_expression_completion_at(continuation_slot);
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected a grouping item after ','"));
@@ -121,7 +149,11 @@ impl Parser {
         Ok(items)
     }
 
-    pub(super) fn parse_group_by_item(&mut self, stops: &[TokenKind]) -> PResult<Node> {
+    pub(super) fn parse_group_by_item(
+        &mut self,
+        slot: CompletionSlot,
+        stops: &[TokenKind],
+    ) -> PResult<Node> {
         if self.at(TokenKind::Char('(')) && self.peek_kind_n(1) == TokenKind::Char(')') {
             let location = self.advance().location();
             self.advance();
@@ -153,9 +185,17 @@ impl Parser {
         if let Some(kind) = kind {
             self.expect(TokenKind::Char('('))?;
             let content = if kind == GroupingSetKind::Sets {
-                self.parse_group_by_list_until(&[TokenKind::Char(')')])?
+                self.parse_group_by_list_until(
+                    CompletionSlot::SelectGroupBy,
+                    CompletionSlot::SelectGroupByAfterComma,
+                    &[TokenKind::Char(')')],
+                )?
             } else {
-                self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?
+                self.parse_expr_list_strict_until_at(
+                    CompletionSlot::SelectGroupBy,
+                    CompletionSlot::SelectGroupByAfterComma,
+                    &[TokenKind::Char(')')],
+                )?
             };
             if content.is_empty() {
                 return Err(self.error_here("grouping set requires at least one item"));
@@ -170,34 +210,38 @@ impl Parser {
         }
 
         let range = self.take_until_top_level_range(&extend_stops(stops, TokenKind::Char(',')));
-        self.parse_expression_range(range)
+        self.parse_expression_range_at(slot, range)
     }
 
-    pub(super) fn parse_expr_box_strict_until(
+    pub(super) fn parse_expr_box_strict_until_at(
         &mut self,
+        slot: CompletionSlot,
         stops: &[TokenKind],
     ) -> PResult<Box<Node>> {
         if self.at_completion_cursor() {
-            self.record_expression_completion();
+            self.record_expression_completion_at(slot);
         }
         let range = self.take_until_top_level_range(stops);
-        self.parse_expression_range(range).map(Box::new)
+        self.parse_expression_range_at(slot, range).map(Box::new)
     }
 
-    pub(super) fn parse_b_expr_box_strict_until(
+    pub(super) fn parse_b_expr_box_strict_until_at(
         &mut self,
+        slot: CompletionSlot,
         stops: &[TokenKind],
     ) -> PResult<Box<Node>> {
         let range = self.take_until_top_level_range(stops);
-        self.parse_b_expression_range(range).map(Box::new)
+        self.parse_b_expression_range_at(slot, range).map(Box::new)
     }
 
     pub(super) fn parse_sort_list_strict_until(
         &mut self,
+        first_slot: CompletionSlot,
+        continuation_slot: CompletionSlot,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
         if self.at_completion_cursor() {
-            self.record_expression_completion();
+            self.record_expression_completion_at(first_slot);
         }
         let mut items = Vec::new();
         while !self.at_any(stops) {
@@ -273,7 +317,7 @@ impl Parser {
                 sortby_dir = SortByDir::Using;
                 expression_end = using_index;
             }
-            let node = self.parse_expression_range(range.start..expression_end)?;
+            let node = self.parse_expression_range_at(first_slot, range.start..expression_end)?;
             items.push(Node::SortBy(SortBy {
                 node_tag: NodeTag::SortBy,
                 node: Some(Box::new(node)),
@@ -286,7 +330,7 @@ impl Parser {
                 break;
             }
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_expression_completion_at(continuation_slot);
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an ORDER BY expression after ','"));

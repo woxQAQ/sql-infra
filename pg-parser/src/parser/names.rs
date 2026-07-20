@@ -61,7 +61,8 @@ impl Parser {
             .ok_or_else(|| self.error_here("function expression requires '('"))?;
         let close = find_matching_close(remaining, open)
             .ok_or_else(|| self.error_here("unterminated function expression"))?;
-        let expression = self.parse_expression_range(start..start + close + 1)?;
+        let expression =
+            self.parse_expression_range_at(CompletionSlot::FromItem, start..start + close + 1)?;
         if !is_function_expression_node(&expression) {
             return Err(self.error_here("expected a function expression"));
         }

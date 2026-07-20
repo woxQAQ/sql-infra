@@ -99,7 +99,11 @@ impl ExprParser {
                 ..SubLink::default()
             }));
         }
-        let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+        let args = self.parse_expr_list_until_at(
+            CompletionSlot::ParenthesizedExpression,
+            CompletionSlot::ParenthesizedExpressionAfterComma,
+            TokenKind::Char(')'),
+        )?;
         self.expect(TokenKind::Char(')'))?;
         if args.is_empty() {
             return self.fail("parenthesized expression cannot be empty");
@@ -130,7 +134,11 @@ impl ExprParser {
     pub(super) fn parse_keyword_call_as_coalesce(&mut self) -> Option<Node> {
         let location = self.advance().location();
         self.expect(TokenKind::Char('('))?;
-        let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+        let args = self.parse_expr_list_until_at(
+            CompletionSlot::CoalesceArgument,
+            CompletionSlot::CoalesceArgumentAfterComma,
+            TokenKind::Char(')'),
+        )?;
         self.expect(TokenKind::Char(')'))?;
         if args.is_empty() {
             return self.fail("COALESCE requires at least one argument");
@@ -146,7 +154,11 @@ impl ExprParser {
     pub(super) fn parse_keyword_call_as_minmax(&mut self) -> Option<Node> {
         let token = self.advance().clone();
         self.expect(TokenKind::Char('('))?;
-        let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+        let args = self.parse_expr_list_until_at(
+            CompletionSlot::MinmaxArgument,
+            CompletionSlot::MinmaxArgumentAfterComma,
+            TokenKind::Char(')'),
+        )?;
         self.expect(TokenKind::Char(')'))?;
         if args.is_empty() {
             return self.fail("GREATEST/LEAST requires at least one argument");
@@ -167,7 +179,11 @@ impl ExprParser {
     pub(super) fn parse_keyword_call_as_aexpr(&mut self, kind: AExprKind) -> Option<Node> {
         let token = self.advance().clone();
         self.expect(TokenKind::Char('('))?;
-        let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+        let args = self.parse_expr_list_until_at(
+            CompletionSlot::NullifArgument,
+            CompletionSlot::NullifArgumentAfterComma,
+            TokenKind::Char(')'),
+        )?;
         self.expect(TokenKind::Char(')'))?;
         if args.len() != 2 {
             return self.fail("NULLIF requires exactly two arguments");
@@ -206,7 +222,11 @@ impl ExprParser {
                         sublink
                     })
                 } else {
-                    let elements = self.parse_expr_list_until(TokenKind::Char(')'))?;
+                    let elements = self.parse_expr_list_until_at(
+                        CompletionSlot::InListExpression,
+                        CompletionSlot::InListExpressionAfterComma,
+                        TokenKind::Char(')'),
+                    )?;
                     if elements.is_empty() {
                         return self.fail("IN requires at least one expression");
                     }
@@ -600,19 +620,36 @@ impl ExprParser {
         Some(type_name)
     }
 
-    pub(super) fn parse_expr_list_until(&mut self, stop: TokenKind) -> Option<NodeList> {
+    pub(super) fn parse_expr_list_until_at(
+        &mut self,
+        first_slot: CompletionSlot,
+        continuation_slot: CompletionSlot,
+        stop: TokenKind,
+    ) -> Option<NodeList> {
         if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
-            recorder.borrow_mut().record_expression();
+            recorder.borrow_mut().record_expression_at(first_slot);
         }
         let mut items = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
-            items.push(self.parse_expr(0)?);
+            let slot = if items.is_empty() {
+                first_slot
+            } else {
+                continuation_slot
+            };
+            items.push(self.parse_expr_at(slot, 0)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
             if self.at(stop) || self.at(TokenKind::Eof) {
+                if self.at_completion_cursor()
+                    && let Some(recorder) = &self.completion
+                {
+                    recorder
+                        .borrow_mut()
+                        .record_expression_at(continuation_slot);
+                }
                 if self.error.is_none() {
                     self.error = Some(ParseError::ranged(
                         self.peek().range,
@@ -699,7 +736,9 @@ impl ExprParser {
         if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
-            recorder.borrow_mut().record(Expectation::Token(kind));
+            recorder
+                .borrow_mut()
+                .record_at(self.active_completion_slot(), Expectation::Token(kind));
             return false;
         }
         if self.at(kind) {
@@ -714,7 +753,9 @@ impl ExprParser {
         if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
-            recorder.borrow_mut().record(Expectation::Token(kind));
+            recorder
+                .borrow_mut()
+                .record_at(self.active_completion_slot(), Expectation::Token(kind));
         }
         if self.at(kind) {
             Some(self.advance().clone())

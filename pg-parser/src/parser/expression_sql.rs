@@ -7,14 +7,16 @@ impl ExprParser {
         let arg = if self.at(TokenKind::When) {
             None
         } else {
-            Some(Box::new(self.parse_expr(0)?))
+            Some(Box::new(
+                self.parse_expr_at(CompletionSlot::CaseOperand, 0)?,
+            ))
         };
         let mut args = Vec::new();
         while self.consume(TokenKind::When) {
             let when_location = self.previous_location();
-            let expr = self.parse_expr(0)?;
+            let expr = self.parse_expr_at(CompletionSlot::CaseWhenCondition, 0)?;
             self.expect(TokenKind::Then)?;
-            let result = self.parse_expr(0)?;
+            let result = self.parse_expr_at(CompletionSlot::CaseThenResult, 0)?;
             args.push(Node::CaseWhen(CaseWhen {
                 xpr: Expr::new(NodeTag::CaseWhen),
                 expr: Some(Box::new(expr)),
@@ -26,7 +28,9 @@ impl ExprParser {
             return None;
         }
         let defresult = if self.consume(TokenKind::Else) {
-            Some(Box::new(self.parse_expr(0)?))
+            Some(Box::new(
+                self.parse_expr_at(CompletionSlot::CaseElseResult, 0)?,
+            ))
         } else {
             None
         };
@@ -44,7 +48,11 @@ impl ExprParser {
     pub(super) fn parse_grouping_func(&mut self) -> Option<Node> {
         let location = self.expect(TokenKind::Grouping)?.location();
         self.expect(TokenKind::Char('('))?;
-        let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+        let args = self.parse_expr_list_until_at(
+            CompletionSlot::GroupingArgument,
+            CompletionSlot::GroupingArgumentAfterComma,
+            TokenKind::Char(')'),
+        )?;
         self.expect(TokenKind::Char(')'))?;
         if args.is_empty() {
             return self.fail("GROUPING requires at least one argument");
@@ -60,7 +68,7 @@ impl ExprParser {
     pub(super) fn parse_cast_or_treat(&mut self) -> Option<Node> {
         let token = self.advance().clone();
         self.expect(TokenKind::Char('('))?;
-        let arg = self.parse_expr(0)?;
+        let arg = self.parse_expr_at(CompletionSlot::CastArgument, 0)?;
         self.expect(TokenKind::As)?;
         let type_tokens = self.take_until_balanced(TokenKind::Char(')'));
         let type_name = parse_type_name_tokens(type_tokens).ok()?;
@@ -108,7 +116,7 @@ impl ExprParser {
         let field = token_name(&field_token)?;
         self.advance();
         self.expect(TokenKind::From)?;
-        let arg = self.parse_expr(0)?;
+        let arg = self.parse_expr_at(CompletionSlot::ExtractArgument, 0)?;
         self.expect(TokenKind::Char(')'))?;
         Some(Node::FuncCall(FuncCall {
             node_tag: NodeTag::FuncCall,
@@ -126,7 +134,7 @@ impl ExprParser {
     pub(super) fn parse_normalize_func(&mut self) -> Option<Node> {
         let location = self.expect(TokenKind::Normalize)?.location();
         self.expect(TokenKind::Char('('))?;
-        let mut args = vec![self.parse_expr(0)?];
+        let mut args = vec![self.parse_expr_at(CompletionSlot::NormalizeArgument, 0)?];
         if self.consume(TokenKind::Char(',')) {
             let form_token = self.advance().clone();
             let form = match form_token.kind {
@@ -166,9 +174,9 @@ impl ExprParser {
     pub(super) fn parse_position_func(&mut self) -> Option<Node> {
         let location = self.expect(TokenKind::Position)?.location();
         self.expect(TokenKind::Char('('))?;
-        let needle = self.parse_b_expr(0)?;
+        let needle = self.parse_b_expr_at(CompletionSlot::PositionNeedle, 0)?;
         self.expect(TokenKind::InP)?;
-        let haystack = self.parse_b_expr(0)?;
+        let haystack = self.parse_b_expr_at(CompletionSlot::PositionHaystack, 0)?;
         self.expect(TokenKind::Char(')'))?;
         Some(self.make_sql_syntax_call("position", vec![haystack, needle], location))
     }
@@ -184,22 +192,25 @@ impl ExprParser {
                 ..FuncCall::default()
             }));
         }
-        let first = self.parse_function_argument()?;
+        let first = self.parse_function_argument_at(CompletionSlot::OverlaySource)?;
         if self.consume(TokenKind::Placing) {
             if matches!(&first, Node::NamedArgExpr(_)) {
                 return self.fail("named arguments are not allowed in SQL OVERLAY syntax");
             }
-            let replacement = self.parse_expr(0)?;
+            let replacement = self.parse_expr_at(CompletionSlot::OverlayReplacement, 0)?;
             self.expect(TokenKind::From)?;
-            let start = self.parse_expr(0)?;
+            let start = self.parse_expr_at(CompletionSlot::OverlayStart, 0)?;
             let mut args = vec![first, replacement, start];
             if self.consume(TokenKind::For) {
-                args.push(self.parse_expr(0)?);
+                args.push(self.parse_expr_at(CompletionSlot::OverlayCount, 0)?);
             }
             self.expect(TokenKind::Char(')'))?;
             Some(self.make_sql_syntax_call("overlay", args, location))
         } else {
-            let args = self.parse_plain_function_arguments_after(first)?;
+            let args = self.parse_plain_function_arguments_after_at(
+                first,
+                CompletionSlot::FunctionArgumentAfterComma,
+            )?;
             self.expect(TokenKind::Char(')'))?;
             Some(Node::FuncCall(FuncCall {
                 node_tag: NodeTag::FuncCall,
@@ -223,8 +234,11 @@ impl ExprParser {
             }));
         }
         if self.starts_named_function_argument() {
-            let first = self.parse_function_argument()?;
-            let args = self.parse_plain_function_arguments_after(first)?;
+            let first = self.parse_function_argument_at(CompletionSlot::FunctionArgument)?;
+            let args = self.parse_plain_function_arguments_after_at(
+                first,
+                CompletionSlot::FunctionArgumentAfterComma,
+            )?;
             self.expect(TokenKind::Char(')'))?;
             return Some(Node::FuncCall(FuncCall {
                 node_tag: NodeTag::FuncCall,
@@ -234,20 +248,20 @@ impl ExprParser {
                 ..FuncCall::default()
             }));
         }
-        let first = self.parse_expr(36)?;
+        let first = self.parse_expr_at(CompletionSlot::SubstringSource, 36)?;
         let args = match self.peek_kind() {
             TokenKind::From => {
                 self.advance();
-                let second = self.parse_expr(0)?;
+                let second = self.parse_expr_at(CompletionSlot::SubstringStart, 0)?;
                 let mut args = vec![first, second];
                 if self.consume(TokenKind::For) {
-                    args.push(self.parse_expr(0)?);
+                    args.push(self.parse_expr_at(CompletionSlot::SubstringCount, 0)?);
                 }
                 args
             }
             TokenKind::For => {
                 self.advance();
-                let count = self.parse_expr(0)?;
+                let count = self.parse_expr_at(CompletionSlot::SubstringCount, 0)?;
                 vec![
                     first,
                     Node::AConst(AConst::integer(1, -1)),
@@ -266,13 +280,16 @@ impl ExprParser {
             }
             TokenKind::Similar => {
                 self.advance();
-                let pattern = self.parse_expr(36)?;
+                let pattern = self.parse_expr_at(CompletionSlot::SubstringPattern, 36)?;
                 self.expect(TokenKind::Escape)?;
-                let escape = self.parse_expr(36)?;
+                let escape = self.parse_expr_at(CompletionSlot::SubstringEscape, 36)?;
                 vec![first, pattern, escape]
             }
             _ => {
-                let args = self.parse_plain_function_arguments_after(first)?;
+                let args = self.parse_plain_function_arguments_after_at(
+                    first,
+                    CompletionSlot::FunctionArgumentAfterComma,
+                )?;
                 self.expect(TokenKind::Char(')'))?;
                 return Some(Node::FuncCall(FuncCall {
                     node_tag: NodeTag::FuncCall,
@@ -299,17 +316,25 @@ impl ExprParser {
             "btrim"
         };
         let args = if self.consume(TokenKind::From) {
-            self.parse_expr_list_until(TokenKind::Char(')'))?
+            self.parse_expr_list_until_at(
+                CompletionSlot::TrimSource,
+                CompletionSlot::TrimSourceAfterComma,
+                TokenKind::Char(')'),
+            )?
         } else {
-            let first = self.parse_expr(0)?;
+            let first = self.parse_expr_at(CompletionSlot::TrimArgument, 0)?;
             if self.consume(TokenKind::From) {
-                let mut values = self.parse_expr_list_until(TokenKind::Char(')'))?;
+                let mut values = self.parse_expr_list_until_at(
+                    CompletionSlot::TrimSource,
+                    CompletionSlot::TrimSourceAfterComma,
+                    TokenKind::Char(')'),
+                )?;
                 values.push(first);
                 values
             } else {
                 let mut values = vec![first];
                 while self.consume(TokenKind::Char(',')) {
-                    values.push(self.parse_expr(0)?);
+                    values.push(self.parse_expr_at(CompletionSlot::TrimArgumentAfterComma, 0)?);
                 }
                 values
             }
@@ -324,12 +349,12 @@ impl ExprParser {
     pub(super) fn parse_xmlexists_func(&mut self) -> Option<Node> {
         let location = self.expect(TokenKind::Xmlexists)?.location();
         self.expect(TokenKind::Char('('))?;
-        let xpath = self.parse_c_expr()?;
+        let xpath = self.parse_c_expr_at(CompletionSlot::XmlExistsXpath)?;
         self.expect(TokenKind::Passing)?;
         if self.at(TokenKind::By) {
             self.parse_xml_passing_mechanism()?;
         }
-        let document = self.parse_c_expr()?;
+        let document = self.parse_c_expr_at(CompletionSlot::XmlExistsDocument)?;
         if self.at(TokenKind::By) {
             self.parse_xml_passing_mechanism()?;
         }

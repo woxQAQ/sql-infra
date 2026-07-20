@@ -70,7 +70,7 @@ impl Parser {
             .map_or_else(|| self.location(), Token::location);
         if range.is_empty() {
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_expression_completion_at(CompletionSlot::StatisticsExpression);
             }
             return Err(ParseError::new(
                 location,
@@ -78,6 +78,11 @@ impl Parser {
             ));
         }
         if self.tokens[range.end - 1].kind == TokenKind::Char(',') {
+            if self.at_completion_cursor() {
+                self.record_expression_completion_at(
+                    CompletionSlot::StatisticsExpressionAfterComma,
+                );
+            }
             return Err(ParseError::new(
                 location,
                 "statistics parameter list cannot end with ','",
@@ -102,7 +107,13 @@ impl Parser {
 
         ranges
             .into_iter()
-            .map(|item_range| {
+            .enumerate()
+            .map(|(index, item_range)| {
+                let slot = if index == 0 {
+                    CompletionSlot::StatisticsExpression
+                } else {
+                    CompletionSlot::StatisticsExpressionAfterComma
+                };
                 let tokens = &self.tokens[item_range.clone()];
                 let item_location = tokens.first().map_or(location, Token::location);
                 if tokens.len() == 1
@@ -131,11 +142,14 @@ impl Parser {
                             "unexpected token after statistics expression",
                         ));
                     }
-                    self.parse_expression_range(item_range.start + 1..item_range.start + close)?
+                    self.parse_expression_range_at(
+                        slot,
+                        item_range.start + 1..item_range.start + close,
+                    )?
                 } else {
                     let starts_with_cast =
                         tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-                    let expression = self.parse_expression_range(item_range)?;
+                    let expression = self.parse_expression_range_at(slot, item_range)?;
                     if !is_windowless_function_expression_node(&expression, starts_with_cast) {
                         return Err(ParseError::new(
                             item_location,

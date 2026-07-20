@@ -26,7 +26,10 @@ impl Parser {
                 TokenKind::DomainP,
                 TokenKind::Extension,
             ] {
-                self.record_completion(Expectation::Token(token));
+                self.record_completion_at(
+                    CompletionSlot::CreateObjectKind,
+                    Expectation::Token(token),
+                );
             }
             return Err(self.error_here("completion cursor"));
         }

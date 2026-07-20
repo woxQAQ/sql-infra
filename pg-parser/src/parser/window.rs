@@ -53,25 +53,33 @@ impl Parser {
         }
         if self.consume(TokenKind::Partition) {
             self.expect(TokenKind::By)?;
-            window.partition_clause = self.parse_expr_list_strict_until(&[
-                TokenKind::Order,
-                TokenKind::Rows,
-                TokenKind::Range,
-                TokenKind::Groups,
-                terminator,
-            ])?;
+            window.partition_clause = self.parse_expr_list_strict_until_at(
+                CompletionSlot::WindowPartitionExpression,
+                CompletionSlot::WindowPartitionExpressionAfterComma,
+                &[
+                    TokenKind::Order,
+                    TokenKind::Rows,
+                    TokenKind::Range,
+                    TokenKind::Groups,
+                    terminator,
+                ],
+            )?;
             if window.partition_clause.is_empty() {
                 return Err(self.error_here("PARTITION BY requires an expression"));
             }
         }
         if self.consume(TokenKind::Order) {
             self.expect(TokenKind::By)?;
-            window.order_clause = self.parse_sort_list_strict_until(&[
-                TokenKind::Rows,
-                TokenKind::Range,
-                TokenKind::Groups,
-                terminator,
-            ])?;
+            window.order_clause = self.parse_sort_list_strict_until(
+                CompletionSlot::WindowOrderExpression,
+                CompletionSlot::WindowOrderExpressionAfterComma,
+                &[
+                    TokenKind::Rows,
+                    TokenKind::Range,
+                    TokenKind::Groups,
+                    terminator,
+                ],
+            )?;
             if window.order_clause.is_empty() {
                 return Err(self.error_here("ORDER BY requires a sort expression"));
             }
@@ -102,9 +110,11 @@ impl Parser {
         self.advance();
         window.frame_options = FRAMEOPTION_NONDEFAULT | frame_mode;
         if self.consume(TokenKind::Between) {
-            let (start_options, start_offset) = self.parse_window_frame_bound()?;
+            let (start_options, start_offset) =
+                self.parse_window_frame_bound(CompletionSlot::WindowFrameStartOffset)?;
             self.expect(TokenKind::And)?;
-            let (end_start_options, end_offset) = self.parse_window_frame_bound()?;
+            let (end_start_options, end_offset) =
+                self.parse_window_frame_bound(CompletionSlot::WindowFrameEndOffset)?;
             let frame_options = start_options | (end_start_options << 1) | FRAMEOPTION_BETWEEN;
             if frame_options & FRAMEOPTION_START_UNBOUNDED_FOLLOWING != 0
                 || frame_options & FRAMEOPTION_END_UNBOUNDED_PRECEDING != 0
@@ -121,7 +131,8 @@ impl Parser {
             window.start_offset = start_offset;
             window.end_offset = end_offset;
         } else {
-            let (start_options, start_offset) = self.parse_window_frame_bound()?;
+            let (start_options, start_offset) =
+                self.parse_window_frame_bound(CompletionSlot::WindowFrameStartOffset)?;
             if start_options
                 & (FRAMEOPTION_START_UNBOUNDED_FOLLOWING | FRAMEOPTION_START_OFFSET_FOLLOWING)
                 != 0
@@ -157,7 +168,10 @@ impl Parser {
         Ok(())
     }
 
-    pub(super) fn parse_window_frame_bound(&mut self) -> PResult<(i32, Option<Box<Node>>)> {
+    pub(super) fn parse_window_frame_bound(
+        &mut self,
+        slot: CompletionSlot,
+    ) -> PResult<(i32, Option<Box<Node>>)> {
         if self.consume(TokenKind::Unbounded) {
             if self.consume(TokenKind::Preceding) {
                 return Ok((FRAMEOPTION_START_UNBOUNDED_PRECEDING, None));
@@ -169,8 +183,8 @@ impl Parser {
             self.expect(TokenKind::Row)?;
             return Ok((FRAMEOPTION_START_CURRENT_ROW, None));
         }
-        let offset =
-            self.parse_expr_box_strict_until(&[TokenKind::Preceding, TokenKind::Following])?;
+        let offset = self
+            .parse_expr_box_strict_until_at(slot, &[TokenKind::Preceding, TokenKind::Following])?;
         if self.consume(TokenKind::Preceding) {
             Ok((FRAMEOPTION_START_OFFSET_PRECEDING, Some(offset)))
         } else {

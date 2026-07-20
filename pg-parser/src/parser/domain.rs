@@ -61,14 +61,17 @@ impl Parser {
             let (contype, raw_expr) = match self.peek_kind() {
                 TokenKind::Default => {
                     self.advance();
-                    let raw_expr = Some(self.parse_expr_box_strict_until(&[
-                        TokenKind::Constraint,
-                        TokenKind::Not,
-                        TokenKind::Check,
-                        TokenKind::Collate,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?);
+                    let raw_expr = Some(self.parse_expr_box_strict_until_at(
+                        CompletionSlot::DomainDefault,
+                        &[
+                            TokenKind::Constraint,
+                            TokenKind::Not,
+                            TokenKind::Check,
+                            TokenKind::Collate,
+                            TokenKind::Char(';'),
+                            TokenKind::Eof,
+                        ],
+                    )?);
                     (ConstrType::Default, raw_expr)
                 }
                 TokenKind::Not => {
@@ -83,7 +86,10 @@ impl Parser {
                 TokenKind::Check => {
                     self.advance();
                     self.expect(TokenKind::Char('('))?;
-                    let raw_expr = Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                    let raw_expr = Some(self.parse_expr_box_strict_until_at(
+                        CompletionSlot::DomainCheck,
+                        &[TokenKind::Char(')')],
+                    )?);
                     self.expect(TokenKind::Char(')'))?;
                     (ConstrType::Check, raw_expr)
                 }
@@ -160,11 +166,10 @@ impl Parser {
                 self.advance();
                 if self.consume(TokenKind::Default) {
                     stmt.subtype = AlterDomainType::AlterDefault;
-                    stmt.def =
-                        Some(self.parse_expr_box_strict_until(&[
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ])?);
+                    stmt.def = Some(self.parse_expr_box_strict_until_at(
+                        CompletionSlot::AlterDomainDefault,
+                        &[TokenKind::Char(';'), TokenKind::Eof],
+                    )?);
                 } else if self.consume(TokenKind::Not) {
                     self.expect(TokenKind::NullP)?;
                     stmt.subtype = AlterDomainType::SetNotNull;
@@ -235,7 +240,10 @@ impl Parser {
             TokenKind::Check => {
                 self.advance();
                 self.expect(TokenKind::Char('('))?;
-                let raw_expr = Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                let raw_expr = Some(self.parse_expr_box_strict_until_at(
+                    CompletionSlot::AlterDomainCheck,
+                    &[TokenKind::Char(')')],
+                )?);
                 self.expect(TokenKind::Char(')'))?;
                 (ConstrType::Check, raw_expr, Vec::new())
             }

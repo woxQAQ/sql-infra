@@ -58,7 +58,7 @@ impl Parser {
     pub(super) fn parse_alter_table_after_kind(&mut self, objtype: ObjectType) -> PResult<Node> {
         let missing_ok = self.consume_if_exists()?;
         if self.at_completion_cursor() {
-            self.record_relation_completion();
+            self.record_relation_completion_at(CompletionSlot::AlterTableRelation);
             return Err(self.error_here("completion cursor"));
         }
         let relation = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
@@ -488,11 +488,10 @@ impl Parser {
                         None
                     };
                     let raw_default = if self.consume(TokenKind::Using) {
-                        Some(self.parse_expr_box_strict_until(&[
-                            TokenKind::Char(','),
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ])?)
+                        Some(self.parse_expr_box_strict_until_at(
+                            CompletionSlot::AlterColumnUsing,
+                            &[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof],
+                        )?)
                     } else {
                         None
                     };
@@ -514,11 +513,10 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::ColumnDefault;
-                            cmd.def = Some(self.parse_expr_box_strict_until(&[
-                                TokenKind::Char(','),
-                                TokenKind::Char(';'),
-                                TokenKind::Eof,
-                            ])?);
+                            cmd.def = Some(self.parse_expr_box_strict_until_at(
+                                CompletionSlot::AlterColumnDefault,
+                                &[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof],
+                            )?);
                         }
                         TokenKind::Not => {
                             self.advance();
@@ -540,8 +538,10 @@ impl Parser {
                             self.expect(TokenKind::As)?;
                             self.expect(TokenKind::Char('('))?;
                             cmd.subtype = AlterTableType::SetExpression;
-                            cmd.def =
-                                Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?);
+                            cmd.def = Some(self.parse_expr_box_strict_until_at(
+                                CompletionSlot::AlterColumnExpression,
+                                &[TokenKind::Char(')')],
+                            )?);
                             self.expect(TokenKind::Char(')'))?;
                         }
                         TokenKind::Statistics => {

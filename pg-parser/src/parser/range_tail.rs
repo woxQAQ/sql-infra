@@ -12,12 +12,17 @@ impl Parser {
             }
             while !self.at(TokenKind::Char(')')) {
                 let target_location = self.location();
+                let slot = if namespaces.is_empty() {
+                    CompletionSlot::XmlTableNamespace
+                } else {
+                    CompletionSlot::XmlTableNamespaceAfterComma
+                };
                 if self.consume(TokenKind::Default) {
                     let range = self
                         .take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
                     namespaces.push(Node::ResTarget(ResTarget {
                         node_tag: NodeTag::ResTarget,
-                        val: Some(Box::new(self.parse_b_expression_range(range)?)),
+                        val: Some(Box::new(self.parse_b_expression_range_at(slot, range)?)),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
                     }));
@@ -31,7 +36,9 @@ impl Parser {
                     namespaces.push(Node::ResTarget(ResTarget {
                         node_tag: NodeTag::ResTarget,
                         name: Some(name),
-                        val: Some(Box::new(self.parse_b_expression_range(expression_range)?)),
+                        val: Some(Box::new(
+                            self.parse_b_expression_range_at(slot, expression_range)?,
+                        )),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
                     }));
@@ -47,7 +54,9 @@ impl Parser {
             self.expect(TokenKind::Char(','))?;
         }
         let row_range = self.take_until_top_level_range(&[TokenKind::Passing]);
-        let rowexpr = Box::new(self.parse_c_expression_range(row_range)?);
+        let rowexpr = Box::new(
+            self.parse_c_expression_range_at(CompletionSlot::XmlTableRowExpression, row_range)?,
+        );
         self.expect(TokenKind::Passing)?;
         if self.consume(TokenKind::By)
             && !(self.consume(TokenKind::RefP) || self.consume(TokenKind::ValueP))
@@ -64,7 +73,8 @@ impl Parser {
         {
             doc_range.end -= 2;
         }
-        let docexpr = self.parse_c_expression_range(doc_range)?;
+        let docexpr = self
+            .parse_c_expression_range_at(CompletionSlot::XmlTableDocumentExpression, doc_range)?;
         self.expect(TokenKind::Columns)?;
         let mut columns = Vec::new();
         if self.at(TokenKind::Char(')')) {
@@ -196,7 +206,7 @@ impl Parser {
                     qual_stops.push(stop);
                 }
             }
-            Some(self.parse_expr_box_strict_until(&qual_stops)?)
+            Some(self.parse_expr_box_strict_until_at(CompletionSlot::JoinOn, &qual_stops)?)
         } else if self.consume(TokenKind::Using) {
             if !needs_qual || is_natural {
                 return Err(self.error_here("this JOIN form does not accept USING"));

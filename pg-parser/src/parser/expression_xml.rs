@@ -21,7 +21,11 @@ impl ExprParser {
         };
         match token.kind {
             TokenKind::Xmlconcat => {
-                expr.args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+                expr.args = self.parse_expr_list_until_at(
+                    CompletionSlot::XmlConcatArgument,
+                    CompletionSlot::XmlConcatArgumentAfterComma,
+                    TokenKind::Char(')'),
+                )?;
                 if expr.args.is_empty() {
                     return self.fail("XMLCONCAT requires at least one argument");
                 }
@@ -40,21 +44,37 @@ impl ExprParser {
                 if self.consume(TokenKind::Char(',')) {
                     if self.consume(TokenKind::Xmlattributes) {
                         self.expect(TokenKind::Char('('))?;
-                        expr.named_args = self.parse_xml_labeled_expr_list(TokenKind::Char(')'))?;
+                        expr.named_args = self.parse_xml_labeled_expr_list(
+                            CompletionSlot::XmlAttributeExpression,
+                            CompletionSlot::XmlAttributeExpressionAfterComma,
+                            TokenKind::Char(')'),
+                        )?;
                         if expr.named_args.is_empty() {
                             return self.fail("XMLATTRIBUTES requires at least one expression");
                         }
                         self.expect(TokenKind::Char(')'))?;
                         if self.consume(TokenKind::Char(',')) {
-                            expr.args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+                            expr.args = self.parse_expr_list_until_at(
+                                CompletionSlot::XmlElementContent,
+                                CompletionSlot::XmlElementContentAfterComma,
+                                TokenKind::Char(')'),
+                            )?;
                         }
                     } else {
-                        expr.args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+                        expr.args = self.parse_expr_list_until_at(
+                            CompletionSlot::XmlElementContent,
+                            CompletionSlot::XmlElementContentAfterComma,
+                            TokenKind::Char(')'),
+                        )?;
                     }
                 }
             }
             TokenKind::Xmlforest => {
-                expr.named_args = self.parse_xml_labeled_expr_list(TokenKind::Char(')'))?;
+                expr.named_args = self.parse_xml_labeled_expr_list(
+                    CompletionSlot::XmlForestExpression,
+                    CompletionSlot::XmlForestExpressionAfterComma,
+                    TokenKind::Char(')'),
+                )?;
                 if expr.named_args.is_empty() {
                     return self.fail("XMLFOREST requires at least one expression");
                 }
@@ -66,7 +86,7 @@ impl ExprParser {
                     self.expect(TokenKind::ContentP)?;
                     XmlOptionType::Content
                 };
-                let value = self.parse_expr(0)?;
+                let value = self.parse_expr_at(CompletionSlot::XmlParseValue, 0)?;
                 let preserve = if self.consume(TokenKind::Preserve) {
                     self.expect(TokenKind::WhitespaceP)?;
                     true
@@ -98,18 +118,21 @@ impl ExprParser {
                     .or_else(|| self.fail("XMLPI NAME requires a column label"))?,
                 );
                 if self.consume(TokenKind::Char(',')) {
-                    expr.args.push(self.parse_expr(0)?);
+                    expr.args
+                        .push(self.parse_expr_at(CompletionSlot::XmlPiValue, 0)?);
                 }
             }
             TokenKind::Xmlroot => {
-                expr.args.push(self.parse_expr(0)?);
+                expr.args
+                    .push(self.parse_expr_at(CompletionSlot::XmlRootDocument, 0)?);
                 self.expect(TokenKind::Char(','))?;
                 self.expect(TokenKind::VersionP)?;
                 if self.consume(TokenKind::No) {
                     self.expect(TokenKind::ValueP)?;
                     expr.args.push(Node::AConst(AConst::null(-1)));
                 } else {
-                    expr.args.push(self.parse_expr(0)?);
+                    expr.args
+                        .push(self.parse_expr_at(CompletionSlot::XmlRootVersion, 0)?);
                 }
                 let standalone = if self.consume(TokenKind::Char(',')) {
                     self.expect(TokenKind::StandaloneP)?;
@@ -135,16 +158,26 @@ impl ExprParser {
         Some(Node::XmlExpr(expr))
     }
 
-    pub(super) fn parse_xml_labeled_expr_list(&mut self, stop: TokenKind) -> Option<NodeList> {
+    pub(super) fn parse_xml_labeled_expr_list(
+        &mut self,
+        first_slot: CompletionSlot,
+        continuation_slot: CompletionSlot,
+        stop: TokenKind,
+    ) -> Option<NodeList> {
         if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
-            recorder.borrow_mut().record_expression();
+            recorder.borrow_mut().record_expression_at(first_slot);
         }
         let mut targets = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
             let location = self.location();
-            let value = self.parse_expr(0)?;
+            let slot = if targets.is_empty() {
+                first_slot
+            } else {
+                continuation_slot
+            };
+            let value = self.parse_expr_at(slot, 0)?;
             let name = if self.consume(TokenKind::As) {
                 Some(
                     self.consume_identifier_in_categories(&[
@@ -168,7 +201,14 @@ impl ExprParser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at(stop) {
+            if self.at(stop) || self.at(TokenKind::Eof) {
+                if self.at_completion_cursor()
+                    && let Some(recorder) = &self.completion
+                {
+                    recorder
+                        .borrow_mut()
+                        .record_expression_at(continuation_slot);
+                }
                 return self.fail("expected an XML expression after ','");
             }
         }
@@ -184,7 +224,7 @@ impl ExprParser {
             self.expect(TokenKind::ContentP)?;
             XmlOptionType::Content
         };
-        let expr = self.parse_expr(0)?;
+        let expr = self.parse_expr_at(CompletionSlot::XmlSerializeValue, 0)?;
         self.expect(TokenKind::As)?;
         let mut type_tokens = Vec::new();
         while !matches!(

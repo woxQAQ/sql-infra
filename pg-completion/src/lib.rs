@@ -24,6 +24,7 @@ pub struct CompletionResult {
 pub struct CompletionItem {
     pub label: String,
     pub kind: CompletionKind,
+    pub catalog_identity: Option<CatalogObjectIdentity>,
     pub insert_text: String,
     pub detail: Option<String>,
     pub documentation: Option<String>,
@@ -32,15 +33,20 @@ pub struct CompletionItem {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum CompletionKind {
     Keyword,
-    Schema,
-    Table,
-    View,
-    MaterializedView,
-    Column,
-    Function,
-    Type,
+    Catalog(CatalogObjectKind),
     Cte,
     Alias,
+}
+
+#[allow(non_upper_case_globals)]
+impl CompletionKind {
+    pub const Schema: Self = Self::Catalog(CatalogObjectKind::Schema);
+    pub const Table: Self = Self::Catalog(CatalogObjectKind::Table);
+    pub const View: Self = Self::Catalog(CatalogObjectKind::View);
+    pub const MaterializedView: Self = Self::Catalog(CatalogObjectKind::MaterializedView);
+    pub const Column: Self = Self::Catalog(CatalogObjectKind::Column);
+    pub const Function: Self = Self::Catalog(CatalogObjectKind::Function);
+    pub const Type: Self = Self::Catalog(CatalogObjectKind::Type);
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,56 +73,221 @@ impl From<pg_parser::CompletionError> for CompletionError {
 /// Metadata seam consumed by the completion module.
 ///
 /// Implementations may query a live database, a cache, or an in-memory test
-/// catalog. The completion module owns visibility, filtering, and ranking.
+/// catalog. Adapters may return a superset: the completion module validates
+/// object kind, prefix, namespace, and owner before ranking results. Database
+/// permissions and connection-specific discoverability remain adapter concerns.
 pub trait Catalog {
     fn search(&self, query: CatalogQuery<'_>) -> Vec<CatalogItem>;
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum CatalogQuery<'a> {
-    Schemas {
-        prefix: &'a str,
-    },
-    Relations {
+pub struct CatalogQuery<'a> {
+    pub kinds: &'a [CatalogObjectKind],
+    pub prefix: &'a str,
+    pub scope: CatalogQueryScope<'a>,
+    pub search_path: &'a [&'a str],
+}
+
+impl<'a> CatalogQuery<'a> {
+    pub fn global(kinds: &'a [CatalogObjectKind], prefix: &'a str) -> Self {
+        Self {
+            kinds,
+            prefix,
+            scope: CatalogQueryScope::Global,
+            search_path: &[],
+        }
+    }
+
+    pub fn in_schema(
+        kinds: &'a [CatalogObjectKind],
         prefix: &'a str,
         schema: Option<&'a str>,
         search_path: &'a [&'a str],
-    },
-    Columns {
+    ) -> Self {
+        Self {
+            kinds,
+            prefix,
+            scope: CatalogQueryScope::Schema(schema),
+            search_path,
+        }
+    }
+
+    pub fn in_relation(
+        kinds: &'a [CatalogObjectKind],
+        prefix: &'a str,
         relation: &'a QualifiedName,
         search_path: &'a [&'a str],
-    },
-    Functions {
-        prefix: &'a str,
-        schema: Option<&'a str>,
-        search_path: &'a [&'a str],
-    },
-    Types {
-        prefix: &'a str,
-        schema: Option<&'a str>,
-        search_path: &'a [&'a str],
-    },
+    ) -> Self {
+        Self {
+            kinds,
+            prefix,
+            scope: CatalogQueryScope::Relation(relation),
+            search_path,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum CatalogQueryScope<'a> {
+    Global,
+    Schema(Option<&'a str>),
+    Relation(&'a QualifiedName),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CatalogItem {
-    pub name: String,
-    pub schema: Option<String>,
-    pub kind: CatalogItemKind,
+    pub identity: CatalogObjectIdentity,
     pub definition: Option<String>,
     pub documentation: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum CatalogItemKind {
+impl CatalogItem {
+    pub fn new(identity: CatalogObjectIdentity) -> Self {
+        Self {
+            identity,
+            definition: None,
+            documentation: None,
+        }
+    }
+
+    pub fn with_definition(mut self, definition: impl Into<String>) -> Self {
+        self.definition = Some(definition.into());
+        self
+    }
+
+    pub fn with_documentation(mut self, documentation: impl Into<String>) -> Self {
+        self.documentation = Some(documentation.into());
+        self
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct CatalogObjectIdentity {
+    pub kind: CatalogObjectKind,
+    pub name: String,
+    pub namespace: CatalogObjectNamespace,
+    pub signature: Vec<String>,
+}
+
+impl CatalogObjectIdentity {
+    pub fn global(kind: CatalogObjectKind, name: impl Into<String>) -> Self {
+        Self {
+            kind,
+            name: name.into(),
+            namespace: CatalogObjectNamespace::Global,
+            signature: Vec::new(),
+        }
+    }
+
+    pub fn in_schema(
+        kind: CatalogObjectKind,
+        schema: impl Into<String>,
+        name: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            name: name.into(),
+            namespace: CatalogObjectNamespace::Schema(schema.into()),
+            signature: Vec::new(),
+        }
+    }
+
+    pub fn owned_by_relation(
+        kind: CatalogObjectKind,
+        relation: QualifiedName,
+        name: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            name: name.into(),
+            namespace: CatalogObjectNamespace::Relation(relation),
+            signature: Vec::new(),
+        }
+    }
+
+    pub fn with_signature(
+        mut self,
+        signature: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.signature = signature.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn schema(&self) -> Option<&str> {
+        match &self.namespace {
+            CatalogObjectNamespace::Schema(schema) => Some(schema),
+            CatalogObjectNamespace::Relation(relation) => relation.schema.as_deref(),
+            CatalogObjectNamespace::Global => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum CatalogObjectNamespace {
+    Global,
+    Schema(String),
+    Relation(QualifiedName),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum CatalogObjectKind {
+    AccessMethod,
+    Aggregate,
+    Cast,
     Schema,
     Table,
     View,
     MaterializedView,
+    ForeignTable,
+    Sequence,
+    Index,
     Column,
     Function,
+    Procedure,
+    Routine,
     Type,
+    Domain,
+    Collation,
+    Conversion,
+    Database,
+    Role,
+    Tablespace,
+    Constraint,
+    Trigger,
+    EventTrigger,
+    Rule,
+    Policy,
+    Operator,
+    OperatorClass,
+    OperatorFamily,
+    Extension,
+    Language,
+    ForeignDataWrapper,
+    ForeignServer,
+    UserMapping,
+    Publication,
+    Subscription,
+    Statistics,
+    TextSearchConfiguration,
+    TextSearchDictionary,
+    TextSearchParser,
+    TextSearchTemplate,
+    Transform,
+    PropertyGraph,
 }
+
+const SCHEMA_KINDS: &[CatalogObjectKind] = &[CatalogObjectKind::Schema];
+const RELATION_KINDS: &[CatalogObjectKind] = &[
+    CatalogObjectKind::Table,
+    CatalogObjectKind::View,
+    CatalogObjectKind::MaterializedView,
+    CatalogObjectKind::ForeignTable,
+    CatalogObjectKind::Sequence,
+];
+const COLUMN_KINDS: &[CatalogObjectKind] = &[CatalogObjectKind::Column];
+const FUNCTION_KINDS: &[CatalogObjectKind] =
+    &[CatalogObjectKind::Function, CatalogObjectKind::Aggregate];
+const TYPE_KINDS: &[CatalogObjectKind] = &[CatalogObjectKind::Type, CatalogObjectKind::Domain];
 
 /// Complete SQL at `request.cursor`.
 ///
@@ -159,10 +330,13 @@ pub fn complete(
     let items = candidates
         .into_iter()
         .filter_map(|candidate| {
-            let key = (
-                candidate.item.kind,
-                candidate.item.label.to_lowercase(),
-                candidate.item.detail.clone(),
+            let key = candidate.item.catalog_identity.clone().map_or_else(
+                || CompletionIdentity::Local {
+                    kind: candidate.item.kind,
+                    label: candidate.item.label.to_lowercase(),
+                    detail: candidate.item.detail.clone(),
+                },
+                CompletionIdentity::Catalog,
             );
             seen.insert(key).then_some(candidate.item)
         })
@@ -171,10 +345,9 @@ pub fn complete(
         replacement: context.replacement,
         items,
         is_incomplete: catalog.is_none()
-            && context
-                .expectations
-                .iter()
-                .any(|expectation| matches!(expectation, Expectation::Name(_))),
+            && context.expectations.iter().any(
+                |expectation| matches!(expectation, Expectation::Name(name) if name.is_reference()),
+            ),
     })
 }
 
@@ -206,6 +379,7 @@ impl Resolver<'_> {
             CompletionItem {
                 label: keyword.to_ascii_uppercase(),
                 kind: CompletionKind::Keyword,
+                catalog_identity: None,
                 insert_text: keyword.to_ascii_uppercase(),
                 detail: None,
                 documentation: None,
@@ -217,9 +391,7 @@ impl Resolver<'_> {
     fn resolve_name(&self, expectation: &NameExpectation, result: &mut Vec<RankedCandidate>) {
         match expectation {
             NameExpectation::Schema => self.search_catalog(
-                CatalogQuery::Schemas {
-                    prefix: &self.context.prefix,
-                },
+                CatalogQuery::global(SCHEMA_KINDS, &self.context.prefix),
                 180,
                 result,
             ),
@@ -230,34 +402,38 @@ impl Resolver<'_> {
                     }
                 }
                 self.search_catalog(
-                    CatalogQuery::Relations {
-                        prefix: &self.context.prefix,
-                        schema: schema.as_deref(),
-                        search_path: self.request.search_path,
-                    },
+                    CatalogQuery::in_schema(
+                        RELATION_KINDS,
+                        &self.context.prefix,
+                        schema.as_deref(),
+                        self.request.search_path,
+                    ),
                     400,
                     result,
                 );
             }
             NameExpectation::Column(context) => self.resolve_columns(context, result),
             NameExpectation::Function { schema } => self.search_catalog(
-                CatalogQuery::Functions {
-                    prefix: &self.context.prefix,
-                    schema: schema.as_deref(),
-                    search_path: self.request.search_path,
-                },
+                CatalogQuery::in_schema(
+                    FUNCTION_KINDS,
+                    &self.context.prefix,
+                    schema.as_deref(),
+                    self.request.search_path,
+                ),
                 300,
                 result,
             ),
             NameExpectation::Type { schema } => self.search_catalog(
-                CatalogQuery::Types {
-                    prefix: &self.context.prefix,
-                    schema: schema.as_deref(),
-                    search_path: self.request.search_path,
-                },
+                CatalogQuery::in_schema(
+                    TYPE_KINDS,
+                    &self.context.prefix,
+                    schema.as_deref(),
+                    self.request.search_path,
+                ),
                 300,
                 result,
             ),
+            NameExpectation::Declaration(_) => {}
         }
     }
 
@@ -287,10 +463,12 @@ impl Resolver<'_> {
                         name: qualifier.clone(),
                         ..QualifiedName::default()
                     };
-                    for column in self.search(CatalogQuery::Columns {
-                        relation: &relation,
-                        search_path: self.request.search_path,
-                    }) {
+                    for column in self.search(CatalogQuery::in_relation(
+                        COLUMN_KINDS,
+                        "",
+                        &relation,
+                        self.request.search_path,
+                    )) {
                         result.push(self.catalog_candidate(column, 650));
                     }
                 }
@@ -299,23 +477,26 @@ impl Resolver<'_> {
                 let mut occurrences: HashMap<String, (String, usize)> = HashMap::new();
                 for reference in &self.context.scope.references {
                     for column in self.column_items(reference) {
-                        let key = column.name.to_lowercase();
-                        let entry = occurrences.entry(key).or_insert((column.name, 0));
+                        let name = column.identity.name;
+                        let key = name.to_lowercase();
+                        let entry = occurrences.entry(key).or_insert((name, 0));
                         entry.1 += 1;
                     }
                 }
                 for (_, (name, count)) in occurrences {
                     if count >= 2 {
-                        result.push(self.column_candidate(name, None, None, 680));
+                        result.push(self.column_candidate(name, None, None, None, 680));
                     }
                 }
             }
             ColumnContext::TargetRelation => {
                 if let Some(relation) = &self.context.scope.target_relation {
-                    for column in self.search(CatalogQuery::Columns {
+                    for column in self.search(CatalogQuery::in_relation(
+                        COLUMN_KINDS,
+                        "",
                         relation,
-                        search_path: self.request.search_path,
-                    }) {
+                        self.request.search_path,
+                    )) {
                         result.push(self.catalog_candidate(column, 680));
                     }
                 }
@@ -335,6 +516,7 @@ impl Resolver<'_> {
                     column.clone(),
                     Some(reference.exposed_name().to_owned()),
                     None,
+                    None,
                     score,
                 ));
             }
@@ -353,6 +535,7 @@ impl Resolver<'_> {
                         column.clone(),
                         Some(reference.exposed_name().to_owned()),
                         None,
+                        None,
                         score + 30,
                     ));
                 }
@@ -360,10 +543,12 @@ impl Resolver<'_> {
             return;
         }
         for column in self.column_items(reference) {
+            let identity = column.identity;
             result.push(self.column_candidate(
-                column.name,
+                identity.name.clone(),
                 Some(reference.exposed_name().to_owned()),
                 column.definition,
+                Some(identity),
                 score,
             ));
         }
@@ -374,19 +559,21 @@ impl Resolver<'_> {
             return reference
                 .alias_columns
                 .iter()
-                .map(|name| CatalogItem {
-                    name: name.clone(),
-                    schema: None,
-                    kind: CatalogItemKind::Column,
-                    definition: None,
-                    documentation: None,
+                .map(|name| {
+                    CatalogItem::new(CatalogObjectIdentity::owned_by_relation(
+                        CatalogObjectKind::Column,
+                        reference.name.clone(),
+                        name.clone(),
+                    ))
                 })
                 .collect();
         }
-        self.search(CatalogQuery::Columns {
-            relation: &reference.name,
-            search_path: self.request.search_path,
-        })
+        self.search(CatalogQuery::in_relation(
+            COLUMN_KINDS,
+            "",
+            &reference.name,
+            self.request.search_path,
+        ))
     }
 
     fn column_candidate(
@@ -394,6 +581,7 @@ impl Resolver<'_> {
         name: String,
         relation: Option<String>,
         definition: Option<String>,
+        catalog_identity: Option<CatalogObjectIdentity>,
         score: i32,
     ) -> RankedCandidate {
         let detail = match (relation, definition) {
@@ -405,6 +593,7 @@ impl Resolver<'_> {
             CompletionItem {
                 label: name.clone(),
                 kind: CompletionKind::Column,
+                catalog_identity,
                 insert_text: quote_identifier(&name, self.quoted),
                 detail,
                 documentation: None,
@@ -424,6 +613,7 @@ impl Resolver<'_> {
             CompletionItem {
                 label: label.clone(),
                 kind,
+                catalog_identity: None,
                 insert_text: quote_identifier(&label, self.quoted),
                 detail: Some(
                     match reference.kind {
@@ -456,52 +646,69 @@ impl Resolver<'_> {
             catalog
                 .search(query)
                 .into_iter()
-                .filter(|item| catalog_item_matches_query(&query, item.kind))
+                .filter(|item| catalog_item_matches_query(&query, item))
                 .collect()
         })
     }
 
     fn catalog_candidate(&self, item: CatalogItem, score: i32) -> RankedCandidate {
-        let kind = match item.kind {
-            CatalogItemKind::Schema => CompletionKind::Schema,
-            CatalogItemKind::Table => CompletionKind::Table,
-            CatalogItemKind::View => CompletionKind::View,
-            CatalogItemKind::MaterializedView => CompletionKind::MaterializedView,
-            CatalogItemKind::Column => CompletionKind::Column,
-            CatalogItemKind::Function => CompletionKind::Function,
-            CatalogItemKind::Type => CompletionKind::Type,
-        };
-        let detail = match (&item.schema, &item.definition) {
+        let identity = item.identity;
+        let detail = match (identity.schema(), &item.definition) {
             (Some(schema), Some(definition)) => {
-                Some(format!("{schema}.{} {definition}", item.name))
+                Some(format!("{schema}.{} {definition}", identity.name))
             }
-            (Some(schema), None) => Some(format!("{schema}.{}", item.name)),
+            (Some(schema), None) => Some(format!("{schema}.{}", identity.name)),
             (None, definition) => definition.clone(),
         };
+        let schema_score = search_path_score(identity.schema(), self.request.search_path);
         RankedCandidate::new(
             CompletionItem {
-                label: item.name.clone(),
-                kind,
-                insert_text: quote_identifier(&item.name, self.quoted),
+                label: identity.name.clone(),
+                kind: CompletionKind::Catalog(identity.kind),
+                catalog_identity: Some(identity.clone()),
+                insert_text: quote_identifier(&identity.name, self.quoted),
                 detail,
                 documentation: item.documentation,
             },
-            score + search_path_score(item.schema.as_deref(), self.request.search_path),
+            score + schema_score,
         )
     }
 }
 
-fn catalog_item_matches_query(query: &CatalogQuery<'_>, kind: CatalogItemKind) -> bool {
-    match query {
-        CatalogQuery::Schemas { .. } => kind == CatalogItemKind::Schema,
-        CatalogQuery::Relations { .. } => matches!(
-            kind,
-            CatalogItemKind::Table | CatalogItemKind::View | CatalogItemKind::MaterializedView
-        ),
-        CatalogQuery::Columns { .. } => kind == CatalogItemKind::Column,
-        CatalogQuery::Functions { .. } => kind == CatalogItemKind::Function,
-        CatalogQuery::Types { .. } => kind == CatalogItemKind::Type,
-    }
+fn catalog_item_matches_query(query: &CatalogQuery<'_>, item: &CatalogItem) -> bool {
+    query.kinds.contains(&item.identity.kind)
+        && prefix_matches(&item.identity.name, query.prefix, false)
+        && match (&query.scope, &item.identity.namespace) {
+            (CatalogQueryScope::Global, CatalogObjectNamespace::Global) => true,
+            (CatalogQueryScope::Schema(None), CatalogObjectNamespace::Schema(_)) => true,
+            (CatalogQueryScope::Schema(Some(expected)), CatalogObjectNamespace::Schema(actual)) => {
+                actual.eq_ignore_ascii_case(expected)
+            }
+            (CatalogQueryScope::Relation(expected), CatalogObjectNamespace::Relation(actual)) => {
+                qualified_names_equal(actual, expected)
+            }
+            _ => false,
+        }
+}
+
+fn qualified_names_equal(left: &QualifiedName, right: &QualifiedName) -> bool {
+    names_equal(&left.name, &right.name, false)
+        && match (left.schema.as_deref(), right.schema.as_deref()) {
+            (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
+            (Some(_), None) => true,
+            (None, None) => true,
+            _ => false,
+        }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+enum CompletionIdentity {
+    Catalog(CatalogObjectIdentity),
+    Local {
+        kind: CompletionKind,
+        label: String,
+        detail: Option<String>,
+    },
 }
 
 struct RankedCandidate {
@@ -583,11 +790,7 @@ fn needs_quoting(identifier: &str) -> bool {
 /// Simple catalog adapter useful for embedding and tests.
 #[derive(Default)]
 pub struct MemoryCatalog {
-    schemas: Vec<CatalogItem>,
-    relations: Vec<CatalogItem>,
-    functions: Vec<CatalogItem>,
-    types: Vec<CatalogItem>,
-    columns: HashMap<(Option<String>, String), Vec<CatalogItem>>,
+    items: Vec<CatalogItem>,
 }
 
 impl MemoryCatalog {
@@ -595,45 +798,46 @@ impl MemoryCatalog {
         Self::default()
     }
 
+    pub fn add(&mut self, item: CatalogItem) {
+        self.items.push(item);
+    }
+
     pub fn add_schema(&mut self, name: impl Into<String>) {
-        self.schemas.push(CatalogItem {
-            name: name.into(),
-            schema: None,
-            kind: CatalogItemKind::Schema,
-            definition: None,
-            documentation: None,
-        });
+        self.add(CatalogItem::new(CatalogObjectIdentity::global(
+            CatalogObjectKind::Schema,
+            name,
+        )));
     }
 
     pub fn add_relation(
         &mut self,
         schema: impl Into<String>,
         name: impl Into<String>,
-        kind: CatalogItemKind,
+        kind: CatalogObjectKind,
         columns: impl IntoIterator<Item = (String, String)>,
     ) {
         let schema = schema.into();
         let name = name.into();
-        self.relations.push(CatalogItem {
-            name: name.clone(),
-            schema: Some(schema.clone()),
+        self.add(CatalogItem::new(CatalogObjectIdentity::in_schema(
             kind,
-            definition: None,
-            documentation: None,
-        });
-        self.columns.insert(
-            (Some(schema), name),
-            columns
-                .into_iter()
-                .map(|(name, definition)| CatalogItem {
+            schema.clone(),
+            name.clone(),
+        )));
+        let relation = QualifiedName {
+            schema: Some(schema),
+            name,
+            ..QualifiedName::default()
+        };
+        for (name, definition) in columns {
+            self.add(
+                CatalogItem::new(CatalogObjectIdentity::owned_by_relation(
+                    CatalogObjectKind::Column,
+                    relation.clone(),
                     name,
-                    schema: None,
-                    kind: CatalogItemKind::Column,
-                    definition: Some(definition),
-                    documentation: None,
-                })
-                .collect(),
-        );
+                ))
+                .with_definition(definition),
+            );
+        }
     }
 
     pub fn add_function(
@@ -642,102 +846,61 @@ impl MemoryCatalog {
         name: impl Into<String>,
         definition: impl Into<String>,
     ) {
-        self.functions.push(CatalogItem {
-            name: name.into(),
-            schema: Some(schema.into()),
-            kind: CatalogItemKind::Function,
-            definition: Some(definition.into()),
-            documentation: None,
-        });
+        self.add(
+            CatalogItem::new(CatalogObjectIdentity::in_schema(
+                CatalogObjectKind::Function,
+                schema,
+                name,
+            ))
+            .with_definition(definition),
+        );
     }
 
     pub fn add_type(&mut self, schema: impl Into<String>, name: impl Into<String>) {
-        self.types.push(CatalogItem {
-            name: name.into(),
-            schema: Some(schema.into()),
-            kind: CatalogItemKind::Type,
-            definition: None,
-            documentation: None,
-        });
+        self.add(CatalogItem::new(CatalogObjectIdentity::in_schema(
+            CatalogObjectKind::Type,
+            schema,
+            name,
+        )));
     }
 }
 
 impl Catalog for MemoryCatalog {
     fn search(&self, query: CatalogQuery<'_>) -> Vec<CatalogItem> {
-        match query {
-            CatalogQuery::Schemas { prefix } => filter_items(&self.schemas, prefix),
-            CatalogQuery::Relations { prefix, schema, .. } => {
-                filter_items_in_schema(&self.relations, prefix, schema)
-            }
-            CatalogQuery::Columns {
-                relation,
-                search_path,
-            } => self.columns_for_relation(relation, search_path),
-            CatalogQuery::Functions { prefix, schema, .. } => {
-                filter_items_in_schema(&self.functions, prefix, schema)
-            }
-            CatalogQuery::Types { prefix, schema, .. } => {
-                filter_items_in_schema(&self.types, prefix, schema)
-            }
-        }
-    }
-}
-
-impl MemoryCatalog {
-    fn columns_for_relation(
-        &self,
-        relation: &QualifiedName,
-        search_path: &[&str],
-    ) -> Vec<CatalogItem> {
-        let columns = if let Some(schema) = relation.schema.as_deref() {
-            self.find_columns(Some(schema), &relation.name)
-        } else {
-            search_path
+        let resolved_relation_schema = match query.scope {
+            CatalogQueryScope::Relation(relation) if relation.schema.is_none() => query
+                .search_path
                 .iter()
-                .find_map(|schema| self.find_columns(Some(schema), &relation.name))
-                .or_else(|| self.find_columns(None, &relation.name))
-        };
-        columns.cloned().unwrap_or_default()
-    }
-
-    fn find_columns(&self, schema: Option<&str>, relation: &str) -> Option<&Vec<CatalogItem>> {
-        self.columns
-            .iter()
-            .find_map(|((candidate_schema, candidate_relation), columns)| {
-                let schema_matches = match (candidate_schema.as_deref(), schema) {
-                    (Some(candidate), Some(expected)) => candidate.eq_ignore_ascii_case(expected),
-                    (None, None) => true,
-                    _ => false,
-                };
-                (schema_matches && candidate_relation.eq_ignore_ascii_case(relation))
-                    .then_some(columns)
-            })
-    }
-}
-
-fn filter_items(items: &[CatalogItem], prefix: &str) -> Vec<CatalogItem> {
-    items
-        .iter()
-        .filter(|item| prefix_matches(&item.name, prefix, false))
-        .cloned()
-        .collect()
-}
-
-fn filter_items_in_schema(
-    items: &[CatalogItem],
-    prefix: &str,
-    schema: Option<&str>,
-) -> Vec<CatalogItem> {
-    items
-        .iter()
-        .filter(|item| {
-            prefix_matches(&item.name, prefix, false)
-                && schema.is_none_or(|schema| {
-                    item.schema
-                        .as_deref()
-                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(schema))
+                .find(|schema| {
+                    self.items.iter().any(|item| {
+                        matches!(
+                            &item.identity.namespace,
+                            CatalogObjectNamespace::Relation(owner)
+                                if owner.name.eq_ignore_ascii_case(&relation.name)
+                                    && owner.schema.as_deref().is_some_and(|owner_schema| {
+                                        owner_schema.eq_ignore_ascii_case(schema)
+                                    })
+                        )
+                    })
                 })
-        })
-        .cloned()
-        .collect()
+                .copied(),
+            _ => None,
+        };
+        self.items
+            .iter()
+            .filter(|item| {
+                catalog_item_matches_query(&query, item)
+                    && resolved_relation_schema.is_none_or(|schema| {
+                        matches!(
+                            &item.identity.namespace,
+                            CatalogObjectNamespace::Relation(owner)
+                                if owner.schema.as_deref().is_some_and(|owner_schema| {
+                                    owner_schema.eq_ignore_ascii_case(schema)
+                                })
+                        )
+                    })
+            })
+            .cloned()
+            .collect()
+    }
 }

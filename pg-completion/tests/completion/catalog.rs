@@ -1,4 +1,4 @@
-use pg_completion::{CatalogItemKind, CompletionKind, MemoryCatalog};
+use pg_completion::{CatalogObjectKind, CatalogObjectNamespace, CompletionKind, MemoryCatalog};
 
 use super::support::Fixture;
 
@@ -9,7 +9,7 @@ fn memory_catalog_supports_every_public_metadata_family() {
     catalog.add_relation(
         "app",
         "customers",
-        CatalogItemKind::Table,
+        CatalogObjectKind::Table,
         [
             ("id".into(), "integer".into()),
             ("email".into(), "text".into()),
@@ -25,9 +25,18 @@ fn memory_catalog_supports_every_public_metadata_family() {
     fixture
         .complete_with("SELECT * FROM app.cus|", Some(&catalog))
         .assert_has("customers", CompletionKind::Table);
-    fixture
-        .complete_with("SELECT c.em| FROM app.customers c", Some(&catalog))
-        .assert_has("email", CompletionKind::Column);
+    let columns = fixture.complete_with("SELECT c.em| FROM app.customers c", Some(&catalog));
+    columns.assert_has("email", CompletionKind::Column);
+    let identity = columns
+        .item("email", CompletionKind::Column)
+        .catalog_identity
+        .as_ref()
+        .expect("catalog columns preserve structured identity");
+    assert!(matches!(
+        &identity.namespace,
+        CatalogObjectNamespace::Relation(relation)
+            if relation.schema.as_deref() == Some("app") && relation.name == "customers"
+    ));
     fixture
         .complete_with("SELECT app.customer_|", Some(&catalog))
         .assert_has("customer_count", CompletionKind::Function);
@@ -42,13 +51,13 @@ fn memory_catalog_resolves_unqualified_columns_by_search_path() {
     catalog.add_relation(
         "public",
         "customers",
-        CatalogItemKind::Table,
+        CatalogObjectKind::Table,
         [("public_only".into(), "text".into())],
     );
     catalog.add_relation(
         "audit",
         "customers",
-        CatalogItemKind::View,
+        CatalogObjectKind::View,
         [("audit_only".into(), "text".into())],
     );
 

@@ -3,6 +3,7 @@ use super::*;
 impl Parser {
     pub(super) fn parse_where_or_current_clause(
         &mut self,
+        slot: CompletionSlot,
         stops: &[TokenKind],
     ) -> PResult<Option<Box<Node>>> {
         if !self.consume(TokenKind::Where) {
@@ -20,7 +21,7 @@ impl Parser {
                 ..CurrentOfExpr::default()
             }))));
         }
-        Ok(Some(self.parse_expr_box_strict_until(stops)?))
+        Ok(Some(self.parse_expr_box_strict_until_at(slot, stops)?))
     }
 
     pub(super) fn parse_returning_clause(&mut self) -> PResult<Option<Box<ReturningClause>>> {
@@ -55,8 +56,11 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
         }
-        let exprs =
-            self.parse_res_target_list_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+        let exprs = self.parse_res_target_list_strict_until(
+            CompletionSlot::ReturningExpression,
+            CompletionSlot::ReturningExpressionAfterComma,
+            &[TokenKind::Char(';'), TokenKind::Eof],
+        )?;
         if exprs.is_empty() {
             return Err(self.error_here("RETURNING requires at least one expression"));
         }
@@ -82,7 +86,10 @@ impl Parser {
             .ok_or_else(|| self.error_here("expected a range name after FOR PORTION OF"))?;
         if self.consume(TokenKind::Char('(')) {
             let target_location = self.location();
-            let target = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+            let target = self.parse_expr_box_strict_until_at(
+                CompletionSlot::ForPortionTarget,
+                &[TokenKind::Char(')')],
+            )?;
             self.expect(TokenKind::Char(')'))?;
             return Ok(Some(Box::new(ForPortionOfClause {
                 node_tag: NodeTag::ForPortionOfClause,
@@ -94,17 +101,21 @@ impl Parser {
             })));
         }
         let target_location = self.expect(TokenKind::From)?.location();
-        let target_start = self.parse_expr_box_strict_until(&[TokenKind::To])?;
+        let target_start =
+            self.parse_expr_box_strict_until_at(CompletionSlot::ForPortionStart, &[TokenKind::To])?;
         self.expect(TokenKind::To)?;
-        let target_end = self.parse_expr_box_strict_until(&[
-            TokenKind::As,
-            TokenKind::Set,
-            TokenKind::Using,
-            TokenKind::Where,
-            TokenKind::Returning,
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ])?;
+        let target_end = self.parse_expr_box_strict_until_at(
+            CompletionSlot::ForPortionEnd,
+            &[
+                TokenKind::As,
+                TokenKind::Set,
+                TokenKind::Using,
+                TokenKind::Where,
+                TokenKind::Returning,
+                TokenKind::Char(';'),
+                TokenKind::Eof,
+            ],
+        )?;
         Ok(Some(Box::new(ForPortionOfClause {
             node_tag: NodeTag::ForPortionOfClause,
             range_name: Some(range_name),
@@ -128,7 +139,12 @@ impl Parser {
             while !self.at(TokenKind::Char(')')) {
                 let range =
                     self.take_until_top_level_range(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                index_elems.push(Node::IndexElem(self.parse_index_elem_range(range)?));
+                let slot = if index_elems.is_empty() {
+                    CompletionSlot::OnConflictInferenceElement
+                } else {
+                    CompletionSlot::OnConflictInferenceElementAfterComma
+                };
+                index_elems.push(Node::IndexElem(self.parse_index_elem_range(slot, range)?));
                 if !self.consume(TokenKind::Char(',')) {
                     break;
                 }
@@ -141,7 +157,10 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             let where_clause = if self.consume(TokenKind::Where) {
-                Some(self.parse_expr_box_strict_until(&[TokenKind::Do])?)
+                Some(self.parse_expr_box_strict_until_at(
+                    CompletionSlot::OnConflictInferenceWhere,
+                    &[TokenKind::Do],
+                )?)
             } else {
                 None
             };
@@ -181,18 +200,22 @@ impl Parser {
             TokenKind::Update => {
                 self.advance();
                 self.expect(TokenKind::Set)?;
-                let target_list = self.parse_set_clause_list_until(&[
-                    TokenKind::Where,
-                    TokenKind::Returning,
-                    TokenKind::Char(';'),
-                    TokenKind::Eof,
-                ])?;
-                let where_clause = if self.consume(TokenKind::Where) {
-                    Some(self.parse_expr_box_strict_until(&[
+                let target_list = self.parse_set_clause_list_until(
+                    CompletionSlot::OnConflictSetTarget,
+                    CompletionSlot::OnConflictSetTargetAfterComma,
+                    CompletionSlot::OnConflictSetValue,
+                    &[
+                        TokenKind::Where,
                         TokenKind::Returning,
                         TokenKind::Char(';'),
                         TokenKind::Eof,
-                    ])?)
+                    ],
+                )?;
+                let where_clause = if self.consume(TokenKind::Where) {
+                    Some(self.parse_expr_box_strict_until_at(
+                        CompletionSlot::OnConflictUpdateWhere,
+                        &[TokenKind::Returning, TokenKind::Char(';'), TokenKind::Eof],
+                    )?)
                 } else {
                     None
                 };
@@ -211,11 +234,10 @@ impl Parser {
                     LockClauseStrength::None
                 };
                 let where_clause = if self.consume(TokenKind::Where) {
-                    Some(self.parse_expr_box_strict_until(&[
-                        TokenKind::Returning,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?)
+                    Some(self.parse_expr_box_strict_until_at(
+                        CompletionSlot::OnConflictSelectWhere,
+                        &[TokenKind::Returning, TokenKind::Char(';'), TokenKind::Eof],
+                    )?)
                 } else {
                     None
                 };
@@ -243,11 +265,18 @@ impl Parser {
         })))
     }
 
-    pub(super) fn parse_set_clause_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+    pub(super) fn parse_set_clause_list_until(
+        &mut self,
+        first_target_slot: CompletionSlot,
+        continuation_target_slot: CompletionSlot,
+        value_slot: CompletionSlot,
+        stops: &[TokenKind],
+    ) -> PResult<NodeList> {
         if self.at_completion_cursor() {
-            self.record_completion(Expectation::Name(NameExpectation::Column(
-                ColumnContext::TargetRelation,
-            )));
+            self.record_completion_at(
+                first_target_slot,
+                Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+            );
             return Err(self.error_here("completion cursor"));
         }
         let mut targets = Vec::new();
@@ -267,8 +296,10 @@ impl Parser {
                 }
                 self.expect(TokenKind::Char(')'))?;
                 self.expect(TokenKind::Char('='))?;
-                let source =
-                    self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
+                let source = self.parse_expr_box_strict_until_at(
+                    value_slot,
+                    &extend_stops(stops, TokenKind::Char(',')),
+                )?;
                 let ncolumns = names.len() as i32;
                 for (index, (name, indirection, location)) in names.into_iter().enumerate() {
                     targets.push(Node::ResTarget(ResTarget {
@@ -291,8 +322,10 @@ impl Parser {
                     .ok_or_else(|| self.error_here("expected an assignment target"))?;
                 let indirection = self.parse_assignment_indirection()?;
                 self.expect(TokenKind::Char('='))?;
-                let val =
-                    self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
+                let val = self.parse_expr_box_strict_until_at(
+                    value_slot,
+                    &extend_stops(stops, TokenKind::Char(',')),
+                )?;
                 targets.push(Node::ResTarget(ResTarget {
                     node_tag: NodeTag::ResTarget,
                     name: Some(name),
@@ -305,6 +338,12 @@ impl Parser {
                 break;
             }
             if self.at_any(stops) {
+                if self.at_completion_cursor() {
+                    self.record_completion_at(
+                        continuation_target_slot,
+                        Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+                    );
+                }
                 return Err(self.error_here("expected an assignment after ','"));
             }
         }
@@ -326,21 +365,32 @@ impl Parser {
                 let lower_or_index =
                     self.take_until_top_level_range(&[TokenKind::Char(':'), TokenKind::Char(']')]);
                 if lower_or_index.is_empty() && self.at_completion_cursor() {
-                    self.record_expression_completion();
+                    self.record_expression_completion_at(
+                        CompletionSlot::AssignmentSubscriptLowerOrIndex,
+                    );
                 }
                 let (is_slice, lidx, uidx) = if self.consume(TokenKind::Char(':')) {
                     let upper = self.take_until_top_level_range(&[TokenKind::Char(']')]);
+                    if upper.is_empty() && self.at_completion_cursor() {
+                        self.record_expression_completion_at(CompletionSlot::AssignmentSliceUpper);
+                    }
                     (
                         true,
                         if lower_or_index.is_empty() {
                             None
                         } else {
-                            Some(Box::new(self.parse_expression_range(lower_or_index)?))
+                            Some(Box::new(self.parse_expression_range_at(
+                                CompletionSlot::AssignmentSubscriptLowerOrIndex,
+                                lower_or_index,
+                            )?))
                         },
                         if upper.is_empty() {
                             None
                         } else {
-                            Some(Box::new(self.parse_expression_range(upper)?))
+                            Some(Box::new(self.parse_expression_range_at(
+                                CompletionSlot::AssignmentSliceUpper,
+                                upper,
+                            )?))
                         },
                     )
                 } else {
@@ -350,7 +400,10 @@ impl Parser {
                     (
                         false,
                         None,
-                        Some(Box::new(self.parse_expression_range(lower_or_index)?)),
+                        Some(Box::new(self.parse_expression_range_at(
+                            CompletionSlot::AssignmentSubscriptLowerOrIndex,
+                            lower_or_index,
+                        )?)),
                     )
                 };
                 self.expect(TokenKind::Char(']'))?;
@@ -387,7 +440,10 @@ impl Parser {
                 }
             };
             let condition = if self.consume(TokenKind::And) {
-                Some(self.parse_expr_box_strict_until(&[TokenKind::Then])?)
+                Some(self.parse_expr_box_strict_until_at(
+                    CompletionSlot::MergeWhenCondition,
+                    &[TokenKind::Then],
+                )?)
             } else {
                 None
             };
@@ -397,12 +453,17 @@ impl Parser {
                 TokenKind::Update => {
                     self.advance();
                     self.expect(TokenKind::Set)?;
-                    let target_list = self.parse_set_clause_list_until(&[
-                        TokenKind::When,
-                        TokenKind::Returning,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?;
+                    let target_list = self.parse_set_clause_list_until(
+                        CompletionSlot::MergeSetTarget,
+                        CompletionSlot::MergeSetTargetAfterComma,
+                        CompletionSlot::MergeSetValue,
+                        &[
+                            TokenKind::When,
+                            TokenKind::Returning,
+                            TokenKind::Char(';'),
+                            TokenKind::Eof,
+                        ],
+                    )?;
                     (
                         CmdType::Update,
                         OverridingKind::NotSet,
@@ -494,7 +555,11 @@ impl Parser {
         } else {
             self.expect(TokenKind::Values)?;
             self.expect(TokenKind::Char('('))?;
-            let values = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            let values = self.parse_expr_list_strict_until_at(
+                CompletionSlot::MergeInsertValue,
+                CompletionSlot::MergeInsertValueAfterComma,
+                &[TokenKind::Char(')')],
+            )?;
             if values.is_empty() {
                 return Err(self.error_here("MERGE INSERT VALUES cannot be empty"));
             }

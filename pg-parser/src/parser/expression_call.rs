@@ -26,16 +26,21 @@ impl ExprParser {
                     return self.fail("ALL and DISTINCT cannot be used together");
                 }
                 loop {
+                    let slot = if call.args.is_empty() {
+                        CompletionSlot::FunctionArgument
+                    } else {
+                        CompletionSlot::FunctionArgumentAfterComma
+                    };
                     if self.at(TokenKind::Variadic) {
                         if agg_all || call.agg_distinct {
                             return self.fail("ALL/DISTINCT cannot be used with VARIADIC");
                         }
                         self.advance();
                         call.func_variadic = true;
-                        call.args.push(self.parse_expr(0)?);
+                        call.args.push(self.parse_expr_at(slot, 0)?);
                         break;
                     }
-                    call.args.push(self.parse_function_argument()?);
+                    call.args.push(self.parse_function_argument_at(slot)?);
                     if !self.consume(TokenKind::Char(',')) {
                         break;
                     }
@@ -48,7 +53,11 @@ impl ExprParser {
                 }
                 if self.consume(TokenKind::Order) {
                     self.expect(TokenKind::By)?;
-                    call.agg_order = self.parse_expression_sort_list(TokenKind::Char(')'))?;
+                    call.agg_order = self.parse_expression_sort_list(
+                        CompletionSlot::FunctionOrderBy,
+                        CompletionSlot::FunctionOrderByAfterComma,
+                        TokenKind::Char(')'),
+                    )?;
                 }
                 self.expect(TokenKind::Char(')'))?;
             }
@@ -82,7 +91,11 @@ impl ExprParser {
                     }
                 }
             } else {
-                elements = self.parse_expr_list_until(TokenKind::Char(']'))?;
+                elements = self.parse_expr_list_until_at(
+                    CompletionSlot::ArrayElement,
+                    CompletionSlot::ArrayElementAfterComma,
+                    TokenKind::Char(']'),
+                )?;
             }
         }
         let list_end = self.expect(TokenKind::Char(']'))?.location();
@@ -95,20 +108,20 @@ impl ExprParser {
         }))
     }
 
-    pub(super) fn parse_function_argument(&mut self) -> Option<Node> {
+    pub(super) fn parse_function_argument_at(&mut self, slot: CompletionSlot) -> Option<Node> {
         if self.starts_named_function_argument() {
             let name_token = self.advance().clone();
             let location = name_token.location();
             self.advance();
             return Some(Node::NamedArgExpr(NamedArgExpr {
                 xpr: Expr::new(NodeTag::NamedArgExpr),
-                arg: Some(Box::new(self.parse_expr(0)?)),
+                arg: Some(Box::new(self.parse_expr_at(slot, 0)?)),
                 name: token_name(&name_token),
                 argnumber: -1,
                 location: location as ParseLoc,
             }));
         }
-        self.parse_expr(0)
+        self.parse_expr_at(slot, 0)
     }
 
     pub(super) fn starts_named_function_argument(&self) -> bool {
@@ -119,26 +132,40 @@ impl ExprParser {
             )
     }
 
-    pub(super) fn parse_plain_function_arguments_after(&mut self, first: Node) -> Option<NodeList> {
+    pub(super) fn parse_plain_function_arguments_after_at(
+        &mut self,
+        first: Node,
+        continuation_slot: CompletionSlot,
+    ) -> Option<NodeList> {
         let mut args = vec![first];
         while self.consume(TokenKind::Char(',')) {
             if self.at(TokenKind::Char(')')) {
                 return self.fail("expected a function argument after ','");
             }
-            args.push(self.parse_function_argument()?);
+            args.push(self.parse_function_argument_at(continuation_slot)?);
         }
         Some(args)
     }
 
-    pub(super) fn parse_expression_sort_list(&mut self, stop: TokenKind) -> Option<NodeList> {
+    pub(super) fn parse_expression_sort_list(
+        &mut self,
+        first_slot: CompletionSlot,
+        continuation_slot: CompletionSlot,
+        stop: TokenKind,
+    ) -> Option<NodeList> {
         if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
-            recorder.borrow_mut().record_expression();
+            recorder.borrow_mut().record_expression_at(first_slot);
         }
         let mut items = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
-            let expression = self.parse_expr(0)?;
+            let slot = if items.is_empty() {
+                first_slot
+            } else {
+                continuation_slot
+            };
+            let expression = self.parse_expr_at(slot, 0)?;
             let mut sortby_dir = SortByDir::Default;
             let mut use_op = Vec::new();
             let mut location = -1;
@@ -206,7 +233,14 @@ impl ExprParser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at(stop) {
+            if self.at(stop) || self.at(TokenKind::Eof) {
+                if self.at_completion_cursor()
+                    && let Some(recorder) = &self.completion
+                {
+                    recorder
+                        .borrow_mut()
+                        .record_expression_at(continuation_slot);
+                }
                 return self.fail("expected an ORDER BY expression after ','");
             }
         }
@@ -225,14 +259,20 @@ impl ExprParser {
             self.expect(TokenKind::Char('('))?;
             self.expect(TokenKind::Order)?;
             self.expect(TokenKind::By)?;
-            call.agg_order = self.parse_expression_sort_list(TokenKind::Char(')'))?;
+            call.agg_order = self.parse_expression_sort_list(
+                CompletionSlot::WithinGroupOrderBy,
+                CompletionSlot::WithinGroupOrderByAfterComma,
+                TokenKind::Char(')'),
+            )?;
             self.expect(TokenKind::Char(')'))?;
             call.agg_within_group = true;
         }
         if self.consume(TokenKind::Filter) {
             self.expect(TokenKind::Char('('))?;
             self.expect(TokenKind::Where)?;
-            call.agg_filter = Some(Box::new(self.parse_expr(0)?));
+            call.agg_filter = Some(Box::new(
+                self.parse_expr_at(CompletionSlot::FunctionFilter, 0)?,
+            ));
             self.expect(TokenKind::Char(')'))?;
         }
         if self.consume(TokenKind::IgnoreP) {

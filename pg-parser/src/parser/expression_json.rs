@@ -10,8 +10,12 @@ impl ExprParser {
                 if self.json_object_uses_standard_syntax() {
                     self.parse_json_object_constructor(token.location())
                 } else {
-                    let first = self.parse_function_argument()?;
-                    let args = self.parse_plain_function_arguments_after(first)?;
+                    let first =
+                        self.parse_function_argument_at(CompletionSlot::FunctionArgument)?;
+                    let args = self.parse_plain_function_arguments_after_at(
+                        first,
+                        CompletionSlot::FunctionArgumentAfterComma,
+                    )?;
                     self.expect(TokenKind::Char(')'))?;
                     Some(Node::FuncCall(FuncCall {
                         node_tag: NodeTag::FuncCall,
@@ -200,7 +204,9 @@ impl ExprParser {
         if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
-            recorder.borrow_mut().record_expression();
+            recorder
+                .borrow_mut()
+                .record_expression_at(self.active_completion_slot());
         }
         let mut exprs = Vec::new();
         while !matches!(
@@ -308,7 +314,9 @@ impl ExprParser {
         if self.at_completion_cursor()
             && let Some(recorder) = &self.completion
         {
-            recorder.borrow_mut().record_expression();
+            recorder
+                .borrow_mut()
+                .record_expression_at(self.active_completion_slot());
         }
         let mut exprs = Vec::new();
         while !matches!(
@@ -350,6 +358,7 @@ impl ExprParser {
 impl Parser {
     pub(super) fn parse_json_value_expr_range(
         &self,
+        slot: CompletionSlot,
         range: std::ops::Range<usize>,
     ) -> PResult<JsonValueExpr> {
         let location = self
@@ -358,14 +367,14 @@ impl Parser {
             .map_or_else(|| self.location(), Token::location);
         if range.is_empty() {
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_expression_completion_at(slot);
             }
             return Err(ParseError::new(
                 location,
                 "expected a JSON value expression",
             ));
         }
-        let mut parser = self.expression_view(range);
+        let mut parser = self.expression_view_at(slot, range);
         let value = parser.parse_json_value_expr().ok_or_else(|| {
             parser
                 .error

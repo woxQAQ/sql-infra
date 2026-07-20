@@ -46,12 +46,15 @@ impl Parser {
         self.expect(TokenKind::Using)?;
         let source_relation = Some(Box::new(self.parse_from_item(&[TokenKind::On])?));
         self.expect(TokenKind::On)?;
-        let join_condition = self.parse_expr_box_strict_until(&[
-            TokenKind::When,
-            TokenKind::Returning,
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ])?;
+        let join_condition = self.parse_expr_box_strict_until_at(
+            CompletionSlot::MergeJoinCondition,
+            &[
+                TokenKind::When,
+                TokenKind::Returning,
+                TokenKind::Char(';'),
+                TokenKind::Eof,
+            ],
+        )?;
         let merge_when_clauses = self.parse_merge_when_clauses()?;
         if merge_when_clauses.is_empty() {
             return Err(self.error_here("MERGE requires at least one WHEN clause"));

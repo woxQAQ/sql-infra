@@ -1,15 +1,15 @@
-use pg_completion::{CatalogItemKind, CompletionKind};
+use pg_completion::{CatalogItem, CatalogObjectIdentity, CatalogObjectKind, CompletionKind};
 
 use super::support::Fixture;
 
 #[test]
 fn exact_prefix_matches_rank_before_longer_matches() {
     let mut fixture = Fixture::default();
-    fixture.catalog.relation(
+    fixture.catalog.add_relation(
         "public",
         "user",
-        CatalogItemKind::Table,
-        &[("id", "integer")],
+        CatalogObjectKind::Table,
+        [("id".into(), "integer".into())],
     );
     fixture
         .complete("SELECT * FROM user|")
@@ -22,7 +22,7 @@ fn duplicate_catalog_rows_are_deduplicated_by_visible_identity() {
     let mut fixture = Fixture::default();
     fixture
         .catalog
-        .duplicate_relation("public", "users", CatalogItemKind::Table);
+        .add_relation("public", "users", CatalogObjectKind::Table, []);
     let result = fixture.complete("SELECT * FROM users|");
     assert_eq!(result.count("users", CompletionKind::Table), 1);
 }
@@ -30,17 +30,17 @@ fn duplicate_catalog_rows_are_deduplicated_by_visible_identity() {
 #[test]
 fn equal_scores_have_deterministic_case_insensitive_label_order() {
     let mut fixture = Fixture::default();
-    fixture.catalog.relation(
+    fixture.catalog.add_relation(
         "public",
         "beta",
-        CatalogItemKind::Table,
-        &[("id", "integer")],
+        CatalogObjectKind::Table,
+        [("id".into(), "integer".into())],
     );
-    fixture.catalog.relation(
+    fixture.catalog.add_relation(
         "public",
         "alpha",
-        CatalogItemKind::Table,
-        &[("id", "integer")],
+        CatalogObjectKind::Table,
+        [("id".into(), "integer".into())],
     );
     let result = fixture.complete("SELECT * FROM |");
     let labels = result
@@ -74,8 +74,8 @@ fn duplicate_functions_and_types_are_deduplicated_by_visible_identity() {
     let mut fixture = Fixture::default();
     fixture
         .catalog
-        .duplicate_function("pg_catalog", "count", "count(any) -> bigint");
-    fixture.catalog.duplicate_type("pg_catalog", "integer");
+        .add_function("pg_catalog", "count", "count(any) -> bigint");
+    fixture.catalog.add_type("pg_catalog", "integer");
 
     assert_eq!(
         fixture
@@ -88,6 +88,46 @@ fn duplicate_functions_and_types_are_deduplicated_by_visible_identity() {
             .complete("SELECT 1::inte|")
             .count("integer", CompletionKind::Type),
         1
+    );
+}
+
+#[test]
+fn overloaded_catalog_objects_remain_distinct_by_structured_identity() {
+    let mut fixture = Fixture::default();
+    fixture.catalog.add(
+        CatalogItem::new(
+            CatalogObjectIdentity::in_schema(
+                CatalogObjectKind::Function,
+                "public",
+                "calculate_total",
+            )
+            .with_signature(["integer"]),
+        )
+        .with_definition("calculate_total(integer) -> numeric"),
+    );
+
+    let result = fixture.complete("SELECT calculate_| ");
+    assert_eq!(result.count("calculate_total", CompletionKind::Function), 2);
+    let identities = result
+        .result
+        .items
+        .iter()
+        .filter(|item| item.label == "calculate_total")
+        .map(|item| {
+            item.catalog_identity
+                .as_ref()
+                .expect("catalog candidate keeps its identity")
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        identities
+            .iter()
+            .any(|identity| identity.signature.is_empty())
+    );
+    assert!(
+        identities
+            .iter()
+            .any(|identity| identity.signature == ["integer"])
     );
 }
 
@@ -113,11 +153,11 @@ fn every_returned_item_obeys_prefix_filtering() {
 #[test]
 fn relation_details_distinguish_same_labels_from_different_schemas() {
     let mut fixture = Fixture::default();
-    fixture.catalog.relation(
+    fixture.catalog.add_relation(
         "audit",
         "users",
-        CatalogItemKind::View,
-        &[("id", "integer")],
+        CatalogObjectKind::View,
+        [("id".into(), "integer".into())],
     );
     let result = fixture.complete("SELECT * FROM users|");
     assert!(result.result.items.iter().any(|item| {
@@ -133,8 +173,8 @@ fn search_path_ranks_same_named_functions_and_types() {
     let mut fixture = Fixture::default();
     fixture
         .catalog
-        .function("audit", "calculate_total", "audit calculation", None);
-    fixture.catalog.ty("audit", "order_status");
+        .add_function("audit", "calculate_total", "audit calculation");
+    fixture.catalog.add_type("audit", "order_status");
 
     let functions = fixture.complete("SELECT calculate_|");
     let public_function = functions

@@ -417,8 +417,10 @@ impl Parser {
                     let columns = self.parse_optional_column_name_list()?;
                     let where_clause = if self.consume(TokenKind::Where) {
                         self.expect(TokenKind::Char('('))?;
-                        let expression =
-                            self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+                        let expression = self.parse_expr_box_strict_until_at(
+                            CompletionSlot::PublicationRowFilter,
+                            &[TokenKind::Char(')')],
+                        )?;
                         self.expect(TokenKind::Char(')'))?;
                         Some(expression)
                     } else {

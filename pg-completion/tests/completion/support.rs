@@ -1,200 +1,86 @@
-use std::collections::HashMap;
-
 use pg_completion::{
-    Catalog, CatalogItem, CatalogItemKind, CatalogQuery, CompletionError, CompletionItem,
-    CompletionKind, CompletionRequest, CompletionResult, complete,
+    Catalog, CatalogItem, CatalogObjectIdentity, CatalogObjectKind, CompletionError,
+    CompletionItem, CompletionKind, CompletionRequest, CompletionResult, MemoryCatalog, complete,
 };
-use pg_parser::{QualifiedName, TextSize};
+use pg_parser::TextSize;
 
-#[derive(Default)]
-pub struct TestCatalog {
-    schemas: Vec<CatalogItem>,
-    relations: Vec<CatalogItem>,
-    functions: Vec<CatalogItem>,
-    types: Vec<CatalogItem>,
-    columns: HashMap<(Option<String>, String), Vec<CatalogItem>>,
-}
-
-impl TestCatalog {
-    pub fn standard() -> Self {
-        let mut catalog = Self::default();
-        catalog.schema("public");
-        catalog.schema("audit");
-        catalog.schema("pg_catalog");
-        catalog.relation(
-            "public",
-            "users",
-            CatalogItemKind::Table,
-            &[("id", "integer"), ("name", "text"), ("select", "text")],
-        );
-        catalog.relation(
-            "public",
-            "orders",
-            CatalogItemKind::Table,
-            &[
-                ("id", "integer"),
-                ("user_id", "integer"),
-                ("amount", "numeric"),
-            ],
-        );
-        catalog.relation(
-            "audit",
-            "active_users",
-            CatalogItemKind::View,
-            &[("id", "integer"), ("name", "text")],
-        );
-        catalog.relation(
-            "audit",
-            "recent_orders",
-            CatalogItemKind::MaterializedView,
-            &[("id", "integer"), ("amount", "numeric")],
-        );
-        catalog.relation(
-            "public",
-            "UserProfile",
-            CatalogItemKind::Table,
-            &[("DisplayName", "text")],
-        );
-        catalog.function(
+fn standard_catalog() -> MemoryCatalog {
+    let mut catalog = MemoryCatalog::new();
+    catalog.add_schema("public");
+    catalog.add_schema("audit");
+    catalog.add_schema("pg_catalog");
+    catalog.add_relation(
+        "public",
+        "users",
+        CatalogObjectKind::Table,
+        [
+            ("id".into(), "integer".into()),
+            ("name".into(), "text".into()),
+            ("select".into(), "text".into()),
+        ],
+    );
+    catalog.add_relation(
+        "public",
+        "orders",
+        CatalogObjectKind::Table,
+        [
+            ("id".into(), "integer".into()),
+            ("user_id".into(), "integer".into()),
+            ("amount".into(), "numeric".into()),
+        ],
+    );
+    catalog.add_relation(
+        "audit",
+        "active_users",
+        CatalogObjectKind::View,
+        [
+            ("id".into(), "integer".into()),
+            ("name".into(), "text".into()),
+        ],
+    );
+    catalog.add_relation(
+        "audit",
+        "recent_orders",
+        CatalogObjectKind::MaterializedView,
+        [
+            ("id".into(), "integer".into()),
+            ("amount".into(), "numeric".into()),
+        ],
+    );
+    catalog.add_relation(
+        "public",
+        "UserProfile",
+        CatalogObjectKind::Table,
+        [("DisplayName".into(), "text".into())],
+    );
+    catalog.add(
+        CatalogItem::new(CatalogObjectIdentity::in_schema(
+            CatalogObjectKind::Function,
             "pg_catalog",
             "count",
-            "count(any) -> bigint",
-            Some("number of input rows"),
-        );
-        catalog.function(
-            "public",
-            "calculate_total",
-            "calculate_total(numeric) -> numeric",
-            None,
-        );
-        catalog.ty("pg_catalog", "integer");
-        catalog.ty("public", "order_status");
-        catalog
-    }
-
-    pub fn schema(&mut self, name: &str) {
-        self.schemas
-            .push(item(name, None, CatalogItemKind::Schema, None, None));
-    }
-
-    pub fn relation(
-        &mut self,
-        schema: &str,
-        name: &str,
-        kind: CatalogItemKind,
-        columns: &[(&str, &str)],
-    ) {
-        self.relations
-            .push(item(name, Some(schema), kind, None, None));
-        self.columns.insert(
-            (Some(schema.to_owned()), name.to_owned()),
-            columns
-                .iter()
-                .map(|(name, definition)| {
-                    item(name, None, CatalogItemKind::Column, Some(definition), None)
-                })
-                .collect(),
-        );
-    }
-
-    pub fn function(
-        &mut self,
-        schema: &str,
-        name: &str,
-        definition: &str,
-        documentation: Option<&str>,
-    ) {
-        self.functions.push(item(
-            name,
-            Some(schema),
-            CatalogItemKind::Function,
-            Some(definition),
-            documentation,
-        ));
-    }
-
-    pub fn ty(&mut self, schema: &str, name: &str) {
-        self.types
-            .push(item(name, Some(schema), CatalogItemKind::Type, None, None));
-    }
-
-    pub fn duplicate_relation(&mut self, schema: &str, name: &str, kind: CatalogItemKind) {
-        self.relations
-            .push(item(name, Some(schema), kind, None, None));
-    }
-
-    pub fn duplicate_function(&mut self, schema: &str, name: &str, definition: &str) {
-        self.functions.push(item(
-            name,
-            Some(schema),
-            CatalogItemKind::Function,
-            Some(definition),
-            None,
-        ));
-    }
-
-    pub fn duplicate_type(&mut self, schema: &str, name: &str) {
-        self.types
-            .push(item(name, Some(schema), CatalogItemKind::Type, None, None));
-    }
-}
-
-impl Catalog for TestCatalog {
-    fn search(&self, query: CatalogQuery<'_>) -> Vec<CatalogItem> {
-        match query {
-            CatalogQuery::Schemas { prefix } => filter(&self.schemas, prefix, None),
-            CatalogQuery::Relations { prefix, schema, .. } => {
-                filter(&self.relations, prefix, schema)
-            }
-            CatalogQuery::Columns {
-                relation,
-                search_path,
-            } => self.columns(relation, search_path),
-            CatalogQuery::Functions { prefix, schema, .. } => {
-                filter(&self.functions, prefix, schema)
-            }
-            CatalogQuery::Types { prefix, schema, .. } => filter(&self.types, prefix, schema),
-        }
-    }
-}
-
-impl TestCatalog {
-    fn columns(&self, relation: &QualifiedName, search_path: &[&str]) -> Vec<CatalogItem> {
-        let columns = if let Some(schema) = relation.schema.as_deref() {
-            self.find_columns(Some(schema), &relation.name)
-        } else {
-            search_path
-                .iter()
-                .find_map(|schema| self.find_columns(Some(schema), &relation.name))
-                .or_else(|| self.find_columns(None, &relation.name))
-        };
-        columns.cloned().unwrap_or_default()
-    }
-
-    fn find_columns(&self, schema: Option<&str>, relation: &str) -> Option<&Vec<CatalogItem>> {
-        self.columns
-            .iter()
-            .find_map(|((candidate_schema, candidate_relation), columns)| {
-                let schema_matches = match (candidate_schema.as_deref(), schema) {
-                    (Some(candidate), Some(expected)) => candidate.eq_ignore_ascii_case(expected),
-                    (None, None) => true,
-                    _ => false,
-                };
-                (schema_matches && candidate_relation.eq_ignore_ascii_case(relation))
-                    .then_some(columns)
-            })
-    }
+        ))
+        .with_definition("count(any) -> bigint")
+        .with_documentation("number of input rows"),
+    );
+    catalog.add_function(
+        "public",
+        "calculate_total",
+        "calculate_total(numeric) -> numeric",
+    );
+    catalog.add_type("pg_catalog", "integer");
+    catalog.add_type("public", "order_status");
+    catalog
 }
 
 pub struct Fixture {
-    pub catalog: TestCatalog,
+    pub catalog: MemoryCatalog,
     search_path: Vec<&'static str>,
 }
 
 impl Default for Fixture {
     fn default() -> Self {
         Self {
-            catalog: TestCatalog::standard(),
+            catalog: standard_catalog(),
             search_path: vec!["public", "pg_catalog"],
         }
     }
@@ -473,37 +359,4 @@ fn marked_sql(marked: &str) -> (String, usize) {
         "completion test must contain exactly one '|' marker: {marked:?}"
     );
     (marked.replacen('|', "", 1), cursor)
-}
-
-fn item(
-    name: &str,
-    schema: Option<&str>,
-    kind: CatalogItemKind,
-    definition: Option<&str>,
-    documentation: Option<&str>,
-) -> CatalogItem {
-    CatalogItem {
-        name: name.to_owned(),
-        schema: schema.map(str::to_owned),
-        kind,
-        definition: definition.map(str::to_owned),
-        documentation: documentation.map(str::to_owned),
-    }
-}
-
-fn filter(items: &[CatalogItem], prefix: &str, schema: Option<&str>) -> Vec<CatalogItem> {
-    items
-        .iter()
-        .filter(|item| {
-            item.name
-                .to_ascii_lowercase()
-                .starts_with(&prefix.to_ascii_lowercase())
-                && schema.is_none_or(|schema| {
-                    item.schema
-                        .as_deref()
-                        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(schema))
-                })
-        })
-        .cloned()
-        .collect()
 }

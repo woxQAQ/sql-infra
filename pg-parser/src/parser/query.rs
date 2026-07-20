@@ -3,6 +3,25 @@ use super::*;
 impl Parser {
     pub(super) fn parse_with_statement(&mut self) -> PResult<Node> {
         let with = self.parse_with_clause()?;
+        if self.at_completion_cursor() {
+            for token in [
+                TokenKind::Search,
+                TokenKind::Cycle,
+                TokenKind::Select,
+                TokenKind::Values,
+                TokenKind::Table,
+                TokenKind::Insert,
+                TokenKind::Update,
+                TokenKind::DeleteP,
+                TokenKind::Merge,
+            ] {
+                self.record_completion_at(
+                    CompletionSlot::CteContinuation,
+                    Expectation::Token(token),
+                );
+            }
+            return Err(self.error_here("completion cursor"));
+        }
         let target = match self.peek_kind() {
             TokenKind::Select | TokenKind::Values | TokenKind::Table | TokenKind::Char('(') => {
                 WithTarget::Select
@@ -34,12 +53,33 @@ impl Parser {
 
         loop {
             let cte_location = self.location();
+            if self.at_completion_cursor() {
+                self.record_completion_at(
+                    CompletionSlot::CteName,
+                    Expectation::Name(NameExpectation::Declaration(DeclarationKind::Cte)),
+                );
+                return Err(self.error_here("completion cursor"));
+            }
             let name = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("WITH requires a common table expression name"))?;
             let mut aliascolnames = Vec::new();
             if self.consume(TokenKind::Char('(')) {
                 loop {
+                    if self.at_completion_cursor() {
+                        let slot = if aliascolnames.is_empty() {
+                            CompletionSlot::CteAliasColumn
+                        } else {
+                            CompletionSlot::CteAliasColumnAfterComma
+                        };
+                        self.record_completion_at(
+                            slot,
+                            Expectation::Name(NameExpectation::Declaration(
+                                DeclarationKind::Column,
+                            )),
+                        );
+                        return Err(self.error_here("completion cursor"));
+                    }
                     let column = self.consume_col_id().ok_or_else(|| {
                         self.error_here("expected a column name in the CTE alias list")
                     })?;
@@ -318,8 +358,11 @@ impl Parser {
                         .push(Node::String(String::new("distinct")));
                     if self.consume(TokenKind::On) {
                         self.expect(TokenKind::Char('('))?;
-                        let expressions =
-                            self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+                        let expressions = self.parse_expr_list_strict_until_at(
+                            CompletionSlot::SelectDistinctOn,
+                            CompletionSlot::SelectDistinctOnAfterComma,
+                            &[TokenKind::Char(')')],
+                        )?;
                         if expressions.is_empty() {
                             return Err(self.error_here("DISTINCT ON requires an expression"));
                         }
@@ -327,24 +370,28 @@ impl Parser {
                         self.expect(TokenKind::Char(')'))?;
                     }
                 }
-                stmt.target_list = self.parse_res_target_list_strict_until(&[
-                    TokenKind::Into,
-                    TokenKind::From,
-                    TokenKind::Where,
-                    TokenKind::GroupP,
-                    TokenKind::Having,
-                    TokenKind::Window,
-                    TokenKind::Order,
-                    TokenKind::Limit,
-                    TokenKind::Offset,
-                    TokenKind::Fetch,
-                    TokenKind::For,
-                    TokenKind::Union,
-                    TokenKind::Intersect,
-                    TokenKind::Except,
-                    TokenKind::Char(';'),
-                    TokenKind::Eof,
-                ])?;
+                stmt.target_list = self.parse_res_target_list_strict_until(
+                    CompletionSlot::SelectTarget,
+                    CompletionSlot::SelectTargetAfterComma,
+                    &[
+                        TokenKind::Into,
+                        TokenKind::From,
+                        TokenKind::Where,
+                        TokenKind::GroupP,
+                        TokenKind::Having,
+                        TokenKind::Window,
+                        TokenKind::Order,
+                        TokenKind::Limit,
+                        TokenKind::Offset,
+                        TokenKind::Fetch,
+                        TokenKind::For,
+                        TokenKind::Union,
+                        TokenKind::Intersect,
+                        TokenKind::Except,
+                        TokenKind::Char(';'),
+                        TokenKind::Eof,
+                    ],
+                )?;
                 if distinct_requires_target && stmt.target_list.is_empty() {
                     return Err(self.error_here("SELECT DISTINCT requires a target list"));
                 }
@@ -374,31 +421,10 @@ impl Parser {
             ])?;
         }
         if self.consume(TokenKind::Where) {
-            stmt.where_clause = Some(self.parse_expr_box_strict_until(&[
-                TokenKind::GroupP,
-                TokenKind::Having,
-                TokenKind::Window,
-                TokenKind::Order,
-                TokenKind::Limit,
-                TokenKind::Offset,
-                TokenKind::Fetch,
-                TokenKind::For,
-                TokenKind::Union,
-                TokenKind::Intersect,
-                TokenKind::Except,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?);
-        }
-        if self.consume(TokenKind::GroupP) {
-            self.expect(TokenKind::By)?;
-            if self.consume(TokenKind::All) {
-                stmt.group_by_all = true;
-            } else {
-                if self.consume(TokenKind::Distinct) {
-                    stmt.group_distinct = true;
-                }
-                stmt.group_clause = self.parse_group_by_list_until(&[
+            stmt.where_clause = Some(self.parse_expr_box_strict_until_at(
+                CompletionSlot::SelectWhere,
+                &[
+                    TokenKind::GroupP,
                     TokenKind::Having,
                     TokenKind::Window,
                     TokenKind::Order,
@@ -411,26 +437,57 @@ impl Parser {
                     TokenKind::Except,
                     TokenKind::Char(';'),
                     TokenKind::Eof,
-                ])?;
+                ],
+            )?);
+        }
+        if self.consume(TokenKind::GroupP) {
+            self.expect(TokenKind::By)?;
+            if self.consume(TokenKind::All) {
+                stmt.group_by_all = true;
+            } else {
+                if self.consume(TokenKind::Distinct) {
+                    stmt.group_distinct = true;
+                }
+                stmt.group_clause = self.parse_group_by_list_until(
+                    CompletionSlot::SelectGroupBy,
+                    CompletionSlot::SelectGroupByAfterComma,
+                    &[
+                        TokenKind::Having,
+                        TokenKind::Window,
+                        TokenKind::Order,
+                        TokenKind::Limit,
+                        TokenKind::Offset,
+                        TokenKind::Fetch,
+                        TokenKind::For,
+                        TokenKind::Union,
+                        TokenKind::Intersect,
+                        TokenKind::Except,
+                        TokenKind::Char(';'),
+                        TokenKind::Eof,
+                    ],
+                )?;
                 if stmt.group_clause.is_empty() {
                     return Err(self.error_here("GROUP BY requires at least one expression"));
                 }
             }
         }
         if self.consume(TokenKind::Having) {
-            stmt.having_clause = Some(self.parse_expr_box_strict_until(&[
-                TokenKind::Window,
-                TokenKind::Order,
-                TokenKind::Limit,
-                TokenKind::Offset,
-                TokenKind::Fetch,
-                TokenKind::For,
-                TokenKind::Union,
-                TokenKind::Intersect,
-                TokenKind::Except,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?);
+            stmt.having_clause = Some(self.parse_expr_box_strict_until_at(
+                CompletionSlot::SelectHaving,
+                &[
+                    TokenKind::Window,
+                    TokenKind::Order,
+                    TokenKind::Limit,
+                    TokenKind::Offset,
+                    TokenKind::Fetch,
+                    TokenKind::For,
+                    TokenKind::Union,
+                    TokenKind::Intersect,
+                    TokenKind::Except,
+                    TokenKind::Char(';'),
+                    TokenKind::Eof,
+                ],
+            )?);
         }
         if self.consume(TokenKind::Window) {
             stmt.window_clause = self.parse_window_clause_until(&[
@@ -508,17 +565,21 @@ impl Parser {
     fn parse_select_tail(&mut self, stmt: &mut SelectStmt) -> PResult<()> {
         if self.consume(TokenKind::Order) {
             self.expect(TokenKind::By)?;
-            stmt.sort_clause = self.parse_sort_list_strict_until(&[
-                TokenKind::Limit,
-                TokenKind::Offset,
-                TokenKind::Fetch,
-                TokenKind::For,
-                TokenKind::Union,
-                TokenKind::Intersect,
-                TokenKind::Except,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?;
+            stmt.sort_clause = self.parse_sort_list_strict_until(
+                CompletionSlot::SelectOrderBy,
+                CompletionSlot::SelectOrderByAfterComma,
+                &[
+                    TokenKind::Limit,
+                    TokenKind::Offset,
+                    TokenKind::Fetch,
+                    TokenKind::For,
+                    TokenKind::Union,
+                    TokenKind::Intersect,
+                    TokenKind::Except,
+                    TokenKind::Char(';'),
+                    TokenKind::Eof,
+                ],
+            )?;
         }
         let locking_stops = [
             TokenKind::Limit,
@@ -573,17 +634,20 @@ impl Parser {
                         self.previous_location() as ParseLoc
                     )))
                 } else {
-                    self.parse_expr_box_strict_until(&[
-                        TokenKind::Char(','),
-                        TokenKind::Offset,
-                        TokenKind::Fetch,
-                        TokenKind::For,
-                        TokenKind::Union,
-                        TokenKind::Intersect,
-                        TokenKind::Except,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?
+                    self.parse_expr_box_strict_until_at(
+                        CompletionSlot::SelectLimit,
+                        &[
+                            TokenKind::Char(','),
+                            TokenKind::Offset,
+                            TokenKind::Fetch,
+                            TokenKind::For,
+                            TokenKind::Union,
+                            TokenKind::Intersect,
+                            TokenKind::Except,
+                            TokenKind::Char(';'),
+                            TokenKind::Eof,
+                        ],
+                    )?
                 });
                 if self.consume(TokenKind::Char(',')) {
                     return Err(
@@ -609,9 +673,12 @@ impl Parser {
                 ]);
                 let has_row_suffix = self.at(TokenKind::Row) || self.at(TokenKind::Rows);
                 stmt.limit_offset = Some(Box::new(if has_row_suffix {
-                    self.parse_select_fetch_first_value_range(offset_range)?
+                    self.parse_select_fetch_first_value_range(
+                        CompletionSlot::SelectOffset,
+                        offset_range,
+                    )?
                 } else {
-                    self.parse_expression_range(offset_range)?
+                    self.parse_expression_range_at(CompletionSlot::SelectOffset, offset_range)?
                 }));
                 if has_row_suffix {
                     self.advance();
@@ -631,7 +698,10 @@ impl Parser {
                     } else {
                         let range =
                             self.take_until_top_level_range(&[TokenKind::Row, TokenKind::Rows]);
-                        Box::new(self.parse_select_fetch_first_value_range(range)?)
+                        Box::new(self.parse_select_fetch_first_value_range(
+                            CompletionSlot::SelectFetchCount,
+                            range,
+                        )?)
                     },
                 );
                 if !(self.consume(TokenKind::Row) || self.consume(TokenKind::Rows)) {
@@ -648,7 +718,11 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_select_fetch_first_value_range(&self, range: std::ops::Range<usize>) -> PResult<Node> {
+    fn parse_select_fetch_first_value_range(
+        &self,
+        slot: CompletionSlot,
+        range: std::ops::Range<usize>,
+    ) -> PResult<Node> {
         if matches!(
             &self.tokens[range.clone()],
             [
@@ -662,9 +736,9 @@ impl Parser {
                 }
             ]
         ) {
-            self.parse_expression_range(range)
+            self.parse_expression_range_at(slot, range)
         } else {
-            self.parse_c_expression_range(range)
+            self.parse_c_expression_range_at(slot, range)
         }
     }
 }

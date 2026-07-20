@@ -1,5 +1,8 @@
 use crate::ast::*;
-use crate::completion::{ColumnContext, Expectation, NameExpectation, SharedCompletionRecorder};
+use crate::completion::{
+    ColumnContext, CompletionSlot, DeclarationKind, Expectation, NameExpectation,
+    SharedCompletionRecorder,
+};
 use crate::lexer::{Token, TokenValue, lex, lookup_keyword};
 use crate::{BareLabel, KeywordCategory, TextRange, TextSize, TokenKind};
 use std::ops::Range;
@@ -322,18 +325,19 @@ impl Parser {
         }
     }
 
-    fn expression_view(&self, range: Range<usize>) -> ExprParser {
-        self.expression_view_with_completion(range, self.completion.clone())
+    fn expression_view_at(&self, slot: CompletionSlot, range: Range<usize>) -> ExprParser {
+        self.expression_view_with_completion(range, self.completion.clone(), Some(slot))
     }
 
     fn expression_view_without_completion(&self, range: Range<usize>) -> ExprParser {
-        self.expression_view_with_completion(range, None)
+        self.expression_view_with_completion(range, None, None)
     }
 
     fn expression_view_with_completion(
         &self,
         range: Range<usize>,
         completion: Option<SharedCompletionRecorder>,
+        slot: Option<CompletionSlot>,
     ) -> ExprParser {
         assert!(
             self.start <= range.start && range.start <= range.end && range.end <= self.end,
@@ -343,7 +347,7 @@ impl Parser {
             .tokens
             .get(range.end)
             .map_or_else(|| self.eof.location(), Token::location);
-        ExprParser::from_shared_range(self.tokens.clone(), range, eof_location, completion)
+        ExprParser::from_shared_range(self.tokens.clone(), range, eof_location, completion, slot)
     }
 
     pub(super) fn expression_range_is_valid(&self, range: Range<usize>) -> bool {
@@ -354,64 +358,82 @@ impl Parser {
                 .is_ok()
     }
 
-    pub(super) fn parse_expression_range(&self, range: Range<usize>) -> PResult<Node> {
+    pub(super) fn parse_expression_range_at(
+        &self,
+        slot: CompletionSlot,
+        range: Range<usize>,
+    ) -> PResult<Node> {
         let location = self
             .tokens
             .get(range.start)
             .map_or_else(|| self.location(), Token::location);
         if range.is_empty() {
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_expression_completion_at(slot);
             }
             return Err(ParseError::new(location, "expected an expression"));
         }
-        self.expression_view(range).parse().map_err(|mut error| {
-            if error.location() == 0 {
-                error.reanchor(location);
-            }
-            error
-        })
+        self.expression_view_at(slot, range)
+            .parse()
+            .map_err(|mut error| {
+                if error.location() == 0 {
+                    error.reanchor(location);
+                }
+                error
+            })
     }
 
-    pub(super) fn parse_b_expression_range(&self, range: Range<usize>) -> PResult<Node> {
+    pub(super) fn parse_b_expression_range_at(
+        &self,
+        slot: CompletionSlot,
+        range: Range<usize>,
+    ) -> PResult<Node> {
         let location = self
             .tokens
             .get(range.start)
             .map_or_else(|| self.location(), Token::location);
         if range.is_empty() {
             if self.at_completion_cursor() {
-                self.record_restricted_expression_completion();
+                self.record_restricted_expression_completion_at(slot);
             }
             return Err(ParseError::new(
                 location,
                 "expected a restricted expression",
             ));
         }
-        self.expression_view(range).parse_b().map_err(|mut error| {
-            if error.location() == 0 {
-                error.reanchor(location);
-            }
-            error
-        })
+        self.expression_view_at(slot, range)
+            .parse_b()
+            .map_err(|mut error| {
+                if error.location() == 0 {
+                    error.reanchor(location);
+                }
+                error
+            })
     }
 
-    pub(super) fn parse_c_expression_range(&self, range: Range<usize>) -> PResult<Node> {
+    pub(super) fn parse_c_expression_range_at(
+        &self,
+        slot: CompletionSlot,
+        range: Range<usize>,
+    ) -> PResult<Node> {
         let location = self
             .tokens
             .get(range.start)
             .map_or_else(|| self.location(), Token::location);
         if range.is_empty() {
             if self.at_completion_cursor() {
-                self.record_restricted_expression_completion();
+                self.record_restricted_expression_completion_at(slot);
             }
             return Err(ParseError::new(location, "expected a common expression"));
         }
-        self.expression_view(range).parse_c().map_err(|mut error| {
-            if error.location() == 0 {
-                error.reanchor(location);
-            }
-            error
-        })
+        self.expression_view_at(slot, range)
+            .parse_c()
+            .map_err(|mut error| {
+                if error.location() == 0 {
+                    error.reanchor(location);
+                }
+                error
+            })
     }
 
     pub(super) fn split_explicit_alias_range(
@@ -647,10 +669,6 @@ impl Parser {
     /// `true`; otherwise leave the cursor unchanged and return `false`.
     /// Corresponds to "optional / see-one-consume-one" in grammar productions.
     pub(super) fn consume(&mut self, kind: TokenKind) -> bool {
-        if self.at_completion_cursor() {
-            self.record_completion(Expectation::Token(kind));
-            return false;
-        }
         if self.at(kind) {
             self.pos += 1;
             true
@@ -663,9 +681,6 @@ impl Parser {
     /// a clone; otherwise emit a syntax error with the expected vs actual kind.
     /// Corresponds to mandatory tokens in productions.
     pub(super) fn expect(&mut self, kind: TokenKind) -> PResult<Token> {
-        if self.at_completion_cursor() {
-            self.record_completion(Expectation::Token(kind));
-        }
         if self.at(kind) {
             Ok(self.advance().clone())
         } else {
@@ -743,29 +758,30 @@ impl Parser {
                 .is_some_and(|recorder| recorder.borrow().is_cursor(self.location()))
     }
 
-    pub(super) fn record_completion(&self, expectation: Expectation) {
+    pub(super) fn record_completion_at(&self, slot: CompletionSlot, expectation: Expectation) {
         if let Some(recorder) = &self.completion {
-            recorder.borrow_mut().record(expectation);
+            recorder.borrow_mut().record_at(slot, expectation);
         }
     }
 
-    pub(super) fn record_expression_completion(&self) {
+    pub(super) fn record_expression_completion_at(&self, slot: CompletionSlot) {
         if let Some(recorder) = &self.completion {
-            recorder.borrow_mut().record_expression();
+            recorder.borrow_mut().record_expression_at(slot);
         }
     }
 
-    pub(super) fn record_restricted_expression_completion(&self) {
+    pub(super) fn record_restricted_expression_completion_at(&self, slot: CompletionSlot) {
         if let Some(recorder) = &self.completion {
-            recorder.borrow_mut().record_restricted_expression();
+            recorder.borrow_mut().record_restricted_expression_at(slot);
         }
     }
 
-    pub(super) fn record_relation_completion(&self) {
-        self.record_completion(Expectation::Name(NameExpectation::Relation {
-            schema: None,
-        }));
-        self.record_completion(Expectation::Name(NameExpectation::Schema));
+    pub(super) fn record_relation_completion_at(&self, slot: CompletionSlot) {
+        self.record_completion_at(
+            slot,
+            Expectation::Name(NameExpectation::Relation { schema: None }),
+        );
+        self.record_completion_at(slot, Expectation::Name(NameExpectation::Schema));
     }
 }
 
@@ -790,7 +806,10 @@ impl Parser {
                 TokenKind::Values,
                 TokenKind::Explain,
             ] {
-                self.record_completion(Expectation::Token(token));
+                self.record_completion_at(
+                    CompletionSlot::StatementStart,
+                    Expectation::Token(token),
+                );
             }
             return Err(self.error_here("completion cursor"));
         }
@@ -963,7 +982,7 @@ mod tests {
     #[test]
     fn expression_view_shares_tokens_and_cannot_read_its_suffix() {
         let parent = Parser::new("1 + 2, 3").unwrap();
-        let mut expression = parent.expression_view(0..3);
+        let mut expression = parent.expression_view_without_completion(0..3);
 
         assert!(Rc::ptr_eq(&parent.tokens, &expression.tokens));
         assert!(matches!(expression.parse_expr(0), Some(Node::AExpr(_))));

@@ -59,8 +59,8 @@ fn routine_and_type_insert_text_quotes_unsafe_identifiers() {
     let mut fixture = Fixture::default();
     fixture
         .catalog
-        .function("public", "calculate total", "calculate total()", None);
-    fixture.catalog.ty("public", "order state");
+        .add_function("public", "calculate total", "calculate total()");
+    fixture.catalog.add_type("public", "order state");
 
     assert_eq!(
         fixture
@@ -83,8 +83,8 @@ fn quoted_routine_and_type_prefixes_are_case_sensitive() {
     let mut fixture = Fixture::default();
     fixture
         .catalog
-        .function("public", "CalculateTotal", "CalculateTotal()", None);
-    fixture.catalog.ty("public", "OrderState");
+        .add_function("public", "CalculateTotal", "CalculateTotal()");
+    fixture.catalog.add_type("public", "OrderState");
 
     let function = fixture.complete("SELECT \"Calc|\"");
     assert_eq!(

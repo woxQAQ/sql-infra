@@ -67,7 +67,10 @@ impl Parser {
         };
         let qual = if self.consume(TokenKind::Using) {
             self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+            let expr = self.parse_expr_box_strict_until_at(
+                CompletionSlot::CreatePolicyUsing,
+                &[TokenKind::Char(')')],
+            )?;
             self.expect(TokenKind::Char(')'))?;
             Some(expr)
         } else {
@@ -76,7 +79,10 @@ impl Parser {
         let with_check = if self.consume(TokenKind::With) {
             self.expect(TokenKind::Check)?;
             self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+            let expr = self.parse_expr_box_strict_until_at(
+                CompletionSlot::CreatePolicyCheck,
+                &[TokenKind::Char(')')],
+            )?;
             self.expect(TokenKind::Char(')'))?;
             Some(expr)
         } else {
@@ -132,7 +138,10 @@ impl Parser {
         };
         let qual = if self.consume(TokenKind::Using) {
             self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+            let expr = self.parse_expr_box_strict_until_at(
+                CompletionSlot::AlterPolicyUsing,
+                &[TokenKind::Char(')')],
+            )?;
             self.expect(TokenKind::Char(')'))?;
             Some(expr)
         } else {
@@ -141,7 +150,10 @@ impl Parser {
         let with_check = if self.consume(TokenKind::With) {
             self.expect(TokenKind::Check)?;
             self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+            let expr = self.parse_expr_box_strict_until_at(
+                CompletionSlot::AlterPolicyCheck,
+                &[TokenKind::Char(')')],
+            )?;
             self.expect(TokenKind::Char(')'))?;
             Some(expr)
         } else {

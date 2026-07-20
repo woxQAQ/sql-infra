@@ -92,8 +92,10 @@ impl Parser {
 
     pub(super) fn parse_return(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Return)?;
-        let returnval =
-            Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?);
+        let returnval = Some(self.parse_expr_box_strict_until_at(
+            CompletionSlot::ReturnExpression,
+            &[TokenKind::Char(';'), TokenKind::Eof],
+        )?);
         Ok(Node::ReturnStmt(ReturnStmt {
             node_tag: NodeTag::ReturnStmt,
             returnval,

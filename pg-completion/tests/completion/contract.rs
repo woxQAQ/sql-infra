@@ -1,34 +1,26 @@
 use std::cell::RefCell;
 
-use pg_completion::{Catalog, CatalogItem, CatalogItemKind, CatalogQuery, CompletionKind};
+use pg_completion::{
+    Catalog, CatalogItem, CatalogObjectIdentity, CatalogObjectKind, CatalogQuery,
+    CatalogQueryScope, CompletionKind,
+};
+use pg_parser::QualifiedName;
 
 use super::support::Fixture;
 
 #[derive(Debug, Eq, PartialEq)]
-enum ObservedQuery {
-    Schemas {
-        prefix: String,
-    },
-    Relations {
-        prefix: String,
-        schema: Option<String>,
-        search_path: Vec<String>,
-    },
-    Columns {
-        relation: String,
-        schema: Option<String>,
-        search_path: Vec<String>,
-    },
-    Functions {
-        prefix: String,
-        schema: Option<String>,
-        search_path: Vec<String>,
-    },
-    Types {
-        prefix: String,
-        schema: Option<String>,
-        search_path: Vec<String>,
-    },
+struct ObservedQuery {
+    kinds: Vec<CatalogObjectKind>,
+    prefix: String,
+    scope: ObservedScope,
+    search_path: Vec<String>,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum ObservedScope {
+    Global,
+    Schema(Option<String>),
+    Relation(QualifiedName),
 }
 
 #[derive(Default)]
@@ -52,45 +44,16 @@ impl ProbeCatalog {
 
 impl Catalog for ProbeCatalog {
     fn search(&self, query: CatalogQuery<'_>) -> Vec<CatalogItem> {
-        let observed = match query {
-            CatalogQuery::Schemas { prefix } => ObservedQuery::Schemas {
-                prefix: prefix.to_owned(),
-            },
-            CatalogQuery::Relations {
-                prefix,
-                schema,
-                search_path,
-            } => ObservedQuery::Relations {
-                prefix: prefix.to_owned(),
-                schema: schema.map(str::to_owned),
-                search_path: owned_path(search_path),
-            },
-            CatalogQuery::Columns {
-                relation,
-                search_path,
-            } => ObservedQuery::Columns {
-                relation: relation.name.clone(),
-                schema: relation.schema.clone(),
-                search_path: owned_path(search_path),
-            },
-            CatalogQuery::Functions {
-                prefix,
-                schema,
-                search_path,
-            } => ObservedQuery::Functions {
-                prefix: prefix.to_owned(),
-                schema: schema.map(str::to_owned),
-                search_path: owned_path(search_path),
-            },
-            CatalogQuery::Types {
-                prefix,
-                schema,
-                search_path,
-            } => ObservedQuery::Types {
-                prefix: prefix.to_owned(),
-                schema: schema.map(str::to_owned),
-                search_path: owned_path(search_path),
-            },
+        let scope = match query.scope {
+            CatalogQueryScope::Global => ObservedScope::Global,
+            CatalogQueryScope::Schema(schema) => ObservedScope::Schema(schema.map(str::to_owned)),
+            CatalogQueryScope::Relation(relation) => ObservedScope::Relation(relation.clone()),
+        };
+        let observed = ObservedQuery {
+            kinds: query.kinds.to_vec(),
+            prefix: query.prefix.to_owned(),
+            scope,
+            search_path: owned_path(query.search_path),
         };
         self.queries.borrow_mut().push(observed);
         self.items.clone()
@@ -100,8 +63,8 @@ impl Catalog for ProbeCatalog {
 #[test]
 fn completion_filters_results_from_an_unfiltered_catalog() {
     let catalog = ProbeCatalog::returning([
-        item("users", "public", CatalogItemKind::Table),
-        item("orders", "public", CatalogItemKind::Table),
+        item("users", "public", CatalogObjectKind::Table),
+        item("orders", "public", CatalogObjectKind::Table),
     ]);
 
     Fixture::default()
@@ -114,44 +77,38 @@ fn completion_prefix_filters_every_catalog_query_family() {
     let fixture = Fixture::default();
 
     let schemas = ProbeCatalog::returning([
-        CatalogItem {
-            name: "public".into(),
-            schema: None,
-            kind: CatalogItemKind::Schema,
-            definition: None,
-            documentation: None,
-        },
-        CatalogItem {
-            name: "audit".into(),
-            schema: None,
-            kind: CatalogItemKind::Schema,
-            definition: None,
-            documentation: None,
-        },
+        CatalogItem::new(CatalogObjectIdentity::global(
+            CatalogObjectKind::Schema,
+            "public",
+        )),
+        CatalogItem::new(CatalogObjectIdentity::global(
+            CatalogObjectKind::Schema,
+            "audit",
+        )),
     ]);
     fixture
         .complete_with("SELECT * FROM pub|", Some(&schemas))
         .assert_kind_labels(CompletionKind::Schema, &["public"]);
 
     let columns = ProbeCatalog::returning([
-        item("name", "public", CatalogItemKind::Column),
-        item("amount", "public", CatalogItemKind::Column),
+        column("name", "public", "users"),
+        column("amount", "public", "users"),
     ]);
     fixture
         .complete_with("SELECT na| FROM users", Some(&columns))
         .assert_kind_labels(CompletionKind::Column, &["name"]);
 
     let functions = ProbeCatalog::returning([
-        item("count", "pg_catalog", CatalogItemKind::Function),
-        item("calculate_total", "public", CatalogItemKind::Function),
+        item("count", "pg_catalog", CatalogObjectKind::Function),
+        item("calculate_total", "public", CatalogObjectKind::Function),
     ]);
     fixture
         .complete_with("SELECT cou|", Some(&functions))
         .assert_kind_labels(CompletionKind::Function, &["count"]);
 
     let types = ProbeCatalog::returning([
-        item("integer", "pg_catalog", CatalogItemKind::Type),
-        item("interval", "pg_catalog", CatalogItemKind::Type),
+        item("integer", "pg_catalog", CatalogObjectKind::Type),
+        item("interval", "pg_catalog", CatalogObjectKind::Type),
     ]);
     fixture
         .complete_with("SELECT 1::integ|", Some(&types))
@@ -169,24 +126,37 @@ fn catalog_queries_preserve_prefix_qualification_and_search_path() {
     fixture.complete_with("SELECT 1::pg_catalog.inte|", Some(&catalog));
 
     let path = vec!["app".to_owned(), "pg_catalog".to_owned()];
-    assert!(catalog.recorded(&ObservedQuery::Relations {
+    assert!(catalog.recorded(&ObservedQuery {
+        kinds: vec![
+            CatalogObjectKind::Table,
+            CatalogObjectKind::View,
+            CatalogObjectKind::MaterializedView,
+            CatalogObjectKind::ForeignTable,
+            CatalogObjectKind::Sequence,
+        ],
         prefix: "us".to_owned(),
-        schema: Some("audit".to_owned()),
+        scope: ObservedScope::Schema(Some("audit".to_owned())),
         search_path: path.clone(),
     }));
-    assert!(catalog.recorded(&ObservedQuery::Columns {
-        relation: "users".to_owned(),
-        schema: None,
+    assert!(catalog.recorded(&ObservedQuery {
+        kinds: vec![CatalogObjectKind::Column],
+        prefix: String::new(),
+        scope: ObservedScope::Relation(QualifiedName {
+            name: "users".to_owned(),
+            ..QualifiedName::default()
+        }),
         search_path: path.clone(),
     }));
-    assert!(catalog.recorded(&ObservedQuery::Functions {
+    assert!(catalog.recorded(&ObservedQuery {
+        kinds: vec![CatalogObjectKind::Function, CatalogObjectKind::Aggregate],
         prefix: "cou".to_owned(),
-        schema: Some("pg_catalog".to_owned()),
+        scope: ObservedScope::Schema(Some("pg_catalog".to_owned())),
         search_path: path.clone(),
     }));
-    assert!(catalog.recorded(&ObservedQuery::Types {
+    assert!(catalog.recorded(&ObservedQuery {
+        kinds: vec![CatalogObjectKind::Type, CatalogObjectKind::Domain],
         prefix: "inte".to_owned(),
-        schema: Some("pg_catalog".to_owned()),
+        scope: ObservedScope::Schema(Some("pg_catalog".to_owned())),
         search_path: path,
     }));
 }
@@ -198,12 +168,18 @@ fn owned_path(search_path: &[&str]) -> Vec<String> {
         .collect()
 }
 
-fn item(name: &str, schema: &str, kind: CatalogItemKind) -> CatalogItem {
-    CatalogItem {
-        name: name.to_owned(),
-        schema: Some(schema.to_owned()),
-        kind,
-        definition: None,
-        documentation: None,
-    }
+fn item(name: &str, schema: &str, kind: CatalogObjectKind) -> CatalogItem {
+    CatalogItem::new(CatalogObjectIdentity::in_schema(kind, schema, name))
+}
+
+fn column(name: &str, schema: &str, relation: &str) -> CatalogItem {
+    CatalogItem::new(CatalogObjectIdentity::owned_by_relation(
+        CatalogObjectKind::Column,
+        QualifiedName {
+            schema: Some(schema.to_owned()),
+            name: relation.to_owned(),
+            ..QualifiedName::default()
+        },
+        name,
+    ))
 }

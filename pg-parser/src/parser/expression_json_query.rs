@@ -263,7 +263,11 @@ impl ExprParser {
                 end += 1;
             }
             let mut parser = self.parser_view(start..end);
-            match parser.parse_sort_list_strict_until(&[TokenKind::Eof]) {
+            match parser.parse_sort_list_strict_until(
+                CompletionSlot::JsonArrayAggOrderBy,
+                CompletionSlot::JsonArrayAggOrderByAfterComma,
+                &[TokenKind::Eof],
+            ) {
                 Ok(items) => agg_order = items,
                 Err(error) => {
                     if self.error.is_none() {

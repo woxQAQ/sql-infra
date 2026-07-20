@@ -3,14 +3,22 @@ use super::*;
 impl Parser {
     pub(super) fn parse_from_clause_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
         if self.at_completion_cursor() {
-            self.record_completion(Expectation::Name(NameExpectation::Relation {
-                schema: None,
-            }));
-            self.record_completion(Expectation::Name(NameExpectation::Schema));
-            self.record_completion(Expectation::Name(NameExpectation::Function {
-                schema: None,
-            }));
-            self.record_completion(Expectation::Token(TokenKind::LateralP));
+            self.record_completion_at(
+                CompletionSlot::FromItem,
+                Expectation::Name(NameExpectation::Relation { schema: None }),
+            );
+            self.record_completion_at(
+                CompletionSlot::FromItem,
+                Expectation::Name(NameExpectation::Schema),
+            );
+            self.record_completion_at(
+                CompletionSlot::FromItem,
+                Expectation::Name(NameExpectation::Function { schema: None }),
+            );
+            self.record_completion_at(
+                CompletionSlot::FromItem,
+                Expectation::Token(TokenKind::LateralP),
+            );
             return Err(self.error_here("completion cursor"));
         }
         let mut items = Vec::new();
@@ -168,14 +176,21 @@ impl Parser {
                 return Err(self.error_here("TABLESAMPLE requires a sampling method"));
             }
             self.expect(TokenKind::Char('('))?;
-            let args = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            let args = self.parse_expr_list_strict_until_at(
+                CompletionSlot::TableSampleArgument,
+                CompletionSlot::TableSampleArgumentAfterComma,
+                &[TokenKind::Char(')')],
+            )?;
             if args.is_empty() {
                 return Err(self.error_here("TABLESAMPLE requires at least one argument"));
             }
             self.expect(TokenKind::Char(')'))?;
             let repeatable = if self.consume(TokenKind::Repeatable) {
                 self.expect(TokenKind::Char('('))?;
-                let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+                let expr = self.parse_expr_box_strict_until_at(
+                    CompletionSlot::TableSampleRepeatable,
+                    &[TokenKind::Char(')')],
+                )?;
                 self.expect(TokenKind::Char(')'))?;
                 Some(expr)
             } else {
@@ -220,7 +235,12 @@ impl Parser {
                 TokenKind::Char(','),
                 TokenKind::Char(')'),
             ]);
-            let expression = self.parse_expression_range(expression_range)?;
+            let slot = if functions.is_empty() {
+                CompletionSlot::RowsFromFunction
+            } else {
+                CompletionSlot::RowsFromFunctionAfterComma
+            };
+            let expression = self.parse_expression_range_at(slot, expression_range)?;
             if !is_function_expression_node(&expression) {
                 return Err(self.error_here("ROWS FROM items must be function expressions"));
             }

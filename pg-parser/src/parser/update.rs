@@ -16,7 +16,7 @@ impl Parser {
     pub(super) fn parse_update(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::Update)?;
         if self.at_completion_cursor() {
-            self.record_relation_completion();
+            self.record_relation_completion_at(CompletionSlot::UpdateTargetRelation);
             return Err(self.error_here("completion cursor"));
         }
         let mut relation = Some(Box::new(
@@ -30,13 +30,18 @@ impl Parser {
             relation.alias = self.parse_optional_alias(false);
         }
         self.expect(TokenKind::Set)?;
-        let target_list = self.parse_set_clause_list_until(&[
-            TokenKind::From,
-            TokenKind::Where,
-            TokenKind::Returning,
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ])?;
+        let target_list = self.parse_set_clause_list_until(
+            CompletionSlot::UpdateSetTarget,
+            CompletionSlot::UpdateSetTargetAfterComma,
+            CompletionSlot::UpdateSetValue,
+            &[
+                TokenKind::From,
+                TokenKind::Where,
+                TokenKind::Returning,
+                TokenKind::Char(';'),
+                TokenKind::Eof,
+            ],
+        )?;
         if target_list.is_empty() {
             return Err(self.error_here("UPDATE SET requires at least one assignment"));
         }
@@ -54,11 +59,10 @@ impl Parser {
         } else {
             Vec::new()
         };
-        let where_clause = self.parse_where_or_current_clause(&[
-            TokenKind::Returning,
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ])?;
+        let where_clause = self.parse_where_or_current_clause(
+            CompletionSlot::UpdateWhere,
+            &[TokenKind::Returning, TokenKind::Char(';'), TokenKind::Eof],
+        )?;
         let returning_clause = self.parse_returning_clause()?;
         Ok(Node::UpdateStmt(UpdateStmt {
             node_tag: NodeTag::UpdateStmt,

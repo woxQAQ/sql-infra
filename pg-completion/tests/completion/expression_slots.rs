@@ -1,4 +1,4 @@
-use pg_completion::{CatalogItemKind, CompletionKind};
+use pg_completion::{CatalogObjectKind, CompletionKind};
 
 use super::support::Fixture;
 
@@ -181,11 +181,11 @@ fn insert_select_switches_from_source_scope_to_target_returning_scope() {
 #[test]
 fn remaining_statement_expression_slots_reach_value_completion() {
     let mut fixture = Fixture::default();
-    fixture.catalog.relation(
+    fixture.catalog.add_relation(
         "public",
         "events",
-        CatalogItemKind::Table,
-        &[("occurred_at", "timestamp")],
+        CatalogObjectKind::Table,
+        [("occurred_at".into(), "timestamp".into())],
     );
 
     for marked in [

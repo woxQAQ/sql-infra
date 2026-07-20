@@ -3,9 +3,10 @@ use super::*;
 impl Parser {
     pub(super) fn parse_insert_column_list(&mut self) -> PResult<NodeList> {
         if self.at_completion_cursor() {
-            self.record_completion(Expectation::Name(NameExpectation::Column(
-                ColumnContext::TargetRelation,
-            )));
+            self.record_completion_at(
+                CompletionSlot::InsertColumn,
+                Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+            );
             return Err(self.error_here("completion cursor"));
         }
         let mut cols = Vec::new();

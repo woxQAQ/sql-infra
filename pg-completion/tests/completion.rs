@@ -12,6 +12,8 @@ mod errors;
 mod expression_forms;
 #[path = "completion/expression_slots.rs"]
 mod expression_slots;
+#[path = "completion/grammar_coverage.rs"]
+mod grammar_coverage;
 #[path = "completion/ranking.rs"]
 mod ranking;
 #[path = "completion/relations.rs"]

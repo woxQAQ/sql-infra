@@ -23,7 +23,12 @@ impl Parser {
                 self.tokens.get(range.start).map(|token| token.kind) == Some(TokenKind::Char('('));
             let starts_with_cast =
                 self.tokens.get(range.start).map(|token| token.kind) == Some(TokenKind::Cast);
-            let parsed = self.parse_index_elem_range(range)?;
+            let slot = if part_params.is_empty() {
+                CompletionSlot::PartitionKeyExpression
+            } else {
+                CompletionSlot::PartitionKeyExpressionAfterComma
+            };
+            let parsed = self.parse_index_elem_range(slot, range)?;
             if !parsed.opclassopts.is_empty()
                 || parsed.ordering != SortByDir::Default
                 || parsed.nulls_ordering != SortByNulls::Default
@@ -84,7 +89,11 @@ impl Parser {
         if self.consume(TokenKind::InP) {
             let location = self.previous_location();
             self.expect(TokenKind::Char('('))?;
-            let listdatums = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            let listdatums = self.parse_expr_list_strict_until_at(
+                CompletionSlot::PartitionListValue,
+                CompletionSlot::PartitionListValueAfterComma,
+                &[TokenKind::Char(')')],
+            )?;
             if listdatums.is_empty() {
                 return Err(self.error_here("list partition bound cannot be empty"));
             }
@@ -100,14 +109,22 @@ impl Parser {
         if self.consume(TokenKind::From) {
             let location = self.previous_location();
             self.expect(TokenKind::Char('('))?;
-            let lowerdatums = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            let lowerdatums = self.parse_expr_list_strict_until_at(
+                CompletionSlot::PartitionRangeFromValue,
+                CompletionSlot::PartitionRangeFromValueAfterComma,
+                &[TokenKind::Char(')')],
+            )?;
             if lowerdatums.is_empty() {
                 return Err(self.error_here("range partition lower bound cannot be empty"));
             }
             self.expect(TokenKind::Char(')'))?;
             self.expect(TokenKind::To)?;
             self.expect(TokenKind::Char('('))?;
-            let upperdatums = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            let upperdatums = self.parse_expr_list_strict_until_at(
+                CompletionSlot::PartitionRangeToValue,
+                CompletionSlot::PartitionRangeToValueAfterComma,
+                &[TokenKind::Char(')')],
+            )?;
             if upperdatums.is_empty() {
                 return Err(self.error_here("range partition upper bound cannot be empty"));
             }

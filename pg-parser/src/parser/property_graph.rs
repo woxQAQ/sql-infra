@@ -321,7 +321,11 @@ impl Parser {
             });
         }
         self.expect(TokenKind::Char('('))?;
-        let properties = self.parse_res_target_list_strict_until(&[TokenKind::Char(')')])?;
+        let properties = self.parse_res_target_list_strict_until(
+            CompletionSlot::PropertyGraphPropertyExpression,
+            CompletionSlot::PropertyGraphPropertyExpressionAfterComma,
+            &[TokenKind::Char(')')],
+        )?;
         if properties.is_empty() {
             return Err(self.error_here("PROPERTIES list cannot be empty"));
         }
@@ -338,7 +342,11 @@ impl Parser {
         let location = self.previous_location();
         self.expect(TokenKind::Properties)?;
         self.expect(TokenKind::Char('('))?;
-        let properties = self.parse_res_target_list_strict_until(&[TokenKind::Char(')')])?;
+        let properties = self.parse_res_target_list_strict_until(
+            CompletionSlot::PropertyGraphPropertyExpression,
+            CompletionSlot::PropertyGraphPropertyExpressionAfterComma,
+            &[TokenKind::Char(')')],
+        )?;
         if properties.is_empty() {
             return Err(self.error_here("ADD PROPERTIES list cannot be empty"));
         }

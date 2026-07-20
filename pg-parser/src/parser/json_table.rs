@@ -7,14 +7,14 @@ impl Parser {
 
         let context_location = self.location();
         let context_range = self.take_until_top_level_range(&[TokenKind::Char(',')]);
-        let context_item =
-            self.parse_json_value_expr_range(context_range)
-                .map_err(|mut error| {
-                    if error.location() == 0 {
-                        error.reanchor(context_location);
-                    }
-                    error
-                })?;
+        let context_item = self
+            .parse_json_value_expr_range(CompletionSlot::JsonTableContext, context_range)
+            .map_err(|mut error| {
+                if error.location() == 0 {
+                    error.reanchor(context_location);
+                }
+                error
+            })?;
         self.expect(TokenKind::Char(','))?;
 
         let pathspec = self.parse_json_table_path_spec(false)?.ok_or_else(|| {
@@ -53,7 +53,12 @@ impl Parser {
         loop {
             let location = self.location();
             let value_range = self.take_until_top_level_range(&[TokenKind::As]);
-            let value = self.parse_json_value_expr_range(value_range)?;
+            let slot = if arguments.is_empty() {
+                CompletionSlot::JsonTablePassingArgument
+            } else {
+                CompletionSlot::JsonTablePassingArgumentAfterComma
+            };
+            let value = self.parse_json_value_expr_range(slot, value_range)?;
             self.expect(TokenKind::As)?;
             let name = self
                 .consume_col_label()
@@ -355,7 +360,10 @@ impl Parser {
                 let range = self.take_until_top_level_range(&[TokenKind::On]);
                 (
                     JsonBehaviorType::Default,
-                    Some(Box::new(self.parse_expression_range(range)?)),
+                    Some(Box::new(self.parse_expression_range_at(
+                        CompletionSlot::JsonTableDefaultBehavior,
+                        range,
+                    )?)),
                 )
             }
             TokenKind::ErrorP => {

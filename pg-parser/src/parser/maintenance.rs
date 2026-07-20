@@ -102,7 +102,10 @@ impl Parser {
             if !is_from {
                 return Err(self.error_here("WHERE clause is not allowed with COPY TO"));
             }
-            Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?)
+            Some(self.parse_expr_box_strict_until_at(
+                CompletionSlot::CopyWhere,
+                &[TokenKind::Char(';'), TokenKind::Eof],
+            )?)
         } else {
             None
         };

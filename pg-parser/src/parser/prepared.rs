@@ -58,7 +58,11 @@ impl Parser {
                 .ok_or_else(|| self.error_here("EXECUTE requires a statement name"))?,
         );
         let params = if self.consume(TokenKind::Char('(')) {
-            let params = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
+            let params = self.parse_expr_list_strict_until_at(
+                CompletionSlot::ExecuteParameter,
+                CompletionSlot::ExecuteParameterAfterComma,
+                &[TokenKind::Char(')')],
+            )?;
             if params.is_empty() {
                 return Err(self.error_here("EXECUTE parameter list cannot be empty"));
             }
@@ -178,7 +182,21 @@ impl Parser {
     pub(super) fn parse_call(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Call)?;
         let range = self.take_until_top_level_range(&[TokenKind::Char(';'), TokenKind::Eof]);
-        let funccall = match self.parse_expression_range(range)? {
+        let has_argument_list = self.tokens[range.clone()]
+            .iter()
+            .any(|token| token.kind == TokenKind::Char('('));
+        if self.at_completion_cursor() && !has_argument_list {
+            self.record_completion_at(
+                CompletionSlot::CallRoutine,
+                Expectation::Name(NameExpectation::Function { schema: None }),
+            );
+            self.record_completion_at(
+                CompletionSlot::CallRoutine,
+                Expectation::Name(NameExpectation::Schema),
+            );
+            return Err(self.error_here("completion cursor"));
+        }
+        let funccall = match self.parse_expression_range_at(CompletionSlot::CallRoutine, range)? {
             Node::FuncCall(call)
                 if call.agg_filter.is_none()
                     && call.over.is_none()

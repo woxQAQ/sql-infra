@@ -33,13 +33,20 @@ impl Parser {
             }
         }
         let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[TokenKind::Columns])?)
+            Some(self.parse_expr_box_strict_until_at(
+                CompletionSlot::GraphTableWhere,
+                &[TokenKind::Columns],
+            )?)
         } else {
             None
         };
         self.expect(TokenKind::Columns)?;
         self.expect(TokenKind::Char('('))?;
-        let columns = self.parse_res_target_list_strict_until(&[TokenKind::Char(')')])?;
+        let columns = self.parse_res_target_list_strict_until(
+            CompletionSlot::GraphTableColumnExpression,
+            CompletionSlot::GraphTableColumnExpressionAfterComma,
+            &[TokenKind::Char(')')],
+        )?;
         self.expect(TokenKind::Char(')'))?;
         self.expect(TokenKind::Char(')'))?;
         let alias = self.parse_optional_alias_clause()?;
@@ -79,7 +86,10 @@ impl Parser {
                 return Err(self.error_here("parenthesized graph path cannot be empty"));
             }
             let where_clause = if self.consume(TokenKind::Where) {
-                Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?)
+                Some(self.parse_expr_box_strict_until_at(
+                    CompletionSlot::GraphPathWhere,
+                    &[TokenKind::Char(')')],
+                )?)
             } else {
                 None
             };
@@ -177,7 +187,10 @@ impl Parser {
             None
         };
         let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[close.unwrap()])?)
+            Some(self.parse_expr_box_strict_until_at(
+                CompletionSlot::GraphElementWhere,
+                &[close.unwrap()],
+            )?)
         } else {
             None
         };

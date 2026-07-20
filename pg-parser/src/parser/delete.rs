@@ -13,7 +13,7 @@ impl Parser {
         self.expect(TokenKind::DeleteP)?;
         self.expect(TokenKind::From)?;
         if self.at_completion_cursor() {
-            self.record_relation_completion();
+            self.record_relation_completion_at(CompletionSlot::DeleteTargetRelation);
             return Err(self.error_here("completion cursor"));
         }
         let mut relation = Some(Box::new(
@@ -40,11 +40,10 @@ impl Parser {
         } else {
             Vec::new()
         };
-        let where_clause = self.parse_where_or_current_clause(&[
-            TokenKind::Returning,
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ])?;
+        let where_clause = self.parse_where_or_current_clause(
+            CompletionSlot::DeleteWhere,
+            &[TokenKind::Returning, TokenKind::Char(';'), TokenKind::Eof],
+        )?;
         let returning_clause = self.parse_returning_clause()?;
         Ok(Node::DeleteStmt(DeleteStmt {
             node_tag: NodeTag::DeleteStmt,

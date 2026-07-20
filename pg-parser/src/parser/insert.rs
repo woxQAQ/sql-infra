@@ -28,7 +28,7 @@ impl Parser {
         self.expect(TokenKind::Insert)?;
         self.expect(TokenKind::Into)?;
         if self.at_completion_cursor() {
-            self.record_relation_completion();
+            self.record_relation_completion_at(CompletionSlot::InsertTargetRelation);
             return Err(self.error_here("completion cursor"));
         }
         let mut relation = self

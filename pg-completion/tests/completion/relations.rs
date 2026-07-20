@@ -1,4 +1,4 @@
-use pg_completion::{CatalogItemKind, CompletionKind};
+use pg_completion::{CatalogObjectKind, CompletionKind};
 
 use super::support::Fixture;
 
@@ -42,11 +42,11 @@ fn schemas_and_schema_qualified_relations_are_resolved_separately() {
 #[test]
 fn ctes_are_relation_candidates_and_outrank_catalog_relations() {
     let mut fixture = Fixture::default();
-    fixture.catalog.relation(
+    fixture.catalog.add_relation(
         "public",
         "active",
-        CatalogItemKind::Table,
-        &[("id", "integer")],
+        CatalogObjectKind::Table,
+        [("id".into(), "integer".into())],
     );
     fixture
         .complete("WITH active(id) AS (SELECT id FROM users) SELECT * FROM ac|")
@@ -58,11 +58,11 @@ fn ctes_are_relation_candidates_and_outrank_catalog_relations() {
 #[test]
 fn search_path_relations_rank_before_other_schemas() {
     let mut fixture = Fixture::default();
-    fixture.catalog.relation(
+    fixture.catalog.add_relation(
         "audit",
         "users",
-        CatalogItemKind::View,
-        &[("id", "integer")],
+        CatalogObjectKind::View,
+        [("id".into(), "integer".into())],
     );
     let result = fixture.complete("SELECT * FROM user|");
     result
@@ -108,7 +108,7 @@ fn relation_insert_text_quotes_unsafe_catalog_identifiers() {
     for name in ["", "123users", "user profiles", "user\"profiles"] {
         fixture
             .catalog
-            .relation("public", name, CatalogItemKind::Table, &[]);
+            .add_relation("public", name, CatalogObjectKind::Table, []);
     }
 
     let result = fixture.complete("SELECT * FROM |");
@@ -136,10 +136,10 @@ fn quoted_relation_prefixes_decode_escaped_quotes_and_unicode() {
     let mut fixture = Fixture::default();
     fixture
         .catalog
-        .relation("public", "user\"profiles", CatalogItemKind::Table, &[]);
+        .add_relation("public", "user\"profiles", CatalogObjectKind::Table, []);
     fixture
         .catalog
-        .relation("public", "用户资料", CatalogItemKind::Table, &[]);
+        .add_relation("public", "用户资料", CatalogObjectKind::Table, []);
 
     let escaped = fixture.complete("SELECT * FROM \"user\"\"p|\"");
     assert_eq!(

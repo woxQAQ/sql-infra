@@ -8,9 +8,17 @@ pub(super) struct ExprParser {
     pub(super) eof: Token,
     pub(super) error: Option<ParseError>,
     pub(super) completion: Option<SharedCompletionRecorder>,
+    pub(super) completion_slot: Option<CompletionSlot>,
 }
 
 impl ExprParser {
+    pub(super) fn active_completion_slot(&self) -> CompletionSlot {
+        match self.completion_slot {
+            Some(slot) => slot,
+            None => panic!("expression completion parser must carry a semantic slot"),
+        }
+    }
+
     /// Build a standalone expression parser for an owned/transformed stream.
     /// Expressions sliced from an outer parser use `from_shared_range`.
     pub(super) fn from_owned_tokens(mut tokens: Vec<Token>) -> Self {
@@ -34,6 +42,7 @@ impl ExprParser {
             eof,
             error: None,
             completion: None,
+            completion_slot: None,
         }
     }
 
@@ -42,6 +51,7 @@ impl ExprParser {
         range: std::ops::Range<usize>,
         eof_location: usize,
         completion: Option<SharedCompletionRecorder>,
+        completion_slot: Option<CompletionSlot>,
     ) -> Self {
         assert!(range.start <= range.end && range.end <= tokens.len());
         Self {
@@ -52,6 +62,7 @@ impl ExprParser {
             eof: Token::synthetic(TokenKind::Eof, eof_location),
             error: None,
             completion,
+            completion_slot,
         }
     }
 
@@ -95,6 +106,7 @@ impl ExprParser {
             range,
             eof_location,
             self.completion.clone(),
+            self.completion_slot,
         )
     }
 
@@ -171,8 +183,22 @@ impl ExprParser {
         self.parse_expr_mode(min_bp, false)
     }
 
+    pub(super) fn parse_expr_at(&mut self, slot: CompletionSlot, min_bp: u8) -> Option<Node> {
+        let previous = self.completion_slot.replace(slot);
+        let result = self.parse_expr_mode(min_bp, false);
+        self.completion_slot = previous;
+        result
+    }
+
     pub(super) fn parse_b_expr(&mut self, min_bp: u8) -> Option<Node> {
         self.parse_expr_mode(min_bp, true)
+    }
+
+    pub(super) fn parse_b_expr_at(&mut self, slot: CompletionSlot, min_bp: u8) -> Option<Node> {
+        let previous = self.completion_slot.replace(slot);
+        let result = self.parse_expr_mode(min_bp, true);
+        self.completion_slot = previous;
+        result
     }
 
     pub(super) fn parse_expr_mode(&mut self, min_bp: u8, restricted: bool) -> Option<Node> {

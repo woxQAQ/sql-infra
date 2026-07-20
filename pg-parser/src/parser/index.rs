@@ -25,7 +25,7 @@ impl Parser {
         }
         self.expect(TokenKind::On)?;
         if self.at_completion_cursor() {
-            self.record_relation_completion();
+            self.record_relation_completion_at(CompletionSlot::IndexRelation);
             return Err(self.error_here("completion cursor"));
         }
         let relation = Some(Box::new(
@@ -77,7 +77,10 @@ impl Parser {
             None
         };
         let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?)
+            Some(self.parse_expr_box_strict_until_at(
+                CompletionSlot::IndexPredicate,
+                &[TokenKind::Char(';'), TokenKind::Eof],
+            )?)
         } else {
             None
         };
@@ -115,7 +118,12 @@ impl Parser {
                 self.tokens.get(range.start).map(|token| token.kind) == Some(TokenKind::Char('('));
             let starts_with_cast =
                 self.tokens.get(range.start).map(|token| token.kind) == Some(TokenKind::Cast);
-            let element = self.parse_index_elem_range(range)?;
+            let slot = if elements.is_empty() {
+                CompletionSlot::CreateIndexElement
+            } else {
+                CompletionSlot::CreateIndexElementAfterComma
+            };
+            let element = self.parse_index_elem_range(slot, range)?;
             if let Some(expression) = element.expr.as_deref()
                 && !starts_parenthesized
                 && !is_windowless_function_expression_node(expression, starts_with_cast)
@@ -160,11 +168,15 @@ pub(super) fn node_to_index_elem(node: Node) -> Node {
 impl Parser {
     pub(super) fn parse_index_elem_range(
         &self,
+        slot: CompletionSlot,
         range: std::ops::Range<usize>,
     ) -> PResult<IndexElem> {
         let tokens = &self.tokens[range.clone()];
         let location = tokens.first().map_or(self.location(), Token::location);
         if tokens.is_empty() {
+            if self.at_completion_cursor() {
+                self.record_expression_completion_at(slot);
+            }
             return Err(ParseError::new(location, "expected an index element"));
         }
         let collate_index = find_top_level_token(tokens, TokenKind::Collate);
@@ -176,11 +188,11 @@ impl Parser {
                 ));
             }
             (
-                self.parse_expression_range(range.start..range.start + index)?,
+                self.parse_expression_range_at(slot, range.start..range.start + index)?,
                 range.start + index,
             )
         } else {
-            let mut parser = self.expression_view(range.clone());
+            let mut parser = self.expression_view_at(slot, range.clone());
             let expression = parser.parse_expr(0).ok_or_else(|| {
                 parser
                     .error
