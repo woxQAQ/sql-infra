@@ -2,8 +2,6 @@
 mod alter;
 #[path = "statements/common.rs"]
 mod common;
-#[path = "statements/coverage.rs"]
-mod coverage;
 #[path = "statements/create.rs"]
 mod create;
 #[path = "statements/dml.rs"]

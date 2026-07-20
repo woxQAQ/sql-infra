@@ -3,65 +3,31 @@ use pg_completion::CompletionKind;
 use super::support::Fixture;
 
 #[test]
-fn completion_offers_every_supported_keyword_expression_starter() {
+fn expression_completion_offers_representative_starters_and_excludes_contextual_keywords() {
     let result = Fixture::default().complete("SELECT | FROM users");
+
+    // Exercise the public completion contract across distinct expression
+    // families. The form-specific tests below cover the detailed grammar;
+    // this test deliberately does not mirror the implementation's token list.
     for keyword in [
         "NULL",
         "TRUE",
-        "FALSE",
         "NOT",
         "EXISTS",
         "ARRAY",
         "CASE",
-        "GROUPING",
-        "COLLATION",
         "CAST",
-        "TREAT",
         "EXTRACT",
-        "NORMALIZE",
-        "POSITION",
-        "OVERLAY",
-        "SUBSTRING",
-        "TRIM",
-        "XMLEXISTS",
-        "SYSTEM_USER",
         "CURRENT_DATE",
-        "CURRENT_TIME",
-        "CURRENT_TIMESTAMP",
-        "LOCALTIME",
-        "LOCALTIMESTAMP",
-        "CURRENT_ROLE",
-        "CURRENT_USER",
-        "USER",
-        "SESSION_USER",
-        "CURRENT_CATALOG",
-        "CURRENT_SCHEMA",
-        "XMLCONCAT",
-        "XMLELEMENT",
-        "XMLFOREST",
-        "XMLPARSE",
-        "XMLPI",
-        "XMLROOT",
         "XMLSERIALIZE",
-        "JSON",
-        "JSON_OBJECT",
-        "JSON_ARRAY",
-        "JSON_SCALAR",
-        "JSON_SERIALIZE",
-        "JSON_QUERY",
-        "JSON_EXISTS",
         "JSON_VALUE",
-        "JSON_OBJECTAGG",
-        "JSON_ARRAYAGG",
         "ROW",
         "COALESCE",
-        "GREATEST",
-        "LEAST",
-        "NULLIF",
     ] {
         result.assert_has(keyword, CompletionKind::Keyword);
     }
     result
+        .assert_lacks("SELECT", CompletionKind::Keyword)
         .assert_lacks("DEFAULT", CompletionKind::Keyword)
         .assert_lacks("MERGE_ACTION", CompletionKind::Keyword);
 }

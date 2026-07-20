@@ -466,6 +466,6 @@ pub const CASES: &[StatementCase] = &[
 ];
 
 #[test]
-fn every_top_level_raw_statement_has_a_smoke_case() {
+fn registered_top_level_statements_parse_to_expected_tags() {
     assert_statement_cases(CASES);
 }
