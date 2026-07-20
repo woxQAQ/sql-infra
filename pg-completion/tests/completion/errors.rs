@@ -13,7 +13,11 @@ fn public_error_wrapper_preserves_parser_cursor_errors() {
     )
     .unwrap_err();
     assert!(matches!(
-        error,
+        &error,
         CompletionError::Syntax(pg_parser::CompletionError::CursorOutOfBounds { .. })
     ));
+    assert_eq!(
+        error.to_string(),
+        "completion cursor 1 is beyond source length 0"
+    );
 }

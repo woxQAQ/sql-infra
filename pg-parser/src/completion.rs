@@ -111,6 +111,89 @@ impl CompletionRecorder {
             self.expectations.push(expectation);
         }
     }
+
+    pub(crate) fn record_expression(&mut self) {
+        self.record_expression_with_tokens(expression_start_tokens().iter().copied());
+    }
+
+    pub(crate) fn record_restricted_expression(&mut self) {
+        self.record_expression_with_tokens(
+            expression_start_tokens()
+                .iter()
+                .copied()
+                .filter(|token| *token != TokenKind::Not),
+        );
+    }
+
+    fn record_expression_with_tokens(&mut self, tokens: impl IntoIterator<Item = TokenKind>) {
+        self.record(Expectation::Expression);
+        self.record(Expectation::Name(NameExpectation::Column(
+            ColumnContext::VisibleScope,
+        )));
+        self.record(Expectation::Name(NameExpectation::Function {
+            schema: None,
+        }));
+        for token in tokens {
+            self.record(Expectation::Token(token));
+        }
+    }
+}
+
+fn expression_start_tokens() -> &'static [TokenKind] {
+    &[
+        TokenKind::NullP,
+        TokenKind::TrueP,
+        TokenKind::FalseP,
+        TokenKind::Not,
+        TokenKind::Exists,
+        TokenKind::Array,
+        TokenKind::Case,
+        TokenKind::Grouping,
+        TokenKind::Collation,
+        TokenKind::Cast,
+        TokenKind::Treat,
+        TokenKind::Extract,
+        TokenKind::Normalize,
+        TokenKind::Position,
+        TokenKind::Overlay,
+        TokenKind::Substring,
+        TokenKind::Trim,
+        TokenKind::Xmlexists,
+        TokenKind::SystemUser,
+        TokenKind::CurrentDate,
+        TokenKind::CurrentTime,
+        TokenKind::CurrentTimestamp,
+        TokenKind::Localtime,
+        TokenKind::Localtimestamp,
+        TokenKind::CurrentRole,
+        TokenKind::CurrentUser,
+        TokenKind::User,
+        TokenKind::SessionUser,
+        TokenKind::CurrentCatalog,
+        TokenKind::CurrentSchema,
+        TokenKind::Xmlconcat,
+        TokenKind::Xmlelement,
+        TokenKind::Xmlforest,
+        TokenKind::Xmlparse,
+        TokenKind::Xmlpi,
+        TokenKind::Xmlroot,
+        TokenKind::Xmlserialize,
+        TokenKind::Json,
+        TokenKind::JsonObject,
+        TokenKind::JsonArray,
+        TokenKind::JsonScalar,
+        TokenKind::JsonSerialize,
+        TokenKind::JsonQuery,
+        TokenKind::JsonExists,
+        TokenKind::JsonValue,
+        TokenKind::JsonObjectagg,
+        TokenKind::JsonArrayagg,
+        TokenKind::Row,
+        TokenKind::Coalesce,
+        TokenKind::Greatest,
+        TokenKind::Least,
+        TokenKind::Nullif,
+    ]
 }
 
 impl std::fmt::Display for CompletionError {
@@ -165,7 +248,13 @@ pub fn collect_completion(
         Vec::new()
     } else {
         let mut expectations = collect_parser_expectations(&statement_tokens, replacement_start);
-        for fallback in collect_tricky_expectations(&statement_tokens, replacement_start, &scope) {
+        let parser_expects_expression = expectations.contains(&Expectation::Expression);
+        for fallback in collect_tricky_expectations(
+            &statement_tokens,
+            replacement_start,
+            &scope,
+            parser_expects_expression,
+        ) {
             if !expectations.contains(&fallback) {
                 expectations.push(fallback);
             }
@@ -341,10 +430,27 @@ fn collect_scope(tokens: &[Token], cursor: usize) -> ScopeSnapshot {
             .unwrap_or_default();
         frames.push((select, references));
     }
-    let local_references = frames
+    let mut local_references = frames
         .pop()
         .map(|(_, references)| references)
         .unwrap_or_default();
+    if let Some((statement, statement_kind)) = top_level_dml_statement(&tokens) {
+        if statement_kind == TokenKind::Insert
+            && [TokenKind::Conflict, TokenKind::Returning]
+                .into_iter()
+                .any(|kind| {
+                    find_top_level_token_after(&tokens, statement, kind)
+                        .is_some_and(|index| tokens[index].token.location() < cursor)
+                })
+        {
+            local_references.clear();
+        }
+        if statement_kind == TokenKind::Merge {
+            local_references.extend(collect_merge_references(&tokens));
+        } else if matches!(statement_kind, TokenKind::Update | TokenKind::DeleteP) {
+            local_references.extend(collect_update_delete_references(&tokens, &ctes));
+        }
+    }
     let outer_references: Vec<Vec<RangeReference>> = frames
         .into_iter()
         .rev()
@@ -675,17 +781,13 @@ fn parse_alias(
 }
 
 fn collect_target_relation(tokens: &[DepthToken]) -> Option<QualifiedName> {
-    let first = tokens.first()?.token.kind;
+    let (statement, first) = top_level_dml_statement(tokens)
+        .or_else(|| tokens.first().map(|token| (0, token.token.kind)))?;
     let start = match first {
-        TokenKind::Insert => tokens
-            .iter()
-            .position(|token| token.depth == 0 && token.token.kind == TokenKind::Into)
-            .map(|index| index + 1)?,
-        TokenKind::Update => 1,
-        TokenKind::DeleteP => tokens
-            .iter()
-            .position(|token| token.depth == 0 && token.token.kind == TokenKind::From)
-            .map(|index| index + 1)?,
+        TokenKind::Insert => find_top_level_token_after(tokens, statement, TokenKind::Into)? + 1,
+        TokenKind::Update => statement + 1,
+        TokenKind::DeleteP => find_top_level_token_after(tokens, statement, TokenKind::From)? + 1,
+        TokenKind::Merge => find_top_level_token_after(tokens, statement, TokenKind::Into)? + 1,
         TokenKind::Alter
             if tokens
                 .get(1)
@@ -703,10 +805,137 @@ fn collect_target_relation(tokens: &[DepthToken]) -> Option<QualifiedName> {
                 .position(|token| token.depth == 0 && token.token.kind == TokenKind::On)
                 .map(|index| index + 1)?
         }
+        TokenKind::Create
+            if tokens
+                .iter()
+                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Policy) =>
+        {
+            tokens
+                .iter()
+                .position(|token| token.depth == 0 && token.token.kind == TokenKind::On)
+                .map(|index| index + 1)?
+        }
+        TokenKind::Create
+            if tokens
+                .iter()
+                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Publication) =>
+        {
+            tokens
+                .iter()
+                .position(|token| token.depth == 0 && token.token.kind == TokenKind::Table)
+                .map(|index| index + 1)?
+        }
+        TokenKind::Copy => 1,
         _ => return None,
     };
     let (parts, _) = parse_qualified_name(tokens, start, 0);
     (!parts.is_empty()).then(|| qualified_name(parts))
+}
+
+fn collect_merge_references(tokens: &[DepthToken]) -> Vec<RangeReference> {
+    [TokenKind::Into, TokenKind::Using]
+        .into_iter()
+        .filter_map(|marker| {
+            let start = tokens
+                .iter()
+                .position(|token| token.depth == 0 && token.token.kind == marker)?
+                + 1;
+            let first = tokens.get(start)?;
+            let (parts, next) = parse_qualified_name(tokens, start, 0);
+            if parts.is_empty() {
+                return None;
+            }
+            let (alias, alias_columns, end) = parse_alias(tokens, next, 0);
+            let end_location = tokens
+                .get(end.saturating_sub(1))
+                .map_or(first.token.end_location(), |token| {
+                    token.token.end_location()
+                });
+            Some(RangeReference {
+                kind: RangeReferenceKind::Relation,
+                name: qualified_name(parts),
+                alias,
+                alias_columns,
+                range: TextRange::new(first.token.range.start(), text_size(end_location)),
+                lateral: false,
+            })
+        })
+        .collect()
+}
+
+fn collect_update_delete_references(
+    tokens: &[DepthToken],
+    ctes: &[RangeReference],
+) -> Vec<RangeReference> {
+    let Some((statement, first)) = top_level_dml_statement(tokens) else {
+        return Vec::new();
+    };
+    let (target_start, source_marker) = match first {
+        TokenKind::Update => (statement + 1, TokenKind::From),
+        TokenKind::DeleteP => {
+            let Some(from) = find_top_level_token_after(tokens, statement, TokenKind::From) else {
+                return Vec::new();
+            };
+            (from + 1, TokenKind::Using)
+        }
+        _ => return Vec::new(),
+    };
+
+    let mut result = relation_reference_at(tokens, target_start)
+        .into_iter()
+        .collect::<Vec<_>>();
+    if let Some(source) = tokens
+        .iter()
+        .position(|token| token.depth == 0 && token.token.kind == source_marker)
+    {
+        result.extend(parse_from_references(tokens, source + 1, ctes));
+    }
+    result
+}
+
+fn top_level_dml_statement(tokens: &[DepthToken]) -> Option<(usize, TokenKind)> {
+    tokens.iter().enumerate().find_map(|(index, token)| {
+        (token.depth == 0
+            && matches!(
+                token.token.kind,
+                TokenKind::Insert | TokenKind::Update | TokenKind::DeleteP | TokenKind::Merge
+            ))
+        .then_some((index, token.token.kind))
+    })
+}
+
+fn find_top_level_token_after(
+    tokens: &[DepthToken],
+    start: usize,
+    kind: TokenKind,
+) -> Option<usize> {
+    tokens
+        .iter()
+        .enumerate()
+        .skip(start)
+        .find_map(|(index, token)| (token.depth == 0 && token.token.kind == kind).then_some(index))
+}
+
+fn relation_reference_at(tokens: &[DepthToken], start: usize) -> Option<RangeReference> {
+    let first = tokens.get(start)?;
+    let (parts, next) = parse_qualified_name(tokens, start, 0);
+    if parts.is_empty() {
+        return None;
+    }
+    let (alias, alias_columns, end) = parse_alias(tokens, next, 0);
+    let end_location = tokens
+        .get(end.saturating_sub(1))
+        .map_or(first.token.end_location(), |token| {
+            token.token.end_location()
+        });
+    Some(RangeReference {
+        kind: RangeReferenceKind::Relation,
+        name: qualified_name(parts),
+        alias,
+        alias_columns,
+        range: TextRange::new(first.token.range.start(), text_size(end_location)),
+        lateral: false,
+    })
 }
 
 /// Enrich parser-produced candidates for cursor shapes that cannot be
@@ -717,6 +946,7 @@ fn collect_tricky_expectations(
     tokens: &[Token],
     offset: usize,
     scope: &ScopeSnapshot,
+    parser_expects_expression: bool,
 ) -> Vec<Expectation> {
     let before: Vec<&Token> = tokens
         .iter()
@@ -727,6 +957,19 @@ fn collect_tricky_expectations(
         add_statement_starters(&mut result);
         return result;
     };
+    let cursor_expects_expression = parser_expects_expression
+        || matches!(
+            last.kind,
+            TokenKind::Select
+                | TokenKind::Where
+                | TokenKind::Having
+                | TokenKind::On
+                | TokenKind::By
+                | TokenKind::Returning
+                | TokenKind::Set
+        )
+        || (last.kind == TokenKind::Char(',')
+            && current_clause(&before) == Some(TokenKind::Select));
 
     if last.kind == TokenKind::Char('.') {
         if let Some(qualifier) = before
@@ -792,24 +1035,50 @@ fn collect_tricky_expectations(
         return result;
     }
 
-    if inside_create_index_columns(&before) || after_alter_table_column_keyword(&before) {
+    if inside_create_index_columns(&before) {
         push_unique(
             &mut result,
             Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
         );
-        if inside_create_index_columns(&before) {
-            push_unique(&mut result, Expectation::Token(TokenKind::Char(')')));
-        }
+        add_expression_expectations(&mut result);
+        push_unique(&mut result, Expectation::Token(TokenKind::Char(')')));
         return result;
     }
 
-    if expects_existing_relation(&before) {
+    if after_alter_table_column_keyword(&before) {
+        push_unique(
+            &mut result,
+            Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+        );
+        return result;
+    }
+
+    if expects_existing_relation(&before) && !parser_expects_expression {
         push_unique(
             &mut result,
             Expectation::Name(NameExpectation::Relation { schema: None }),
         );
         push_unique(&mut result, Expectation::Name(NameExpectation::Schema));
         return result;
+    }
+
+    if cursor_expects_expression
+        && target_relation_columns_visible(&before)
+        && scope.target_relation.is_some()
+        && !scope.references.iter().any(|reference| {
+            scope
+                .target_relation
+                .as_ref()
+                .is_some_and(|target| reference.name == *target)
+        })
+    {
+        push_unique(
+            &mut result,
+            Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+        );
+    }
+    if cursor_expects_expression && default_expression_is_valid(&before) {
+        push_unique(&mut result, Expectation::Token(TokenKind::Default));
     }
 
     match last.kind {
@@ -819,7 +1088,9 @@ fn collect_tricky_expectations(
         TokenKind::Char(',') if current_clause(&before) == Some(TokenKind::Select) => {
             add_expression_expectations(&mut result);
         }
-        TokenKind::From | TokenKind::Join | TokenKind::Into | TokenKind::Update => {
+        TokenKind::From | TokenKind::Join | TokenKind::Into | TokenKind::Update
+            if !parser_expects_expression =>
+        {
             push_unique(
                 &mut result,
                 Expectation::Name(NameExpectation::Relation { schema: None }),
@@ -874,15 +1145,89 @@ fn collect_tricky_expectations(
                 TokenKind::TypeP,
             ],
         ),
-        _ => {
+        _ if !parser_expects_expression => {
             if current_clause(&before).is_some() {
                 add_expression_tail_expectations(&mut result);
             } else if scope.references.is_empty() {
                 add_statement_starters(&mut result);
             }
         }
+        _ => {}
     }
     result
+}
+
+fn target_relation_columns_visible(tokens: &[&Token]) -> bool {
+    let Some((statement, first)) = top_level_statement(tokens) else {
+        return false;
+    };
+    match first {
+        TokenKind::Update | TokenKind::DeleteP | TokenKind::Copy => true,
+        TokenKind::Insert => top_level_tokens_after(tokens, statement)
+            .any(|token| matches!(token.kind, TokenKind::Returning | TokenKind::Conflict)),
+        TokenKind::Create => top_level_tokens_after(tokens, statement).any(|token| {
+            matches!(
+                token.kind,
+                TokenKind::Index | TokenKind::Policy | TokenKind::Publication
+            )
+        }),
+        _ => false,
+    }
+}
+
+fn default_expression_is_valid(tokens: &[&Token]) -> bool {
+    let Some((statement, kind)) = top_level_statement(tokens) else {
+        return false;
+    };
+    match kind {
+        TokenKind::Update => current_clause(tokens) == Some(TokenKind::Set),
+        TokenKind::Insert => {
+            top_level_tokens_after(tokens, statement).any(|token| token.kind == TokenKind::Values)
+                || (top_level_tokens_after(tokens, statement)
+                    .any(|token| token.kind == TokenKind::Conflict)
+                    && current_clause(tokens) == Some(TokenKind::Set))
+        }
+        _ => false,
+    }
+}
+
+fn top_level_statement(tokens: &[&Token]) -> Option<(usize, TokenKind)> {
+    top_level_tokens(tokens).find_map(|(index, token)| {
+        matches!(
+            token.kind,
+            TokenKind::Select
+                | TokenKind::Insert
+                | TokenKind::Update
+                | TokenKind::DeleteP
+                | TokenKind::Merge
+                | TokenKind::Create
+                | TokenKind::Alter
+                | TokenKind::Copy
+        )
+        .then_some((index, token.kind))
+    })
+}
+
+fn top_level_tokens<'a>(tokens: &'a [&'a Token]) -> impl Iterator<Item = (usize, &'a Token)> {
+    let mut depth = 0usize;
+    tokens.iter().enumerate().filter_map(move |(index, token)| {
+        let token_depth = depth;
+        match token.kind {
+            TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+            TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        (token_depth == 0).then_some((index, *token))
+    })
+}
+
+fn top_level_tokens_after<'a>(
+    tokens: &'a [&'a Token],
+    start: usize,
+) -> impl Iterator<Item = &'a Token> {
+    top_level_tokens(tokens)
+        .filter(move |(index, _)| *index >= start)
+        .map(|(_, token)| token)
 }
 
 fn add_statement_starters(result: &mut Vec<Expectation>) {
@@ -913,16 +1258,7 @@ fn add_expression_expectations(result: &mut Vec<Expectation>) {
         result,
         Expectation::Name(NameExpectation::Function { schema: None }),
     );
-    add_tokens(
-        result,
-        &[
-            TokenKind::NullP,
-            TokenKind::TrueP,
-            TokenKind::FalseP,
-            TokenKind::Case,
-            TokenKind::Cast,
-        ],
-    );
+    add_tokens(result, expression_start_tokens());
 }
 
 fn add_expression_tail_expectations(result: &mut Vec<Expectation>) {
@@ -962,7 +1298,11 @@ fn inside_join_using(tokens: &[&Token]) -> bool {
             TokenKind::Char(')') => depth += 1,
             TokenKind::Char('(') if depth > 0 => depth -= 1,
             TokenKind::Char('(') => {
-                return index > 0 && tokens[index - 1].kind == TokenKind::Using;
+                return index > 0
+                    && tokens[index - 1].kind == TokenKind::Using
+                    && tokens[..index - 1]
+                        .iter()
+                        .any(|token| token.kind == TokenKind::Join);
             }
             _ => {}
         }
@@ -974,13 +1314,18 @@ fn inside_insert_columns(tokens: &[&Token]) -> bool {
     if tokens.first().map(|token| token.kind) != Some(TokenKind::Insert) {
         return false;
     }
+    if tokens
+        .iter()
+        .any(|token| matches!(token.kind, TokenKind::Values | TokenKind::Select))
+    {
+        return false;
+    }
     let mut depth = 0usize;
     for token in tokens.iter().rev() {
         match token.kind {
             TokenKind::Char(')') => depth += 1,
             TokenKind::Char('(') if depth > 0 => depth -= 1,
             TokenKind::Char('(') => return true,
-            TokenKind::Values | TokenKind::Select => return false,
             _ => {}
         }
     }
@@ -1139,6 +1484,8 @@ fn is_alias_token(token: &Token) -> bool {
                 | TokenKind::Natural
                 | TokenKind::On
                 | TokenKind::Using
+                | TokenKind::Tablesample
+                | TokenKind::Repeatable
         )
 }
 
@@ -1616,5 +1963,131 @@ mod tests {
                 "{marked}"
             );
         }
+    }
+
+    #[test]
+    fn relation_owned_expression_contexts_keep_the_target_relation() {
+        for marked in [
+            "CREATE INDEX users_idx ON users (|",
+            "CREATE POLICY users_policy ON users USING (|",
+            "CREATE PUBLICATION users_publication FOR TABLE users WHERE (|",
+            "COPY users FROM STDIN WHERE |",
+        ] {
+            let context = collect(marked);
+            assert_eq!(
+                context
+                    .scope
+                    .target_relation
+                    .as_ref()
+                    .map(|name| name.name.as_str()),
+                Some("users"),
+                "{marked}: {:?}",
+                context.scope
+            );
+            assert!(
+                context
+                    .expectations
+                    .contains(&Expectation::Name(NameExpectation::Column(
+                        ColumnContext::TargetRelation
+                    ))),
+                "{marked}: {:?}",
+                context.expectations
+            );
+        }
+    }
+
+    #[test]
+    fn merge_expression_context_exposes_target_and_source_relations() {
+        let context =
+            collect("MERGE INTO users u USING orders o ON | WHEN MATCHED THEN DO NOTHING");
+        assert_eq!(
+            context
+                .scope
+                .references
+                .iter()
+                .map(RangeReference::exposed_name)
+                .collect::<Vec<_>>(),
+            ["u", "o"]
+        );
+        assert_eq!(
+            context
+                .scope
+                .target_relation
+                .as_ref()
+                .map(|name| name.name.as_str()),
+            Some("users")
+        );
+    }
+
+    #[test]
+    fn update_from_and_delete_using_expose_all_expression_relations() {
+        for (marked, expected) in [
+            ("UPDATE users u SET name = | FROM orders o", ["u", "o"]),
+            ("DELETE FROM users u USING orders o WHERE |", ["u", "o"]),
+        ] {
+            let context = collect(marked);
+            assert_eq!(
+                context
+                    .scope
+                    .references
+                    .iter()
+                    .map(RangeReference::exposed_name)
+                    .collect::<Vec<_>>(),
+                expected,
+                "{marked}"
+            );
+        }
+    }
+
+    #[test]
+    fn with_dml_statements_keep_ctes_targets_and_sources_in_scope() {
+        let context = collect(
+            "WITH recent(order_id, user_id, amount) AS \
+             (SELECT id, user_id, amount FROM orders) \
+             UPDATE users u SET name = | FROM recent r",
+        );
+        assert_eq!(
+            context
+                .scope
+                .references
+                .iter()
+                .map(RangeReference::exposed_name)
+                .collect::<Vec<_>>(),
+            ["u", "r"]
+        );
+        assert_eq!(
+            context
+                .scope
+                .target_relation
+                .as_ref()
+                .map(|name| name.name.as_str()),
+            Some("users")
+        );
+    }
+
+    #[test]
+    fn insert_select_scope_ends_before_conflict_and_returning_clauses() {
+        let source = collect("INSERT INTO users(name) SELECT | FROM orders o");
+        assert_eq!(
+            source
+                .scope
+                .references
+                .iter()
+                .map(RangeReference::exposed_name)
+                .collect::<Vec<_>>(),
+            ["o"]
+        );
+
+        let returning =
+            collect("INSERT INTO users(name) SELECT amount::text FROM orders o RETURNING |");
+        assert!(returning.scope.references.is_empty());
+        assert_eq!(
+            returning
+                .scope
+                .target_relation
+                .as_ref()
+                .map(|name| name.name.as_str()),
+            Some("users")
+        );
     }
 }

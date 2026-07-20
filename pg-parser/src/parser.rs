@@ -380,7 +380,7 @@ impl Parser {
             .map_or_else(|| self.location(), Token::location);
         if range.is_empty() {
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_restricted_expression_completion();
             }
             return Err(ParseError::new(
                 location,
@@ -402,7 +402,7 @@ impl Parser {
             .map_or_else(|| self.location(), Token::location);
         if range.is_empty() {
             if self.at_completion_cursor() {
-                self.record_expression_completion();
+                self.record_restricted_expression_completion();
             }
             return Err(ParseError::new(location, "expected a common expression"));
         }
@@ -750,13 +750,15 @@ impl Parser {
     }
 
     pub(super) fn record_expression_completion(&self) {
-        self.record_completion(Expectation::Expression);
-        self.record_completion(Expectation::Name(NameExpectation::Column(
-            ColumnContext::VisibleScope,
-        )));
-        self.record_completion(Expectation::Name(NameExpectation::Function {
-            schema: None,
-        }));
+        if let Some(recorder) = &self.completion {
+            recorder.borrow_mut().record_expression();
+        }
+    }
+
+    pub(super) fn record_restricted_expression_completion(&self) {
+        if let Some(recorder) = &self.completion {
+            recorder.borrow_mut().record_restricted_expression();
+        }
     }
 
     pub(super) fn record_relation_completion(&self) {

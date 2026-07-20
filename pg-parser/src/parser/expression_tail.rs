@@ -601,6 +601,11 @@ impl ExprParser {
     }
 
     pub(super) fn parse_expr_list_until(&mut self, stop: TokenKind) -> Option<NodeList> {
+        if self.at_completion_cursor()
+            && let Some(recorder) = &self.completion
+        {
+            recorder.borrow_mut().record_expression();
+        }
         let mut items = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
             items.push(self.parse_expr(0)?);

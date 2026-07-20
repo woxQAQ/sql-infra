@@ -136,6 +136,11 @@ impl ExprParser {
     }
 
     pub(super) fn parse_xml_labeled_expr_list(&mut self, stop: TokenKind) -> Option<NodeList> {
+        if self.at_completion_cursor()
+            && let Some(recorder) = &self.completion
+        {
+            recorder.borrow_mut().record_expression();
+        }
         let mut targets = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
             let location = self.location();

@@ -110,6 +110,55 @@ fn completion_filters_results_from_an_unfiltered_catalog() {
 }
 
 #[test]
+fn completion_prefix_filters_every_catalog_query_family() {
+    let fixture = Fixture::default();
+
+    let schemas = ProbeCatalog::returning([
+        CatalogItem {
+            name: "public".into(),
+            schema: None,
+            kind: CatalogItemKind::Schema,
+            definition: None,
+            documentation: None,
+        },
+        CatalogItem {
+            name: "audit".into(),
+            schema: None,
+            kind: CatalogItemKind::Schema,
+            definition: None,
+            documentation: None,
+        },
+    ]);
+    fixture
+        .complete_with("SELECT * FROM pub|", Some(&schemas))
+        .assert_kind_labels(CompletionKind::Schema, &["public"]);
+
+    let columns = ProbeCatalog::returning([
+        item("name", "public", CatalogItemKind::Column),
+        item("amount", "public", CatalogItemKind::Column),
+    ]);
+    fixture
+        .complete_with("SELECT na| FROM users", Some(&columns))
+        .assert_kind_labels(CompletionKind::Column, &["name"]);
+
+    let functions = ProbeCatalog::returning([
+        item("count", "pg_catalog", CatalogItemKind::Function),
+        item("calculate_total", "public", CatalogItemKind::Function),
+    ]);
+    fixture
+        .complete_with("SELECT cou|", Some(&functions))
+        .assert_kind_labels(CompletionKind::Function, &["count"]);
+
+    let types = ProbeCatalog::returning([
+        item("integer", "pg_catalog", CatalogItemKind::Type),
+        item("interval", "pg_catalog", CatalogItemKind::Type),
+    ]);
+    fixture
+        .complete_with("SELECT 1::integ|", Some(&types))
+        .assert_kind_labels(CompletionKind::Type, &["integer"]);
+}
+
+#[test]
 fn catalog_queries_preserve_prefix_qualification_and_search_path() {
     let catalog = ProbeCatalog::default();
     let fixture = Fixture::default().with_search_path(&["app", "pg_catalog"]);

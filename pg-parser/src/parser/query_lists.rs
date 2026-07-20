@@ -64,6 +64,9 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
+            }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an expression after ','"));
             }
@@ -88,6 +91,9 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
+            }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an expression after ','"));
             }
@@ -104,6 +110,9 @@ impl Parser {
             items.push(self.parse_group_by_item(stops)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
+            }
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected a grouping item after ','"));
@@ -275,6 +284,9 @@ impl Parser {
             }));
             if !self.consume(TokenKind::Char(',')) {
                 break;
+            }
+            if self.at_completion_cursor() {
+                self.record_expression_completion();
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an ORDER BY expression after ','"));

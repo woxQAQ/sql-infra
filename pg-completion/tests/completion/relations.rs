@@ -105,13 +105,14 @@ fn quoted_relation_completion_is_case_sensitive_and_quotes_insert_text() {
 #[test]
 fn relation_insert_text_quotes_unsafe_catalog_identifiers() {
     let mut fixture = Fixture::default();
-    for name in ["123users", "user profiles", "user\"profiles"] {
+    for name in ["", "123users", "user profiles", "user\"profiles"] {
         fixture
             .catalog
             .relation("public", name, CatalogItemKind::Table, &[]);
     }
 
     let result = fixture.complete("SELECT * FROM |");
+    assert_eq!(result.item("", CompletionKind::Table).insert_text, "\"\"");
     assert_eq!(
         result.item("123users", CompletionKind::Table).insert_text,
         "\"123users\""
@@ -128,4 +129,29 @@ fn relation_insert_text_quotes_unsafe_catalog_identifiers() {
             .insert_text,
         "\"user\"\"profiles\""
     );
+}
+
+#[test]
+fn quoted_relation_prefixes_decode_escaped_quotes_and_unicode() {
+    let mut fixture = Fixture::default();
+    fixture
+        .catalog
+        .relation("public", "user\"profiles", CatalogItemKind::Table, &[]);
+    fixture
+        .catalog
+        .relation("public", "用户资料", CatalogItemKind::Table, &[]);
+
+    let escaped = fixture.complete("SELECT * FROM \"user\"\"p|\"");
+    assert_eq!(
+        escaped
+            .item("user\"profiles", CompletionKind::Table)
+            .insert_text,
+        "\"user\"\"profiles\""
+    );
+    escaped.assert_replaces("\"user\"\"p\"");
+
+    fixture
+        .complete("SELECT * FROM \"用|\"")
+        .assert_has("用户资料", CompletionKind::Table)
+        .assert_replaces("\"用\"");
 }

@@ -122,6 +122,21 @@ impl TestCatalog {
         self.relations
             .push(item(name, Some(schema), kind, None, None));
     }
+
+    pub fn duplicate_function(&mut self, schema: &str, name: &str, definition: &str) {
+        self.functions.push(item(
+            name,
+            Some(schema),
+            CatalogItemKind::Function,
+            Some(definition),
+            None,
+        ));
+    }
+
+    pub fn duplicate_type(&mut self, schema: &str, name: &str) {
+        self.types
+            .push(item(name, Some(schema), CatalogItemKind::Type, None, None));
+    }
 }
 
 impl Catalog for TestCatalog {
@@ -229,6 +244,7 @@ impl Fixture {
         Completed {
             marked: marked.to_owned(),
             sql,
+            cursor,
             result,
         }
     }
@@ -237,6 +253,7 @@ impl Fixture {
 pub struct Completed {
     marked: String,
     sql: String,
+    cursor: usize,
     pub result: CompletionResult,
 }
 
@@ -257,6 +274,118 @@ impl Completed {
             "did not expect {label:?} ({kind:?}) for {:?}; got {:?}",
             self.marked,
             self.summary()
+        );
+        self
+    }
+
+    pub fn assert_lacks_kind(&self, kind: CompletionKind) -> &Self {
+        let unexpected = self
+            .result
+            .items
+            .iter()
+            .filter(|item| item.kind == kind)
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            unexpected.is_empty(),
+            "did not expect {kind:?} candidates for {:?}; got {unexpected:?}",
+            self.marked
+        );
+        self
+    }
+
+    pub fn assert_value_expression(&self) -> &Self {
+        self.assert_has("count", CompletionKind::Function)
+            .assert_has("NULL", CompletionKind::Keyword)
+            .assert_lacks_kind(CompletionKind::Schema)
+            .assert_lacks_kind(CompletionKind::Table)
+            .assert_lacks_kind(CompletionKind::View)
+            .assert_lacks_kind(CompletionKind::MaterializedView)
+            .assert_lacks_kind(CompletionKind::Type)
+            .assert_lacks("LATERAL", CompletionKind::Keyword)
+    }
+
+    pub fn assert_required_value_expression(&self) -> &Self {
+        self.assert_value_expression()
+            .assert_lacks("FROM", CompletionKind::Keyword)
+            .assert_lacks("WHERE", CompletionKind::Keyword)
+            .assert_lacks("GROUP", CompletionKind::Keyword)
+            .assert_lacks("HAVING", CompletionKind::Keyword)
+            .assert_lacks("ORDER", CompletionKind::Keyword)
+            .assert_lacks("LIMIT", CompletionKind::Keyword)
+            .assert_lacks("OFFSET", CompletionKind::Keyword)
+            .assert_lacks("RETURNING", CompletionKind::Keyword)
+    }
+
+    pub fn assert_visible_value_expression(&self) -> &Self {
+        self.assert_value_expression()
+            .assert_has("name", CompletionKind::Column)
+    }
+
+    pub fn assert_required_visible_value_expression(&self) -> &Self {
+        self.assert_required_value_expression()
+            .assert_has("name", CompletionKind::Column)
+    }
+
+    pub fn assert_no_duplicate_items(&self) -> &Self {
+        let mut seen = std::collections::HashSet::new();
+        for item in &self.result.items {
+            let identity = (
+                item.kind,
+                item.label.to_ascii_lowercase(),
+                item.detail.as_deref(),
+            );
+            assert!(
+                seen.insert(identity),
+                "duplicate completion item for {:?}: {:?}",
+                self.marked,
+                item
+            );
+        }
+        self
+    }
+
+    pub fn assert_prefix_filtered(&self, prefix: &str, case_sensitive: bool) -> &Self {
+        for item in &self.result.items {
+            let matches = if case_sensitive {
+                item.label.starts_with(prefix)
+            } else {
+                item.label
+                    .to_ascii_lowercase()
+                    .starts_with(&prefix.to_ascii_lowercase())
+            };
+            assert!(
+                matches,
+                "completion item {:?} does not match prefix {prefix:?} for {:?}",
+                item, self.marked
+            );
+        }
+        self
+    }
+
+    pub fn assert_replacement_contract(&self) -> &Self {
+        let start = usize::from(self.result.replacement.start());
+        let end = usize::from(self.result.replacement.end());
+        assert!(
+            start <= end,
+            "invalid replacement range for {:?}",
+            self.marked
+        );
+        assert!(
+            end <= self.sql.len(),
+            "replacement exceeds source for {:?}",
+            self.marked
+        );
+        assert!(
+            self.sql.is_char_boundary(start) && self.sql.is_char_boundary(end),
+            "replacement is not on UTF-8 boundaries for {:?}",
+            self.marked
+        );
+        assert!(
+            start <= self.cursor && self.cursor <= end,
+            "replacement does not contain cursor for {:?}: {start}..{end}, cursor {}",
+            self.marked,
+            self.cursor
         );
         self
     }

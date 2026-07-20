@@ -265,6 +265,13 @@ impl Resolver<'_> {
         match context {
             ColumnContext::VisibleScope => {
                 for reference in &self.context.scope.references {
+                    if reference.alias.is_some() {
+                        result.push(self.reference_candidate(
+                            reference,
+                            CompletionKind::Alias,
+                            540,
+                        ));
+                    }
                     self.columns_for_reference(reference, 500, result);
                 }
             }
@@ -445,8 +452,13 @@ impl Resolver<'_> {
     }
 
     fn search(&self, query: CatalogQuery<'_>) -> Vec<CatalogItem> {
-        self.catalog
-            .map_or_else(Vec::new, |catalog| catalog.search(query))
+        self.catalog.map_or_else(Vec::new, |catalog| {
+            catalog
+                .search(query)
+                .into_iter()
+                .filter(|item| catalog_item_matches_query(&query, item.kind))
+                .collect()
+        })
     }
 
     fn catalog_candidate(&self, item: CatalogItem, score: i32) -> RankedCandidate {
@@ -476,6 +488,19 @@ impl Resolver<'_> {
             },
             score + search_path_score(item.schema.as_deref(), self.request.search_path),
         )
+    }
+}
+
+fn catalog_item_matches_query(query: &CatalogQuery<'_>, kind: CatalogItemKind) -> bool {
+    match query {
+        CatalogQuery::Schemas { .. } => kind == CatalogItemKind::Schema,
+        CatalogQuery::Relations { .. } => matches!(
+            kind,
+            CatalogItemKind::Table | CatalogItemKind::View | CatalogItemKind::MaterializedView
+        ),
+        CatalogQuery::Columns { .. } => kind == CatalogItemKind::Column,
+        CatalogQuery::Functions { .. } => kind == CatalogItemKind::Function,
+        CatalogQuery::Types { .. } => kind == CatalogItemKind::Type,
     }
 }
 

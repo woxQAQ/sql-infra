@@ -197,6 +197,11 @@ impl ExprParser {
     }
 
     pub(super) fn parse_json_object_constructor(&mut self, location: usize) -> Option<Node> {
+        if self.at_completion_cursor()
+            && let Some(recorder) = &self.completion
+        {
+            recorder.borrow_mut().record_expression();
+        }
         let mut exprs = Vec::new();
         while !matches!(
             self.peek_kind(),
@@ -299,6 +304,11 @@ impl ExprParser {
                 absent_on_null: true,
                 location: location as ParseLoc,
             }));
+        }
+        if self.at_completion_cursor()
+            && let Some(recorder) = &self.completion
+        {
+            recorder.borrow_mut().record_expression();
         }
         let mut exprs = Vec::new();
         while !matches!(

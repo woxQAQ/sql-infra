@@ -3,6 +3,12 @@ use super::*;
 
 impl ExprParser {
     pub(super) fn parse_c_expr(&mut self) -> Option<Node> {
+        if self.at_completion_cursor() {
+            if let Some(recorder) = &self.completion {
+                recorder.borrow_mut().record_restricted_expression();
+            }
+            return self.fail("completion cursor");
+        }
         if matches!(
             self.peek_kind(),
             TokenKind::Not
@@ -53,22 +59,10 @@ impl ExprParser {
     pub(super) fn parse_prefix(&mut self, restricted: bool) -> Option<Node> {
         if self.at_completion_cursor() {
             if let Some(recorder) = &self.completion {
-                let mut recorder = recorder.borrow_mut();
-                recorder.record(Expectation::Expression);
-                recorder.record(Expectation::Name(NameExpectation::Column(
-                    ColumnContext::VisibleScope,
-                )));
-                recorder.record(Expectation::Name(NameExpectation::Function {
-                    schema: None,
-                }));
-                for token in [
-                    TokenKind::NullP,
-                    TokenKind::TrueP,
-                    TokenKind::FalseP,
-                    TokenKind::Case,
-                    TokenKind::Cast,
-                ] {
-                    recorder.record(Expectation::Token(token));
+                if restricted {
+                    recorder.borrow_mut().record_restricted_expression();
+                } else {
+                    recorder.borrow_mut().record_expression();
                 }
             }
             return self.fail("completion cursor");

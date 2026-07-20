@@ -28,10 +28,13 @@ Public completion behavior is covered by integration tests under
 `tests/completion/`. Scenarios use a single `|` marker for the cursor and are
 grouped by responsibility:
 
-- `syntax`: parser expectations, replacement ranges, suppression, errors;
+- `syntax`, `boundaries`: parser expectations, replacement ranges, lexical
+  suppression, cursor boundaries, and result invariants;
+- `expression_forms`, `expression_slots`: every supported expression family
+  and the query, DML, DDL, and utility positions that host expressions;
 - `relations`, `columns`, `routines_types`: catalog-backed name resolution;
-- `ranking`: ordering, search path, and deduplication;
-- `catalog`: the public `MemoryCatalog` adapter.
+- `ranking`: ordering, search path, prefix filtering, and deduplication;
+- `contract`, `catalog`: the `Catalog` seam and public `MemoryCatalog` adapter.
 
 Add new SQL completion behavior to the relevant integration scenario instead
 of adding resolver tests inside `src/lib.rs`.

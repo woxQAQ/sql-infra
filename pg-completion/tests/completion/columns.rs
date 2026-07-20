@@ -42,6 +42,16 @@ fn join_using_only_returns_columns_present_on_both_sides() {
 }
 
 #[test]
+fn join_using_honors_alias_column_lists_on_both_sides() {
+    Fixture::default()
+        .complete(
+            "SELECT * FROM users u(user_id, user_name) \
+             JOIN orders o(order_id, user_id, total) USING (user_|",
+        )
+        .assert_kind_labels(CompletionKind::Column, &["user_id"]);
+}
+
+#[test]
 fn target_relation_columns_cover_dml_ddl_and_utility_slots() {
     let fixture = Fixture::default();
     for marked in [
@@ -100,4 +110,55 @@ fn reserved_and_mixed_case_columns_are_quoted_on_insert() {
             .insert_text,
         "\"DisplayName\""
     );
+}
+
+#[test]
+fn range_aliases_are_expression_candidates_and_hide_base_relation_names() {
+    let fixture = Fixture::default();
+    fixture
+        .complete("SELECT u| FROM users u")
+        .assert_has("u", CompletionKind::Alias)
+        .assert_lacks("users", CompletionKind::Alias);
+    fixture
+        .complete("SELECT s| FROM (SELECT id FROM users) s")
+        .assert_has("s", CompletionKind::Alias);
+    fixture
+        .complete("SELECT f| FROM calculate_total(1) f")
+        .assert_has("f", CompletionKind::Alias);
+    fixture
+        .complete("SELECT * FROM users u WHERE EXISTS (SELECT u|)")
+        .assert_has("u", CompletionKind::Alias);
+}
+
+#[test]
+fn quoted_alias_completion_is_case_sensitive_and_quotes_insert_text() {
+    let result = Fixture::default().complete("SELECT \"U|\" FROM users \"UserAlias\"");
+    let alias = result.item("UserAlias", CompletionKind::Alias);
+    assert_eq!(alias.insert_text, "\"UserAlias\"");
+    result.assert_lacks("users", CompletionKind::Alias);
+}
+
+#[test]
+fn ambiguous_unqualified_columns_remain_distinguishable_by_detail() {
+    let result = Fixture::default().complete("SELECT i| FROM users u JOIN orders o ON u.id = o.id");
+    assert_eq!(result.count("id", CompletionKind::Column), 2);
+    assert!(result.result.items.iter().any(|item| {
+        item.kind == CompletionKind::Column
+            && item.label == "id"
+            && item.detail.as_deref() == Some("u.id integer")
+    }));
+    assert!(result.result.items.iter().any(|item| {
+        item.kind == CompletionKind::Column
+            && item.label == "id"
+            && item.detail.as_deref() == Some("o.id integer")
+    }));
+}
+
+#[test]
+fn range_tail_keywords_are_not_misclassified_as_aliases() {
+    Fixture::default()
+        .complete("SELECT | FROM users TABLESAMPLE system(10) REPEATABLE (1)")
+        .assert_lacks("tablesample", CompletionKind::Alias)
+        .assert_lacks("repeatable", CompletionKind::Alias)
+        .assert_has("name", CompletionKind::Column);
 }

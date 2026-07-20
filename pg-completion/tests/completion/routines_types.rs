@@ -77,3 +77,32 @@ fn routine_and_type_insert_text_quotes_unsafe_identifiers() {
         "\"order state\""
     );
 }
+
+#[test]
+fn quoted_routine_and_type_prefixes_are_case_sensitive() {
+    let mut fixture = Fixture::default();
+    fixture
+        .catalog
+        .function("public", "CalculateTotal", "CalculateTotal()", None);
+    fixture.catalog.ty("public", "OrderState");
+
+    let function = fixture.complete("SELECT \"Calc|\"");
+    assert_eq!(
+        function
+            .item("CalculateTotal", CompletionKind::Function)
+            .insert_text,
+        "\"CalculateTotal\""
+    );
+    fixture
+        .complete("SELECT \"calc|\"")
+        .assert_lacks("CalculateTotal", CompletionKind::Function);
+
+    let ty = fixture.complete("SELECT 1::\"Order|\"");
+    assert_eq!(
+        ty.item("OrderState", CompletionKind::Type).insert_text,
+        "\"OrderState\""
+    );
+    fixture
+        .complete("SELECT 1::\"order|\"")
+        .assert_lacks("OrderState", CompletionKind::Type);
+}
