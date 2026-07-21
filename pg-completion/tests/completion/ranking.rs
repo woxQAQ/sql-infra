@@ -23,8 +23,9 @@ fn duplicate_catalog_rows_are_deduplicated_by_visible_identity() {
     fixture
         .catalog
         .add_relation("public", "users", CatalogObjectKind::Table, []);
-    let result = fixture.complete("SELECT * FROM users|");
-    assert_eq!(result.count("users", CompletionKind::Table), 1);
+    fixture
+        .complete("SELECT * FROM users|")
+        .assert_count("users", CompletionKind::Table, 1);
 }
 
 #[test]
@@ -42,15 +43,9 @@ fn equal_scores_have_deterministic_case_insensitive_label_order() {
         CatalogObjectKind::Table,
         [("id".into(), "integer".into())],
     );
-    let result = fixture.complete("SELECT * FROM |");
-    let labels = result
-        .result
-        .items
-        .iter()
-        .filter(|item| matches!(item.label.as_str(), "alpha" | "beta"))
-        .map(|item| item.label.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(labels, ["alpha", "beta"]);
+    fixture
+        .complete("SELECT * FROM |")
+        .assert_labels_in_order(CompletionKind::Table, &["alpha", "beta"]);
 }
 
 #[test]
@@ -77,18 +72,12 @@ fn duplicate_functions_and_types_are_deduplicated_by_visible_identity() {
         .add_function("pg_catalog", "count", "count(any) -> bigint");
     fixture.catalog.add_type("pg_catalog", "integer");
 
-    assert_eq!(
-        fixture
-            .complete("SELECT cou|")
-            .count("count", CompletionKind::Function),
-        1
-    );
-    assert_eq!(
-        fixture
-            .complete("SELECT 1::inte|")
-            .count("integer", CompletionKind::Type),
-        1
-    );
+    fixture
+        .complete("SELECT cou|")
+        .assert_count("count", CompletionKind::Function, 1);
+    fixture
+        .complete("SELECT 1::inte|")
+        .assert_count("integer", CompletionKind::Type, 1);
 }
 
 #[test]
@@ -106,29 +95,19 @@ fn overloaded_catalog_objects_remain_distinct_by_structured_identity() {
         .with_definition("calculate_total(integer) -> numeric"),
     );
 
-    let result = fixture.complete("SELECT calculate_| ");
-    assert_eq!(result.count("calculate_total", CompletionKind::Function), 2);
-    let identities = result
-        .result
-        .items
-        .iter()
-        .filter(|item| item.label == "calculate_total")
-        .map(|item| {
+    fixture
+        .complete("SELECT calculate_| ")
+        .assert_count("calculate_total", CompletionKind::Function, 2)
+        .assert_has_matching("calculate_total", CompletionKind::Function, |item| {
             item.catalog_identity
                 .as_ref()
-                .expect("catalog candidate keeps its identity")
+                .is_some_and(|identity| identity.signature.is_empty())
         })
-        .collect::<Vec<_>>();
-    assert!(
-        identities
-            .iter()
-            .any(|identity| identity.signature.is_empty())
-    );
-    assert!(
-        identities
-            .iter()
-            .any(|identity| identity.signature == ["integer"])
-    );
+        .assert_has_matching("calculate_total", CompletionKind::Function, |item| {
+            item.catalog_identity
+                .as_ref()
+                .is_some_and(|identity| identity.signature == ["integer"])
+        });
 }
 
 #[test]
@@ -159,13 +138,10 @@ fn relation_details_distinguish_same_labels_from_different_schemas() {
         CatalogObjectKind::View,
         [("id".into(), "integer".into())],
     );
-    let result = fixture.complete("SELECT * FROM users|");
-    assert!(result.result.items.iter().any(|item| {
-        item.kind == CompletionKind::Table && item.detail.as_deref() == Some("public.users")
-    }));
-    assert!(result.result.items.iter().any(|item| {
-        item.kind == CompletionKind::View && item.detail.as_deref() == Some("audit.users")
-    }));
+    fixture
+        .complete("SELECT * FROM users|")
+        .assert_has_detail("users", CompletionKind::Table, "public.users")
+        .assert_has_detail("users", CompletionKind::View, "audit.users");
 }
 
 #[test]
@@ -176,46 +152,20 @@ fn search_path_ranks_same_named_functions_and_types() {
         .add_function("audit", "calculate_total", "audit calculation");
     fixture.catalog.add_type("audit", "order_status");
 
-    let functions = fixture.complete("SELECT calculate_|");
-    let public_function = functions
-        .result
-        .items
-        .iter()
-        .position(|item| {
-            item.kind == CompletionKind::Function
-                && item.detail.as_deref()
-                    == Some("public.calculate_total calculate_total(numeric) -> numeric")
-        })
-        .unwrap();
-    let audit_function = functions
-        .result
-        .items
-        .iter()
-        .position(|item| {
-            item.kind == CompletionKind::Function
-                && item.detail.as_deref() == Some("audit.calculate_total audit calculation")
-        })
-        .unwrap();
-    assert!(public_function < audit_function);
+    fixture
+        .complete("SELECT calculate_|")
+        .assert_details_in_order(
+            CompletionKind::Function,
+            &[
+                "public.calculate_total calculate_total(numeric) -> numeric",
+                "audit.calculate_total audit calculation",
+            ],
+        );
 
-    let types = fixture.complete("SELECT 1::order_|");
-    let public_type = types
-        .result
-        .items
-        .iter()
-        .position(|item| {
-            item.kind == CompletionKind::Type
-                && item.detail.as_deref() == Some("public.order_status")
-        })
-        .unwrap();
-    let audit_type = types
-        .result
-        .items
-        .iter()
-        .position(|item| {
-            item.kind == CompletionKind::Type
-                && item.detail.as_deref() == Some("audit.order_status")
-        })
-        .unwrap();
-    assert!(public_type < audit_type);
+    fixture
+        .complete("SELECT 1::order_|")
+        .assert_details_in_order(
+            CompletionKind::Type,
+            &["public.order_status", "audit.order_status"],
+        );
 }

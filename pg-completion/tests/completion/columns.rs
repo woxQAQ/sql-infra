@@ -96,20 +96,12 @@ fn cte_and_subquery_alias_columns_are_visible() {
 #[test]
 fn reserved_and_mixed_case_columns_are_quoted_on_insert() {
     let fixture = Fixture::default();
-    assert_eq!(
-        fixture
-            .complete("SELECT se| FROM users")
-            .item("select", CompletionKind::Column)
-            .insert_text,
-        "\"select\""
-    );
-    assert_eq!(
-        fixture
-            .complete("SELECT p.Dis| FROM \"UserProfile\" p")
-            .item("DisplayName", CompletionKind::Column)
-            .insert_text,
-        "\"DisplayName\""
-    );
+    fixture
+        .complete("SELECT se| FROM users")
+        .assert_insert_text("select", CompletionKind::Column, "\"select\"");
+    fixture
+        .complete("SELECT p.Dis| FROM \"UserProfile\" p")
+        .assert_insert_text("DisplayName", CompletionKind::Column, "\"DisplayName\"");
 }
 
 #[test]
@@ -132,26 +124,19 @@ fn range_aliases_are_expression_candidates_and_hide_base_relation_names() {
 
 #[test]
 fn quoted_alias_completion_is_case_sensitive_and_quotes_insert_text() {
-    let result = Fixture::default().complete("SELECT \"U|\" FROM users \"UserAlias\"");
-    let alias = result.item("UserAlias", CompletionKind::Alias);
-    assert_eq!(alias.insert_text, "\"UserAlias\"");
-    result.assert_lacks("users", CompletionKind::Alias);
+    Fixture::default()
+        .complete("SELECT \"U|\" FROM users \"UserAlias\"")
+        .assert_insert_text("UserAlias", CompletionKind::Alias, "\"UserAlias\"")
+        .assert_lacks("users", CompletionKind::Alias);
 }
 
 #[test]
 fn ambiguous_unqualified_columns_remain_distinguishable_by_detail() {
-    let result = Fixture::default().complete("SELECT i| FROM users u JOIN orders o ON u.id = o.id");
-    assert_eq!(result.count("id", CompletionKind::Column), 2);
-    assert!(result.result.items.iter().any(|item| {
-        item.kind == CompletionKind::Column
-            && item.label == "id"
-            && item.detail.as_deref() == Some("u.id integer")
-    }));
-    assert!(result.result.items.iter().any(|item| {
-        item.kind == CompletionKind::Column
-            && item.label == "id"
-            && item.detail.as_deref() == Some("o.id integer")
-    }));
+    Fixture::default()
+        .complete("SELECT i| FROM users u JOIN orders o ON u.id = o.id")
+        .assert_count("id", CompletionKind::Column, 2)
+        .assert_has_detail("id", CompletionKind::Column, "u.id integer")
+        .assert_has_detail("id", CompletionKind::Column, "o.id integer");
 }
 
 #[test]

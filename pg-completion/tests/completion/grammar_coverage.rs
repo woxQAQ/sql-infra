@@ -1381,18 +1381,7 @@ fn covered_slots_reach_their_semantic_contract() {
                 completed.assert_has(keyword, CompletionKind::Keyword);
             }
             Contract::KeywordSet(expected) => {
-                let actual = completed
-                    .result
-                    .items
-                    .iter()
-                    .filter(|item| item.kind == CompletionKind::Keyword)
-                    .map(|item| item.label.as_str())
-                    .collect::<HashSet<_>>();
-                assert_eq!(
-                    actual,
-                    expected.iter().copied().collect(),
-                    "keyword continuation set for {marked:?}"
-                );
+                completed.assert_kind_label_set(CompletionKind::Keyword, expected);
             }
             Contract::Relation => {
                 completed.assert_has("users", CompletionKind::Table);
@@ -1406,15 +1395,9 @@ fn covered_slots_reach_their_semantic_contract() {
                     .assert_has("NULL", CompletionKind::Keyword);
             }
             Contract::Declaration => {
-                assert!(
-                    completed
-                        .result
-                        .items
-                        .iter()
-                        .all(|item| !matches!(item.kind, CompletionKind::Catalog(_))),
-                    "declaration slot leaked catalog candidates for {marked:?}"
-                );
-                completed.assert_incomplete(false);
+                completed
+                    .assert_all_items(|item| !matches!(item.kind, CompletionKind::Catalog(_)))
+                    .assert_incomplete(false);
             }
             Contract::FunctionReference => {
                 completed

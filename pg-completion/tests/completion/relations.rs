@@ -64,27 +64,14 @@ fn search_path_relations_rank_before_other_schemas() {
         CatalogObjectKind::View,
         [("id".into(), "integer".into())],
     );
-    let result = fixture.complete("SELECT * FROM user|");
-    result
+    fixture
+        .complete("SELECT * FROM user|")
         .assert_has("users", CompletionKind::Table)
-        .assert_has("users", CompletionKind::View);
-    let public = result
-        .result
-        .items
-        .iter()
-        .position(|item| {
-            item.kind == CompletionKind::Table && item.detail.as_deref() == Some("public.users")
-        })
-        .unwrap();
-    let audit = result
-        .result
-        .items
-        .iter()
-        .position(|item| {
-            item.kind == CompletionKind::View && item.detail.as_deref() == Some("audit.users")
-        })
-        .unwrap();
-    assert!(public < audit);
+        .assert_has("users", CompletionKind::View)
+        .assert_candidates_in_order(&[
+            (CompletionKind::Table, "public.users"),
+            (CompletionKind::View, "audit.users"),
+        ]);
 
     Fixture::default()
         .with_search_path(&["audit", "public", "pg_catalog"])
@@ -94,10 +81,9 @@ fn search_path_relations_rank_before_other_schemas() {
 
 #[test]
 fn quoted_relation_completion_is_case_sensitive_and_quotes_insert_text() {
-    let result = Fixture::default().complete("SELECT * FROM \"User|");
-    let item = result.item("UserProfile", CompletionKind::Table);
-    assert_eq!(item.insert_text, "\"UserProfile\"");
-    result
+    Fixture::default()
+        .complete("SELECT * FROM \"User|")
+        .assert_insert_text("UserProfile", CompletionKind::Table, "\"UserProfile\"")
         .assert_lacks("users", CompletionKind::Table)
         .assert_replaces("\"User");
 }
@@ -111,24 +97,16 @@ fn relation_insert_text_quotes_unsafe_catalog_identifiers() {
             .add_relation("public", name, CatalogObjectKind::Table, []);
     }
 
-    let result = fixture.complete("SELECT * FROM |");
-    assert_eq!(result.item("", CompletionKind::Table).insert_text, "\"\"");
-    assert_eq!(
-        result.item("123users", CompletionKind::Table).insert_text,
-        "\"123users\""
-    );
-    assert_eq!(
-        result
-            .item("user profiles", CompletionKind::Table)
-            .insert_text,
-        "\"user profiles\""
-    );
-    assert_eq!(
-        result
-            .item("user\"profiles", CompletionKind::Table)
-            .insert_text,
-        "\"user\"\"profiles\""
-    );
+    fixture
+        .complete("SELECT * FROM |")
+        .assert_insert_text("", CompletionKind::Table, "\"\"")
+        .assert_insert_text("123users", CompletionKind::Table, "\"123users\"")
+        .assert_insert_text("user profiles", CompletionKind::Table, "\"user profiles\"")
+        .assert_insert_text(
+            "user\"profiles",
+            CompletionKind::Table,
+            "\"user\"\"profiles\"",
+        );
 }
 
 #[test]
@@ -141,14 +119,14 @@ fn quoted_relation_prefixes_decode_escaped_quotes_and_unicode() {
         .catalog
         .add_relation("public", "用户资料", CatalogObjectKind::Table, []);
 
-    let escaped = fixture.complete("SELECT * FROM \"user\"\"p|\"");
-    assert_eq!(
-        escaped
-            .item("user\"profiles", CompletionKind::Table)
-            .insert_text,
-        "\"user\"\"profiles\""
-    );
-    escaped.assert_replaces("\"user\"\"p\"");
+    fixture
+        .complete("SELECT * FROM \"user\"\"p|\"")
+        .assert_insert_text(
+            "user\"profiles",
+            CompletionKind::Table,
+            "\"user\"\"profiles\"",
+        )
+        .assert_replaces("\"user\"\"p\"");
 
     fixture
         .complete("SELECT * FROM \"用|\"")

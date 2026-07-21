@@ -25,18 +25,19 @@ fn memory_catalog_supports_every_public_metadata_family() {
     fixture
         .complete_with("SELECT * FROM app.cus|", Some(&catalog))
         .assert_has("customers", CompletionKind::Table);
-    let columns = fixture.complete_with("SELECT c.em| FROM app.customers c", Some(&catalog));
-    columns.assert_has("email", CompletionKind::Column);
-    let identity = columns
-        .item("email", CompletionKind::Column)
-        .catalog_identity
-        .as_ref()
-        .expect("catalog columns preserve structured identity");
-    assert!(matches!(
-        &identity.namespace,
-        CatalogObjectNamespace::Relation(relation)
-            if relation.schema.as_deref() == Some("app") && relation.name == "customers"
-    ));
+    fixture
+        .complete_with("SELECT c.em| FROM app.customers c", Some(&catalog))
+        .assert_has("email", CompletionKind::Column)
+        .assert_has_matching("email", CompletionKind::Column, |item| {
+            item.catalog_identity.as_ref().is_some_and(|identity| {
+                matches!(
+                    &identity.namespace,
+                    CatalogObjectNamespace::Relation(relation)
+                        if relation.schema.as_deref() == Some("app")
+                            && relation.name == "customers"
+                )
+            })
+        });
     fixture
         .complete_with("SELECT app.customer_|", Some(&catalog))
         .assert_has("customer_count", CompletionKind::Function);

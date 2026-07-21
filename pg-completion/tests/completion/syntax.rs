@@ -87,10 +87,7 @@ fn strings_and_comments_suppress_completion() {
         "SELECT /* na| */ 1",
         "SELECT $$na|$$",
     ] {
-        assert!(
-            fixture.complete(marked).result.items.is_empty(),
-            "{marked:?}"
-        );
+        fixture.complete(marked).assert_empty();
     }
 }
 

@@ -56,10 +56,7 @@ fn lexical_regions_and_their_boundaries_suppress_only_inside_content() {
         "SELECT 'unterminated |",
         "SELECT /* unterminated |",
     ] {
-        assert!(
-            fixture.complete(marked).result.items.is_empty(),
-            "{marked:?}"
-        );
+        fixture.complete(marked).assert_empty();
     }
 
     fixture

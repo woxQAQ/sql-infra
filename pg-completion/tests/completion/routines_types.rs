@@ -4,14 +4,14 @@ use super::support::Fixture;
 
 #[test]
 fn functions_complete_in_expression_slots_with_metadata() {
-    let fixture = Fixture::default();
-    let result = fixture.complete("SELECT cou| FROM users");
-    let item = result.item("count", CompletionKind::Function);
-    assert_eq!(
-        item.detail.as_deref(),
-        Some("pg_catalog.count count(any) -> bigint")
-    );
-    assert_eq!(item.documentation.as_deref(), Some("number of input rows"));
+    Fixture::default()
+        .complete("SELECT cou| FROM users")
+        .assert_has_detail(
+            "count",
+            CompletionKind::Function,
+            "pg_catalog.count count(any) -> bigint",
+        )
+        .assert_documentation("count", CompletionKind::Function, "number of input rows");
 }
 
 #[test]
@@ -62,19 +62,15 @@ fn routine_and_type_insert_text_quotes_unsafe_identifiers() {
         .add_function("public", "calculate total", "calculate total()");
     fixture.catalog.add_type("public", "order state");
 
-    assert_eq!(
-        fixture
-            .complete("SELECT calculate| ")
-            .item("calculate total", CompletionKind::Function)
-            .insert_text,
-        "\"calculate total\""
+    fixture.complete("SELECT calculate| ").assert_insert_text(
+        "calculate total",
+        CompletionKind::Function,
+        "\"calculate total\"",
     );
-    assert_eq!(
-        fixture
-            .complete("SELECT 1::order|")
-            .item("order state", CompletionKind::Type)
-            .insert_text,
-        "\"order state\""
+    fixture.complete("SELECT 1::order|").assert_insert_text(
+        "order state",
+        CompletionKind::Type,
+        "\"order state\"",
     );
 }
 
@@ -86,21 +82,19 @@ fn quoted_routine_and_type_prefixes_are_case_sensitive() {
         .add_function("public", "CalculateTotal", "CalculateTotal()");
     fixture.catalog.add_type("public", "OrderState");
 
-    let function = fixture.complete("SELECT \"Calc|\"");
-    assert_eq!(
-        function
-            .item("CalculateTotal", CompletionKind::Function)
-            .insert_text,
-        "\"CalculateTotal\""
+    fixture.complete("SELECT \"Calc|\"").assert_insert_text(
+        "CalculateTotal",
+        CompletionKind::Function,
+        "\"CalculateTotal\"",
     );
     fixture
         .complete("SELECT \"calc|\"")
         .assert_lacks("CalculateTotal", CompletionKind::Function);
 
-    let ty = fixture.complete("SELECT 1::\"Order|\"");
-    assert_eq!(
-        ty.item("OrderState", CompletionKind::Type).insert_text,
-        "\"OrderState\""
+    fixture.complete("SELECT 1::\"Order|\"").assert_insert_text(
+        "OrderState",
+        CompletionKind::Type,
+        "\"OrderState\"",
     );
     fixture
         .complete("SELECT 1::\"order|\"")

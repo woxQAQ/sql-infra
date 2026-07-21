@@ -140,7 +140,7 @@ pub struct Completed {
     marked: String,
     sql: String,
     cursor: usize,
-    pub result: CompletionResult,
+    result: CompletionResult,
 }
 
 impl Completed {
@@ -164,6 +164,13 @@ impl Completed {
         self
     }
 
+    pub fn assert_has_all(&self, kind: CompletionKind, labels: &[&str]) -> &Self {
+        for label in labels {
+            self.assert_has(label, kind);
+        }
+        self
+    }
+
     pub fn assert_lacks_kind(&self, kind: CompletionKind) -> &Self {
         let unexpected = self
             .result
@@ -177,6 +184,171 @@ impl Completed {
             "did not expect {kind:?} candidates for {:?}; got {unexpected:?}",
             self.marked
         );
+        self
+    }
+
+    pub fn assert_empty(&self) -> &Self {
+        assert!(
+            self.result.items.is_empty(),
+            "expected no completion items for {:?}; got {:?}",
+            self.marked,
+            self.summary()
+        );
+        self
+    }
+
+    pub fn assert_count(&self, label: &str, kind: CompletionKind, expected: usize) -> &Self {
+        let actual = self
+            .result
+            .items
+            .iter()
+            .filter(|item| item.label == label && item.kind == kind)
+            .count();
+        assert_eq!(actual, expected, "{:?}", self.marked);
+        self
+    }
+
+    pub fn assert_insert_text(&self, label: &str, kind: CompletionKind, expected: &str) -> &Self {
+        assert_eq!(
+            self.find_required(label, kind).insert_text,
+            expected,
+            "{:?}",
+            self.marked
+        );
+        self
+    }
+
+    pub fn assert_has_detail(&self, label: &str, kind: CompletionKind, expected: &str) -> &Self {
+        self.assert_has_matching(label, kind, |item| item.detail.as_deref() == Some(expected))
+    }
+
+    pub fn assert_documentation(&self, label: &str, kind: CompletionKind, expected: &str) -> &Self {
+        assert_eq!(
+            self.find_required(label, kind).documentation.as_deref(),
+            Some(expected),
+            "{:?}",
+            self.marked
+        );
+        self
+    }
+
+    pub fn assert_has_matching(
+        &self,
+        label: &str,
+        kind: CompletionKind,
+        predicate: impl Fn(&CompletionItem) -> bool,
+    ) -> &Self {
+        assert!(
+            self.result
+                .items
+                .iter()
+                .any(|item| item.label == label && item.kind == kind && predicate(item)),
+            "expected matching {label:?} ({kind:?}) for {:?}; got {:?}",
+            self.marked,
+            self.summary()
+        );
+        self
+    }
+
+    pub fn assert_all_items(&self, predicate: impl Fn(&CompletionItem) -> bool) -> &Self {
+        let unexpected = self
+            .result
+            .items
+            .iter()
+            .filter(|item| !predicate(item))
+            .collect::<Vec<_>>();
+        assert!(
+            unexpected.is_empty(),
+            "unexpected completion items for {:?}: {unexpected:?}",
+            self.marked
+        );
+        self
+    }
+
+    pub fn assert_kind_label_set(&self, kind: CompletionKind, expected: &[&str]) -> &Self {
+        let actual = self
+            .result
+            .items
+            .iter()
+            .filter(|item| item.kind == kind)
+            .map(|item| item.label.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(
+            actual,
+            expected.iter().copied().collect(),
+            "{:?}",
+            self.marked
+        );
+        self
+    }
+
+    pub fn assert_labels_in_order(&self, kind: CompletionKind, expected: &[&str]) -> &Self {
+        let mut previous = None;
+        for label in expected {
+            let position = self
+                .result
+                .items
+                .iter()
+                .position(|item| item.kind == kind && item.label == *label)
+                .unwrap_or_else(|| panic!("missing {label:?} ({kind:?}) for {:?}", self.marked));
+            if let Some(previous) = previous {
+                assert!(
+                    previous < position,
+                    "expected {expected:?} in order for {:?}; got {:?}",
+                    self.marked,
+                    self.summary()
+                );
+            }
+            previous = Some(position);
+        }
+        self
+    }
+
+    pub fn assert_details_in_order(&self, kind: CompletionKind, expected: &[&str]) -> &Self {
+        let mut previous = None;
+        for detail in expected {
+            let position = self
+                .result
+                .items
+                .iter()
+                .position(|item| item.kind == kind && item.detail.as_deref() == Some(*detail))
+                .unwrap_or_else(|| {
+                    panic!("missing detail {detail:?} ({kind:?}) for {:?}", self.marked)
+                });
+            if let Some(previous) = previous {
+                assert!(
+                    previous < position,
+                    "expected details {expected:?} in order for {:?}; got {:?}",
+                    self.marked,
+                    self.summary()
+                );
+            }
+            previous = Some(position);
+        }
+        self
+    }
+
+    pub fn assert_candidates_in_order(&self, expected: &[(CompletionKind, &str)]) -> &Self {
+        let mut previous = None;
+        for (kind, detail) in expected {
+            let position = self
+                .result
+                .items
+                .iter()
+                .position(|item| item.kind == *kind && item.detail.as_deref() == Some(*detail))
+                .unwrap_or_else(|| {
+                    panic!("missing detail {detail:?} ({kind:?}) for {:?}", self.marked)
+                });
+            if let Some(previous) = previous {
+                assert!(
+                    previous < position,
+                    "expected candidates {expected:?} in order for {:?}; got {:?}",
+                    self.marked,
+                    self.summary()
+                );
+            }
+            previous = Some(position);
+        }
         self
     }
 
@@ -303,7 +475,7 @@ impl Completed {
         self
     }
 
-    pub fn item(&self, label: &str, kind: CompletionKind) -> &CompletionItem {
+    fn find_required(&self, label: &str, kind: CompletionKind) -> &CompletionItem {
         self.find(label, kind).unwrap_or_else(|| {
             panic!(
                 "missing {label:?} ({kind:?}) for {:?}; got {:?}",
@@ -311,14 +483,6 @@ impl Completed {
                 self.summary()
             )
         })
-    }
-
-    pub fn count(&self, label: &str, kind: CompletionKind) -> usize {
-        self.result
-            .items
-            .iter()
-            .filter(|item| item.label == label && item.kind == kind)
-            .count()
     }
 
     pub fn assert_kind_labels(&self, kind: CompletionKind, expected: &[&str]) -> &Self {

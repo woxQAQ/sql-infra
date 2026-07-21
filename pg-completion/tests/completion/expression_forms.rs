@@ -4,29 +4,29 @@ use super::support::Fixture;
 
 #[test]
 fn expression_completion_offers_representative_starters_and_excludes_contextual_keywords() {
-    let result = Fixture::default().complete("SELECT | FROM users");
-
     // Exercise the public completion contract across distinct expression
     // families. The form-specific tests below cover the detailed grammar;
     // this test deliberately does not mirror the implementation's token list.
-    for keyword in [
-        "NULL",
-        "TRUE",
-        "NOT",
-        "EXISTS",
-        "ARRAY",
-        "CASE",
-        "CAST",
-        "EXTRACT",
-        "CURRENT_DATE",
-        "XMLSERIALIZE",
-        "JSON_VALUE",
-        "ROW",
-        "COALESCE",
-    ] {
-        result.assert_has(keyword, CompletionKind::Keyword);
-    }
-    result
+    Fixture::default()
+        .complete("SELECT | FROM users")
+        .assert_has_all(
+            CompletionKind::Keyword,
+            &[
+                "NULL",
+                "TRUE",
+                "NOT",
+                "EXISTS",
+                "ARRAY",
+                "CASE",
+                "CAST",
+                "EXTRACT",
+                "CURRENT_DATE",
+                "XMLSERIALIZE",
+                "JSON_VALUE",
+                "ROW",
+                "COALESCE",
+            ],
+        )
         .assert_lacks("SELECT", CompletionKind::Keyword)
         .assert_lacks("DEFAULT", CompletionKind::Keyword)
         .assert_lacks("MERGE_ACTION", CompletionKind::Keyword);
