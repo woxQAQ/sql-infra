@@ -49,27 +49,6 @@ impl CompletionKind {
     pub const Type: Self = Self::Catalog(CatalogObjectKind::Type);
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CompletionError {
-    Syntax(pg_parser::CompletionError),
-}
-
-impl std::fmt::Display for CompletionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Syntax(error) => error.fmt(f),
-        }
-    }
-}
-
-impl std::error::Error for CompletionError {}
-
-impl From<pg_parser::CompletionError> for CompletionError {
-    fn from(value: pg_parser::CompletionError) -> Self {
-        Self::Syntax(value)
-    }
-}
-
 /// Metadata seam consumed by the completion module.
 ///
 /// Implementations may query a live database, a cache, or an in-memory test
@@ -297,7 +276,7 @@ const TYPE_KINDS: &[CatalogObjectKind] = &[CatalogObjectKind::Type, CatalogObjec
 pub fn complete(
     request: CompletionRequest<'_>,
     catalog: Option<&dyn Catalog>,
-) -> Result<CompletionResult, CompletionError> {
+) -> Result<CompletionResult, pg_parser::CompletionError> {
     let context = collect_completion(request.sql, request.cursor)?;
     let quoted = request
         .sql

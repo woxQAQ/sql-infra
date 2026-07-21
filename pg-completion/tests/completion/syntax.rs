@@ -1,4 +1,4 @@
-use pg_completion::{CompletionError, CompletionKind};
+use pg_completion::CompletionKind;
 
 use super::support::Fixture;
 
@@ -97,10 +97,10 @@ fn cursor_validation_errors_cross_the_public_interface() {
     let sql = "SELECT 中";
     assert!(matches!(
         fixture.error_without_catalog(sql, "SELECT ".len() + 1),
-        CompletionError::Syntax(pg_parser::CompletionError::CursorNotCharBoundary { .. })
+        pg_parser::CompletionError::CursorNotCharBoundary { .. }
     ));
     assert!(matches!(
         fixture.error_without_catalog(sql, sql.len() + 1),
-        CompletionError::Syntax(pg_parser::CompletionError::CursorOutOfBounds { .. })
+        pg_parser::CompletionError::CursorOutOfBounds { .. }
     ));
 }

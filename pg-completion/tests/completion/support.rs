@@ -1,6 +1,6 @@
 use pg_completion::{
-    Catalog, CatalogItem, CatalogObjectIdentity, CatalogObjectKind, CompletionError,
-    CompletionItem, CompletionKind, CompletionRequest, CompletionResult, MemoryCatalog, complete,
+    Catalog, CatalogItem, CatalogObjectIdentity, CatalogObjectKind, CompletionItem, CompletionKind,
+    CompletionRequest, CompletionResult, MemoryCatalog, complete,
 };
 use pg_parser::TextSize;
 
@@ -104,7 +104,7 @@ impl Fixture {
         self.complete_with_catalog(marked, catalog)
     }
 
-    pub fn error_without_catalog(&self, sql: &str, cursor: usize) -> CompletionError {
+    pub fn error_without_catalog(&self, sql: &str, cursor: usize) -> pg_parser::CompletionError {
         complete(
             CompletionRequest {
                 sql,
