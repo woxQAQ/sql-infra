@@ -1523,7 +1523,9 @@ fn top_level_statement(tokens: &[&Token]) -> Option<(usize, TokenKind)> {
     })
 }
 
-fn top_level_tokens<'a>(tokens: &'a [&'a Token]) -> impl Iterator<Item = (usize, &'a Token)> {
+fn top_level_tokens<'slice, 'token: 'slice>(
+    tokens: &'slice [&'token Token],
+) -> impl Iterator<Item = (usize, &'token Token)> + 'slice {
     let mut depth = 0usize;
     tokens.iter().enumerate().filter_map(move |(index, token)| {
         let token_depth = depth;
@@ -1536,10 +1538,10 @@ fn top_level_tokens<'a>(tokens: &'a [&'a Token]) -> impl Iterator<Item = (usize,
     })
 }
 
-fn top_level_tokens_after<'a>(
-    tokens: &'a [&'a Token],
+fn top_level_tokens_after<'slice, 'token: 'slice>(
+    tokens: &'slice [&'token Token],
     start: usize,
-) -> impl Iterator<Item = &'a Token> {
+) -> impl Iterator<Item = &'token Token> + 'slice {
     top_level_tokens(tokens)
         .filter(move |(index, _)| *index >= start)
         .map(|(_, token)| token)
@@ -2005,6 +2007,20 @@ mod tests {
         let tokens = completion_tokens(&sql, cursor);
         let (_, statement_tokens) = statement_at(&sql, cursor, &tokens);
         collect_parser_expectations(&statement_tokens, cursor).0
+    }
+
+    #[test]
+    fn top_level_token_references_outlive_the_reference_slice() {
+        let token = Token::synthetic(TokenKind::Select, 0);
+        let returned = {
+            let tokens = [&token];
+            top_level_tokens(&tokens)
+                .next()
+                .expect("select is a top-level token")
+                .1
+        };
+
+        assert_eq!(returned.kind, TokenKind::Select);
     }
 
     #[test]

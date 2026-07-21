@@ -715,7 +715,7 @@ impl<'a> Lexer<'a> {
         &mut self,
         location: usize,
         radix: u32,
-        fail_message: &'static str,
+        fail_message: &str,
     ) -> Result<Token, LexError> {
         let start = self.pos;
         self.pos += 2;
