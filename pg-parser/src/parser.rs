@@ -101,6 +101,13 @@ use xmltable_columns::*;
 pub struct ParseError {
     pub message: std::string::String,
     pub range: TextRange,
+    mode: ParseErrorMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ParseErrorMode {
+    Syntax,
+    Completion,
 }
 
 impl ParseError {
@@ -110,6 +117,7 @@ impl ParseError {
                 TextSize::try_from(location).expect("parser locations come from validated input"),
             ),
             message: message.into(),
+            mode: ParseErrorMode::Syntax,
         }
     }
 
@@ -117,7 +125,20 @@ impl ParseError {
         Self {
             range,
             message: message.into(),
+            mode: ParseErrorMode::Syntax,
         }
+    }
+
+    fn completion(range: TextRange) -> Self {
+        Self {
+            message: "completion collection stopped".into(),
+            range,
+            mode: ParseErrorMode::Completion,
+        }
+    }
+
+    pub(crate) fn is_completion(&self) -> bool {
+        self.mode == ParseErrorMode::Completion
     }
 
     pub fn location(&self) -> usize {
@@ -136,6 +157,7 @@ impl From<crate::lexer::LexError> for ParseError {
         Self {
             message: value.message,
             range: value.range,
+            mode: ParseErrorMode::Syntax,
         }
     }
 }
@@ -370,6 +392,7 @@ impl Parser {
         if range.is_empty() {
             if self.at_completion_cursor() {
                 self.record_expression_completion_at(slot);
+                return Err(self.completion_stop());
             }
             return Err(ParseError::new(location, "expected an expression"));
         }
@@ -395,6 +418,7 @@ impl Parser {
         if range.is_empty() {
             if self.at_completion_cursor() {
                 self.record_restricted_expression_completion_at(slot);
+                return Err(self.completion_stop());
             }
             return Err(ParseError::new(
                 location,
@@ -423,6 +447,7 @@ impl Parser {
         if range.is_empty() {
             if self.at_completion_cursor() {
                 self.record_restricted_expression_completion_at(slot);
+                return Err(self.completion_stop());
             }
             return Err(ParseError::new(location, "expected a common expression"));
         }
@@ -467,8 +492,14 @@ impl Parser {
         (None, range)
     }
 
-    pub(crate) fn parse_completion_statement(&mut self) -> PResult<Node> {
-        self.parse_statement(None)
+    pub(crate) fn parse_completion_statement(&mut self) {
+        match self.parse_statement(None) {
+            Ok(_) => {}
+            Err(error) if error.is_completion() => {}
+            // A prefix can also be genuinely incomplete before the cursor.
+            // Recorded expectations remain useful in that case.
+            Err(_syntax_error) => {}
+        }
     }
 
     pub fn parse(&mut self) -> PResult<Vec<RawStmt>> {
@@ -750,6 +781,11 @@ impl Parser {
         ParseError::ranged(self.peek().range, message)
     }
 
+    pub(super) fn completion_stop(&self) -> ParseError {
+        debug_assert!(self.at_completion_cursor());
+        ParseError::completion(self.peek().range)
+    }
+
     pub(super) fn at_completion_cursor(&self) -> bool {
         self.at(TokenKind::Eof)
             && self
@@ -811,7 +847,7 @@ impl Parser {
                     Expectation::Token(token),
                 );
             }
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         match self.peek_kind() {
             TokenKind::With => self.parse_with_statement(),
@@ -977,6 +1013,21 @@ mod tests {
         ));
         assert!(!artificial_eof.at_completion_cursor());
         assert!(cursor_eof.at_completion_cursor());
+    }
+
+    #[test]
+    fn completion_stop_is_distinct_from_a_syntax_error() {
+        let tokens = lex("").unwrap();
+        let recorder = Rc::new(std::cell::RefCell::new(
+            crate::completion::CompletionRecorder::default(),
+        ));
+        let mut completion = Parser::for_completion(tokens, recorder);
+        let completion_error = completion.parse_statement(None).unwrap_err();
+        assert!(completion_error.is_completion());
+
+        let mut ordinary = Parser::new("INSERT").unwrap();
+        let syntax_error = ordinary.parse_statement(None).unwrap_err();
+        assert!(!syntax_error.is_completion());
     }
 
     #[test]

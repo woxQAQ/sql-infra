@@ -14,7 +14,7 @@ impl Parser {
         self.expect(TokenKind::From)?;
         if self.at_completion_cursor() {
             self.record_relation_completion_at(CompletionSlot::DeleteTargetRelation);
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let mut relation = Some(Box::new(
             self.try_parse_range_var(true)

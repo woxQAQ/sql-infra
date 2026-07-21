@@ -16,7 +16,7 @@ impl ExprParser {
                     .borrow_mut()
                     .record_restricted_expression_at(self.active_completion_slot());
             }
-            return self.fail("completion cursor");
+            return self.stop_for_completion();
         }
         if matches!(
             self.peek_kind(),
@@ -78,7 +78,7 @@ impl ExprParser {
                         .record_expression_at(self.active_completion_slot());
                 }
             }
-            return self.fail("completion cursor");
+            return self.stop_for_completion();
         }
         if let Some(constant) = self.try_parse_typed_constant() {
             return Some(constant);

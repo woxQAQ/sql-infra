@@ -549,7 +549,7 @@ fn collect_parser_expectations(
     prefix.push(Token::synthetic(TokenKind::Eof, offset));
     let recorder = Rc::new(RefCell::new(CompletionRecorder::default()));
     let mut parser = crate::parser::Parser::for_completion(prefix, recorder.clone());
-    let _ = parser.parse_completion_statement();
+    parser.parse_completion_statement();
     Rc::try_unwrap(recorder)
         .map(|recorder| {
             let recorder = recorder.into_inner();

@@ -242,6 +242,9 @@ impl ExprParser {
                     | TokenKind::Char(')')
                     | TokenKind::Eof
             ) {
+                if self.at_completion_cursor() {
+                    return self.stop_for_completion();
+                }
                 return self.fail("expected a JSON object member after ','");
             }
         }
@@ -339,6 +342,9 @@ impl ExprParser {
                     | TokenKind::Char(')')
                     | TokenKind::Eof
             ) {
+                if self.at_completion_cursor() {
+                    return self.stop_for_completion();
+                }
                 return self.fail("expected a JSON array element after ','");
             }
         }
@@ -368,6 +374,7 @@ impl Parser {
         if range.is_empty() {
             if self.at_completion_cursor() {
                 self.record_expression_completion_at(slot);
+                return Err(self.completion_stop());
             }
             return Err(ParseError::new(
                 location,

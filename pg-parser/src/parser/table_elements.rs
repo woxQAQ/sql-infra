@@ -7,7 +7,7 @@ impl Parser {
                 CompletionSlot::InsertColumn,
                 Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
             );
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let mut cols = Vec::new();
         if self.at(TokenKind::Char(')')) {

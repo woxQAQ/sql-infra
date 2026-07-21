@@ -20,7 +20,7 @@ impl Parser {
                     Expectation::Token(token),
                 );
             }
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         if self.peek_kind() == TokenKind::Default && self.peek_kind_n(1) == TokenKind::Privileges {
             return self.parse_alter_default_privileges();

@@ -240,6 +240,7 @@ impl ExprParser {
                     recorder
                         .borrow_mut()
                         .record_expression_at(continuation_slot);
+                    return self.stop_for_completion();
                 }
                 return self.fail("expected an ORDER BY expression after ','");
             }

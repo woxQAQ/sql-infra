@@ -29,7 +29,7 @@ impl Parser {
         self.expect(TokenKind::Into)?;
         if self.at_completion_cursor() {
             self.record_relation_completion_at(CompletionSlot::InsertTargetRelation);
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let mut relation = self
             .try_parse_qualified_range_var()

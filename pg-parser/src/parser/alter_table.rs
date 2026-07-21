@@ -59,7 +59,7 @@ impl Parser {
         let missing_ok = self.consume_if_exists()?;
         if self.at_completion_cursor() {
             self.record_relation_completion_at(CompletionSlot::AlterTableRelation);
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let relation = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
             || self.error_here("ALTER relation requires a relation name"),

@@ -19,7 +19,7 @@ impl Parser {
                 CompletionSlot::FromItem,
                 Expectation::Token(TokenKind::LateralP),
             );
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let mut items = Vec::new();
         while !self.at_any(stops) {

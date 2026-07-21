@@ -19,7 +19,7 @@ impl Parser {
                     Expectation::Token(token),
                 );
             }
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         match self.peek_kind() {
             TokenKind::Database => self.parse_drop_database(),

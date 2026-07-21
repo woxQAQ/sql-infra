@@ -77,6 +77,7 @@ impl Parser {
             }
             if self.at_completion_cursor() {
                 self.record_expression_completion_at(continuation_slot);
+                return Err(self.completion_stop());
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an expression after ','"));
@@ -111,6 +112,7 @@ impl Parser {
             }
             if self.at_completion_cursor() {
                 self.record_expression_completion_at(continuation_slot);
+                return Err(self.completion_stop());
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an expression after ','"));
@@ -141,6 +143,7 @@ impl Parser {
             }
             if self.at_completion_cursor() {
                 self.record_expression_completion_at(continuation_slot);
+                return Err(self.completion_stop());
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected a grouping item after ','"));
@@ -331,6 +334,7 @@ impl Parser {
             }
             if self.at_completion_cursor() {
                 self.record_expression_completion_at(continuation_slot);
+                return Err(self.completion_stop());
             }
             if self.at_any(stops) {
                 return Err(self.error_here("expected an ORDER BY expression after ','"));

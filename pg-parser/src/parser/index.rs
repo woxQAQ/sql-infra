@@ -26,7 +26,7 @@ impl Parser {
         self.expect(TokenKind::On)?;
         if self.at_completion_cursor() {
             self.record_relation_completion_at(CompletionSlot::IndexRelation);
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let relation = Some(Box::new(
             self.try_parse_qualified_range_var()
@@ -176,6 +176,7 @@ impl Parser {
         if tokens.is_empty() {
             if self.at_completion_cursor() {
                 self.record_expression_completion_at(slot);
+                return Err(self.completion_stop());
             }
             return Err(ParseError::new(location, "expected an index element"));
         }

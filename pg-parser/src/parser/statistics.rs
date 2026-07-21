@@ -71,6 +71,7 @@ impl Parser {
         if range.is_empty() {
             if self.at_completion_cursor() {
                 self.record_expression_completion_at(CompletionSlot::StatisticsExpression);
+                return Err(self.completion_stop());
             }
             return Err(ParseError::new(
                 location,
@@ -82,6 +83,7 @@ impl Parser {
                 self.record_expression_completion_at(
                     CompletionSlot::StatisticsExpressionAfterComma,
                 );
+                return Err(self.completion_stop());
             }
             return Err(ParseError::new(
                 location,

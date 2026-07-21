@@ -277,7 +277,7 @@ impl Parser {
                 first_target_slot,
                 Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
             );
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let mut targets = Vec::new();
         while !self.at_any(stops) {
@@ -343,6 +343,7 @@ impl Parser {
                         continuation_target_slot,
                         Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
                     );
+                    return Err(self.completion_stop());
                 }
                 return Err(self.error_here("expected an assignment after ','"));
             }

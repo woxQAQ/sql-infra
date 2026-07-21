@@ -20,7 +20,7 @@ impl Parser {
                     Expectation::Token(token),
                 );
             }
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let target = match self.peek_kind() {
             TokenKind::Select | TokenKind::Values | TokenKind::Table | TokenKind::Char('(') => {
@@ -58,7 +58,7 @@ impl Parser {
                     CompletionSlot::CteName,
                     Expectation::Name(NameExpectation::Declaration(DeclarationKind::Cte)),
                 );
-                return Err(self.error_here("completion cursor"));
+                return Err(self.completion_stop());
             }
             let name = self
                 .consume_col_id()
@@ -78,7 +78,7 @@ impl Parser {
                                 DeclarationKind::Column,
                             )),
                         );
-                        return Err(self.error_here("completion cursor"));
+                        return Err(self.completion_stop());
                     }
                     let column = self.consume_col_id().ok_or_else(|| {
                         self.error_here("expected a column name in the CTE alias list")

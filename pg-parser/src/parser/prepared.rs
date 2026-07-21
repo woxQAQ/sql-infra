@@ -194,7 +194,7 @@ impl Parser {
                 CompletionSlot::CallRoutine,
                 Expectation::Name(NameExpectation::Schema),
             );
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         let funccall = match self.parse_expression_range_at(CompletionSlot::CallRoutine, range)? {
             Node::FuncCall(call)

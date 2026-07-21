@@ -31,7 +31,7 @@ impl Parser {
                     Expectation::Token(token),
                 );
             }
-            return Err(self.error_here("completion cursor"));
+            return Err(self.completion_stop());
         }
         if (trusted || procedural) && self.peek_kind() != TokenKind::Language {
             return Err(self.error_here("TRUSTED/PROCEDURAL is only valid for CREATE LANGUAGE"));

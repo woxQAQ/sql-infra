@@ -649,6 +649,7 @@ impl ExprParser {
                     recorder
                         .borrow_mut()
                         .record_expression_at(continuation_slot);
+                    return self.stop_for_completion();
                 }
                 if self.error.is_none() {
                     self.error = Some(ParseError::ranged(
@@ -665,6 +666,14 @@ impl ExprParser {
     pub(super) fn fail<T>(&mut self, message: impl Into<std::string::String>) -> Option<T> {
         if self.error.is_none() {
             self.error = Some(ParseError::ranged(self.peek().range, message));
+        }
+        None
+    }
+
+    pub(super) fn stop_for_completion<T>(&mut self) -> Option<T> {
+        debug_assert!(self.at_completion_cursor());
+        if self.error.is_none() {
+            self.error = Some(ParseError::completion(self.peek().range));
         }
         None
     }
