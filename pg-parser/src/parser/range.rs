@@ -54,7 +54,7 @@ impl Parser {
             if lateral {
                 return Err(self.error_here("LATERAL requires a function or subquery"));
             }
-            Node::RangeVar(self.parse_relation_expr(true)?)
+            Node::RangeVar(self.parse_relation_expr_at(CompletionSlot::FromItem, true, true)?)
         } else if self.consume(TokenKind::Char('(')) {
             let inner = self.take_until_top_level_range(&[TokenKind::Char(')')]);
             if matches!(
@@ -163,7 +163,7 @@ impl Parser {
                 if lateral {
                     return Err(self.error_here("LATERAL requires a function or subquery"));
                 }
-                Node::RangeVar(self.parse_relation_expr(true)?)
+                Node::RangeVar(self.parse_relation_expr_at(CompletionSlot::FromItem, true, true)?)
             }
         };
         if self.consume(TokenKind::Tablesample) {

@@ -29,8 +29,7 @@ impl Parser {
             return Err(self.completion_stop());
         }
         let relation = Some(Box::new(
-            self.try_parse_qualified_range_var()
-                .ok_or_else(|| self.error_here("CREATE INDEX requires a relation"))?,
+            self.parse_qualified_range_var_at(CompletionSlot::IndexRelation, false)?,
         ));
         let access_method = if self.consume(TokenKind::Using) {
             Some(

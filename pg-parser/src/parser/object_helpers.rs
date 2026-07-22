@@ -272,8 +272,29 @@ fn parse_object_with_args_tokens_impl(
 
 impl Parser {
     pub(super) fn parse_type_name_until(&mut self, stops: &[TokenKind]) -> Option<TypeName> {
+        if self.at_completion_cursor() {
+            self.record_completion_at(
+                CompletionSlot::TypeName,
+                Expectation::Name(NameExpectation::Type { schema: None }),
+            );
+            return None;
+        }
         let location = self.location();
         let tokens = self.take_until_top_level(stops);
+        if self.at_completion_cursor()
+            && tokens
+                .last()
+                .is_some_and(|token| token.kind == TokenKind::Char('.'))
+        {
+            let schema = tokens
+                .get(tokens.len().saturating_sub(2))
+                .and_then(token_name);
+            self.record_completion_at(
+                CompletionSlot::TypeName,
+                Expectation::Name(NameExpectation::Type { schema }),
+            );
+            return None;
+        }
         tokens_to_type_name(tokens).map(|mut type_name| {
             type_name.location = location as ParseLoc;
             type_name

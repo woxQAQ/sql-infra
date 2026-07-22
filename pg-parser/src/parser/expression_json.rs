@@ -201,12 +201,8 @@ impl ExprParser {
     }
 
     pub(super) fn parse_json_object_constructor(&mut self, location: usize) -> Option<Node> {
-        if self.at_completion_cursor()
-            && let Some(recorder) = &self.completion
-        {
-            recorder
-                .borrow_mut()
-                .record_expression_at(self.active_completion_slot());
+        if self.at_completion_cursor() {
+            self.record_expression_completion_at(self.active_completion_slot(), false);
         }
         let mut exprs = Vec::new();
         while !matches!(
@@ -243,6 +239,7 @@ impl ExprParser {
                     | TokenKind::Eof
             ) {
                 if self.at_completion_cursor() {
+                    self.record_expression_completion_at(self.active_completion_slot(), false);
                     return self.stop_for_completion();
                 }
                 return self.fail("expected a JSON object member after ','");
@@ -314,12 +311,8 @@ impl ExprParser {
                 location: location as ParseLoc,
             }));
         }
-        if self.at_completion_cursor()
-            && let Some(recorder) = &self.completion
-        {
-            recorder
-                .borrow_mut()
-                .record_expression_at(self.active_completion_slot());
+        if self.at_completion_cursor() {
+            self.record_expression_completion_at(self.active_completion_slot(), false);
         }
         let mut exprs = Vec::new();
         while !matches!(
@@ -343,6 +336,7 @@ impl ExprParser {
                     | TokenKind::Eof
             ) {
                 if self.at_completion_cursor() {
+                    self.record_expression_completion_at(self.active_completion_slot(), false);
                     return self.stop_for_completion();
                 }
                 return self.fail("expected a JSON array element after ','");

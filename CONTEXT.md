@@ -32,6 +32,30 @@ _Avoid_: Name slot
 A completion slot that introduces a new name rather than referring to an existing PostgreSQL object.
 _Avoid_: Creation slot, name slot
 
+**Scope frame**:
+A query-level layer of SQL names visible from a cursor position. Scope frames are considered from the nearest query outward.
+_Avoid_: Nesting level
+
+**CTE binding**:
+A common-table-expression name together with the row shape it exposes. Its visibility follows the declaration order and `RECURSIVE` semantics of its `WITH` clause.
+_Avoid_: Temporary table, range reference
+
+**Range binding**:
+A name introduced by a `FROM` item for a row-producing source such as a relation, CTE, derived table, or table function.
+_Avoid_: Table reference, alias only
+
+**Target relation**:
+The relation a statement inserts into, updates, deletes from, or otherwise owns. It is distinct from range bindings that supply rows to expressions.
+_Avoid_: Local relation, source relation
+
+**Row shape**:
+The ordered columns exposed by a row-producing SQL source, including names inherited or renamed through projections and alias lists.
+_Avoid_: Catalog columns, result rows
+
+**Name shadowing**:
+The PostgreSQL rule that a binding in a nearer scope hides an outer binding with the same visible name; column shadowing is determined by the columns each frame exposes.
+_Avoid_: Ranking preference, score boost
+
 **Catalog object**:
 A named PostgreSQL entity discoverable from database metadata and eligible for use in a reference slot.
 _Avoid_: Completion item, database item

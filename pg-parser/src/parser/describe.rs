@@ -141,7 +141,7 @@ impl Parser {
 
     fn parse_described_object(&mut self, security_label: bool) -> PResult<(ObjectType, Node)> {
         if self.consume(TokenKind::Column) {
-            return Ok((ObjectType::Column, self.parse_any_name_object_until_is()?));
+            return Ok((ObjectType::Column, self.parse_described_column_until_is()?));
         }
         if self.consume(TokenKind::TypeP) {
             return Ok((ObjectType::Type, self.parse_type_object_until_is()?));
@@ -294,6 +294,39 @@ impl Parser {
             }
         };
         Ok((objtype, object))
+    }
+
+    fn parse_described_column_until_is(&mut self) -> PResult<Node> {
+        if self.at_completion_cursor() {
+            self.record_completion_at(
+                CompletionSlot::ObjectColumnName,
+                Expectation::Name(NameExpectation::Relation { schema: None }),
+            );
+            self.record_completion_at(
+                CompletionSlot::ObjectColumnName,
+                Expectation::Name(NameExpectation::Schema),
+            );
+            return Err(self.completion_stop());
+        }
+
+        let tokens = self.take_until_top_level(&[TokenKind::Is]);
+        if self.at_completion_cursor()
+            && tokens
+                .last()
+                .is_some_and(|token| token.kind == TokenKind::Char('.'))
+        {
+            if let Some(qualifier) = tokens
+                .get(tokens.len().saturating_sub(2))
+                .and_then(token_name)
+            {
+                self.record_completion_at(
+                    CompletionSlot::ObjectColumnName,
+                    Expectation::Name(NameExpectation::Column(ColumnContext::Qualified(qualifier))),
+                );
+            }
+            return Err(self.completion_stop());
+        }
+        Ok(name_list_node(parse_any_name_tokens(&tokens)?))
     }
 
     fn parse_simple_described_object_type(

@@ -164,10 +164,8 @@ impl ExprParser {
         continuation_slot: CompletionSlot,
         stop: TokenKind,
     ) -> Option<NodeList> {
-        if self.at_completion_cursor()
-            && let Some(recorder) = &self.completion
-        {
-            recorder.borrow_mut().record_expression_at(first_slot);
+        if self.at_completion_cursor() {
+            self.record_expression_completion_at(first_slot, false);
         }
         let mut targets = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
@@ -202,12 +200,8 @@ impl ExprParser {
                 break;
             }
             if self.at(stop) || self.at(TokenKind::Eof) {
-                if self.at_completion_cursor()
-                    && let Some(recorder) = &self.completion
-                {
-                    recorder
-                        .borrow_mut()
-                        .record_expression_at(continuation_slot);
+                if self.at_completion_cursor() {
+                    self.record_expression_completion_at(continuation_slot, false);
                     return self.stop_for_completion();
                 }
                 return self.fail("expected an XML expression after ','");

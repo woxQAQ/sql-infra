@@ -147,3 +147,121 @@ fn range_tail_keywords_are_not_misclassified_as_aliases() {
         .assert_lacks("repeatable", CompletionKind::Alias)
         .assert_has("name", CompletionKind::Column);
 }
+
+#[test]
+fn inner_frames_really_shadow_outer_ranges_and_columns() {
+    let fixture = Fixture::default();
+    fixture
+        .complete("SELECT * FROM users u WHERE EXISTS (SELECT u.| FROM orders u)")
+        .assert_has("amount", CompletionKind::Column)
+        .assert_lacks("name", CompletionKind::Column);
+
+    fixture
+        .complete("SELECT * FROM users u WHERE EXISTS (SELECT i| FROM orders o)")
+        .assert_count("id", CompletionKind::Column, 1)
+        .assert_has_detail("id", CompletionKind::Column, "o.id integer");
+
+    fixture
+        .complete("SELECT * FROM users u WHERE EXISTS (SELECT na| FROM orders o)")
+        .assert_has("name", CompletionKind::Column);
+
+    fixture
+        .complete("SELECT * FROM users u WHERE EXISTS (SELECT na| FROM orders u)")
+        .assert_has("name", CompletionKind::Column);
+}
+
+#[test]
+fn lateral_subqueries_see_only_left_hand_siblings() {
+    let fixture = Fixture::default();
+    fixture
+        .complete("SELECT * FROM users u, LATERAL (SELECT |) s, \"UserProfile\" profile")
+        .assert_has("name", CompletionKind::Column)
+        .assert_lacks("DisplayName", CompletionKind::Column);
+
+    fixture
+        .complete("SELECT * FROM users u, order_lines(|) lines, \"UserProfile\" profile")
+        .assert_has("name", CompletionKind::Column)
+        .assert_lacks("DisplayName", CompletionKind::Column)
+        .assert_lacks("line_id", CompletionKind::Column);
+}
+
+#[test]
+fn row_shapes_flow_through_ctes_derived_tables_and_wildcards() {
+    let fixture = Fixture::default();
+    fixture
+        .complete(
+            "WITH active AS (SELECT id, name AS display_name FROM users) \
+             SELECT active.| FROM active",
+        )
+        .assert_has("id", CompletionKind::Column)
+        .assert_has("display_name", CompletionKind::Column)
+        .assert_lacks("name", CompletionKind::Column);
+
+    fixture
+        .complete("SELECT derived.| FROM (SELECT u.* FROM users u) derived")
+        .assert_has("id", CompletionKind::Column)
+        .assert_has("name", CompletionKind::Column);
+
+    fixture
+        .complete(
+            "SELECT derived.| FROM \
+             (SELECT id::text, name::text AS display_name FROM users) derived",
+        )
+        .assert_has("id", CompletionKind::Column)
+        .assert_has("display_name", CompletionKind::Column)
+        .assert_lacks("name", CompletionKind::Column);
+
+    fixture
+        .complete("SELECT values_row.| FROM (VALUES (1, 'one')) values_row")
+        .assert_has("column1", CompletionKind::Column)
+        .assert_has("column2", CompletionKind::Column);
+}
+
+#[test]
+fn alias_lists_rename_positionally_without_dropping_remaining_columns() {
+    Fixture::default()
+        .complete("SELECT u.| FROM users u(user_id)")
+        .assert_has("user_id", CompletionKind::Column)
+        .assert_has("name", CompletionKind::Column)
+        .assert_has("select", CompletionKind::Column)
+        .assert_lacks("id", CompletionKind::Column);
+}
+
+#[test]
+fn table_function_row_shapes_are_available_to_range_bindings() {
+    let fixture = Fixture::default();
+    fixture
+        .complete("SELECT lines.| FROM order_lines(1) lines")
+        .assert_has("line_id", CompletionKind::Column)
+        .assert_has("total", CompletionKind::Column)
+        .assert_has_detail("line_id", CompletionKind::Column, "lines.line_id integer");
+
+    fixture
+        .complete("SELECT lines.| FROM order_lines(1) AS lines(item_id integer, amount numeric)")
+        .assert_has("item_id", CompletionKind::Column)
+        .assert_has("amount", CompletionKind::Column)
+        .assert_lacks("integer", CompletionKind::Column)
+        .assert_lacks("numeric", CompletionKind::Column);
+}
+
+#[test]
+fn recursive_cte_row_shapes_stop_at_cycles() {
+    Fixture::default()
+        .complete(
+            "WITH RECURSIVE nums(n) AS (SELECT n FROM nums) \
+             SELECT nums.| FROM nums",
+        )
+        .assert_has("n", CompletionKind::Column);
+}
+
+#[test]
+fn nested_ctes_shadow_outer_cte_row_shapes() {
+    Fixture::default()
+        .complete(
+            "WITH active(user_id) AS (SELECT id FROM users) \
+             SELECT * FROM (WITH active(order_id) AS (SELECT id FROM orders) \
+             SELECT active.| FROM active) nested",
+        )
+        .assert_has("order_id", CompletionKind::Column)
+        .assert_lacks("user_id", CompletionKind::Column);
+}

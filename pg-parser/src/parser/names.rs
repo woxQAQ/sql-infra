@@ -59,14 +59,14 @@ impl Parser {
         let remaining = &self.tokens[start..self.end];
         let open = find_top_level_token(remaining, TokenKind::Char('('))
             .ok_or_else(|| self.error_here("function expression requires '('"))?;
-        let close = find_matching_close(remaining, open)
-            .ok_or_else(|| self.error_here("unterminated function expression"))?;
+        let expression_end =
+            find_matching_close(remaining, open).map_or(self.end, |close| start + close + 1);
         let expression =
-            self.parse_expression_range_at(CompletionSlot::FromItem, start..start + close + 1)?;
+            self.parse_expression_range_at(CompletionSlot::FromItem, start..expression_end)?;
         if !is_function_expression_node(&expression) {
             return Err(self.error_here("expected a function expression"));
         }
-        self.pos = start + close + 1;
+        self.pos = expression_end;
         Ok(expression)
     }
 
@@ -103,6 +103,16 @@ impl Parser {
         Some(range)
     }
 
+    pub(super) fn parse_range_var_at(
+        &mut self,
+        slot: CompletionSlot,
+        allow_set_alias: bool,
+    ) -> PResult<RangeVar> {
+        let mut range = self.parse_qualified_range_var_at(slot, false)?;
+        range.alias = self.parse_optional_alias(allow_set_alias);
+        Ok(range)
+    }
+
     pub(super) fn parse_relation_expr(&mut self, allow_alias: bool) -> PResult<RangeVar> {
         let only = self.consume(TokenKind::Only);
         let parenthesized = only && self.consume(TokenKind::Char('('));
@@ -113,6 +123,28 @@ impl Parser {
                 "expected a table reference"
             })
         })?;
+        if parenthesized {
+            self.expect(TokenKind::Char(')'))?;
+        }
+        if !only {
+            self.consume(TokenKind::Char('*'));
+        }
+        range.inh = !only;
+        if allow_alias {
+            range.alias = self.parse_optional_alias_clause()?;
+        }
+        Ok(range)
+    }
+
+    pub(super) fn parse_relation_expr_at(
+        &mut self,
+        slot: CompletionSlot,
+        allow_alias: bool,
+        include_function: bool,
+    ) -> PResult<RangeVar> {
+        let only = self.consume(TokenKind::Only);
+        let parenthesized = only && self.consume(TokenKind::Char('('));
+        let mut range = self.parse_qualified_range_var_at(slot, include_function)?;
         if parenthesized {
             self.expect(TokenKind::Char(')'))?;
         }
@@ -160,6 +192,57 @@ impl Parser {
         } else {
             Some(range_var_from_parts(parts, location))
         }
+    }
+
+    pub(super) fn parse_qualified_range_var_at(
+        &mut self,
+        slot: CompletionSlot,
+        include_function: bool,
+    ) -> PResult<RangeVar> {
+        if self.at_completion_cursor() {
+            self.record_relation_completion_at(slot);
+            if include_function {
+                self.record_completion_at(
+                    slot,
+                    Expectation::Name(NameExpectation::Function { schema: None }),
+                );
+            }
+            return Err(self.completion_stop());
+        }
+
+        let location = self.location();
+        let first = self
+            .consume_col_id()
+            .ok_or_else(|| self.error_here("expected a relation name"))?;
+        let mut parts = vec![first];
+        while parts.len() < 3 && self.consume(TokenKind::Char('.')) {
+            if self.at_completion_cursor() {
+                let schema = parts.last().cloned();
+                self.record_completion_at(
+                    slot,
+                    Expectation::Name(NameExpectation::Relation {
+                        schema: schema.clone(),
+                    }),
+                );
+                if include_function {
+                    self.record_completion_at(
+                        slot,
+                        Expectation::Name(NameExpectation::Function { schema }),
+                    );
+                }
+                return Err(self.completion_stop());
+            }
+            if self.at(TokenKind::Char('*')) {
+                self.pos = self.pos.saturating_sub(1);
+                break;
+            }
+            let Some(name) = self.consume_col_label() else {
+                self.pos = self.pos.saturating_sub(1);
+                break;
+            };
+            parts.push(name);
+        }
+        Ok(range_var_from_parts(parts, location))
     }
 
     pub(super) fn consume_name_parts(&mut self) -> Vec<std::string::String> {

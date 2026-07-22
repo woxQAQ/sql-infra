@@ -61,9 +61,9 @@ impl Parser {
             self.record_relation_completion_at(CompletionSlot::AlterTableRelation);
             return Err(self.completion_stop());
         }
-        let relation = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
-            || self.error_here("ALTER relation requires a relation name"),
-        )?));
+        let relation = Some(Box::new(
+            self.parse_qualified_range_var_at(CompletionSlot::AlterTableRelation, false)?,
+        ));
         let cmds = self.parse_alter_table_cmds(objtype)?;
         Ok(Node::AlterTableStmt(AlterTableStmt {
             node_tag: NodeTag::AlterTableStmt,

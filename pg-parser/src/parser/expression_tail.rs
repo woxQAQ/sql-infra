@@ -3,12 +3,22 @@ use super::*;
 
 impl ExprParser {
     pub(super) fn parse_name_nodes(&mut self) -> Option<NodeList> {
+        self.parse_name_nodes_with_completion(false)
+    }
+
+    pub(super) fn parse_expression_name_nodes(&mut self) -> Option<NodeList> {
+        self.parse_name_nodes_with_completion(true)
+    }
+
+    fn parse_name_nodes_with_completion(&mut self, expression_name: bool) -> Option<NodeList> {
         let mut fields = Vec::new();
+        let mut last_name: Option<std::string::String> = None;
         loop {
             if self.consume(TokenKind::Char('*')) {
                 fields.push(Node::AStar(AStar {
                     node_tag: NodeTag::AStar,
                 }));
+                last_name = None;
             } else {
                 let token = self.peek().clone();
                 let categories: &[KeywordCategory] = if fields.is_empty() {
@@ -32,6 +42,28 @@ impl ExprParser {
                         _ => false,
                     };
                 if !accepted {
+                    if expression_name
+                        && self.at_completion_cursor()
+                        && let Some(qualifier) = last_name
+                        && let Some(recorder) = &self.completion
+                    {
+                        let slot = self.active_completion_slot();
+                        let mut recorder = recorder.borrow_mut();
+                        recorder.record_at(
+                            slot,
+                            Expectation::Name(NameExpectation::Column(ColumnContext::Qualified(
+                                qualifier.clone(),
+                            ))),
+                        );
+                        recorder.record_at(
+                            slot,
+                            Expectation::Name(NameExpectation::Function {
+                                schema: Some(qualifier),
+                            }),
+                        );
+                        drop(recorder);
+                        return self.stop_for_completion();
+                    }
                     if fields.is_empty() {
                         return None;
                     }
@@ -39,6 +71,7 @@ impl ExprParser {
                 }
                 let name = token_name(&token)?;
                 self.advance();
+                last_name = Some(name.clone());
                 fields.push(make_string_node(name));
             }
             if !self.consume(TokenKind::Char('.')) {
@@ -580,6 +613,22 @@ impl ExprParser {
 
     pub(super) fn parse_cast_type_name(&mut self) -> Option<TypeName> {
         let start = self.pos;
+        if self.at_completion_cursor() {
+            self.record_type_name_completion(None)?;
+        }
+        if self.completion_cursor_is_at_end()
+            && self
+                .tokens
+                .get(self.end.saturating_sub(1))
+                .is_some_and(|token| token.kind == TokenKind::Char('.'))
+        {
+            let schema = self
+                .tokens
+                .get(self.end.saturating_sub(2))
+                .and_then(token_name);
+            self.pos = self.end;
+            self.record_type_name_completion(schema)?;
+        }
         let mut depth = 0usize;
         let mut best = None;
         for end in start + 1..=self.end {
@@ -620,16 +669,33 @@ impl ExprParser {
         Some(type_name)
     }
 
+    pub(super) fn record_type_name_completion(
+        &mut self,
+        schema: Option<std::string::String>,
+    ) -> Option<()> {
+        if let Some(recorder) = &self.completion {
+            recorder.borrow_mut().record_at(
+                CompletionSlot::TypeName,
+                Expectation::Name(NameExpectation::Type { schema }),
+            );
+        }
+        self.stop_for_completion()
+    }
+
+    fn completion_cursor_is_at_end(&self) -> bool {
+        self.completion
+            .as_ref()
+            .is_some_and(|recorder| recorder.borrow().is_cursor(self.eof.location()))
+    }
+
     pub(super) fn parse_expr_list_until_at(
         &mut self,
         first_slot: CompletionSlot,
         continuation_slot: CompletionSlot,
         stop: TokenKind,
     ) -> Option<NodeList> {
-        if self.at_completion_cursor()
-            && let Some(recorder) = &self.completion
-        {
-            recorder.borrow_mut().record_expression_at(first_slot);
+        if self.at_completion_cursor() {
+            self.record_expression_completion_at(first_slot, false);
         }
         let mut items = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
@@ -643,12 +709,8 @@ impl ExprParser {
                 break;
             }
             if self.at(stop) || self.at(TokenKind::Eof) {
-                if self.at_completion_cursor()
-                    && let Some(recorder) = &self.completion
-                {
-                    recorder
-                        .borrow_mut()
-                        .record_expression_at(continuation_slot);
+                if self.at_completion_cursor() {
+                    self.record_expression_completion_at(continuation_slot, false);
                     return self.stop_for_completion();
                 }
                 if self.error.is_none() {

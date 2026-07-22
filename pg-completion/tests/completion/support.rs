@@ -1,6 +1,6 @@
 use pg_completion::{
-    Catalog, CatalogItem, CatalogObjectIdentity, CatalogObjectKind, CompletionItem, CompletionKind,
-    CompletionRequest, CompletionResult, MemoryCatalog, complete,
+    Catalog, CatalogColumn, CatalogItem, CatalogObjectIdentity, CatalogObjectKind, CompletionItem,
+    CompletionKind, CompletionRequest, CompletionResult, MemoryCatalog, complete,
 };
 use pg_parser::TextSize;
 
@@ -66,6 +66,15 @@ fn standard_catalog() -> MemoryCatalog {
         "public",
         "calculate_total",
         "calculate_total(numeric) -> numeric",
+    );
+    catalog.add_table_function(
+        "public",
+        "order_lines",
+        "order_lines(integer) -> table(line_id integer, total numeric)",
+        [
+            CatalogColumn::new("line_id").with_definition("integer"),
+            CatalogColumn::new("total").with_definition("numeric"),
+        ],
     );
     catalog.add_type("pg_catalog", "integer");
     catalog.add_type("public", "order_status");

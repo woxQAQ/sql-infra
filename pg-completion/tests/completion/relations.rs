@@ -40,7 +40,7 @@ fn schemas_and_schema_qualified_relations_are_resolved_separately() {
 }
 
 #[test]
-fn ctes_are_relation_candidates_and_outrank_catalog_relations() {
+fn ctes_shadow_same_named_catalog_relations() {
     let mut fixture = Fixture::default();
     fixture.catalog.add_relation(
         "public",
@@ -51,8 +51,7 @@ fn ctes_are_relation_candidates_and_outrank_catalog_relations() {
     fixture
         .complete("WITH active(id) AS (SELECT id FROM users) SELECT * FROM ac|")
         .assert_has("active", CompletionKind::Cte)
-        .assert_has("active", CompletionKind::Table)
-        .assert_first("active", CompletionKind::Cte);
+        .assert_lacks("active", CompletionKind::Table);
 }
 
 #[test]
@@ -132,4 +131,43 @@ fn quoted_relation_prefixes_decode_escaped_quotes_and_unicode() {
         .complete("SELECT * FROM \"用|\"")
         .assert_has("用户资料", CompletionKind::Table)
         .assert_replaces("\"用\"");
+}
+
+#[test]
+fn non_recursive_ctes_follow_declaration_order() {
+    let fixture = Fixture::default();
+    fixture
+        .complete(
+            "WITH first AS (SELECT * FROM |), second AS (SELECT * FROM first) \
+             SELECT * FROM second",
+        )
+        .assert_lacks("first", CompletionKind::Cte)
+        .assert_lacks("second", CompletionKind::Cte);
+
+    fixture
+        .complete(
+            "WITH first AS (SELECT * FROM users), second AS (SELECT * FROM |) \
+             SELECT * FROM second",
+        )
+        .assert_has("first", CompletionKind::Cte)
+        .assert_lacks("second", CompletionKind::Cte);
+
+    fixture
+        .complete(
+            "WITH first AS (SELECT * FROM users), second AS (SELECT * FROM first) \
+             SELECT * FROM |",
+        )
+        .assert_has("first", CompletionKind::Cte)
+        .assert_has("second", CompletionKind::Cte);
+}
+
+#[test]
+fn recursive_with_makes_cte_names_visible_inside_members() {
+    Fixture::default()
+        .complete(
+            "WITH RECURSIVE first AS (SELECT * FROM |), \
+             second AS (SELECT * FROM first) SELECT * FROM second",
+        )
+        .assert_has("first", CompletionKind::Cte)
+        .assert_has("second", CompletionKind::Cte);
 }

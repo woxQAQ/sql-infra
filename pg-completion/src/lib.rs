@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use pg_parser::{
-    ColumnContext, CompletionContext, Expectation, NameExpectation, QualifiedName, RangeReference,
-    RangeReferenceKind, TextRange, TextSize, TokenKind, collect_completion, keyword_text,
+    ColumnContext, CompletionContext, CteBinding, CteBindingId, Expectation, NameExpectation,
+    QualifiedName, RangeBinding, RangeBindingId, RangeBindingKind, RangeSource, RowColumnOrigin,
+    RowShape, RowShapeItem, TextRange, TextSize, TokenKind, collect_completion, keyword_text,
     lookup_keyword,
 };
 
@@ -118,6 +119,7 @@ pub struct CatalogItem {
     pub identity: CatalogObjectIdentity,
     pub definition: Option<String>,
     pub documentation: Option<String>,
+    pub row_shape: Option<Vec<CatalogColumn>>,
 }
 
 impl CatalogItem {
@@ -126,6 +128,7 @@ impl CatalogItem {
             identity,
             definition: None,
             documentation: None,
+            row_shape: None,
         }
     }
 
@@ -136,6 +139,31 @@ impl CatalogItem {
 
     pub fn with_documentation(mut self, documentation: impl Into<String>) -> Self {
         self.documentation = Some(documentation.into());
+        self
+    }
+
+    pub fn with_row_shape(mut self, columns: impl IntoIterator<Item = CatalogColumn>) -> Self {
+        self.row_shape = Some(columns.into_iter().collect());
+        self
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CatalogColumn {
+    pub name: String,
+    pub definition: Option<String>,
+}
+
+impl CatalogColumn {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            definition: None,
+        }
+    }
+
+    pub fn with_definition(mut self, definition: impl Into<String>) -> Self {
+        self.definition = Some(definition.into());
         self
     }
 }
@@ -337,6 +365,48 @@ struct Resolver<'a> {
     quoted: bool,
 }
 
+#[derive(Clone)]
+struct ResolvedColumn {
+    name: String,
+    definition: Option<String>,
+    catalog_identity: Option<CatalogObjectIdentity>,
+}
+
+impl ResolvedColumn {
+    fn local(name: String) -> Self {
+        Self {
+            name,
+            definition: None,
+            catalog_identity: None,
+        }
+    }
+
+    fn catalog(item: CatalogItem) -> Self {
+        Self {
+            name: item.identity.name.clone(),
+            definition: item.definition,
+            catalog_identity: Some(item.identity),
+        }
+    }
+
+    fn rename(&mut self, name: &str) {
+        if !self.name.eq_ignore_ascii_case(name) {
+            self.catalog_identity = None;
+        }
+        self.name = name.to_owned();
+    }
+}
+
+fn apply_column_aliases(columns: &mut Vec<ResolvedColumn>, aliases: &[String]) {
+    for (index, alias) in aliases.iter().enumerate() {
+        if let Some(column) = columns.get_mut(index) {
+            column.rename(alias);
+        } else {
+            columns.push(ResolvedColumn::local(alias.clone()));
+        }
+    }
+}
+
 impl Resolver<'_> {
     fn resolve(&self) -> Vec<RankedCandidate> {
         let mut result = Vec::new();
@@ -344,7 +414,6 @@ impl Resolver<'_> {
             match expectation {
                 Expectation::Token(token) => self.resolve_token(*token, &mut result),
                 Expectation::Name(expectation) => self.resolve_name(expectation, &mut result),
-                Expectation::Expression => {}
             }
         }
         result
@@ -376,20 +445,36 @@ impl Resolver<'_> {
             ),
             NameExpectation::Relation { schema } => {
                 if schema.is_none() {
-                    for cte in &self.context.scope.ctes {
-                        result.push(self.reference_candidate(cte, CompletionKind::Cte, 520));
+                    let ctes = self.visible_ctes();
+                    let shadowed = ctes
+                        .iter()
+                        .map(|id| self.context.scope.cte(*id).name.to_ascii_lowercase())
+                        .collect::<HashSet<_>>();
+                    for id in ctes {
+                        result.push(self.cte_candidate(self.context.scope.cte(id), 520));
                     }
-                }
-                self.search_catalog(
-                    CatalogQuery::in_schema(
+                    for item in self.search(CatalogQuery::in_schema(
                         RELATION_KINDS,
                         &self.context.prefix,
-                        schema.as_deref(),
+                        None,
                         self.request.search_path,
-                    ),
-                    400,
-                    result,
-                );
+                    )) {
+                        if !shadowed.contains(&item.identity.name.to_ascii_lowercase()) {
+                            result.push(self.catalog_candidate(item, 400));
+                        }
+                    }
+                } else {
+                    self.search_catalog(
+                        CatalogQuery::in_schema(
+                            RELATION_KINDS,
+                            &self.context.prefix,
+                            schema.as_deref(),
+                            self.request.search_path,
+                        ),
+                        400,
+                        result,
+                    );
+                }
             }
             NameExpectation::Column(context) => self.resolve_columns(context, result),
             NameExpectation::Function { schema } => self.search_catalog(
@@ -419,24 +504,73 @@ impl Resolver<'_> {
     fn resolve_columns(&self, context: &ColumnContext, result: &mut Vec<RankedCandidate>) {
         match context {
             ColumnContext::VisibleScope => {
-                for reference in &self.context.scope.references {
-                    if reference.alias.is_some() {
-                        result.push(self.reference_candidate(
-                            reference,
-                            CompletionKind::Alias,
-                            540,
+                let mut hidden_columns = HashSet::new();
+                let visible_name_frames = self.visible_range_frames();
+                for (frame_index, frame) in self.context.scope.frames().iter().enumerate() {
+                    let mut frame_columns = Vec::new();
+                    for id in visible_name_frames
+                        .get(frame_index)
+                        .into_iter()
+                        .flat_map(|ids| ids.iter().copied())
+                    {
+                        let binding = self.context.scope.range(id);
+                        if binding.alias.is_some() {
+                            result.push(self.binding_candidate(
+                                binding,
+                                CompletionKind::Alias,
+                                540,
+                            ));
+                        }
+                    }
+                    for id in frame.ranges() {
+                        let binding = self.context.scope.range(*id);
+                        frame_columns.extend(
+                            self.range_columns(*id)
+                                .into_iter()
+                                .filter(|column| {
+                                    !hidden_columns.contains(&column.name.to_ascii_lowercase())
+                                })
+                                .map(|column| (binding.exposed_name().to_owned(), column)),
+                        );
+                    }
+                    for (relation, column) in &frame_columns {
+                        result.push(self.resolved_column_candidate(
+                            column.clone(),
+                            Some(relation.clone()),
+                            500,
                         ));
                     }
-                    self.columns_for_reference(reference, 500, result);
+                    hidden_columns.extend(
+                        frame_columns
+                            .into_iter()
+                            .map(|(_, column)| column.name.to_ascii_lowercase()),
+                    );
                 }
             }
             ColumnContext::Qualified(qualifier) => {
-                if let Some(reference) =
-                    self.context.scope.references.iter().find(|reference| {
-                        names_equal(reference.exposed_name(), qualifier, self.quoted)
-                    })
-                {
-                    self.columns_for_reference(reference, 720, result);
+                if let Some(frame) = self.visible_range_frames().into_iter().find_map(|frame| {
+                    let matches = frame
+                        .into_iter()
+                        .filter(|id| {
+                            names_equal(
+                                self.context.scope.range(*id).exposed_name(),
+                                qualifier,
+                                self.quoted,
+                            )
+                        })
+                        .collect::<Vec<_>>();
+                    (!matches.is_empty()).then_some(matches)
+                }) {
+                    for id in frame {
+                        let binding = self.context.scope.range(id);
+                        for column in self.range_columns(id) {
+                            result.push(self.resolved_column_candidate(
+                                column,
+                                Some(binding.exposed_name().to_owned()),
+                                720,
+                            ));
+                        }
+                    }
                 } else {
                     let relation = QualifiedName {
                         name: qualifier.clone(),
@@ -454,12 +588,20 @@ impl Resolver<'_> {
             }
             ColumnContext::JoinUsing => {
                 let mut occurrences: HashMap<String, (String, usize)> = HashMap::new();
-                for reference in &self.context.scope.references {
-                    for column in self.column_items(reference) {
-                        let name = column.identity.name;
+                let frame = self
+                    .visible_range_frames()
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default();
+                for id in frame {
+                    let mut seen_in_binding = HashSet::new();
+                    for column in self.range_columns(id) {
+                        let name = column.name;
                         let key = name.to_lowercase();
-                        let entry = occurrences.entry(key).or_insert((name, 0));
-                        entry.1 += 1;
+                        if seen_in_binding.insert(key.clone()) {
+                            let entry = occurrences.entry(key).or_insert((name, 0));
+                            entry.1 += 1;
+                        }
                     }
                 }
                 for (_, (name, count)) in occurrences {
@@ -469,11 +611,11 @@ impl Resolver<'_> {
                 }
             }
             ColumnContext::TargetRelation => {
-                if let Some(relation) = &self.context.scope.target_relation {
+                if let Some(target) = self.context.scope.target_relation() {
                     for column in self.search(CatalogQuery::in_relation(
                         COLUMN_KINDS,
                         "",
-                        relation,
+                        &target.name,
                         self.request.search_path,
                     )) {
                         result.push(self.catalog_candidate(column, 680));
@@ -483,76 +625,170 @@ impl Resolver<'_> {
         }
     }
 
-    fn columns_for_reference(
-        &self,
-        reference: &RangeReference,
-        score: i32,
-        result: &mut Vec<RankedCandidate>,
-    ) {
-        if !reference.alias_columns.is_empty() {
-            for column in &reference.alias_columns {
-                result.push(self.column_candidate(
-                    column.clone(),
-                    Some(reference.exposed_name().to_owned()),
-                    None,
-                    None,
-                    score,
-                ));
-            }
-            return;
-        }
-        if reference.kind == RangeReferenceKind::Cte {
-            if let Some(cte) = self
-                .context
-                .scope
-                .ctes
-                .iter()
-                .find(|cte| names_equal(&cte.name.name, &reference.name.name, false))
-            {
-                for column in &cte.alias_columns {
-                    result.push(self.column_candidate(
-                        column.clone(),
-                        Some(reference.exposed_name().to_owned()),
-                        None,
-                        None,
-                        score + 30,
-                    ));
+    fn visible_ctes(&self) -> Vec<CteBindingId> {
+        let mut hidden = HashSet::new();
+        let mut result = Vec::new();
+        for frame in self.context.scope.frames() {
+            for id in frame.ctes() {
+                let name = self.context.scope.cte(*id).name.to_ascii_lowercase();
+                if hidden.insert(name) {
+                    result.push(*id);
                 }
             }
-            return;
         }
-        for column in self.column_items(reference) {
-            let identity = column.identity;
-            result.push(self.column_candidate(
-                identity.name.clone(),
-                Some(reference.exposed_name().to_owned()),
-                column.definition,
-                Some(identity),
-                score,
-            ));
-        }
+        result
     }
 
-    fn column_items(&self, reference: &RangeReference) -> Vec<CatalogItem> {
-        if !reference.alias_columns.is_empty() {
-            return reference
-                .alias_columns
+    fn visible_range_frames(&self) -> Vec<Vec<RangeBindingId>> {
+        let mut hidden = HashSet::new();
+        let mut result = Vec::new();
+        for frame in self.context.scope.frames() {
+            let mut visible = Vec::new();
+            let mut frame_names = HashSet::new();
+            for id in frame.ranges() {
+                let name = self.context.scope.range(*id).exposed_name();
+                if name.is_empty() || !hidden.contains(&name.to_ascii_lowercase()) {
+                    visible.push(*id);
+                    if !name.is_empty() {
+                        frame_names.insert(name.to_ascii_lowercase());
+                    }
+                }
+            }
+            hidden.extend(frame_names);
+            result.push(visible);
+        }
+        result
+    }
+
+    fn range_columns(&self, id: RangeBindingId) -> Vec<ResolvedColumn> {
+        self.range_columns_guarded(id, &mut HashSet::new(), &mut HashSet::new())
+    }
+
+    fn range_columns_guarded(
+        &self,
+        id: RangeBindingId,
+        visiting_ranges: &mut HashSet<RangeBindingId>,
+        visiting_ctes: &mut HashSet<CteBindingId>,
+    ) -> Vec<ResolvedColumn> {
+        if !visiting_ranges.insert(id) {
+            return Vec::new();
+        }
+        let binding = self.context.scope.range(id);
+        let mut columns = match &binding.source {
+            RangeSource::Relation(relation) => self.relation_columns(relation),
+            RangeSource::Cte(cte) => self.cte_columns(*cte, visiting_ranges, visiting_ctes),
+            RangeSource::Derived(shape) => {
+                self.row_shape_columns(shape, visiting_ranges, visiting_ctes)
+            }
+            RangeSource::Function(function) => self.function_columns(function),
+        };
+        visiting_ranges.remove(&id);
+        apply_column_aliases(&mut columns, &binding.column_aliases);
+        columns
+    }
+
+    fn cte_columns(
+        &self,
+        id: CteBindingId,
+        visiting_ranges: &mut HashSet<RangeBindingId>,
+        visiting_ctes: &mut HashSet<CteBindingId>,
+    ) -> Vec<ResolvedColumn> {
+        let cte = self.context.scope.cte(id);
+        if !visiting_ctes.insert(id) {
+            return cte
+                .column_aliases
                 .iter()
-                .map(|name| {
-                    CatalogItem::new(CatalogObjectIdentity::owned_by_relation(
-                        CatalogObjectKind::Column,
-                        reference.name.clone(),
-                        name.clone(),
-                    ))
-                })
+                .cloned()
+                .map(ResolvedColumn::local)
                 .collect();
         }
+        let mut columns = self.row_shape_columns(&cte.row_shape, visiting_ranges, visiting_ctes);
+        visiting_ctes.remove(&id);
+        apply_column_aliases(&mut columns, &cte.column_aliases);
+        columns
+    }
+
+    fn row_shape_columns(
+        &self,
+        shape: &RowShape,
+        visiting_ranges: &mut HashSet<RangeBindingId>,
+        visiting_ctes: &mut HashSet<CteBindingId>,
+    ) -> Vec<ResolvedColumn> {
+        let mut result = Vec::new();
+        for item in &shape.items {
+            match item {
+                RowShapeItem::Column { name, origin } => {
+                    let mut column = match origin {
+                        RowColumnOrigin::Expression => ResolvedColumn::local(name.clone()),
+                        RowColumnOrigin::Column {
+                            binding,
+                            name: source_name,
+                        } => {
+                            let sources = binding
+                                .map(|binding| vec![binding])
+                                .unwrap_or_else(|| shape.sources.clone());
+                            sources
+                                .into_iter()
+                                .find_map(|source| {
+                                    self.range_columns_guarded(
+                                        source,
+                                        visiting_ranges,
+                                        visiting_ctes,
+                                    )
+                                    .into_iter()
+                                    .find(|column| column.name.eq_ignore_ascii_case(source_name))
+                                })
+                                .unwrap_or_else(|| ResolvedColumn::local(source_name.clone()))
+                        }
+                    };
+                    column.rename(name);
+                    result.push(column);
+                }
+                RowShapeItem::Wildcard { binding } => {
+                    let sources = binding
+                        .map(|binding| vec![binding])
+                        .unwrap_or_else(|| shape.sources.clone());
+                    for source in sources {
+                        result.extend(self.range_columns_guarded(
+                            source,
+                            visiting_ranges,
+                            visiting_ctes,
+                        ));
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    fn relation_columns(&self, relation: &QualifiedName) -> Vec<ResolvedColumn> {
         self.search(CatalogQuery::in_relation(
             COLUMN_KINDS,
             "",
-            &reference.name,
+            relation,
             self.request.search_path,
         ))
+        .into_iter()
+        .map(ResolvedColumn::catalog)
+        .collect()
+    }
+
+    fn function_columns(&self, function: &QualifiedName) -> Vec<ResolvedColumn> {
+        self.search(CatalogQuery::in_schema(
+            FUNCTION_KINDS,
+            &function.name,
+            function.schema.as_deref(),
+            self.request.search_path,
+        ))
+        .into_iter()
+        .filter(|item| item.identity.name.eq_ignore_ascii_case(&function.name))
+        .flat_map(|item| item.row_shape.unwrap_or_default())
+        .map(|column| ResolvedColumn {
+            name: column.name,
+            definition: column.definition,
+            catalog_identity: None,
+        })
+        .collect()
     }
 
     fn column_candidate(
@@ -581,13 +817,28 @@ impl Resolver<'_> {
         )
     }
 
-    fn reference_candidate(
+    fn resolved_column_candidate(
         &self,
-        reference: &RangeReference,
+        column: ResolvedColumn,
+        relation: Option<String>,
+        score: i32,
+    ) -> RankedCandidate {
+        self.column_candidate(
+            column.name,
+            relation,
+            column.definition,
+            column.catalog_identity,
+            score,
+        )
+    }
+
+    fn binding_candidate(
+        &self,
+        binding: &RangeBinding,
         kind: CompletionKind,
         score: i32,
     ) -> RankedCandidate {
-        let label = reference.exposed_name().to_owned();
+        let label = binding.exposed_name().to_owned();
         RankedCandidate::new(
             CompletionItem {
                 label: label.clone(),
@@ -595,14 +846,28 @@ impl Resolver<'_> {
                 catalog_identity: None,
                 insert_text: quote_identifier(&label, self.quoted),
                 detail: Some(
-                    match reference.kind {
-                        RangeReferenceKind::Cte => "common table expression",
-                        RangeReferenceKind::Subquery => "subquery",
-                        RangeReferenceKind::Function => "table function",
-                        RangeReferenceKind::Relation => "relation",
+                    match binding.kind() {
+                        RangeBindingKind::Cte => "common table expression",
+                        RangeBindingKind::Derived => "derived table",
+                        RangeBindingKind::Function => "table function",
+                        RangeBindingKind::Relation => "relation",
                     }
                     .to_owned(),
                 ),
+                documentation: None,
+            },
+            score,
+        )
+    }
+
+    fn cte_candidate(&self, cte: &CteBinding, score: i32) -> RankedCandidate {
+        RankedCandidate::new(
+            CompletionItem {
+                label: cte.name.clone(),
+                kind: CompletionKind::Cte,
+                catalog_identity: None,
+                insert_text: quote_identifier(&cte.name, self.quoted),
+                detail: Some("common table expression".to_owned()),
                 documentation: None,
             },
             score,
@@ -832,6 +1097,24 @@ impl MemoryCatalog {
                 name,
             ))
             .with_definition(definition),
+        );
+    }
+
+    pub fn add_table_function(
+        &mut self,
+        schema: impl Into<String>,
+        name: impl Into<String>,
+        definition: impl Into<String>,
+        columns: impl IntoIterator<Item = CatalogColumn>,
+    ) {
+        self.add(
+            CatalogItem::new(CatalogObjectIdentity::in_schema(
+                CatalogObjectKind::Function,
+                schema,
+                name,
+            ))
+            .with_definition(definition)
+            .with_row_shape(columns),
         );
     }
 

@@ -819,6 +819,18 @@ impl Parser {
         );
         self.record_completion_at(slot, Expectation::Name(NameExpectation::Schema));
     }
+
+    pub(super) fn record_token_completions_at(&self, slot: CompletionSlot, tokens: &[TokenKind]) {
+        for token in tokens {
+            self.record_completion_at(slot, Expectation::Token(*token));
+        }
+    }
+
+    pub(super) fn replace_completion_default_allowed(&self, allowed: bool) -> Option<bool> {
+        self.completion
+            .as_ref()
+            .map(|recorder| recorder.borrow_mut().replace_default_allowed(allowed))
+    }
 }
 
 // ── Statement dispatch ────────────────────────────────────────────────────

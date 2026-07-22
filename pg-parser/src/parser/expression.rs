@@ -9,6 +9,7 @@ pub(super) struct ExprParser {
     pub(super) error: Option<ParseError>,
     pub(super) completion: Option<SharedCompletionRecorder>,
     pub(super) completion_slot: Option<CompletionSlot>,
+    pub(super) completion_root_slot: Option<CompletionSlot>,
 }
 
 impl ExprParser {
@@ -43,6 +44,7 @@ impl ExprParser {
             error: None,
             completion: None,
             completion_slot: None,
+            completion_root_slot: None,
         }
     }
 
@@ -63,6 +65,7 @@ impl ExprParser {
             error: None,
             completion,
             completion_slot,
+            completion_root_slot: completion_slot,
         }
     }
 
@@ -101,13 +104,31 @@ impl ExprParser {
         } else {
             self.tokens[range.end].location()
         };
-        Self::from_shared_range(
+        let mut view = Self::from_shared_range(
             self.tokens.clone(),
             range,
             eof_location,
             self.completion.clone(),
             self.completion_slot,
-        )
+        );
+        view.completion_root_slot = self.completion_root_slot;
+        view
+    }
+
+    pub(super) fn record_expression_completion_at(&self, slot: CompletionSlot, restricted: bool) {
+        let Some(recorder) = &self.completion else {
+            return;
+        };
+        let root_slot = self.completion_root_slot.unwrap_or(slot);
+        if restricted {
+            recorder
+                .borrow_mut()
+                .record_restricted_expression_at_with_root(slot, root_slot);
+        } else {
+            recorder
+                .borrow_mut()
+                .record_expression_at_with_root(slot, root_slot);
+        }
     }
 
     pub(super) fn parse(self) -> PResult<Node> {

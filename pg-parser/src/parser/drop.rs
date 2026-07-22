@@ -65,6 +65,20 @@ impl Parser {
             .ok_or_else(|| self.error_here("DROP requires an object type"))?;
         let concurrent = remove_type == ObjectType::Index && self.consume(TokenKind::Concurrently);
         let missing_ok = self.consume_if_exists()?;
+        if self.at_completion_cursor()
+            && matches!(
+                remove_type,
+                ObjectType::Table
+                    | ObjectType::View
+                    | ObjectType::Matview
+                    | ObjectType::ForeignTable
+                    | ObjectType::Sequence
+                    | ObjectType::Index
+            )
+        {
+            self.record_relation_completion_at(CompletionSlot::DropRelation);
+            return Err(self.completion_stop());
+        }
         let stops = [
             TokenKind::Cascade,
             TokenKind::Restrict,

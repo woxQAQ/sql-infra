@@ -1,10 +1,11 @@
-use std::collections::HashMap;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{
-    KEYWORDS, KeywordCategory, ObjectType, TextRange, TextSize, Token, TokenKind, TokenValue, lex,
-    lookup_keyword,
-};
+use crate::{KEYWORDS, ObjectType, TextRange, TextSize, Token, TokenKind, TokenValue, lex};
+
+#[path = "completion/scope.rs"]
+mod scope;
+
+use scope::collect_scope;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompletionContext {
@@ -12,19 +13,19 @@ pub struct CompletionContext {
     pub prefix: String,
     pub statement: TextRange,
     pub expectations: Vec<Expectation>,
-    pub slots: Vec<CompletionSlot>,
     pub scope: ScopeSnapshot,
 }
 
 macro_rules! define_completion_slots {
     ($($slot:ident,)*) => {
         #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-        pub enum CompletionSlot {
+        pub(crate) enum CompletionSlot {
             $($slot,)*
         }
 
         impl CompletionSlot {
-            pub const ALL: &'static [Self] = &[$(Self::$slot,)*];
+            #[cfg(test)]
+            pub(crate) const ALL: &'static [Self] = &[$(Self::$slot,)*];
         }
     };
 }
@@ -215,6 +216,12 @@ define_completion_slots! {
     IndexRelation,
     AlterTableRelation,
     InsertColumn,
+    SelectContinuation,
+    JoinUsingColumn,
+    TypeName,
+    AlterTableColumnName,
+    DropRelation,
+    ObjectColumnName,
 }
 
 impl CompletionSlot {
@@ -249,13 +256,41 @@ impl CompletionSlot {
             ColumnContext::VisibleScope
         }
     }
+
+    fn includes_target_relation_columns(self) -> bool {
+        matches!(
+            self,
+            Self::ReturningExpression
+                | Self::ReturningExpressionAfterComma
+                | Self::OnConflictInferenceElement
+                | Self::OnConflictInferenceElementAfterComma
+                | Self::OnConflictInferenceWhere
+                | Self::OnConflictUpdateWhere
+                | Self::OnConflictSelectWhere
+                | Self::OnConflictSetValue
+                | Self::UpdateSetValue
+                | Self::UpdateWhere
+                | Self::DeleteWhere
+                | Self::MergeJoinCondition
+                | Self::MergeWhenCondition
+                | Self::MergeSetValue
+                | Self::MergeInsertValue
+                | Self::MergeInsertValueAfterComma
+        )
+    }
+
+    fn allows_default(self) -> bool {
+        matches!(
+            self,
+            Self::UpdateSetValue | Self::OnConflictSetValue | Self::MergeSetValue
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Expectation {
     Token(TokenKind),
     Name(NameExpectation),
-    Expression,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -292,35 +327,149 @@ pub enum ColumnContext {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ScopeSnapshot {
-    pub local_references: Vec<RangeReference>,
-    pub outer_references: Vec<Vec<RangeReference>>,
-    pub references: Vec<RangeReference>,
-    pub ctes: Vec<RangeReference>,
-    pub target_relation: Option<QualifiedName>,
+    frames: Vec<ScopeFrame>,
+    graph: BindingGraph,
+    target_relation: Option<TargetRelationId>,
+}
+
+impl ScopeSnapshot {
+    /// Query scopes ordered from the cursor's scope to its outermost scope.
+    pub fn frames(&self) -> &[ScopeFrame] {
+        &self.frames
+    }
+
+    pub fn range(&self, id: RangeBindingId) -> &RangeBinding {
+        &self.graph.ranges[id.0]
+    }
+
+    pub fn cte(&self, id: CteBindingId) -> &CteBinding {
+        &self.graph.ctes[id.0]
+    }
+
+    pub fn target(&self, id: TargetRelationId) -> &TargetRelation {
+        &self.graph.target_relations[id.0]
+    }
+
+    pub fn target_relation_id(&self) -> Option<TargetRelationId> {
+        self.target_relation
+    }
+
+    pub fn target_relation(&self) -> Option<&TargetRelation> {
+        self.target_relation.map(|id| self.target(id))
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ScopeFrame {
+    ranges: Vec<RangeBindingId>,
+    ctes: Vec<CteBindingId>,
+}
+
+impl ScopeFrame {
+    pub fn ranges(&self) -> &[RangeBindingId] {
+        &self.ranges
+    }
+
+    pub fn ctes(&self) -> &[CteBindingId] {
+        &self.ctes
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct BindingGraph {
+    ctes: Vec<CteBinding>,
+    ranges: Vec<RangeBinding>,
+    target_relations: Vec<TargetRelation>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct CteBindingId(usize);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct RangeBindingId(usize);
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct TargetRelationId(usize);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CteBinding {
+    pub name: String,
+    pub column_aliases: Vec<String>,
+    pub row_shape: RowShape,
+    pub range: TextRange,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RangeReferenceKind {
+pub enum RangeBindingKind {
     Relation,
     Cte,
-    Subquery,
+    Derived,
     Function,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RangeReference {
-    pub kind: RangeReferenceKind,
-    pub name: QualifiedName,
+pub struct RangeBinding {
+    pub source: RangeSource,
+    pub name: String,
     pub alias: Option<String>,
-    pub alias_columns: Vec<String>,
+    pub column_aliases: Vec<String>,
     pub range: TextRange,
     pub lateral: bool,
 }
 
-impl RangeReference {
-    pub fn exposed_name(&self) -> &str {
-        self.alias.as_deref().unwrap_or(&self.name.name)
+impl RangeBinding {
+    pub fn kind(&self) -> RangeBindingKind {
+        match self.source {
+            RangeSource::Relation(_) => RangeBindingKind::Relation,
+            RangeSource::Cte(_) => RangeBindingKind::Cte,
+            RangeSource::Derived(_) => RangeBindingKind::Derived,
+            RangeSource::Function(_) => RangeBindingKind::Function,
+        }
     }
+
+    pub fn exposed_name(&self) -> &str {
+        &self.name
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RangeSource {
+    Relation(QualifiedName),
+    Cte(CteBindingId),
+    Derived(RowShape),
+    Function(QualifiedName),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TargetRelation {
+    pub name: QualifiedName,
+    pub alias: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RowShape {
+    pub sources: Vec<RangeBindingId>,
+    pub items: Vec<RowShapeItem>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RowShapeItem {
+    Column {
+        name: String,
+        origin: RowColumnOrigin,
+    },
+    Wildcard {
+        binding: Option<RangeBindingId>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RowColumnOrigin {
+    Expression,
+    Column {
+        binding: Option<RangeBindingId>,
+        name: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
@@ -340,11 +489,64 @@ pub enum CompletionError {
 #[derive(Default)]
 pub(crate) struct CompletionRecorder {
     cursor: Option<usize>,
-    expectations: Vec<Expectation>,
-    slots: Vec<CompletionSlot>,
+    events: Vec<CompletionEvent>,
+    default_allowed: bool,
 }
 
 pub(crate) type SharedCompletionRecorder = Rc<RefCell<CompletionRecorder>>;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CompletionEvent {
+    slot: CompletionSlot,
+    signal: CompletionSignal,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum CompletionSignal {
+    Expectation(Expectation),
+    Expression,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ParserCompletion {
+    events: Vec<CompletionEvent>,
+}
+
+impl ParserCompletion {
+    fn expectations(&self) -> Vec<Expectation> {
+        let mut result = Vec::new();
+        for event in &self.events {
+            let CompletionSignal::Expectation(expectation) = &event.signal else {
+                continue;
+            };
+            if !result.contains(expectation) {
+                result.push(expectation.clone());
+            }
+        }
+        result
+    }
+
+    #[cfg(test)]
+    fn contains(&self, slot: CompletionSlot, expectation: &Expectation) -> bool {
+        self.events.iter().any(|event| {
+            event.slot == slot && event.signal == CompletionSignal::Expectation(expectation.clone())
+        })
+    }
+
+    #[cfg(test)]
+    fn contains_expression(&self, slot: CompletionSlot) -> bool {
+        self.events
+            .iter()
+            .any(|event| event.slot == slot && event.signal == CompletionSignal::Expression)
+    }
+
+    #[cfg(test)]
+    fn expects_expression(&self) -> bool {
+        self.events
+            .iter()
+            .any(|event| event.signal == CompletionSignal::Expression)
+    }
+}
 
 impl CompletionRecorder {
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
@@ -358,17 +560,32 @@ impl CompletionRecorder {
         self.cursor == Some(location)
     }
 
+    pub(crate) fn replace_default_allowed(&mut self, allowed: bool) -> bool {
+        std::mem::replace(&mut self.default_allowed, allowed)
+    }
+
     pub(crate) fn record_at(&mut self, slot: CompletionSlot, expectation: Expectation) {
-        if !self.slots.contains(&slot) {
-            self.slots.push(slot);
-        }
-        if !self.expectations.contains(&expectation) {
-            self.expectations.push(expectation);
+        self.record_signal(slot, CompletionSignal::Expectation(expectation));
+    }
+
+    fn record_signal(&mut self, slot: CompletionSlot, signal: CompletionSignal) {
+        let event = CompletionEvent { slot, signal };
+        if !self.events.contains(&event) {
+            self.events.push(event);
         }
     }
 
     pub(crate) fn record_expression_at(&mut self, slot: CompletionSlot) {
         self.record_expression_with_tokens(slot, expression_start_tokens().iter().copied());
+    }
+
+    pub(crate) fn record_expression_at_with_root(
+        &mut self,
+        slot: CompletionSlot,
+        root_slot: CompletionSlot,
+    ) {
+        self.record_expression_at(slot);
+        self.record_root_column_context(slot, root_slot);
     }
 
     pub(crate) fn record_restricted_expression_at(&mut self, slot: CompletionSlot) {
@@ -381,20 +598,52 @@ impl CompletionRecorder {
         );
     }
 
+    pub(crate) fn record_restricted_expression_at_with_root(
+        &mut self,
+        slot: CompletionSlot,
+        root_slot: CompletionSlot,
+    ) {
+        self.record_restricted_expression_at(slot);
+        self.record_root_column_context(slot, root_slot);
+    }
+
+    fn record_root_column_context(&mut self, slot: CompletionSlot, root_slot: CompletionSlot) {
+        if (root_slot.column_context() == ColumnContext::TargetRelation
+            || root_slot.includes_target_relation_columns())
+            && slot.column_context() != ColumnContext::TargetRelation
+        {
+            self.record_at(
+                slot,
+                Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+            );
+        }
+    }
+
     fn record_expression_with_tokens(
         &mut self,
         slot: CompletionSlot,
         tokens: impl IntoIterator<Item = TokenKind>,
     ) {
-        self.record_at(slot, Expectation::Expression);
+        self.record_signal(slot, CompletionSignal::Expression);
         self.record_at(
             slot,
             Expectation::Name(NameExpectation::Column(slot.column_context())),
         );
+        if slot.includes_target_relation_columns()
+            && slot.column_context() != ColumnContext::TargetRelation
+        {
+            self.record_at(
+                slot,
+                Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+            );
+        }
         self.record_at(
             slot,
             Expectation::Name(NameExpectation::Function { schema: None }),
         );
+        if self.default_allowed || slot.allows_default() {
+            self.record_at(slot, Expectation::Token(TokenKind::Default));
+        }
         for token in tokens {
             self.record_at(slot, Expectation::Token(token));
         }
@@ -506,25 +755,11 @@ pub fn collect_completion(
         .replace("\"\"", "\"");
     let (statement, statement_tokens) = statement_at(sql, cursor_usize, &tokens);
     let scope = collect_scope(&statement_tokens, cursor_usize);
-    let (expectations, slots) = if suppress_completion_at_cursor(sql, cursor_usize) {
-        (Vec::new(), Vec::new())
+    let expectations = if suppress_completion_at_cursor(sql, cursor_usize) {
+        Vec::new()
     } else {
-        let (mut expectations, slots) =
-            collect_parser_expectations(&statement_tokens, replacement_start);
-        let parser_expects_expression = expectations.contains(&Expectation::Expression);
-        if !slots.contains(&CompletionSlot::CteContinuation) {
-            for fallback in collect_tricky_expectations(
-                &statement_tokens,
-                replacement_start,
-                &scope,
-                parser_expects_expression,
-            ) {
-                if !expectations.contains(&fallback) {
-                    expectations.push(fallback);
-                }
-            }
-        }
-        (expectations, slots)
+        let parser_completion = collect_parser_expectations(&statement_tokens, replacement_start);
+        parser_completion.expectations()
     };
 
     Ok(CompletionContext {
@@ -532,15 +767,11 @@ pub fn collect_completion(
         prefix,
         statement,
         expectations,
-        slots,
         scope,
     })
 }
 
-fn collect_parser_expectations(
-    tokens: &[Token],
-    offset: usize,
-) -> (Vec<Expectation>, Vec<CompletionSlot>) {
+fn collect_parser_expectations(tokens: &[Token], offset: usize) -> ParserCompletion {
     let mut prefix: Vec<Token> = tokens
         .iter()
         .filter(|token| token.location() < offset)
@@ -553,11 +784,15 @@ fn collect_parser_expectations(
     Rc::try_unwrap(recorder)
         .map(|recorder| {
             let recorder = recorder.into_inner();
-            (recorder.expectations, recorder.slots)
+            ParserCompletion {
+                events: recorder.events,
+            }
         })
         .unwrap_or_else(|recorder| {
             let recorder = recorder.borrow();
-            (recorder.expectations.clone(), recorder.slots.clone())
+            ParserCompletion {
+                events: recorder.events.clone(),
+            }
         })
 }
 
@@ -654,1243 +889,6 @@ fn statement_at(sql: &str, cursor: usize, tokens: &[Token]) -> (TextRange, Vec<T
     (
         TextRange::new(text_size(start), text_size(end)),
         statement_tokens,
-    )
-}
-
-#[derive(Clone)]
-struct DepthToken {
-    token: Token,
-    depth: usize,
-}
-
-fn with_depth(tokens: &[Token]) -> Vec<DepthToken> {
-    let mut depth = 0usize;
-    let mut result = Vec::with_capacity(tokens.len());
-    for token in tokens {
-        result.push(DepthToken {
-            token: token.clone(),
-            depth,
-        });
-        match token.kind {
-            TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
-            TokenKind::Char(')') | TokenKind::Char(']') => {
-                depth = depth.saturating_sub(1);
-            }
-            _ => {}
-        }
-    }
-    result
-}
-
-fn collect_scope(tokens: &[Token], cursor: usize) -> ScopeSnapshot {
-    let tokens = with_depth(tokens);
-    let cursor_depth = depth_at(&tokens, cursor);
-    let mut select_by_depth = HashMap::new();
-    for (index, token) in tokens.iter().enumerate() {
-        if token.token.kind == TokenKind::Select
-            && token.token.location() <= cursor
-            && token.depth <= cursor_depth
-        {
-            select_by_depth.insert(token.depth, index);
-        }
-    }
-    let mut selects: Vec<(usize, usize)> = select_by_depth.into_iter().collect();
-    selects.sort_by_key(|(depth, _)| *depth);
-    let innermost_select = selects.last().map(|(_, index)| *index);
-    let ctes = collect_ctes(&tokens, innermost_select.unwrap_or(tokens.len()));
-    let mut frames = Vec::new();
-    for (_, select) in selects {
-        let references = find_from(&tokens, select)
-            .map(|from| parse_from_references(&tokens, from + 1, ctes.as_slice()))
-            .unwrap_or_default();
-        frames.push((select, references));
-    }
-    let mut local_references = frames
-        .pop()
-        .map(|(_, references)| references)
-        .unwrap_or_default();
-    if let Some((statement, statement_kind)) = top_level_dml_statement(&tokens) {
-        if statement_kind == TokenKind::Insert
-            && [TokenKind::Conflict, TokenKind::Returning]
-                .into_iter()
-                .any(|kind| {
-                    find_top_level_token_after(&tokens, statement, kind)
-                        .is_some_and(|index| tokens[index].token.location() < cursor)
-                })
-        {
-            local_references.clear();
-        }
-        if statement_kind == TokenKind::Merge {
-            local_references.extend(collect_merge_references(&tokens));
-        } else if matches!(statement_kind, TokenKind::Update | TokenKind::DeleteP) {
-            local_references.extend(collect_update_delete_references(&tokens, &ctes));
-        }
-    }
-    let outer_references: Vec<Vec<RangeReference>> = frames
-        .into_iter()
-        .rev()
-        .filter_map(|(select, mut references)| {
-            if let Some((lateral, open_location)) = cursor_from_subquery(&tokens, select, cursor) {
-                if !lateral {
-                    references.clear();
-                } else {
-                    references
-                        .retain(|reference| usize::from(reference.range.start()) < open_location);
-                }
-            }
-            (!references.is_empty()).then_some(references)
-        })
-        .collect();
-    let mut references = local_references.clone();
-    for outer in &outer_references {
-        references.extend(outer.iter().cloned());
-    }
-    let target_relation = collect_target_relation(&tokens);
-    ScopeSnapshot {
-        local_references,
-        outer_references,
-        references,
-        ctes,
-        target_relation,
-    }
-}
-
-fn depth_at(tokens: &[DepthToken], cursor: usize) -> usize {
-    let mut depth = 0usize;
-    for token in tokens {
-        if token.token.location() >= cursor {
-            break;
-        }
-        match token.token.kind {
-            TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
-            TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-    depth
-}
-
-fn collect_ctes(tokens: &[DepthToken], before: usize) -> Vec<RangeReference> {
-    let Some(with_index) = tokens[..before]
-        .iter()
-        .position(|token| token.depth == 0 && token.token.kind == TokenKind::With)
-    else {
-        return Vec::new();
-    };
-    let mut index = with_index + 1;
-    if tokens
-        .get(index)
-        .is_some_and(|token| token.token.kind == TokenKind::Recursive)
-    {
-        index += 1;
-    }
-    let mut result = Vec::new();
-    while index < before {
-        let Some(name) = token_name(tokens.get(index).map(|token| &token.token)) else {
-            break;
-        };
-        let start = tokens[index].token.location();
-        index += 1;
-        let mut alias_columns = Vec::new();
-        if tokens
-            .get(index)
-            .is_some_and(|token| token.token.kind == TokenKind::Char('('))
-        {
-            let Some(close) = matching_paren(tokens, index) else {
-                break;
-            };
-            for token in &tokens[index + 1..close] {
-                if let Some(column) = token_name(Some(&token.token)) {
-                    alias_columns.push(column);
-                }
-            }
-            index = close + 1;
-        }
-        if tokens
-            .get(index)
-            .is_some_and(|token| token.token.kind == TokenKind::As)
-        {
-            index += 1;
-        }
-        if tokens
-            .get(index)
-            .is_some_and(|token| token.token.kind == TokenKind::Not)
-        {
-            index += 1;
-        }
-        if tokens
-            .get(index)
-            .is_some_and(|token| token.token.kind == TokenKind::Materialized)
-        {
-            index += 1;
-        }
-        let Some(open) = tokens
-            .get(index)
-            .filter(|token| token.token.kind == TokenKind::Char('('))
-            .map(|_| index)
-        else {
-            break;
-        };
-        let Some(close) = matching_paren(tokens, open) else {
-            break;
-        };
-        result.push(RangeReference {
-            kind: RangeReferenceKind::Cte,
-            name: QualifiedName {
-                name,
-                ..QualifiedName::default()
-            },
-            alias: None,
-            alias_columns,
-            range: TextRange::new(
-                text_size(start),
-                text_size(tokens[close].token.end_location()),
-            ),
-            lateral: false,
-        });
-        index = close + 1;
-        if tokens
-            .get(index)
-            .is_some_and(|token| token.token.kind == TokenKind::Char(','))
-        {
-            index += 1;
-            continue;
-        }
-        break;
-    }
-    result
-}
-
-fn find_from(tokens: &[DepthToken], select: usize) -> Option<usize> {
-    let depth = tokens[select].depth;
-    for (index, token) in tokens.iter().enumerate().skip(select + 1) {
-        if token.depth < depth {
-            return None;
-        }
-        if token.depth != depth {
-            continue;
-        }
-        if token.token.kind == TokenKind::From {
-            return Some(index);
-        }
-        if is_query_boundary(token.token.kind) {
-            return None;
-        }
-    }
-    None
-}
-
-fn cursor_from_subquery(
-    tokens: &[DepthToken],
-    select: usize,
-    cursor: usize,
-) -> Option<(bool, usize)> {
-    let from = find_from(tokens, select)?;
-    let depth = tokens[select].depth;
-    for (index, token) in tokens.iter().enumerate().skip(from + 1) {
-        if token.depth < depth || (token.depth == depth && is_from_terminator(token.token.kind)) {
-            break;
-        }
-        if token.depth != depth || token.token.kind != TokenKind::Char('(') {
-            continue;
-        }
-        let close = matching_paren(tokens, index)?;
-        if token.token.location() < cursor && cursor <= tokens[close].token.end_location() {
-            let lateral = index > 0 && tokens[index - 1].token.kind == TokenKind::LateralP;
-            return Some((lateral, token.token.location()));
-        }
-    }
-    None
-}
-
-fn parse_from_references(
-    tokens: &[DepthToken],
-    mut index: usize,
-    ctes: &[RangeReference],
-) -> Vec<RangeReference> {
-    let depth = tokens.get(index).map_or(0, |token| token.depth);
-    let mut result = Vec::new();
-    while index < tokens.len() {
-        let token = &tokens[index];
-        if token.depth < depth || (token.depth == depth && is_from_terminator(token.token.kind)) {
-            break;
-        }
-        if token.depth != depth || is_join_noise(token.token.kind) {
-            index += 1;
-            continue;
-        }
-        if matches!(token.token.kind, TokenKind::On | TokenKind::Using) {
-            index = skip_join_condition(tokens, index + 1, depth);
-            continue;
-        }
-        let lateral = token.token.kind == TokenKind::LateralP;
-        if lateral {
-            index += 1;
-        }
-        let Some(current) = tokens.get(index) else {
-            break;
-        };
-        if current.token.kind == TokenKind::Char('(') {
-            let Some(close) = matching_paren(tokens, index) else {
-                break;
-            };
-            let (alias, alias_columns, next) = parse_alias(tokens, close + 1, depth);
-            if alias.is_some() {
-                result.push(RangeReference {
-                    kind: RangeReferenceKind::Subquery,
-                    name: QualifiedName {
-                        name: alias.clone().unwrap_or_default(),
-                        ..QualifiedName::default()
-                    },
-                    alias,
-                    alias_columns,
-                    range: TextRange::new(
-                        current.token.range.start(),
-                        text_size(tokens[next.saturating_sub(1)].token.end_location()),
-                    ),
-                    lateral,
-                });
-            }
-            index = next;
-            continue;
-        }
-        let start = current.token.location();
-        let (parts, next) = parse_qualified_name(tokens, index, depth);
-        if parts.is_empty() {
-            index += 1;
-            continue;
-        }
-        index = next;
-        let is_function = tokens
-            .get(index)
-            .is_some_and(|token| token.depth == depth && token.token.kind == TokenKind::Char('('));
-        if is_function && let Some(close) = matching_paren(tokens, index) {
-            index = close + 1;
-        }
-        let (alias, alias_columns, next) = parse_alias(tokens, index, depth);
-        index = next;
-        let name = qualified_name(parts);
-        let kind = if is_function {
-            RangeReferenceKind::Function
-        } else if ctes
-            .iter()
-            .any(|cte| cte.name.name.eq_ignore_ascii_case(&name.name))
-        {
-            RangeReferenceKind::Cte
-        } else {
-            RangeReferenceKind::Relation
-        };
-        let end = tokens
-            .get(index.saturating_sub(1))
-            .map_or(current.token.end_location(), |token| {
-                token.token.end_location()
-            });
-        result.push(RangeReference {
-            kind,
-            name,
-            alias,
-            alias_columns,
-            range: TextRange::new(text_size(start), text_size(end)),
-            lateral,
-        });
-    }
-    result
-}
-
-fn parse_qualified_name(
-    tokens: &[DepthToken],
-    mut index: usize,
-    depth: usize,
-) -> (Vec<String>, usize) {
-    let mut parts = Vec::new();
-    while let Some(name) = token_name(tokens.get(index).map(|token| &token.token)) {
-        if tokens[index].depth != depth {
-            break;
-        }
-        parts.push(name);
-        index += 1;
-        if !tokens
-            .get(index)
-            .is_some_and(|token| token.depth == depth && token.token.kind == TokenKind::Char('.'))
-        {
-            break;
-        }
-        index += 1;
-    }
-    (parts, index)
-}
-
-fn parse_alias(
-    tokens: &[DepthToken],
-    mut index: usize,
-    depth: usize,
-) -> (Option<String>, Vec<String>, usize) {
-    if tokens
-        .get(index)
-        .is_some_and(|token| token.depth == depth && token.token.kind == TokenKind::As)
-    {
-        index += 1;
-    }
-    let alias = tokens
-        .get(index)
-        .filter(|token| token.depth == depth && is_alias_token(&token.token))
-        .and_then(|token| token_name(Some(&token.token)));
-    if alias.is_none() {
-        return (None, Vec::new(), index);
-    }
-    index += 1;
-    let mut columns = Vec::new();
-    if tokens
-        .get(index)
-        .is_some_and(|token| token.depth == depth && token.token.kind == TokenKind::Char('('))
-        && let Some(close) = matching_paren(tokens, index)
-    {
-        for token in &tokens[index + 1..close] {
-            if let Some(name) = token_name(Some(&token.token)) {
-                columns.push(name);
-            }
-        }
-        index = close + 1;
-    }
-    (alias, columns, index)
-}
-
-fn collect_target_relation(tokens: &[DepthToken]) -> Option<QualifiedName> {
-    let first_token = tokens.first()?;
-    let (statement, first) = if first_token.token.kind == TokenKind::With {
-        top_level_dml_statement(tokens)?
-    } else {
-        (0, first_token.token.kind)
-    };
-    let start = match first {
-        TokenKind::Insert => find_top_level_token_after(tokens, statement, TokenKind::Into)? + 1,
-        TokenKind::Update => statement + 1,
-        TokenKind::DeleteP => find_top_level_token_after(tokens, statement, TokenKind::From)? + 1,
-        TokenKind::Merge => find_top_level_token_after(tokens, statement, TokenKind::Into)? + 1,
-        TokenKind::Alter
-            if tokens
-                .get(1)
-                .is_some_and(|token| token.token.kind == TokenKind::Table) =>
-        {
-            2
-        }
-        TokenKind::Create
-            if tokens
-                .iter()
-                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Index) =>
-        {
-            tokens
-                .iter()
-                .position(|token| token.depth == 0 && token.token.kind == TokenKind::On)
-                .map(|index| index + 1)?
-        }
-        TokenKind::Create
-            if tokens
-                .iter()
-                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Policy) =>
-        {
-            tokens
-                .iter()
-                .position(|token| token.depth == 0 && token.token.kind == TokenKind::On)
-                .map(|index| index + 1)?
-        }
-        TokenKind::Alter
-            if tokens
-                .iter()
-                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Policy) =>
-        {
-            tokens
-                .iter()
-                .position(|token| token.depth == 0 && token.token.kind == TokenKind::On)
-                .map(|index| index + 1)?
-        }
-        TokenKind::Create
-            if tokens
-                .iter()
-                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Rule) =>
-        {
-            tokens
-                .iter()
-                .position(|token| token.depth == 0 && token.token.kind == TokenKind::To)
-                .map(|index| index + 1)?
-        }
-        TokenKind::Create
-            if tokens
-                .iter()
-                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Trigger) =>
-        {
-            tokens
-                .iter()
-                .position(|token| token.depth == 0 && token.token.kind == TokenKind::On)
-                .map(|index| index + 1)?
-        }
-        TokenKind::Create
-            if tokens
-                .iter()
-                .any(|token| token.depth == 0 && token.token.kind == TokenKind::Publication) =>
-        {
-            tokens
-                .iter()
-                .position(|token| token.depth == 0 && token.token.kind == TokenKind::Table)
-                .map(|index| index + 1)?
-        }
-        TokenKind::Copy => 1,
-        _ => return None,
-    };
-    let (parts, _) = parse_qualified_name(tokens, start, 0);
-    (!parts.is_empty()).then(|| qualified_name(parts))
-}
-
-fn collect_merge_references(tokens: &[DepthToken]) -> Vec<RangeReference> {
-    [TokenKind::Into, TokenKind::Using]
-        .into_iter()
-        .filter_map(|marker| {
-            let start = tokens
-                .iter()
-                .position(|token| token.depth == 0 && token.token.kind == marker)?
-                + 1;
-            let first = tokens.get(start)?;
-            let (parts, next) = parse_qualified_name(tokens, start, 0);
-            if parts.is_empty() {
-                return None;
-            }
-            let (alias, alias_columns, end) = parse_alias(tokens, next, 0);
-            let end_location = tokens
-                .get(end.saturating_sub(1))
-                .map_or(first.token.end_location(), |token| {
-                    token.token.end_location()
-                });
-            Some(RangeReference {
-                kind: RangeReferenceKind::Relation,
-                name: qualified_name(parts),
-                alias,
-                alias_columns,
-                range: TextRange::new(first.token.range.start(), text_size(end_location)),
-                lateral: false,
-            })
-        })
-        .collect()
-}
-
-fn collect_update_delete_references(
-    tokens: &[DepthToken],
-    ctes: &[RangeReference],
-) -> Vec<RangeReference> {
-    let Some((statement, first)) = top_level_dml_statement(tokens) else {
-        return Vec::new();
-    };
-    let (target_start, source_marker) = match first {
-        TokenKind::Update => (statement + 1, TokenKind::From),
-        TokenKind::DeleteP => {
-            let Some(from) = find_top_level_token_after(tokens, statement, TokenKind::From) else {
-                return Vec::new();
-            };
-            (from + 1, TokenKind::Using)
-        }
-        _ => return Vec::new(),
-    };
-
-    let mut result = relation_reference_at(tokens, target_start)
-        .into_iter()
-        .collect::<Vec<_>>();
-    if let Some(source) = tokens
-        .iter()
-        .position(|token| token.depth == 0 && token.token.kind == source_marker)
-    {
-        result.extend(parse_from_references(tokens, source + 1, ctes));
-    }
-    result
-}
-
-fn top_level_dml_statement(tokens: &[DepthToken]) -> Option<(usize, TokenKind)> {
-    tokens.iter().enumerate().find_map(|(index, token)| {
-        (token.depth == 0
-            && matches!(
-                token.token.kind,
-                TokenKind::Insert | TokenKind::Update | TokenKind::DeleteP | TokenKind::Merge
-            ))
-        .then_some((index, token.token.kind))
-    })
-}
-
-fn find_top_level_token_after(
-    tokens: &[DepthToken],
-    start: usize,
-    kind: TokenKind,
-) -> Option<usize> {
-    tokens
-        .iter()
-        .enumerate()
-        .skip(start)
-        .find_map(|(index, token)| (token.depth == 0 && token.token.kind == kind).then_some(index))
-}
-
-fn relation_reference_at(tokens: &[DepthToken], start: usize) -> Option<RangeReference> {
-    let first = tokens.get(start)?;
-    let (parts, next) = parse_qualified_name(tokens, start, 0);
-    if parts.is_empty() {
-        return None;
-    }
-    let (alias, alias_columns, end) = parse_alias(tokens, next, 0);
-    let end_location = tokens
-        .get(end.saturating_sub(1))
-        .map_or(first.token.end_location(), |token| {
-            token.token.end_location()
-        });
-    Some(RangeReference {
-        kind: RangeReferenceKind::Relation,
-        name: qualified_name(parts),
-        alias,
-        alias_columns,
-        range: TextRange::new(first.token.range.start(), text_size(end_location)),
-        lateral: false,
-    })
-}
-
-/// Enrich parser-produced candidates for cursor shapes that cannot be
-/// represented by the strict token stream, such as a partial identifier after
-/// a qualifier. Grammar alternatives still come from the recursive-descent
-/// productions through `collect_parser_expectations`.
-fn collect_tricky_expectations(
-    tokens: &[Token],
-    offset: usize,
-    scope: &ScopeSnapshot,
-    parser_expects_expression: bool,
-) -> Vec<Expectation> {
-    let before: Vec<&Token> = tokens
-        .iter()
-        .filter(|token| token.location() < offset)
-        .collect();
-    let mut result = Vec::new();
-    let Some(last) = before.last().copied() else {
-        add_statement_starters(&mut result);
-        return result;
-    };
-    let cursor_expects_expression = parser_expects_expression
-        || matches!(
-            last.kind,
-            TokenKind::Select
-                | TokenKind::Where
-                | TokenKind::Having
-                | TokenKind::On
-                | TokenKind::By
-                | TokenKind::Returning
-                | TokenKind::Set
-        )
-        || (last.kind == TokenKind::Char(',')
-            && current_clause(&before) == Some(TokenKind::Select));
-
-    if last.kind == TokenKind::Char('.') {
-        if let Some(qualifier) = before
-            .get(before.len().saturating_sub(2))
-            .and_then(|token| token_name(Some(token)))
-        {
-            let before_qualifier = &before[..before.len().saturating_sub(2)];
-            if expects_type_name(before_qualifier) {
-                push_unique(
-                    &mut result,
-                    Expectation::Name(NameExpectation::Type {
-                        schema: Some(qualifier),
-                    }),
-                );
-            } else if qualifier_is_relation_schema(&before) {
-                push_unique(
-                    &mut result,
-                    Expectation::Name(NameExpectation::Relation {
-                        schema: Some(qualifier),
-                    }),
-                );
-            } else {
-                push_unique(
-                    &mut result,
-                    Expectation::Name(NameExpectation::Column(ColumnContext::Qualified(
-                        qualifier.clone(),
-                    ))),
-                );
-                push_unique(
-                    &mut result,
-                    Expectation::Name(NameExpectation::Function {
-                        schema: Some(qualifier),
-                    }),
-                );
-            }
-        }
-        return result;
-    }
-
-    if expects_type_name(&before) {
-        push_unique(
-            &mut result,
-            Expectation::Name(NameExpectation::Type { schema: None }),
-        );
-        return result;
-    }
-
-    if inside_join_using(&before) {
-        push_unique(
-            &mut result,
-            Expectation::Name(NameExpectation::Column(ColumnContext::JoinUsing)),
-        );
-        push_unique(&mut result, Expectation::Token(TokenKind::Char(')')));
-        return result;
-    }
-
-    if inside_insert_columns(&before) {
-        push_unique(
-            &mut result,
-            Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
-        );
-        push_unique(&mut result, Expectation::Token(TokenKind::Char(')')));
-        return result;
-    }
-
-    if inside_create_index_columns(&before) {
-        push_unique(
-            &mut result,
-            Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
-        );
-        add_expression_expectations(&mut result);
-        push_unique(&mut result, Expectation::Token(TokenKind::Char(')')));
-        return result;
-    }
-
-    if after_alter_table_column_keyword(&before) {
-        push_unique(
-            &mut result,
-            Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
-        );
-        return result;
-    }
-
-    if expects_existing_relation(&before) && !parser_expects_expression {
-        push_unique(
-            &mut result,
-            Expectation::Name(NameExpectation::Relation { schema: None }),
-        );
-        push_unique(&mut result, Expectation::Name(NameExpectation::Schema));
-        return result;
-    }
-
-    if cursor_expects_expression
-        && target_relation_columns_visible(&before)
-        && scope.target_relation.is_some()
-        && !scope.references.iter().any(|reference| {
-            scope
-                .target_relation
-                .as_ref()
-                .is_some_and(|target| reference.name == *target)
-        })
-    {
-        push_unique(
-            &mut result,
-            Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
-        );
-    }
-    if cursor_expects_expression && default_expression_is_valid(&before) {
-        push_unique(&mut result, Expectation::Token(TokenKind::Default));
-    }
-
-    match last.kind {
-        TokenKind::Select | TokenKind::Where | TokenKind::Having | TokenKind::On => {
-            add_expression_expectations(&mut result);
-        }
-        TokenKind::Char(',') if current_clause(&before) == Some(TokenKind::Select) => {
-            add_expression_expectations(&mut result);
-        }
-        TokenKind::From | TokenKind::Join | TokenKind::Into | TokenKind::Update
-            if !parser_expects_expression =>
-        {
-            push_unique(
-                &mut result,
-                Expectation::Name(NameExpectation::Relation { schema: None }),
-            );
-            push_unique(&mut result, Expectation::Name(NameExpectation::Schema));
-            if matches!(last.kind, TokenKind::From | TokenKind::Join) {
-                push_unique(
-                    &mut result,
-                    Expectation::Name(NameExpectation::Function { schema: None }),
-                );
-                push_unique(&mut result, Expectation::Token(TokenKind::LateralP));
-            }
-        }
-        TokenKind::Set if scope.target_relation.is_some() => {
-            push_unique(
-                &mut result,
-                Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
-            );
-        }
-        TokenKind::By | TokenKind::Returning | TokenKind::Set => {
-            add_expression_expectations(&mut result);
-        }
-        TokenKind::Create => add_tokens(
-            &mut result,
-            &[
-                TokenKind::Table,
-                TokenKind::View,
-                TokenKind::Index,
-                TokenKind::Schema,
-                TokenKind::Function,
-                TokenKind::TypeP,
-            ],
-        ),
-        TokenKind::Alter => add_tokens(
-            &mut result,
-            &[
-                TokenKind::Table,
-                TokenKind::Schema,
-                TokenKind::Database,
-                TokenKind::Role,
-                TokenKind::TypeP,
-            ],
-        ),
-        TokenKind::Drop => add_tokens(
-            &mut result,
-            &[
-                TokenKind::Table,
-                TokenKind::View,
-                TokenKind::Index,
-                TokenKind::Schema,
-                TokenKind::Function,
-                TokenKind::TypeP,
-            ],
-        ),
-        _ if !parser_expects_expression => {
-            if current_clause(&before).is_some() {
-                add_expression_tail_expectations(&mut result);
-            } else if scope.references.is_empty() {
-                add_statement_starters(&mut result);
-            }
-        }
-        _ => {}
-    }
-    result
-}
-
-fn target_relation_columns_visible(tokens: &[&Token]) -> bool {
-    let Some((statement, first)) = top_level_statement(tokens) else {
-        return false;
-    };
-    match first {
-        TokenKind::Update | TokenKind::DeleteP | TokenKind::Copy => true,
-        TokenKind::Insert => top_level_tokens_after(tokens, statement)
-            .any(|token| matches!(token.kind, TokenKind::Returning | TokenKind::Conflict)),
-        TokenKind::Create => top_level_tokens_after(tokens, statement).any(|token| {
-            matches!(
-                token.kind,
-                TokenKind::Index
-                    | TokenKind::Policy
-                    | TokenKind::Publication
-                    | TokenKind::Rule
-                    | TokenKind::Trigger
-            )
-        }),
-        TokenKind::Alter => top_level_tokens_after(tokens, statement)
-            .any(|token| matches!(token.kind, TokenKind::Table | TokenKind::Policy)),
-        _ => false,
-    }
-}
-
-fn default_expression_is_valid(tokens: &[&Token]) -> bool {
-    let Some((statement, kind)) = top_level_statement(tokens) else {
-        return false;
-    };
-    match kind {
-        TokenKind::Update => current_clause(tokens) == Some(TokenKind::Set),
-        TokenKind::Insert => {
-            top_level_tokens_after(tokens, statement).any(|token| token.kind == TokenKind::Values)
-                || (top_level_tokens_after(tokens, statement)
-                    .any(|token| token.kind == TokenKind::Conflict)
-                    && current_clause(tokens) == Some(TokenKind::Set))
-        }
-        _ => false,
-    }
-}
-
-fn top_level_statement(tokens: &[&Token]) -> Option<(usize, TokenKind)> {
-    top_level_tokens(tokens).find_map(|(index, token)| {
-        matches!(
-            token.kind,
-            TokenKind::Select
-                | TokenKind::Insert
-                | TokenKind::Update
-                | TokenKind::DeleteP
-                | TokenKind::Merge
-                | TokenKind::Create
-                | TokenKind::Alter
-                | TokenKind::Copy
-        )
-        .then_some((index, token.kind))
-    })
-}
-
-fn top_level_tokens<'slice, 'token: 'slice>(
-    tokens: &'slice [&'token Token],
-) -> impl Iterator<Item = (usize, &'token Token)> + 'slice {
-    let mut depth = 0usize;
-    tokens.iter().enumerate().filter_map(move |(index, token)| {
-        let token_depth = depth;
-        match token.kind {
-            TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
-            TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-        (token_depth == 0).then_some((index, *token))
-    })
-}
-
-fn top_level_tokens_after<'slice, 'token: 'slice>(
-    tokens: &'slice [&'token Token],
-    start: usize,
-) -> impl Iterator<Item = &'token Token> + 'slice {
-    top_level_tokens(tokens)
-        .filter(move |(index, _)| *index >= start)
-        .map(|(_, token)| token)
-}
-
-fn add_statement_starters(result: &mut Vec<Expectation>) {
-    add_tokens(
-        result,
-        &[
-            TokenKind::Select,
-            TokenKind::With,
-            TokenKind::Insert,
-            TokenKind::Update,
-            TokenKind::DeleteP,
-            TokenKind::Create,
-            TokenKind::Alter,
-            TokenKind::Drop,
-            TokenKind::Values,
-            TokenKind::Explain,
-        ],
-    );
-}
-
-fn add_expression_expectations(result: &mut Vec<Expectation>) {
-    push_unique(result, Expectation::Expression);
-    push_unique(
-        result,
-        Expectation::Name(NameExpectation::Column(ColumnContext::VisibleScope)),
-    );
-    push_unique(
-        result,
-        Expectation::Name(NameExpectation::Function { schema: None }),
-    );
-    add_tokens(result, expression_start_tokens());
-}
-
-fn add_expression_tail_expectations(result: &mut Vec<Expectation>) {
-    add_tokens(
-        result,
-        &[
-            TokenKind::And,
-            TokenKind::Or,
-            TokenKind::From,
-            TokenKind::Where,
-            TokenKind::GroupP,
-            TokenKind::Having,
-            TokenKind::Order,
-            TokenKind::Limit,
-            TokenKind::Offset,
-            TokenKind::Returning,
-        ],
-    );
-}
-
-fn add_tokens(result: &mut Vec<Expectation>, tokens: &[TokenKind]) {
-    for token in tokens {
-        push_unique(result, Expectation::Token(*token));
-    }
-}
-
-fn push_unique(result: &mut Vec<Expectation>, expectation: Expectation) {
-    if !result.contains(&expectation) {
-        result.push(expectation);
-    }
-}
-
-fn inside_join_using(tokens: &[&Token]) -> bool {
-    let mut depth = 0usize;
-    for (index, token) in tokens.iter().enumerate().rev() {
-        match token.kind {
-            TokenKind::Char(')') => depth += 1,
-            TokenKind::Char('(') if depth > 0 => depth -= 1,
-            TokenKind::Char('(') => {
-                return index > 0
-                    && tokens[index - 1].kind == TokenKind::Using
-                    && tokens[..index - 1]
-                        .iter()
-                        .any(|token| token.kind == TokenKind::Join);
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-fn inside_insert_columns(tokens: &[&Token]) -> bool {
-    if tokens.first().map(|token| token.kind) != Some(TokenKind::Insert) {
-        return false;
-    }
-    if tokens
-        .iter()
-        .any(|token| matches!(token.kind, TokenKind::Values | TokenKind::Select))
-    {
-        return false;
-    }
-    let mut depth = 0usize;
-    for token in tokens.iter().rev() {
-        match token.kind {
-            TokenKind::Char(')') => depth += 1,
-            TokenKind::Char('(') if depth > 0 => depth -= 1,
-            TokenKind::Char('(') => return true,
-            _ => {}
-        }
-    }
-    false
-}
-
-fn inside_create_index_columns(tokens: &[&Token]) -> bool {
-    if tokens.first().map(|token| token.kind) != Some(TokenKind::Create)
-        || !tokens.iter().any(|token| token.kind == TokenKind::Index)
-        || !tokens.iter().any(|token| token.kind == TokenKind::On)
-    {
-        return false;
-    }
-    let mut depth = 0usize;
-    for token in tokens.iter().rev() {
-        match token.kind {
-            TokenKind::Char(')') => depth += 1,
-            TokenKind::Char('(') if depth > 0 => depth -= 1,
-            TokenKind::Char('(') => return true,
-            _ => {}
-        }
-    }
-    false
-}
-
-fn after_alter_table_column_keyword(tokens: &[&Token]) -> bool {
-    tokens.first().map(|token| token.kind) == Some(TokenKind::Alter)
-        && tokens.get(1).map(|token| token.kind) == Some(TokenKind::Table)
-        && matches!(
-            tokens.last().map(|token| token.kind),
-            Some(TokenKind::Column | TokenKind::Rename)
-        )
-}
-
-fn expects_existing_relation(tokens: &[&Token]) -> bool {
-    matches!(
-        tokens,
-        [.., alter, table]
-            if alter.kind == TokenKind::Alter && table.kind == TokenKind::Table
-    ) || matches!(
-        tokens,
-        [.., drop, object]
-            if drop.kind == TokenKind::Drop
-                && matches!(object.kind, TokenKind::Table | TokenKind::View | TokenKind::Index)
-    )
-}
-
-fn qualifier_is_relation_schema(tokens: &[&Token]) -> bool {
-    let qualifier_index = tokens.len().saturating_sub(2);
-    let Some(previous) = qualifier_index
-        .checked_sub(1)
-        .and_then(|index| tokens.get(index))
-    else {
-        return false;
-    };
-    matches!(
-        previous.kind,
-        TokenKind::From | TokenKind::Join | TokenKind::Into | TokenKind::Update
-    ) || (previous.kind == TokenKind::Table
-        && qualifier_index >= 2
-        && matches!(
-            tokens[qualifier_index - 2].kind,
-            TokenKind::Alter | TokenKind::Drop
-        ))
-}
-
-fn expects_type_name(tokens: &[&Token]) -> bool {
-    if tokens
-        .last()
-        .is_some_and(|token| token.kind == TokenKind::TypeCast)
-    {
-        return true;
-    }
-    if tokens
-        .last()
-        .is_some_and(|token| token.kind == TokenKind::TypeP)
-        && tokens
-            .first()
-            .is_some_and(|token| token.kind == TokenKind::Alter)
-    {
-        return true;
-    }
-    if !tokens
-        .last()
-        .is_some_and(|token| token.kind == TokenKind::As)
-    {
-        return false;
-    }
-    let mut depth = 0usize;
-    for token in tokens.iter().rev().skip(1) {
-        match token.kind {
-            TokenKind::Char(')') => depth += 1,
-            TokenKind::Char('(') if depth > 0 => depth -= 1,
-            TokenKind::Char('(') => {
-                return tokens
-                    .iter()
-                    .take_while(|candidate| candidate.location() < token.location())
-                    .last()
-                    .is_some_and(|candidate| candidate.kind == TokenKind::Cast);
-            }
-            _ => {}
-        }
-    }
-    false
-}
-
-fn current_clause(tokens: &[&Token]) -> Option<TokenKind> {
-    tokens.iter().rev().find_map(|token| {
-        matches!(
-            token.kind,
-            TokenKind::Select
-                | TokenKind::Where
-                | TokenKind::Having
-                | TokenKind::On
-                | TokenKind::Returning
-                | TokenKind::Set
-        )
-        .then_some(token.kind)
-    })
-}
-
-fn token_name(token: Option<&Token>) -> Option<String> {
-    let token = token?;
-    match &token.value {
-        Some(TokenValue::String(value)) => Some(value.clone()),
-        Some(TokenValue::Keyword(word)) => {
-            let keyword = lookup_keyword(word)?;
-            (keyword.category != KeywordCategory::Reserved).then(|| (*word).to_owned())
-        }
-        _ => None,
-    }
-}
-
-fn is_alias_token(token: &Token) -> bool {
-    token_name(Some(token)).is_some()
-        && !matches!(
-            token.kind,
-            TokenKind::Where
-                | TokenKind::GroupP
-                | TokenKind::Having
-                | TokenKind::Window
-                | TokenKind::Order
-                | TokenKind::Limit
-                | TokenKind::Offset
-                | TokenKind::Fetch
-                | TokenKind::For
-                | TokenKind::Union
-                | TokenKind::Intersect
-                | TokenKind::Except
-                | TokenKind::Join
-                | TokenKind::InnerP
-                | TokenKind::Left
-                | TokenKind::Right
-                | TokenKind::Full
-                | TokenKind::Cross
-                | TokenKind::Natural
-                | TokenKind::On
-                | TokenKind::Using
-                | TokenKind::Tablesample
-                | TokenKind::Repeatable
-        )
-}
-
-fn matching_paren(tokens: &[DepthToken], open: usize) -> Option<usize> {
-    let depth = tokens.get(open)?.depth;
-    tokens
-        .iter()
-        .enumerate()
-        .skip(open + 1)
-        .find_map(|(index, token)| {
-            (token.token.kind == TokenKind::Char(')') && token.depth == depth + 1).then_some(index)
-        })
-}
-
-fn skip_join_condition(tokens: &[DepthToken], mut index: usize, depth: usize) -> usize {
-    while index < tokens.len() {
-        let token = &tokens[index];
-        if token.depth == depth
-            && (token.token.kind == TokenKind::Char(',')
-                || is_join_start(token.token.kind)
-                || is_from_terminator(token.token.kind))
-        {
-            break;
-        }
-        index += 1;
-    }
-    index
-}
-
-fn qualified_name(parts: Vec<String>) -> QualifiedName {
-    match parts.as_slice() {
-        [name] => QualifiedName {
-            name: name.clone(),
-            ..QualifiedName::default()
-        },
-        [schema, name] => QualifiedName {
-            schema: Some(schema.clone()),
-            name: name.clone(),
-            ..QualifiedName::default()
-        },
-        _ => QualifiedName {
-            catalog: parts.get(parts.len().saturating_sub(3)).cloned(),
-            schema: parts.get(parts.len().saturating_sub(2)).cloned(),
-            name: parts.last().cloned().unwrap_or_default(),
-        },
-    }
-}
-
-fn is_join_noise(kind: TokenKind) -> bool {
-    kind == TokenKind::Char(',') || is_join_start(kind) || kind == TokenKind::OuterP
-}
-
-fn is_join_start(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Join
-            | TokenKind::InnerP
-            | TokenKind::Left
-            | TokenKind::Right
-            | TokenKind::Full
-            | TokenKind::Cross
-            | TokenKind::Natural
-    )
-}
-
-fn is_from_terminator(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Where
-            | TokenKind::GroupP
-            | TokenKind::Having
-            | TokenKind::Window
-            | TokenKind::Order
-            | TokenKind::Limit
-            | TokenKind::Offset
-            | TokenKind::Fetch
-            | TokenKind::For
-            | TokenKind::Union
-            | TokenKind::Intersect
-            | TokenKind::Except
-            | TokenKind::Returning
-    )
-}
-
-fn is_query_boundary(kind: TokenKind) -> bool {
-    matches!(
-        kind,
-        TokenKind::Union | TokenKind::Intersect | TokenKind::Except | TokenKind::Char(';')
     )
 }
 
@@ -1994,6 +992,14 @@ fn suppress_completion_at_cursor(sql: &str, cursor: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    #[path = "slot_fixtures.rs"]
+    mod slot_fixtures;
+
+    use slot_fixtures::{SLOT_FIXTURES, SlotContract};
 
     fn collect(marked: &str) -> CompletionContext {
         let cursor = marked.find('|').expect("test input must contain a cursor");
@@ -2001,26 +1007,32 @@ mod tests {
         collect_completion(&sql, text_size(cursor)).unwrap()
     }
 
-    fn collect_from_parser(marked: &str) -> Vec<Expectation> {
+    fn range_names(context: &CompletionContext) -> Vec<&str> {
+        context
+            .scope
+            .frames()
+            .iter()
+            .flat_map(ScopeFrame::ranges)
+            .map(|id| context.scope.range(*id).exposed_name())
+            .collect()
+    }
+
+    fn local_range(context: &CompletionContext, index: usize) -> &RangeBinding {
+        context
+            .scope
+            .range(context.scope.frames()[0].ranges()[index])
+    }
+
+    fn collect_parser_completion(marked: &str) -> ParserCompletion {
         let cursor = marked.find('|').expect("test input must contain a cursor");
         let sql = marked.replacen('|', "", 1);
         let tokens = completion_tokens(&sql, cursor);
         let (_, statement_tokens) = statement_at(&sql, cursor, &tokens);
-        collect_parser_expectations(&statement_tokens, cursor).0
+        collect_parser_expectations(&statement_tokens, cursor)
     }
 
-    #[test]
-    fn top_level_token_references_outlive_the_reference_slice() {
-        let token = Token::synthetic(TokenKind::Select, 0);
-        let returned = {
-            let tokens = [&token];
-            top_level_tokens(&tokens)
-                .next()
-                .expect("select is a top-level token")
-                .1
-        };
-
-        assert_eq!(returned.kind, TokenKind::Select);
+    fn collect_from_parser(marked: &str) -> Vec<Expectation> {
+        collect_parser_completion(marked).expectations()
     }
 
     #[test]
@@ -2040,34 +1052,34 @@ mod tests {
 
     #[test]
     fn recursive_descent_productions_emit_core_expectations() {
+        for marked in [
+            "SELECT |",
+            "SELECT value + |",
+            "SELECT count(|",
+            "WITH x AS (SELECT |",
+            "SELECT (SELECT |",
+            "SELECT 1 IN (SELECT |",
+            "SELECT 1 = ANY (SELECT |",
+            "SELECT JSON_ARRAY(SELECT |",
+            "CREATE RULE r AS ON UPDATE TO t DO (SELECT |",
+            "SELECT sum(x) OVER (PARTITION BY |",
+            "SELECT json_arrayagg(x ORDER BY |",
+            "SELECT * FROM JSON_TABLE(|",
+            "SELECT * FROM ROWS FROM (|",
+            "SELECT * FROM XMLTABLE(|",
+            "CREATE STATISTICS s ON |",
+            "UPDATE t SET value[|",
+        ] {
+            let actual = collect_parser_completion(marked);
+            assert!(actual.expects_expression(), "{marked}: {:?}", actual.events);
+        }
+
         let cases = [
             ("|", Expectation::Token(TokenKind::Select)),
-            ("SELECT |", Expectation::Expression),
-            ("SELECT value + |", Expectation::Expression),
-            ("SELECT count(|", Expectation::Expression),
-            ("WITH x AS (SELECT |", Expectation::Expression),
-            ("SELECT (SELECT |", Expectation::Expression),
-            ("SELECT 1 IN (SELECT |", Expectation::Expression),
-            ("SELECT 1 = ANY (SELECT |", Expectation::Expression),
-            ("SELECT JSON_ARRAY(SELECT |", Expectation::Expression),
-            (
-                "CREATE RULE r AS ON UPDATE TO t DO (SELECT |",
-                Expectation::Expression,
-            ),
-            (
-                "SELECT sum(x) OVER (PARTITION BY |",
-                Expectation::Expression,
-            ),
-            ("SELECT json_arrayagg(x ORDER BY |", Expectation::Expression),
-            ("SELECT * FROM JSON_TABLE(|", Expectation::Expression),
-            ("SELECT * FROM ROWS FROM (|", Expectation::Expression),
-            ("SELECT * FROM XMLTABLE(|", Expectation::Expression),
-            ("CREATE STATISTICS s ON |", Expectation::Expression),
             (
                 "CALL |",
                 Expectation::Name(NameExpectation::Function { schema: None }),
             ),
-            ("UPDATE t SET value[|", Expectation::Expression),
             (
                 "SELECT * FROM |",
                 Expectation::Name(NameExpectation::Relation { schema: None }),
@@ -2085,6 +1097,182 @@ mod tests {
         for (marked, expected) in cases {
             let actual = collect_from_parser(marked);
             assert!(actual.contains(&expected), "{marked}: {actual:?}");
+        }
+    }
+
+    #[test]
+    fn recursive_descent_expectations_keep_semantic_slot_provenance() {
+        for (marked, slot) in [
+            ("SELECT |", CompletionSlot::SelectTarget),
+            ("SELECT count(|", CompletionSlot::FunctionArgument),
+            (
+                "SELECT sum(x) OVER (PARTITION BY |",
+                CompletionSlot::WindowPartitionExpression,
+            ),
+        ] {
+            let completion = collect_parser_completion(marked);
+            assert!(
+                completion.contains_expression(slot),
+                "{marked}: expected expression provenance at {slot:?}, got {:?}",
+                completion.events
+            );
+        }
+
+        let cases = [
+            (
+                "|",
+                CompletionSlot::StatementStart,
+                Expectation::Token(TokenKind::Select),
+            ),
+            (
+                "SELECT |",
+                CompletionSlot::SelectTarget,
+                Expectation::Name(NameExpectation::Column(ColumnContext::VisibleScope)),
+            ),
+            (
+                "SELECT count(|",
+                CompletionSlot::FunctionArgument,
+                Expectation::Name(NameExpectation::Function { schema: None }),
+            ),
+            (
+                "SELECT * FROM |",
+                CompletionSlot::FromItem,
+                Expectation::Name(NameExpectation::Relation { schema: None }),
+            ),
+            (
+                "INSERT INTO |",
+                CompletionSlot::InsertTargetRelation,
+                Expectation::Name(NameExpectation::Relation { schema: None }),
+            ),
+            (
+                "UPDATE users SET |",
+                CompletionSlot::UpdateSetTarget,
+                Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+            ),
+        ];
+        for (marked, slot, expectation) in cases {
+            let completion = collect_parser_completion(marked);
+            assert!(
+                completion.contains(slot, &expectation),
+                "{marked}: expected {slot:?} -> {expectation:?}, got {:?}",
+                completion.events
+            );
+        }
+    }
+
+    #[test]
+    fn every_completion_slot_has_a_parser_owned_contract() {
+        let mut classified = HashSet::new();
+        for (slot, marked, contract) in SLOT_FIXTURES {
+            assert!(classified.insert(*slot), "duplicate fixture for {slot:?}");
+            let completion = collect_parser_completion(marked);
+            let slot_events = completion
+                .events
+                .iter()
+                .filter(|event| event.slot == *slot)
+                .collect::<Vec<_>>();
+            assert!(
+                !slot_events.is_empty(),
+                "{marked:?} did not reach {slot:?}; got {:?}",
+                completion.events
+            );
+            let has_expectation = |predicate: fn(&Expectation) -> bool| {
+                slot_events.iter().any(|event| {
+                    matches!(&event.signal, CompletionSignal::Expectation(value) if predicate(value))
+                })
+            };
+            let satisfied = match contract {
+                SlotContract::Keyword => {
+                    has_expectation(|value| matches!(value, Expectation::Token(_)))
+                }
+                SlotContract::Relation => has_expectation(|value| {
+                    matches!(value, Expectation::Name(NameExpectation::Relation { .. }))
+                }),
+                SlotContract::Column => has_expectation(|value| {
+                    matches!(value, Expectation::Name(NameExpectation::Column(_)))
+                }),
+                SlotContract::JoinUsingColumn => has_expectation(|value| {
+                    matches!(
+                        value,
+                        Expectation::Name(NameExpectation::Column(ColumnContext::JoinUsing))
+                    )
+                }),
+                SlotContract::Type => has_expectation(|value| {
+                    matches!(value, Expectation::Name(NameExpectation::Type { .. }))
+                }),
+                SlotContract::Value => slot_events
+                    .iter()
+                    .any(|event| event.signal == CompletionSignal::Expression),
+                SlotContract::Declaration => has_expectation(|value| {
+                    matches!(value, Expectation::Name(NameExpectation::Declaration(_)))
+                }),
+                SlotContract::FunctionReference => has_expectation(|value| {
+                    matches!(value, Expectation::Name(NameExpectation::Function { .. }))
+                }),
+                SlotContract::FromItem => {
+                    has_expectation(|value| {
+                        matches!(value, Expectation::Name(NameExpectation::Relation { .. }))
+                    }) && has_expectation(|value| {
+                        matches!(value, Expectation::Name(NameExpectation::Function { .. }))
+                    }) && has_expectation(|value| {
+                        matches!(value, Expectation::Token(TokenKind::LateralP))
+                    })
+                }
+            };
+            assert!(
+                satisfied,
+                "{marked:?} reached {slot:?} without its {contract:?} contract: {slot_events:?}"
+            );
+        }
+        assert_eq!(
+            classified,
+            CompletionSlot::ALL.iter().copied().collect(),
+            "the parser fixture matrix must classify every completion slot"
+        );
+    }
+
+    #[test]
+    fn implicit_completion_recording_is_forbidden() {
+        let sources = parser_sources();
+        for pattern in [
+            "record_completion(",
+            "record_expression_completion(",
+            "record_restricted_expression_completion(",
+            ".record_expression(",
+            ".record_restricted_expression(",
+        ] {
+            let actual = sources.matches(pattern).count();
+            assert_eq!(
+                actual, 0,
+                "implicit completion path {pattern:?} is forbidden; register a semantic CompletionSlot instead"
+            );
+        }
+    }
+
+    fn parser_sources() -> String {
+        let parser_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = vec![parser_root.join("parser.rs")];
+        collect_rust_files(&parser_root.join("parser"), &mut files);
+        files.sort();
+        files
+            .into_iter()
+            .map(|path| {
+                fs::read_to_string(&path).unwrap_or_else(|error| panic!("{path:?}: {error}"))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) {
+        for entry in
+            fs::read_dir(directory).unwrap_or_else(|error| panic!("{directory:?}: {error}"))
+        {
+            let path = entry.expect("parser source entry").path();
+            if path.is_dir() {
+                collect_rust_files(&path, files);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                files.push(path);
+            }
         }
     }
 
@@ -2108,9 +1296,12 @@ mod tests {
                     })),
                 "{marked}"
             );
-            assert_eq!(context.scope.references[0].name.name, "users", "{marked}");
+            assert!(matches!(
+                &local_range(&context, 0).source,
+                RangeSource::Relation(name) if name.name == "users"
+            ));
             assert_eq!(
-                context.scope.references[0].alias.as_deref(),
+                local_range(&context, 0).alias.as_deref(),
                 Some("u"),
                 "{marked}"
             );
@@ -2154,15 +1345,17 @@ mod tests {
                     ColumnContext::JoinUsing
                 )))
         );
-        assert_eq!(context.scope.references.len(), 2);
+        assert_eq!(context.scope.frames()[0].ranges().len(), 2);
     }
 
     #[test]
     fn insert_column_list_targets_insert_relation() {
         let context = collect("INSERT INTO users (|");
+        let target = context.scope.target_relation_id().unwrap();
+        assert_eq!(context.scope.target(target).name.name, "users");
         assert_eq!(
-            context.scope.target_relation.as_ref().unwrap().name,
-            "users"
+            context.scope.target_relation(),
+            Some(context.scope.target(target))
         );
         assert!(
             context
@@ -2176,12 +1369,15 @@ mod tests {
     #[test]
     fn cte_is_exposed_as_a_scope_reference() {
         let context = collect("WITH active(id) AS (SELECT id FROM users) SELECT | FROM active");
-        assert_eq!(context.scope.ctes[0].name.name, "active");
-        assert_eq!(context.scope.references[0].kind, RangeReferenceKind::Cte);
-        assert_eq!(
-            context.scope.references[0].alias_columns,
-            Vec::<String>::new()
-        );
+        let cte = context.scope.frames()[0].ctes()[0];
+        assert_eq!(context.scope.cte(cte).name, "active");
+        assert_eq!(local_range(&context, 0).kind(), RangeBindingKind::Cte);
+        assert!(matches!(local_range(&context, 0).source, RangeSource::Cte(id) if id == cte));
+        assert!(local_range(&context, 0).column_aliases.is_empty());
+        assert!(matches!(
+            context.scope.cte(cte).row_shape.items.as_slice(),
+            [RowShapeItem::Column { name, .. }] if name == "id"
+        ));
     }
 
     #[test]
@@ -2203,10 +1399,7 @@ mod tests {
             "CREATE INDEX users_name ON users (|",
         ] {
             let context = collect(marked);
-            assert_eq!(
-                context.scope.target_relation.as_ref().unwrap().name,
-                "users"
-            );
+            assert_eq!(context.scope.target_relation().unwrap().name.name, "users");
             assert!(
                 context
                     .expectations
@@ -2220,8 +1413,7 @@ mod tests {
     #[test]
     fn multi_statement_context_uses_cursor_statement() {
         let context = collect("SELECT * FROM old_table; SELECT | FROM users");
-        assert_eq!(context.scope.references.len(), 1);
-        assert_eq!(context.scope.references[0].name.name, "users");
+        assert_eq!(range_names(&context), ["users"]);
     }
 
     #[test]
@@ -2229,26 +1421,26 @@ mod tests {
         let context = collect(
             "SELECT * FROM users u WHERE EXISTS (SELECT | FROM orders o WHERE o.user_id = u.id)",
         );
-        assert_eq!(context.scope.local_references[0].exposed_name(), "o");
-        assert_eq!(context.scope.outer_references[0][0].exposed_name(), "u");
+        assert_eq!(context.scope.frames().len(), 2);
+        assert_eq!(local_range(&context, 0).exposed_name(), "o");
         assert_eq!(
             context
                 .scope
-                .references
-                .iter()
-                .map(RangeReference::exposed_name)
-                .collect::<Vec<_>>(),
-            vec!["o", "u"]
+                .range(context.scope.frames()[1].ranges()[0])
+                .exposed_name(),
+            "u"
         );
+        assert_eq!(range_names(&context), vec!["o", "u"]);
     }
 
     #[test]
     fn from_subquery_only_inherits_outer_scope_when_lateral() {
         let non_lateral = collect("SELECT * FROM users u, (SELECT |) s");
-        assert!(non_lateral.scope.outer_references.is_empty());
+        assert_eq!(non_lateral.scope.frames().len(), 1);
 
         let lateral = collect("SELECT * FROM users u, LATERAL (SELECT |) s");
-        assert_eq!(lateral.scope.outer_references[0][0].exposed_name(), "u");
+        assert_eq!(lateral.scope.frames().len(), 2);
+        assert_eq!(range_names(&lateral), ["u"]);
     }
 
     #[test]
@@ -2311,9 +1503,8 @@ mod tests {
             assert_eq!(
                 context
                     .scope
-                    .target_relation
-                    .as_ref()
-                    .map(|name| name.name.as_str()),
+                    .target_relation()
+                    .map(|target| target.name.name.as_str()),
                 Some("users"),
                 "{marked}: {:?}",
                 context.scope
@@ -2334,21 +1525,12 @@ mod tests {
     fn merge_expression_context_exposes_target_and_source_relations() {
         let context =
             collect("MERGE INTO users u USING orders o ON | WHEN MATCHED THEN DO NOTHING");
+        assert_eq!(range_names(&context), ["u", "o"]);
         assert_eq!(
             context
                 .scope
-                .references
-                .iter()
-                .map(RangeReference::exposed_name)
-                .collect::<Vec<_>>(),
-            ["u", "o"]
-        );
-        assert_eq!(
-            context
-                .scope
-                .target_relation
-                .as_ref()
-                .map(|name| name.name.as_str()),
+                .target_relation()
+                .map(|target| target.name.name.as_str()),
             Some("users")
         );
     }
@@ -2360,16 +1542,7 @@ mod tests {
             ("DELETE FROM users u USING orders o WHERE |", ["u", "o"]),
         ] {
             let context = collect(marked);
-            assert_eq!(
-                context
-                    .scope
-                    .references
-                    .iter()
-                    .map(RangeReference::exposed_name)
-                    .collect::<Vec<_>>(),
-                expected,
-                "{marked}"
-            );
+            assert_eq!(range_names(&context), expected, "{marked}");
         }
     }
 
@@ -2380,21 +1553,12 @@ mod tests {
              (SELECT id, user_id, amount FROM orders) \
              UPDATE users u SET name = | FROM recent r",
         );
+        assert_eq!(range_names(&context), ["u", "r"]);
         assert_eq!(
             context
                 .scope
-                .references
-                .iter()
-                .map(RangeReference::exposed_name)
-                .collect::<Vec<_>>(),
-            ["u", "r"]
-        );
-        assert_eq!(
-            context
-                .scope
-                .target_relation
-                .as_ref()
-                .map(|name| name.name.as_str()),
+                .target_relation()
+                .map(|target| target.name.name.as_str()),
             Some("users")
         );
     }
@@ -2402,25 +1566,16 @@ mod tests {
     #[test]
     fn insert_select_scope_ends_before_conflict_and_returning_clauses() {
         let source = collect("INSERT INTO users(name) SELECT | FROM orders o");
-        assert_eq!(
-            source
-                .scope
-                .references
-                .iter()
-                .map(RangeReference::exposed_name)
-                .collect::<Vec<_>>(),
-            ["o"]
-        );
+        assert_eq!(range_names(&source), ["o"]);
 
         let returning =
             collect("INSERT INTO users(name) SELECT amount::text FROM orders o RETURNING |");
-        assert!(returning.scope.references.is_empty());
+        assert!(returning.scope.frames()[0].ranges().is_empty());
         assert_eq!(
             returning
                 .scope
-                .target_relation
-                .as_ref()
-                .map(|name| name.name.as_str()),
+                .target_relation()
+                .map(|target| target.name.name.as_str()),
             Some("users")
         );
     }

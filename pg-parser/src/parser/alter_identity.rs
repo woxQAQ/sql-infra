@@ -327,6 +327,13 @@ impl Parser {
                 ) {
                     return Err(self.error_here("RENAME COLUMN is not valid for this object type"));
                 }
+                if self.at_completion_cursor() {
+                    self.record_completion_at(
+                        CompletionSlot::AlterTableColumnName,
+                        Expectation::Name(NameExpectation::Column(ColumnContext::TargetRelation)),
+                    );
+                    return Err(self.completion_stop());
+                }
                 rename_type = ObjectType::Column;
                 relation_type = identity.object_type;
                 identity.subname = Some(

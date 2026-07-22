@@ -31,9 +31,8 @@ impl Parser {
             self.record_relation_completion_at(CompletionSlot::InsertTargetRelation);
             return Err(self.completion_stop());
         }
-        let mut relation = self
-            .try_parse_qualified_range_var()
-            .ok_or_else(|| self.error_here("INSERT INTO requires a relation name"))?;
+        let mut relation =
+            self.parse_qualified_range_var_at(CompletionSlot::InsertTargetRelation, false)?;
         if self.consume(TokenKind::As) {
             relation.alias = Some(Box::new(Alias {
                 node_tag: NodeTag::Alias,
@@ -89,7 +88,13 @@ impl Parser {
                 | TokenKind::Table
                 | TokenKind::Char('(')
         ) {
-            let source = self.parse_statement(None)?;
+            let default_allowed = self.at(TokenKind::Values);
+            let previous_default_allowed = self.replace_completion_default_allowed(default_allowed);
+            let source = self.parse_statement(None);
+            if let Some(previous) = previous_default_allowed {
+                self.replace_completion_default_allowed(previous);
+            }
+            let source = source?;
             if !matches!(source, Node::SelectStmt(_)) {
                 return Err(self.error_here("INSERT source must be a SELECT statement"));
             }

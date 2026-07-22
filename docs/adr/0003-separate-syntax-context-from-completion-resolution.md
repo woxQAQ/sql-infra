@@ -1,25 +1,7 @@
 # Separate syntax context from completion resolution
 
-PostgreSQL completion is split across two modules at a deliberate seam.
+PostgreSQL completion is split across a deliberate seam. `pg-parser::collect_completion` owns grammar facts and SQL visibility: recursive-descent parser events are the sole source of grammar-derived expectations, while internal completion slots retain provenance without becoming part of the public interface. Because parsing deliberately stops at the cursor, a separate tolerant scope analyzer reads the statement tokens and produces nearest-first scope frames backed by stable binding IDs for CTE bindings, range bindings, and the target relation.
 
-`pg-parser::collect_completion` owns grammar-specific facts: the replacement
-range, typed syntax expectations, the active statement range, visible range
-references, CTEs, and the statement target relation. It remains independent of
-database metadata and does not expose a partial PostgreSQL raw parse tree.
-Its standard candidate pass runs the existing recursive-descent `Parser` and
-`ExprParser` in completion mode against the prefix ending at the cursor. A
-small completion-only token pass enriches cursor shapes that strict parsing
-cannot represent, such as a partially typed name after `.`.
+The parser-side binding graph records row-shape derivations for CTE projections, derived tables, values rows, and table functions without depending on live metadata. `pg-completion::complete` resolves that graph against the `Catalog` interface, recursively expands catalog and derived row shapes with cycle guards, applies PostgreSQL visibility and real shadowing, and owns quoting, filtering, ranking, deduplication, and editor-neutral completion items.
 
-`pg-completion::complete` owns user-facing completion behaviour: catalog
-queries, alias and scope resolution, PostgreSQL identifier quoting, prefix
-filtering, ranking, deduplication, and graceful keyword-only degradation when
-metadata is unavailable. Its output is editor-neutral; LSP conversion belongs
-in an outer adapter.
-
-We rejected stringly typed grammar-rule candidates because they create an
-implicit protocol between parser and resolver. `Expectation`,
-`NameExpectation`, and `ColumnContext` are the explicit interface instead.
-We also rejected putting live database access in the parser. Metadata enters
-through the `Catalog` interface, which supports both production and in-memory
-adapters.
+We rejected stringly typed grammar candidates, completion-only grammar heuristics, a partial raw parse tree as the completion interface, and live database access in the parser. We also rejected an incremental scope-cache interface without a measured performance target; the analyzer may use request-local memoization, but callers receive a complete immutable context for one cursor request.

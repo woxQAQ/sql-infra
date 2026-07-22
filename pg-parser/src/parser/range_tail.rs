@@ -212,7 +212,7 @@ impl Parser {
                 return Err(self.error_here("this JOIN form does not accept USING"));
             }
             self.expect(TokenKind::Char('('))?;
-            using_clause = self.parse_parenthesized_name_list_body()?;
+            using_clause = self.parse_join_using_columns()?;
             self.expect(TokenKind::Char(')'))?;
             if self.consume(TokenKind::As) {
                 join_using_alias = Some(Box::new(Alias {
@@ -241,5 +241,30 @@ impl Parser {
             quals,
             ..JoinExpr::default()
         }))
+    }
+
+    fn parse_join_using_columns(&mut self) -> PResult<NodeList> {
+        let mut names = Vec::new();
+        loop {
+            if self.at_completion_cursor() {
+                self.record_completion_at(
+                    CompletionSlot::JoinUsingColumn,
+                    Expectation::Name(NameExpectation::Column(ColumnContext::JoinUsing)),
+                );
+                self.record_completion_at(
+                    CompletionSlot::JoinUsingColumn,
+                    Expectation::Token(TokenKind::Char(')')),
+                );
+                return Err(self.completion_stop());
+            }
+            let name = self
+                .consume_col_id()
+                .ok_or_else(|| self.error_here("expected a column name in JOIN USING"))?;
+            names.push(make_string_node(name));
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+        }
+        Ok(names)
     }
 }

@@ -398,6 +398,29 @@ impl Parser {
             }
         }
 
+        if self.at_completion_cursor() {
+            self.record_token_completions_at(
+                CompletionSlot::SelectContinuation,
+                &[
+                    TokenKind::Into,
+                    TokenKind::From,
+                    TokenKind::Where,
+                    TokenKind::GroupP,
+                    TokenKind::Having,
+                    TokenKind::Window,
+                    TokenKind::Order,
+                    TokenKind::Limit,
+                    TokenKind::Offset,
+                    TokenKind::Fetch,
+                    TokenKind::For,
+                    TokenKind::Union,
+                    TokenKind::Intersect,
+                    TokenKind::Except,
+                ],
+            );
+            return Err(self.completion_stop());
+        }
+
         if self.consume(TokenKind::Into) {
             stmt.into_clause = Some(Box::new(self.parse_select_into_clause()?));
         }
@@ -420,6 +443,26 @@ impl Parser {
                 TokenKind::Eof,
             ])?;
         }
+        if self.at_completion_cursor() {
+            self.record_token_completions_at(
+                CompletionSlot::SelectContinuation,
+                &[
+                    TokenKind::Where,
+                    TokenKind::GroupP,
+                    TokenKind::Having,
+                    TokenKind::Window,
+                    TokenKind::Order,
+                    TokenKind::Limit,
+                    TokenKind::Offset,
+                    TokenKind::Fetch,
+                    TokenKind::For,
+                    TokenKind::Union,
+                    TokenKind::Intersect,
+                    TokenKind::Except,
+                ],
+            );
+            return Err(self.completion_stop());
+        }
         if self.consume(TokenKind::Where) {
             stmt.where_clause = Some(self.parse_expr_box_strict_until_at(
                 CompletionSlot::SelectWhere,
@@ -439,6 +482,25 @@ impl Parser {
                     TokenKind::Eof,
                 ],
             )?);
+        }
+        if self.at_completion_cursor() {
+            self.record_token_completions_at(
+                CompletionSlot::SelectContinuation,
+                &[
+                    TokenKind::GroupP,
+                    TokenKind::Having,
+                    TokenKind::Window,
+                    TokenKind::Order,
+                    TokenKind::Limit,
+                    TokenKind::Offset,
+                    TokenKind::Fetch,
+                    TokenKind::For,
+                    TokenKind::Union,
+                    TokenKind::Intersect,
+                    TokenKind::Except,
+                ],
+            );
+            return Err(self.completion_stop());
         }
         if self.consume(TokenKind::GroupP) {
             self.expect(TokenKind::By)?;
@@ -470,6 +532,24 @@ impl Parser {
                     return Err(self.error_here("GROUP BY requires at least one expression"));
                 }
             }
+        }
+        if self.at_completion_cursor() {
+            self.record_token_completions_at(
+                CompletionSlot::SelectContinuation,
+                &[
+                    TokenKind::Having,
+                    TokenKind::Window,
+                    TokenKind::Order,
+                    TokenKind::Limit,
+                    TokenKind::Offset,
+                    TokenKind::Fetch,
+                    TokenKind::For,
+                    TokenKind::Union,
+                    TokenKind::Intersect,
+                    TokenKind::Except,
+                ],
+            );
+            return Err(self.completion_stop());
         }
         if self.consume(TokenKind::Having) {
             stmt.having_clause = Some(self.parse_expr_box_strict_until_at(

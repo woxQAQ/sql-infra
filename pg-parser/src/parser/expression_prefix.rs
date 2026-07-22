@@ -11,11 +11,7 @@ impl ExprParser {
 
     pub(super) fn parse_c_expr(&mut self) -> Option<Node> {
         if self.at_completion_cursor() {
-            if let Some(recorder) = &self.completion {
-                recorder
-                    .borrow_mut()
-                    .record_restricted_expression_at(self.active_completion_slot());
-            }
+            self.record_expression_completion_at(self.active_completion_slot(), true);
             return self.stop_for_completion();
         }
         if matches!(
@@ -67,17 +63,7 @@ impl ExprParser {
 
     pub(super) fn parse_prefix(&mut self, restricted: bool) -> Option<Node> {
         if self.at_completion_cursor() {
-            if let Some(recorder) = &self.completion {
-                if restricted {
-                    recorder
-                        .borrow_mut()
-                        .record_restricted_expression_at(self.active_completion_slot());
-                } else {
-                    recorder
-                        .borrow_mut()
-                        .record_expression_at(self.active_completion_slot());
-                }
-            }
+            self.record_expression_completion_at(self.active_completion_slot(), restricted);
             return self.stop_for_completion();
         }
         if let Some(constant) = self.try_parse_typed_constant() {

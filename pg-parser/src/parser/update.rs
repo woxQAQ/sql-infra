@@ -20,8 +20,7 @@ impl Parser {
             return Err(self.completion_stop());
         }
         let mut relation = Some(Box::new(
-            self.try_parse_range_var(false)
-                .ok_or_else(|| self.error_here("UPDATE requires a relation name"))?,
+            self.parse_range_var_at(CompletionSlot::UpdateTargetRelation, false)?,
         ));
         let for_portion_of = self.parse_for_portion_of_clause()?;
         if for_portion_of.is_some()
