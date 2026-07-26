@@ -4,7 +4,7 @@ impl Parser {
     pub(super) fn parse_create_prop_graph(&mut self, relpersistence: u8) -> PResult<Node> {
         self.expect(TokenKind::Graph)?;
         let mut pgname = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::PropertyGraph)
             .ok_or_else(|| self.error_here("CREATE PROPERTY GRAPH requires a name"))?;
         pgname.relpersistence = relpersistence;
         let pgname = Some(Box::new(pgname));
@@ -34,7 +34,7 @@ impl Parser {
     pub(super) fn parse_alter_prop_graph(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Graph)?;
         let pgname = Some(Box::new(
-            self.try_parse_qualified_range_var()
+            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::PropertyGraph)
                 .ok_or_else(|| self.error_here("ALTER PROPERTY GRAPH requires a name"))?,
         ));
         let mut stmt = AlterPropGraphStmt {
@@ -42,9 +42,23 @@ impl Parser {
             pgname,
             ..AlterPropGraphStmt::default()
         };
+        self.record_completion_tokens(&[
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Alter,
+            TokenKind::Rename,
+            TokenKind::Owner,
+            TokenKind::Set,
+        ]);
         match self.peek_kind() {
             TokenKind::AddP => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::Vertex,
+                    TokenKind::Node,
+                    TokenKind::Edge,
+                    TokenKind::Relationship,
+                ]);
                 if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
                     self.advance();
                     self.expect(TokenKind::Tables)?;
@@ -67,6 +81,12 @@ impl Parser {
             }
             TokenKind::Drop => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::Vertex,
+                    TokenKind::Node,
+                    TokenKind::Edge,
+                    TokenKind::Relationship,
+                ]);
                 let vertex = if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
                     self.advance();
                     true
@@ -89,6 +109,12 @@ impl Parser {
             }
             TokenKind::Alter => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::Vertex,
+                    TokenKind::Node,
+                    TokenKind::Edge,
+                    TokenKind::Relationship,
+                ]);
                 stmt.element_kind =
                     if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
                         self.advance();
@@ -105,6 +131,11 @@ impl Parser {
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("ALTER graph element requires an alias"))?,
                 );
+                self.record_completion_tokens(&[
+                    TokenKind::AddP,
+                    TokenKind::Drop,
+                    TokenKind::Alter,
+                ]);
                 match self.peek_kind() {
                     TokenKind::AddP => {
                         while self.consume(TokenKind::AddP) {
@@ -178,7 +209,7 @@ impl Parser {
         loop {
             let location = self.location();
             let mut vtable = self
-                .try_parse_qualified_range_var()
+                .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("expected a vertex table name"))?;
             if self.consume(TokenKind::As) {
                 let aliasname = self
@@ -219,7 +250,7 @@ impl Parser {
         loop {
             let location = self.location();
             let mut etable = self
-                .try_parse_qualified_range_var()
+                .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("expected an edge table name"))?;
             if self.consume(TokenKind::As) {
                 let aliasname = self
@@ -269,6 +300,7 @@ impl Parser {
         self.expect(keyword)?;
         if self.consume(TokenKind::Key) {
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot(completion::GrammarSlot::Column);
             let key = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             self.expect(TokenKind::References)?;
@@ -277,6 +309,7 @@ impl Parser {
                     self.error_here(format!("{label} REFERENCES requires an alias"))
                 })?);
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot(completion::GrammarSlot::Column);
             let columns = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             Ok((key, vertex, columns))
@@ -292,6 +325,7 @@ impl Parser {
     pub(super) fn parse_optional_key_clause(&mut self) -> PResult<NodeList> {
         if self.consume(TokenKind::Key) {
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot(completion::GrammarSlot::Column);
             let columns = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             Ok(columns)

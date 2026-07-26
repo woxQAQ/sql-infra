@@ -137,6 +137,45 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompletionLex {
+    pub tokens: Vec<Token>,
+    pub issues: Vec<LexError>,
+}
+
+/// Tokenize editor input without weakening the strict [`lex`] interface.
+///
+/// A lexical failure that starts at or after `point`, or whose invalid range
+/// reaches `point`, is represented by an `Incomplete` token. A failure wholly
+/// before `point` remains fatal because the parser cannot reliably infer the
+/// grammar state past it.
+pub fn lex_for_completion(input: &str, point: TextSize) -> Result<CompletionLex, LexError> {
+    let point = TextSize::try_from(usize::from(point).min(input.len()))
+        .expect("completion point was bounded by input length");
+    match lex(input) {
+        Ok(tokens) => Ok(CompletionLex {
+            tokens,
+            issues: Vec::new(),
+        }),
+        Err(error) if error.range.end() >= point => {
+            let safe_end = usize::from(error.range.start()).min(input.len());
+            let mut tokens = lex(&input[..safe_end])?;
+            tokens.pop();
+            tokens.push(Token {
+                kind: TokenKind::Incomplete,
+                range: error.range,
+                value: None,
+            });
+            tokens.push(Token::new(TokenKind::Eof, usize::from(error.range.end())));
+            Ok(CompletionLex {
+                tokens,
+                issues: vec![error],
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
 pub struct Lexer<'a> {
     input: &'a str,
     bytes: &'a [u8],
@@ -1100,5 +1139,31 @@ mod tests {
         let error = lex(sql).unwrap_err();
         assert_eq!(error.location(), sql.find('\'').unwrap());
         assert_eq!(usize::from(error.range.end()), sql.len());
+    }
+
+    #[test]
+    fn completion_lexing_recovers_only_at_or_after_the_point() {
+        let sql = "select  from \"unfinished";
+        let point = TextSize::new(7);
+        let recovered = lex_for_completion(sql, point).unwrap();
+        assert_eq!(recovered.issues.len(), 1);
+        assert!(
+            recovered
+                .tokens
+                .iter()
+                .any(|token| token.kind == TokenKind::Incomplete)
+        );
+
+        let earlier_error = "select 1e+ from users";
+        let point = TextSize::try_from(earlier_error.len()).unwrap();
+        assert!(lex_for_completion(earlier_error, point).is_err());
+    }
+
+    #[test]
+    fn strict_lexing_remains_strict_for_completion_input() {
+        let sql = "select \"unfinished";
+        assert!(lex(sql).is_err());
+        assert!(lex_for_completion(sql, TextSize::new(7)).is_ok());
+        assert!(lex(sql).is_err());
     }
 }

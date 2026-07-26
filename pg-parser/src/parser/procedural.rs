@@ -12,6 +12,7 @@ impl Parser {
         self.expect(TokenKind::ImportP)?;
         self.expect(TokenKind::Foreign)?;
         self.expect(TokenKind::Schema)?;
+        self.record_completion_slot(completion::GrammarSlot::Schema);
         let remote_schema =
             Some(self.consume_col_id().ok_or_else(|| {
                 self.error_here("IMPORT FOREIGN SCHEMA requires a remote schema")
@@ -32,11 +33,13 @@ impl Parser {
         };
         self.expect(TokenKind::From)?;
         self.expect(TokenKind::Server)?;
+        self.record_completion_slot(completion::GrammarSlot::ForeignServer);
         let server_name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("IMPORT FOREIGN SCHEMA requires a server"))?,
         );
         self.expect(TokenKind::Into)?;
+        self.record_completion_slot(completion::GrammarSlot::Schema);
         let local_schema = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("IMPORT FOREIGN SCHEMA requires a local schema"))?,
@@ -63,12 +66,23 @@ impl Parser {
     pub(super) fn parse_do(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Do)?;
         let mut args = Vec::new();
+        let mut saw_body = false;
+        let mut saw_language = false;
         while !self.at_statement_end() {
             let location = self.location();
+            if !saw_body {
+                self.record_completion_tokens(&[TokenKind::SConst]);
+            }
+            if !saw_language {
+                self.record_completion_tokens(&[TokenKind::Language]);
+            }
             if self.at(TokenKind::SConst) {
                 let value = self.consume_string_like().unwrap_or_default();
                 args.push(make_def_elem("as", Some(make_string_node(value)), location));
-            } else if self.consume(TokenKind::Language) {
+                saw_body = true;
+            } else if self.at(TokenKind::Language) {
+                self.advance();
+                self.record_completion_slot(completion::GrammarSlot::Language);
                 let language = self
                     .consume_non_reserved_word_or_sconst()
                     .ok_or_else(|| self.error_here("DO LANGUAGE requires a language name"))?;
@@ -77,6 +91,7 @@ impl Parser {
                     Some(make_string_node(language)),
                     location,
                 ));
+                saw_language = true;
             } else {
                 return Err(self.error_here("expected a DO code block or LANGUAGE clause"));
             }
@@ -104,10 +119,8 @@ impl Parser {
         self.expect(TokenKind::Wait)?;
         self.expect(TokenKind::For)?;
         self.expect(TokenKind::LsnP)?;
-        if !self.at(TokenKind::SConst) {
-            return Err(self.error_here("WAIT FOR LSN requires a string literal"));
-        }
-        let lsn_literal = self.consume_string_like();
+        let lsn_literal =
+            Some(self.consume_required_string("WAIT FOR LSN requires a string literal")?);
         let options = if self.consume(TokenKind::With) {
             self.parse_parenthesized_utility_option_list()?
         } else {

@@ -85,6 +85,12 @@ impl Parser {
             self.peek_kind(),
             TokenKind::Grant | TokenKind::Revoke | TokenKind::Eof
         ) {
+            self.record_completion_tokens(&[
+                TokenKind::For,
+                TokenKind::InP,
+                TokenKind::Grant,
+                TokenKind::Revoke,
+            ]);
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::For => {
@@ -120,12 +126,16 @@ impl Parser {
                 TokenKind::InP => {
                     self.advance();
                     self.expect(TokenKind::Schema)?;
-                    let schemas = self.parse_simple_name_list_until(&[
-                        TokenKind::Grant,
-                        TokenKind::Revoke,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?;
+                    self.record_completion_slot(completion::GrammarSlot::Schema);
+                    let schemas = self.parse_simple_name_list_until(
+                        &[
+                            TokenKind::Grant,
+                            TokenKind::Revoke,
+                            TokenKind::Char(';'),
+                            TokenKind::Eof,
+                        ],
+                        completion::GrammarSlot::Schema,
+                    )?;
                     if schemas.is_empty() {
                         return Err(self.error_here("IN SCHEMA requires at least one schema"));
                     }
@@ -174,6 +184,15 @@ impl Parser {
         };
         let privileges = self.parse_access_privileges()?;
         self.expect(TokenKind::On)?;
+        self.record_completion_tokens(&[
+            TokenKind::Tables,
+            TokenKind::Functions,
+            TokenKind::Routines,
+            TokenKind::Sequences,
+            TokenKind::TypesP,
+            TokenKind::Schemas,
+            TokenKind::LargeP,
+        ]);
         let objtype = match self.peek_kind() {
             TokenKind::Tables => ObjectType::Table,
             TokenKind::Functions | TokenKind::Routines => ObjectType::Function,
@@ -666,6 +685,7 @@ impl Parser {
         if !self.consume(TokenKind::Char('(')) {
             return Ok(Vec::new());
         }
+        self.record_completion_slot(completion::GrammarSlot::Column);
         let mut columns = Vec::new();
         loop {
             let column = self
@@ -693,12 +713,16 @@ impl Parser {
             self.advance();
             self.expect(TokenKind::InP)?;
             self.expect(TokenKind::Schema)?;
-            let objects = self.parse_simple_name_list_until(&[
-                TokenKind::To,
-                TokenKind::From,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?;
+            self.record_completion_slot(completion::GrammarSlot::Schema);
+            let objects = self.parse_simple_name_list_until(
+                &[
+                    TokenKind::To,
+                    TokenKind::From,
+                    TokenKind::Char(';'),
+                    TokenKind::Eof,
+                ],
+                completion::GrammarSlot::Schema,
+            )?;
             if objects.is_empty() {
                 return Err(self.error_here("IN SCHEMA requires at least one schema"));
             }
@@ -783,17 +807,22 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
+        let object_slot = completion::object_type_slot(objtype);
+        self.record_completion_slot(object_slot);
+        self.record_completion_slot_before(object_slot, &stops);
         let objects = match objtype {
             ObjectType::Function | ObjectType::Procedure | ObjectType::Routine => {
-                self.parse_object_with_args_list_until(&stops)?
+                self.parse_object_with_args_list_until_with_slot(&stops, object_slot)?
             }
             ObjectType::Table | ObjectType::Sequence | ObjectType::Propgraph => {
-                self.parse_privilege_qualified_name_list(&stops)?
+                self.parse_privilege_qualified_name_list_with_slot(&stops, object_slot)?
             }
-            ObjectType::Domain | ObjectType::Type => self.parse_any_name_list_until(&stops)?,
+            ObjectType::Domain | ObjectType::Type => {
+                self.parse_any_name_list_until_with_slot(&stops, object_slot)?
+            }
             ObjectType::Largeobject => self.parse_privilege_numeric_list(&stops)?,
             ObjectType::ParameterAcl => self.parse_parameter_name_list_until(&stops)?,
-            _ => self.parse_simple_name_list_until(&stops)?,
+            _ => self.parse_simple_name_list_until(&stops, object_slot)?,
         };
         if objects.is_empty() {
             return Err(self.error_here("expected at least one privilege target"));
@@ -801,11 +830,15 @@ impl Parser {
         Ok((GrantTargetType::Object, objtype, objects))
     }
 
-    fn parse_privilege_qualified_name_list(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+    fn parse_privilege_qualified_name_list_with_slot(
+        &mut self,
+        stops: &[TokenKind],
+        slot: completion::GrammarSlot,
+    ) -> PResult<NodeList> {
         let mut objects = Vec::new();
         loop {
             objects.push(Node::RangeVar(
-                self.try_parse_qualified_range_var()
+                self.try_parse_qualified_range_var_with_slot(slot)
                     .ok_or_else(|| self.error_here("expected a qualified relation name"))?,
             ));
             if !self.consume(TokenKind::Char(',')) {

@@ -63,10 +63,7 @@ impl Parser {
         let comment = if self.consume(TokenKind::NullP) {
             None
         } else {
-            if !self.at(TokenKind::SConst) {
-                return Err(self.error_here("COMMENT text must be a string or NULL"));
-            }
-            self.consume_string_like()
+            Some(self.consume_required_string("COMMENT text must be a string or NULL")?)
         };
         Ok(Node::CommentStmt(CommentStmt {
             node_tag: NodeTag::CommentStmt,
@@ -125,10 +122,7 @@ impl Parser {
         let label = if self.consume(TokenKind::NullP) {
             None
         } else {
-            if !self.at(TokenKind::SConst) {
-                return Err(self.error_here("security label must be a string or NULL"));
-            }
-            self.consume_string_like()
+            Some(self.consume_required_string("security label must be a string or NULL")?)
         };
         Ok(Node::SecLabelStmt(SecLabelStmt {
             node_tag: NodeTag::SecLabelStmt,
@@ -141,12 +135,17 @@ impl Parser {
 
     fn parse_described_object(&mut self, security_label: bool) -> PResult<(ObjectType, Node)> {
         if self.consume(TokenKind::Column) {
-            return Ok((ObjectType::Column, self.parse_any_name_object_until_is()?));
+            return Ok((
+                ObjectType::Column,
+                self.parse_any_name_object_until_is(completion::GrammarSlot::Column)?,
+            ));
         }
         if self.consume(TokenKind::TypeP) {
+            self.record_completion_slot(completion::GrammarSlot::Type);
             return Ok((ObjectType::Type, self.parse_type_object_until_is()?));
         }
         if self.consume(TokenKind::DomainP) {
+            self.record_completion_slot(completion::GrammarSlot::Domain);
             return Ok((ObjectType::Domain, self.parse_type_object_until_is()?));
         }
         if self.consume(TokenKind::Aggregate) {
@@ -164,13 +163,19 @@ impl Parser {
         if self.consume(TokenKind::Procedure) {
             return Ok((
                 ObjectType::Procedure,
-                Node::ObjectWithArgs(self.parse_object_with_args_until(&[TokenKind::Is])?),
+                Node::ObjectWithArgs(self.parse_object_with_args_until_with_slot(
+                    &[TokenKind::Is],
+                    completion::GrammarSlot::Procedure,
+                )?),
             ));
         }
         if self.consume(TokenKind::Routine) {
             return Ok((
                 ObjectType::Routine,
-                Node::ObjectWithArgs(self.parse_object_with_args_until(&[TokenKind::Is])?),
+                Node::ObjectWithArgs(self.parse_object_with_args_until_with_slot(
+                    &[TokenKind::Is],
+                    completion::GrammarSlot::Routine,
+                )?),
             ));
         }
         if self.consume(TokenKind::LargeP) {
@@ -186,9 +191,15 @@ impl Parser {
             if self.consume(TokenKind::Operator) {
                 if self.consume(TokenKind::Class) || self.consume(TokenKind::Family) {
                     let is_family = self.tokens[self.pos - 1].kind == TokenKind::Family;
+                    self.record_completion_slot(if is_family {
+                        completion::GrammarSlot::OperatorFamily
+                    } else {
+                        completion::GrammarSlot::OperatorClass
+                    });
                     let name_tokens = self.take_until_top_level(&[TokenKind::Using]);
                     let names = parse_any_name_tokens(&name_tokens)?;
                     self.expect(TokenKind::Using)?;
+                    self.record_completion_slot(completion::GrammarSlot::AccessMethod);
                     let method = self
                         .consume_col_id()
                         .ok_or_else(|| self.error_here("USING requires an access method name"))?;
@@ -231,8 +242,13 @@ impl Parser {
             }
             if self.consume(TokenKind::Transform) {
                 self.expect(TokenKind::For)?;
+                self.record_completion_slot_before(
+                    completion::GrammarSlot::Type,
+                    &[TokenKind::Language],
+                );
                 let type_tokens = self.take_until_top_level(&[TokenKind::Language]);
                 self.expect(TokenKind::Language)?;
+                self.record_completion_slot(completion::GrammarSlot::Language);
                 let language = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("LANGUAGE requires a name"))?;
@@ -248,18 +264,22 @@ impl Parser {
                 ));
             }
             if self.consume(TokenKind::Constraint) {
+                self.record_completion_slot(completion::GrammarSlot::Constraint);
                 let conname = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?;
                 self.expect(TokenKind::On)?;
                 if self.consume(TokenKind::DomainP) {
+                    self.record_completion_slot(completion::GrammarSlot::Domain);
                     let domain = self.parse_type_object_until_is()?;
                     return Ok((
                         ObjectType::Domconstraint,
                         name_list_node(vec![domain, make_string_node(conname)]),
                     ));
                 }
-                let mut names = self.parse_any_name_elements_until_is()?;
+                self.record_completion_slot(completion::GrammarSlot::Table);
+                let mut names =
+                    self.parse_any_name_elements_until_is(completion::GrammarSlot::Table)?;
                 names.push(make_string_node(conname));
                 return Ok((ObjectType::Tabconstraint, name_list_node(names)));
             }
@@ -269,11 +289,14 @@ impl Parser {
                 (TokenKind::Trigger, ObjectType::Trigger),
             ] {
                 if self.consume(kind) {
+                    self.record_completion_slot(completion::object_type_slot(objtype));
                     let name = self
                         .consume_col_id()
                         .ok_or_else(|| self.error_here("object requires a name"))?;
                     self.expect(TokenKind::On)?;
-                    let mut elements = self.parse_any_name_elements_until_is()?;
+                    self.record_completion_slot(completion::GrammarSlot::Table);
+                    let mut elements =
+                        self.parse_any_name_elements_until_is(completion::GrammarSlot::Table)?;
                     elements.push(make_string_node(name));
                     return Ok((objtype, name_list_node(elements)));
                 }
@@ -281,9 +304,11 @@ impl Parser {
         }
 
         let (objtype, identity_kind) = self.parse_simple_described_object_type(security_label)?;
+        let slot = completion::object_type_slot(objtype);
         let object = match identity_kind {
-            DescribedIdentityKind::AnyName => self.parse_any_name_object_until_is()?,
+            DescribedIdentityKind::AnyName => self.parse_any_name_object_until_is(slot)?,
             DescribedIdentityKind::Name => {
+                self.record_completion_slot(slot);
                 let name = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("object requires a name"))?;
@@ -405,13 +430,18 @@ impl Parser {
         Ok((objtype, DescribedIdentityKind::Name))
     }
 
-    fn parse_any_name_elements_until_is(&mut self) -> PResult<NodeList> {
+    fn parse_any_name_elements_until_is(
+        &mut self,
+        slot: completion::GrammarSlot,
+    ) -> PResult<NodeList> {
+        self.record_completion_slot(slot);
+        self.record_completion_slot_before(slot, &[TokenKind::Is]);
         let tokens = self.take_until_top_level(&[TokenKind::Is]);
         parse_any_name_tokens(&tokens)
     }
 
-    fn parse_any_name_object_until_is(&mut self) -> PResult<Node> {
-        Ok(name_list_node(self.parse_any_name_elements_until_is()?))
+    fn parse_any_name_object_until_is(&mut self, slot: completion::GrammarSlot) -> PResult<Node> {
+        Ok(name_list_node(self.parse_any_name_elements_until_is(slot)?))
     }
 
     fn parse_type_object_until_is(&mut self) -> PResult<Node> {

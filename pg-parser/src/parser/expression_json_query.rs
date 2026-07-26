@@ -238,8 +238,7 @@ impl ExprParser {
     pub(super) fn parse_json_array_agg(&mut self, location: usize) -> Option<Node> {
         let value = self.parse_json_value_expr()?;
         let mut agg_order = Vec::new();
-        if self.consume(TokenKind::Order) {
-            self.expect(TokenKind::By)?;
+        if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
             let start = self.pos;
             let mut end = start;
             let mut depth = 0usize;
@@ -261,7 +260,8 @@ impl ExprParser {
                 }
                 end += 1;
             }
-            match parse_sort_list_tokens(self.tokens[start..end].to_vec()) {
+            match parse_sort_list_tokens(self.tokens[start..end].to_vec(), self.completion.clone())
+            {
                 Ok(items) => agg_order = items,
                 Err(error) => {
                     if self.error.is_none() {
@@ -305,10 +305,17 @@ impl ExprParser {
         Some(())
     }
 }
-pub(super) fn parse_sort_list_tokens(mut tokens: Vec<Token>) -> PResult<NodeList> {
+pub(super) fn parse_sort_list_tokens(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<NodeList> {
     let location = tokens.last().map_or(0, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     let items = parser.parse_sort_list_strict_until(&[TokenKind::Eof])?;
     if !parser.at(TokenKind::Eof) {
         return Err(parser.error_here("unexpected token after sort list"));

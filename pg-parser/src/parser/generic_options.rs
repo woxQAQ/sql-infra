@@ -10,6 +10,7 @@ impl Parser {
         let mut options = Vec::new();
         loop {
             let location = self.location();
+            self.record_completion_slot(completion::GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("expected an option name"))?;
@@ -38,6 +39,7 @@ impl Parser {
         }
         let mut options = Vec::new();
         loop {
+            self.record_completion_tokens(&[TokenKind::Set, TokenKind::AddP, TokenKind::Drop]);
             let action = match self.peek_kind() {
                 TokenKind::Set => {
                     self.advance();
@@ -54,6 +56,7 @@ impl Parser {
                 _ => DefElemAction::Unspec,
             };
             let location = self.location();
+            self.record_completion_slot(completion::GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("expected an option name"))?;

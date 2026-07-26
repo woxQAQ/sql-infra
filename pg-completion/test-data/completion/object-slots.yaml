@@ -1,0 +1,75 @@
+- input: DROP AGGREGATE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Aggregate]
+
+- input: ALTER DOMAIN |
+  want:
+    candidates:
+      tokens: []
+      slots: [Domain]
+
+- input: ALTER FOREIGN DATA WRAPPER |
+  want:
+    candidates:
+      tokens: []
+      slots: [ForeignDataWrapper]
+
+- input: ALTER FOREIGN TABLE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [ForeignTable]
+
+- input: DROP OPERATOR FAMILY |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [OperatorFamily]
+
+- input: DROP ROUTINE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Routine]
+
+- input: ALTER SUBSCRIPTION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Subscription]
+
+- input: ALTER TEXT SEARCH CONFIGURATION |
+  want:
+    candidates:
+      tokens: []
+      slots: [TextSearchConfiguration]
+
+- input: DROP TRANSFORM FOR |
+  want:
+    candidates:
+      tokens: []
+      slots: [Type]
+
+- input: DROP TRANSFORM FOR int LANGUAGE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Language]
+
+- input: DROP USER MAPPING FOR |
+  want:
+    candidates:
+      tokens: [USER]
+      slots: [Role]
+
+- input: DROP USER MAPPING FOR role_name SERVER |
+  want:
+    candidates:
+      tokens: []
+      slots: [ForeignServer]

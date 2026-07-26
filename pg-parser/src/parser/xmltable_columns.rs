@@ -1,6 +1,9 @@
 use super::*;
 
-pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTableFuncCol> {
+pub(super) fn xmltable_column_from_tokens_with_completion(
+    tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<RangeTableFuncCol> {
     let location = tokens.first().map_or(0, |token| token.location());
     let colname = tokens
         .first()
@@ -10,7 +13,7 @@ pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTa
                 &[KeywordCategory::Unreserved, KeywordCategory::ColName],
             )
         })
-        .ok_or_else(|| ParseError::new(location, "expected an XMLTABLE column name"))?;
+        .ok_or_else(|| ParseError::syntax_exit(location, "expected an XMLTABLE column name"))?;
     if tokens.get(1).map(|token| token.kind) == Some(TokenKind::For)
         && tokens.get(2).map(|token| token.kind) == Some(TokenKind::Ordinality)
         && tokens.len() == 3
@@ -32,7 +35,7 @@ pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTa
         .unwrap_or(tokens.len());
     let type_name = tokens_to_type_name(tokens[1..option_start].to_vec())
         .map(Box::new)
-        .ok_or_else(|| ParseError::new(location, "expected an XMLTABLE column type"))?;
+        .ok_or_else(|| ParseError::syntax_exit(location, "expected an XMLTABLE column type"))?;
     let mut column = RangeTableFuncCol {
         node_tag: NodeTag::RangeTableFuncCol,
         colname: Some(colname.clone()),
@@ -79,10 +82,13 @@ pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTa
                 index += 1;
                 let start = index;
                 index = xmltable_option_expression_end(&tokens, start);
-                let expression = parse_b_expression_tokens(tokens[start..index].to_vec())?;
+                let expression = parse_b_expression_tokens_with_completion(
+                    tokens[start..index].to_vec(),
+                    completion.clone(),
+                )?;
                 if is_path {
                     if column.colexpr.is_some() {
-                        return Err(ParseError::new(
+                        return Err(ParseError::syntax_exit(
                             option_location,
                             "only one PATH value per column is allowed",
                         ));
@@ -90,7 +96,7 @@ pub(super) fn xmltable_column_from_tokens(tokens: Vec<Token>) -> PResult<RangeTa
                     column.colexpr = Some(Box::new(expression));
                 } else {
                     if column.coldefexpr.is_some() {
-                        return Err(ParseError::new(
+                        return Err(ParseError::syntax_exit(
                             option_location,
                             "only one DEFAULT value is allowed",
                         ));

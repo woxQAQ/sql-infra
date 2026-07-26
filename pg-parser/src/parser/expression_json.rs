@@ -148,9 +148,15 @@ impl ExprParser {
                 | TokenKind::Keep
                 | TokenKind::Omit
                 | TokenKind::Char(')')
+                | TokenKind::Completion
                 | TokenKind::Eof
         ) {
             type_tokens.push(self.advance().clone());
+        }
+        if self.at_completion() {
+            self.record_completion_slot(completion::GrammarSlot::Type);
+            self.record_completion_tokens(&[TokenKind::Format]);
+            return self.fail("completion point in JSON RETURNING type");
         }
         let type_name = tokens_to_type_name(type_tokens).map(Box::new)?;
         let format = Some(Box::new(
@@ -251,7 +257,6 @@ impl ExprParser {
     pub(super) fn parse_json_array_constructor(&mut self, location: usize) -> Option<Node> {
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
-            self.expect(TokenKind::Char(')'))?;
             let mut depth = 0usize;
             let mut suffix_start = tokens.len();
             for (index, token) in tokens.iter().enumerate() {
@@ -268,8 +273,28 @@ impl ExprParser {
                     _ => {}
                 }
             }
-            let query = self.parse_nested_select(tokens[..suffix_start].to_vec())?;
-            let mut suffix = ExprParser::new(tokens[suffix_start..].to_vec());
+            let completion_in_suffix = self.at_completion() && suffix_start < tokens.len();
+            let query = if completion_in_suffix {
+                match parse_select_statement_tokens_with_completion(
+                    tokens[..suffix_start].to_vec(),
+                    self.completion.clone(),
+                ) {
+                    Ok(query) => query,
+                    Err(error) => {
+                        if self.error.is_none() {
+                            self.error = Some(error);
+                        }
+                        return None;
+                    }
+                }
+            } else {
+                self.parse_nested_select(tokens[..suffix_start].to_vec())?
+            };
+            let mut suffix_tokens = tokens[suffix_start..].to_vec();
+            if completion_in_suffix {
+                suffix_tokens.push(self.peek().clone());
+            }
+            let mut suffix = ExprParser::with_completion(suffix_tokens, self.completion.clone());
             let format = match suffix.parse_json_format() {
                 Some(format) => Some(Box::new(format.unwrap_or_else(default_json_format))),
                 None => {
@@ -288,6 +313,7 @@ impl ExprParser {
                     return None;
                 }
             };
+            self.expect(TokenKind::Char(')'))?;
             if !suffix.at(TokenKind::Eof) {
                 return self.fail("unexpected token after JSON_ARRAY query clauses");
             }
@@ -336,23 +362,26 @@ impl ExprParser {
         }))
     }
 }
-pub(super) fn parse_json_value_expr_tokens(tokens: Vec<Token>) -> PResult<JsonValueExpr> {
+pub(super) fn parse_json_value_expr_tokens_with_completion(
+    tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<JsonValueExpr> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "expected a JSON value expression",
         ));
     }
-    let mut parser = ExprParser::new(tokens);
+    let mut parser = ExprParser::with_completion(tokens, completion);
     let value = parser.parse_json_value_expr().ok_or_else(|| {
         parser
             .error
             .take()
-            .unwrap_or_else(|| ParseError::new(location, "invalid JSON value expression"))
+            .unwrap_or_else(|| ParseError::syntax_exit(location, "invalid JSON value expression"))
     })?;
     if !parser.at(TokenKind::Eof) {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             parser.location(),
             "unexpected token after JSON value expression",
         ));

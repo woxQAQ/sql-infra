@@ -2,6 +2,8 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
+use pg_parser::{GrammarSlot, TextSize, collect_expectations, lex};
+
 use super::smoke::CASES;
 
 fn names_between(source: &str, start: &str, end: &str) -> BTreeSet<String> {
@@ -55,6 +57,56 @@ fn contains_braced_constructor(source: &str, name: &str) -> bool {
             before.is_none_or(|ch| !ch.is_ascii_alphanumeric() && ch != '_');
         has_identifier_boundary && after.trim_start().starts_with('{')
     })
+}
+
+#[test]
+fn completion_collection_handles_every_smoke_statement_token_boundary() {
+    for case in CASES {
+        let tokens = lex(case.sql)
+            .unwrap_or_else(|error| panic!("failed to lex smoke case {:?}: {error}", case.sql));
+        let mut points = tokens
+            .iter()
+            .flat_map(|token| [token.range.start(), token.range.end()])
+            .collect::<Vec<_>>();
+        points.sort_unstable();
+        points.dedup();
+
+        for point in points {
+            collect_expectations(case.sql, point).unwrap_or_else(|error| {
+                panic!(
+                    "completion collection failed for {:?} at byte {}: {error}",
+                    case.sql,
+                    usize::from(point)
+                )
+            });
+        }
+
+        let complete = collect_expectations(
+            case.sql,
+            TextSize::try_from(case.sql.len()).expect("smoke SQL length fits TextSize"),
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "completion collection failed for complete smoke case {:?}: {error}",
+                case.sql
+            )
+        });
+        assert!(
+            !complete.tokens.contains(&pg_parser::TokenKind::Char(';')),
+            "complete smoke case published the statement terminator for {:?}: {:?}",
+            case.sql,
+            complete.tokens
+        );
+        assert!(
+            complete
+                .slots
+                .iter()
+                .all(|slot| *slot == GrammarSlot::Operator),
+            "complete smoke case published a stale object slot for {:?}: {:?}",
+            case.sql,
+            complete.slots
+        );
+    }
 }
 
 #[test]

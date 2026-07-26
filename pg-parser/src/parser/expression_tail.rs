@@ -3,9 +3,32 @@ use super::*;
 
 impl ExprParser {
     pub(super) fn parse_name_nodes(&mut self) -> Option<NodeList> {
+        self.parse_name_nodes_with_slots(
+            &[
+                completion::GrammarSlot::Column,
+                completion::GrammarSlot::Function,
+            ],
+            true,
+        )
+    }
+
+    pub(super) fn parse_name_nodes_with_slots(
+        &mut self,
+        slots: &[completion::GrammarSlot],
+        allow_star: bool,
+    ) -> Option<NodeList> {
         let mut fields = Vec::new();
         loop {
-            if self.consume(TokenKind::Char('*')) {
+            if self.at_completion() {
+                for slot in slots {
+                    self.record_completion_slot(*slot);
+                }
+                if allow_star {
+                    self.record_completion_tokens(&[TokenKind::Char('*')]);
+                }
+                return self.fail("completion point in a qualified name");
+            }
+            if allow_star && self.consume(TokenKind::Char('*')) {
                 fields.push(Node::AStar(AStar {
                     node_tag: NodeTag::AStar,
                 }));
@@ -89,8 +112,8 @@ impl ExprParser {
         let location = self.expect(TokenKind::Char('('))?.location();
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
-            self.expect(TokenKind::Char(')'))?;
             let subselect = self.parse_nested_select(tokens)?;
+            self.expect(TokenKind::Char(')'))?;
             return Some(Node::SubLink(SubLink {
                 xpr: Expr::new(NodeTag::SubLink),
                 sub_link_type: SubLinkType::ExprSublink,
@@ -122,8 +145,9 @@ impl ExprParser {
             return None;
         }
         let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        let subselect = self.parse_nested_select(tokens)?;
         self.expect(TokenKind::Char(')'))?;
-        self.parse_nested_select(tokens)
+        Some(subselect)
     }
 
     pub(super) fn parse_keyword_call_as_coalesce(&mut self) -> Option<Node> {
@@ -189,12 +213,13 @@ impl ExprParser {
                 let list_start = self.expect(TokenKind::Char('('))?.location();
                 if self.starts_statement() {
                     let tokens = self.take_until_balanced(TokenKind::Char(')'));
+                    let subselect = self.parse_nested_select(tokens)?;
                     self.expect(TokenKind::Char(')'))?;
                     let sublink = Node::SubLink(SubLink {
                         xpr: Expr::new(NodeTag::SubLink),
                         sub_link_type: SubLinkType::AnySublink,
                         testexpr: Some(Box::new(lhs)),
-                        subselect: self.parse_nested_select(tokens).map(Box::new),
+                        subselect: Some(Box::new(subselect)),
                         location: location as ParseLoc,
                         ..SubLink::default()
                     });
@@ -306,6 +331,9 @@ impl ExprParser {
         let location = self.expect(TokenKind::Operator)?.location();
         self.expect(TokenKind::Char('('))?;
         let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        if self.at_completion() {
+            self.record_completion_slot(completion::GrammarSlot::Operator);
+        }
         self.expect(TokenKind::Char(')'))?;
         match parse_operator_name_tokens(tokens, location) {
             Ok(name) => Some(name),
@@ -338,13 +366,14 @@ impl ExprParser {
         self.expect(TokenKind::Char('('))?;
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
+            let subselect = self.parse_nested_select(tokens)?;
             self.expect(TokenKind::Char(')'))?;
             Some(Node::SubLink(SubLink {
                 xpr: Expr::new(NodeTag::SubLink),
                 sub_link_type,
                 testexpr: Some(Box::new(lhs)),
                 oper_name: operator_name,
-                subselect: self.parse_nested_select(tokens).map(Box::new),
+                subselect: Some(Box::new(subselect)),
                 location: location as ParseLoc,
                 ..SubLink::default()
             }))
@@ -561,6 +590,9 @@ impl ExprParser {
         let mut best = None;
         for end in start + 1..self.tokens.len() {
             let token = &self.tokens[end - 1];
+            if token.kind == TokenKind::Completion {
+                self.record_completion_slot(completion::GrammarSlot::Type);
+            }
             if end - 1 > start
                 && depth == 0
                 && (expression_boundary(token.kind)
@@ -619,7 +651,7 @@ impl ExprParser {
 
     pub(super) fn fail<T>(&mut self, message: impl Into<std::string::String>) -> Option<T> {
         if self.error.is_none() {
-            self.error = Some(ParseError::ranged(self.peek().range, message));
+            self.error = Some(self.error_here(message));
         }
         None
     }
@@ -628,6 +660,9 @@ impl ExprParser {
         let mut out = Vec::new();
         let mut depth = 0usize;
         while !self.at(TokenKind::Eof) {
+            if self.at_completion() {
+                break;
+            }
             let kind = self.peek_kind();
             if depth == 0 && kind == stop {
                 break;
@@ -675,6 +710,10 @@ impl ExprParser {
     }
 
     pub(super) fn consume(&mut self, kind: TokenKind) -> bool {
+        if self.at_completion() {
+            self.record_completion_tokens(&[kind]);
+            return false;
+        }
         if self.at(kind) {
             self.pos += 1;
             true
@@ -683,7 +722,28 @@ impl ExprParser {
         }
     }
 
+    /// Optional match of a fixed multi-token unit: if the head token matches,
+    /// every following token is required. Publishes the whole phrase as one
+    /// completion unit.
+    pub(super) fn consume_phrase(&mut self, phrase: &'static [TokenKind]) -> Option<bool> {
+        self.record_completion_phrase(phrase);
+        if !self.consume(phrase[0]) {
+            return Some(false);
+        }
+        for kind in &phrase[1..] {
+            self.expect(*kind)?;
+        }
+        Some(true)
+    }
+
     pub(super) fn expect(&mut self, kind: TokenKind) -> Option<Token> {
+        if self.at_completion() {
+            self.record_completion_tokens(&[kind]);
+            if self.error.is_none() {
+                self.error = Some(self.error_here(format!("expected {kind:?}")));
+            }
+            return None;
+        }
         if self.at(kind) {
             Some(self.advance().clone())
         } else {
@@ -692,7 +752,7 @@ impl ExprParser {
     }
 
     pub(super) fn advance(&mut self) -> &Token {
-        if !self.at(TokenKind::Eof) {
+        if !matches!(self.peek_kind(), TokenKind::Eof | TokenKind::Completion) {
             self.pos += 1;
         }
         &self.tokens[self.pos.saturating_sub(1)]
@@ -722,5 +782,44 @@ impl ExprParser {
             .get(self.pos.saturating_sub(1))
             .map(|token| token.location())
             .unwrap_or_else(|| self.location())
+    }
+
+    pub(super) fn at_completion(&self) -> bool {
+        self.at(TokenKind::Completion)
+    }
+
+    pub(super) fn record_completion_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_slot(&self, slot: completion::GrammarSlot) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().slot(slot);
+        }
+    }
+
+    pub(super) fn record_completion_phrase(&self, phrase: &'static [TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().phrase(phrase);
+        }
+    }
+
+    pub(super) fn error_here(&self, message: impl Into<std::string::String>) -> ParserExit {
+        if self.at_completion() && self.completion.is_some() {
+            ParserExit::completion(self.peek().range)
+        } else {
+            ParseError::ranged(self.peek().range, message)
+        }
     }
 }

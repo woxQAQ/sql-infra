@@ -9,11 +9,13 @@ impl Parser {
     //     [ WITH ( tablespace_option = value [, ... ] ) ]
     pub(super) fn parse_create_tablespace(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Tablespace)?;
+        self.record_completion_slot(completion::GrammarSlot::Tablespace);
         let tablespacename = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE TABLESPACE requires a name"))?,
         );
         let owner = if self.consume(TokenKind::Owner) {
+            self.record_completion_slot(completion::GrammarSlot::Role);
             Some(Box::new(
                 self.consume_role_spec()
                     .ok_or_else(|| self.error_here("OWNER requires a role"))?,
@@ -22,10 +24,7 @@ impl Parser {
             None
         };
         self.expect(TokenKind::Location)?;
-        if !self.at(TokenKind::SConst) {
-            return Err(self.error_here("TABLESPACE LOCATION requires a string"));
-        }
-        let location = self.consume_string_like();
+        let location = Some(self.consume_required_string("TABLESPACE LOCATION requires a string")?);
         let options = if self.consume(TokenKind::With) {
             self.parse_parenthesized_reloptions()?
         } else {
@@ -48,6 +47,7 @@ impl Parser {
     // ALTER TABLESPACE name RESET ( tablespace_option [, ... ] )
     pub(super) fn parse_alter_tablespace(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Tablespace)?;
+        self.record_completion_slot(completion::GrammarSlot::Tablespace);
         let tablespacename = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER TABLESPACE requires a tablespace name"))?,
@@ -90,6 +90,7 @@ impl Parser {
     pub(super) fn parse_drop_tablespace(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Tablespace)?;
         let missing_ok = self.consume_if_exists()?;
+        self.record_completion_slot(completion::GrammarSlot::Tablespace);
         let tablespacename = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("DROP TABLESPACE requires a name"))?,

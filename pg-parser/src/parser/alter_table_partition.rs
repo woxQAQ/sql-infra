@@ -5,6 +5,11 @@ impl Parser {
         &mut self,
         objtype: ObjectType,
     ) -> PResult<AlterTableCmd> {
+        let partition_slot = if objtype == ObjectType::Index {
+            completion::GrammarSlot::Index
+        } else {
+            completion::GrammarSlot::Table
+        };
         let mut cmd = AlterTableCmd {
             node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
@@ -13,9 +18,12 @@ impl Parser {
             TokenKind::Attach => {
                 self.advance();
                 self.expect(TokenKind::Partition)?;
-                let name = Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                    self.error_here("ATTACH PARTITION requires a partition name")
-                })?);
+                let name = Box::new(
+                    self.try_parse_qualified_range_var_with_slot(partition_slot)
+                        .ok_or_else(|| {
+                            self.error_here("ATTACH PARTITION requires a partition name")
+                        })?,
+                );
                 let bound = if objtype == ObjectType::Index {
                     None
                 } else {
@@ -32,9 +40,12 @@ impl Parser {
             TokenKind::Detach => {
                 self.advance();
                 self.expect(TokenKind::Partition)?;
-                let name = Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                    self.error_here("DETACH PARTITION requires a partition name")
-                })?);
+                let name = Box::new(
+                    self.try_parse_qualified_range_var_with_slot(partition_slot)
+                        .ok_or_else(|| {
+                            self.error_here("DETACH PARTITION requires a partition name")
+                        })?,
+                );
                 let (concurrent, finalize) = if self.consume(TokenKind::Concurrently) {
                     (true, false)
                 } else if self.consume(TokenKind::Finalize) {
@@ -57,10 +68,12 @@ impl Parser {
             TokenKind::Split => {
                 self.advance();
                 self.expect(TokenKind::Partition)?;
-                let name =
-                    Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                        self.error_here("SPLIT PARTITION requires a partition name")
-                    })?);
+                let name = Box::new(
+                    self.try_parse_qualified_range_var_with_slot(partition_slot)
+                        .ok_or_else(|| {
+                            self.error_here("SPLIT PARTITION requires a partition name")
+                        })?,
+                );
                 self.expect(TokenKind::Into)?;
                 self.expect(TokenKind::Char('('))?;
                 let mut partlist = Vec::new();
@@ -69,10 +82,12 @@ impl Parser {
                 }
                 while !self.at(TokenKind::Char(')')) {
                     self.expect(TokenKind::Partition)?;
-                    let part_name =
-                        Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                            self.error_here("PARTITION requires a partition name")
-                        })?);
+                    let part_name = Box::new(
+                        self.try_parse_qualified_range_var_with_slot(partition_slot)
+                            .ok_or_else(|| {
+                                self.error_here("PARTITION requires a partition name")
+                            })?,
+                    );
                     let bound = Some(Box::new(self.parse_partition_bound()?));
                     partlist.push(Node::SinglePartitionSpec(SinglePartitionSpec {
                         node_tag: NodeTag::SinglePartitionSpec,
@@ -105,7 +120,7 @@ impl Parser {
                 }
                 while !self.at(TokenKind::Char(')')) {
                     let part = self
-                        .try_parse_qualified_range_var()
+                        .try_parse_qualified_range_var_with_slot(partition_slot)
                         .ok_or_else(|| self.error_here("expected a partition name"))?;
                     partlist.push(Node::RangeVar(part));
                     if !self.consume(TokenKind::Char(',')) {
@@ -117,9 +132,12 @@ impl Parser {
                 }
                 self.expect(TokenKind::Char(')'))?;
                 self.expect(TokenKind::Into)?;
-                let name = Box::new(self.try_parse_qualified_range_var().ok_or_else(|| {
-                    self.error_here("MERGE PARTITIONS INTO requires a partition name")
-                })?);
+                let name = Box::new(
+                    self.try_parse_qualified_range_var_with_slot(partition_slot)
+                        .ok_or_else(|| {
+                            self.error_here("MERGE PARTITIONS INTO requires a partition name")
+                        })?,
+                );
                 cmd.subtype = AlterTableType::MergePartitions;
                 cmd.def = Some(Box::new(Node::PartitionCmd(PartitionCmd {
                     node_tag: NodeTag::PartitionCmd,

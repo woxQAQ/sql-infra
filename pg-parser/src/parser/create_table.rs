@@ -148,8 +148,13 @@ impl Parser {
     ) -> PResult<Node> {
         self.expect(TokenKind::Table)?;
         let if_not_exists = self.consume_if_not_exists()?;
+        let target_slot = if foreign {
+            completion::GrammarSlot::ForeignTable
+        } else {
+            completion::GrammarSlot::Table
+        };
         let mut relation_node = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(target_slot)
             .ok_or_else(|| self.error_here("CREATE TABLE requires a relation name"))?;
         relation_node.relpersistence = relpersistence;
         let relation = Some(Box::new(relation_node));
@@ -167,7 +172,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::Of)?;
                 let parent = self
-                    .try_parse_qualified_range_var()
+                    .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("expected a partitioned parent table"))?;
                 inh_relations.push(Node::RangeVar(parent));
                 let elements = if self.consume(TokenKind::Char('(')) {
@@ -214,7 +219,7 @@ impl Parser {
             }
             while !self.at(TokenKind::Char(')')) {
                 let parent = self
-                    .try_parse_qualified_range_var()
+                    .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("expected an inherited relation"))?;
                 inh_relations.push(Node::RangeVar(parent));
                 if !self.consume(TokenKind::Char(',')) {
@@ -235,6 +240,7 @@ impl Parser {
                 None
             };
             let access_method = if self.consume(TokenKind::Using) {
+                self.record_completion_slot(completion::GrammarSlot::AccessMethod);
                 Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("expected an access method"))?,
@@ -252,6 +258,7 @@ impl Parser {
             };
             let oncommit = self.parse_on_commit_option()?;
             let tablespacename = if self.consume(TokenKind::Tablespace) {
+                self.record_completion_slot(completion::GrammarSlot::Tablespace);
                 Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("expected a tablespace name"))?,
@@ -278,6 +285,7 @@ impl Parser {
         };
         if foreign {
             self.expect(TokenKind::Server)?;
+            self.record_completion_slot(completion::GrammarSlot::ForeignServer);
             let servername = Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("expected a foreign server name"))?,
@@ -310,6 +318,7 @@ impl Parser {
             Vec::new()
         };
         let access_method = if self.consume(TokenKind::Using) {
+            self.record_completion_slot(completion::GrammarSlot::AccessMethod);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("USING requires an access method"))?,
@@ -327,6 +336,7 @@ impl Parser {
         };
         let on_commit = self.parse_on_commit_option()?;
         let table_space_name = if self.consume(TokenKind::Tablespace) {
+            self.record_completion_slot(completion::GrammarSlot::Tablespace);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?,
@@ -360,7 +370,7 @@ impl Parser {
         }
         let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
-        let query = Some(Box::new(parse_select_statement_tokens(query_tokens)?));
+        let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
         Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
             node_tag: NodeTag::CreateTableAsStmt,
             query,
@@ -426,7 +436,7 @@ impl Parser {
         self.expect(TokenKind::View)?;
         let if_not_exists = self.consume_if_not_exists()?;
         let mut relation = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(completion::object_type_slot(objtype))
             .ok_or_else(|| self.error_here("CREATE MATERIALIZED VIEW requires a name"))?;
         relation.relpersistence = relpersistence;
         let rel = Some(Box::new(relation));
@@ -438,6 +448,7 @@ impl Parser {
             Vec::new()
         };
         let access_method = if self.consume(TokenKind::Using) {
+            self.record_completion_slot(completion::GrammarSlot::AccessMethod);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("USING requires an access method"))?,
@@ -451,6 +462,7 @@ impl Parser {
             Vec::new()
         };
         let table_space_name = if self.consume(TokenKind::Tablespace) {
+            self.record_completion_slot(completion::GrammarSlot::Tablespace);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?,
@@ -461,7 +473,7 @@ impl Parser {
         self.expect(TokenKind::As)?;
         let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
-        let query = Some(Box::new(parse_select_statement_tokens(query_tokens)?));
+        let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
         Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
             node_tag: NodeTag::CreateTableAsStmt,
             query,

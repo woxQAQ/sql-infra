@@ -40,6 +40,13 @@ impl Parser {
         match self.peek_kind() {
             TokenKind::Reset => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::All,
+                    TokenKind::Time,
+                    TokenKind::Transaction,
+                    TokenKind::Session,
+                ]);
+                self.record_completion_slot(completion::GrammarSlot::AnyName);
                 let (kind, name) =
                     match self.peek_kind() {
                         TokenKind::All => {
@@ -90,6 +97,17 @@ impl Parser {
             _ => return Err(self.error_here("expected SET or RESET")),
         }
 
+        self.record_completion_tokens(&[
+            TokenKind::Local,
+            TokenKind::Session,
+            TokenKind::Transaction,
+            TokenKind::Time,
+            TokenKind::Schema,
+            TokenKind::Names,
+            TokenKind::Role,
+            TokenKind::XmlP,
+        ]);
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let is_local = allow_scope && self.consume(TokenKind::Local);
         if allow_scope
             && self.at(TokenKind::Session)
@@ -140,6 +158,8 @@ impl Parser {
                 if self.consume(TokenKind::Default) || self.consume(TokenKind::Local) {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
+                    self.record_completion_tokens(&[TokenKind::Default, TokenKind::Local]);
+                    self.record_completion_slot(completion::GrammarSlot::AnyName);
                     let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
                     stmt.args = vec![parse_time_zone_value_tokens(tokens)?];
                 }
@@ -163,11 +183,7 @@ impl Parser {
                 } else if self.at_statement_end() {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
-                    let value = self
-                        .at(TokenKind::SConst)
-                        .then(|| self.consume_string_like())
-                        .flatten()
-                        .ok_or_else(|| self.error_here("SET NAMES requires an encoding"))?;
+                    let value = self.consume_required_string("SET NAMES requires an encoding")?;
                     stmt.args = vec![Node::AConst(AConst::string(
                         value,
                         self.previous_location() as ParseLoc,
@@ -178,6 +194,7 @@ impl Parser {
             TokenKind::Role => {
                 self.advance();
                 stmt.name = Some("role".to_owned());
+                self.record_completion_slot(completion::GrammarSlot::Role);
                 let value = self
                     .consume_non_reserved_word_or_sconst()
                     .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
@@ -194,6 +211,7 @@ impl Parser {
                 if self.consume(TokenKind::Default) {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
+                    self.record_completion_slot(completion::GrammarSlot::Role);
                     let value = self.consume_non_reserved_word_or_sconst().ok_or_else(|| {
                         self.error_here("SET SESSION AUTHORIZATION requires a role")
                     })?;
@@ -273,6 +291,10 @@ impl Parser {
                 TokenKind::Char(';'),
                 TokenKind::Eof,
             ]);
+            if self.at_completion() && tokens.is_empty() {
+                self.record_completion_tokens(&[TokenKind::Default]);
+                self.record_completion_slot(completion::GrammarSlot::AnyName);
+            }
             args.push(parse_setting_value_tokens(tokens)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -298,6 +320,13 @@ impl Parser {
     // SHOW ALL
     pub(super) fn parse_variable_show(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Show)?;
+        self.record_completion_tokens(&[
+            TokenKind::All,
+            TokenKind::Time,
+            TokenKind::Transaction,
+            TokenKind::Session,
+        ]);
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let name = Some(match self.peek_kind() {
             TokenKind::All => {
                 self.advance();
@@ -437,6 +466,7 @@ impl Parser {
                     if self.consume(TokenKind::To) {
                         stmt.kind = TransactionStmtKind::RollbackTo;
                         self.consume(TokenKind::Savepoint);
+                        self.record_completion_slot(completion::GrammarSlot::AnyName);
                         let location = self.location();
                         stmt.savepoint_name =
                             Some(self.consume_col_id().ok_or_else(|| {
@@ -456,6 +486,7 @@ impl Parser {
             }
             TokenKind::Savepoint => {
                 stmt.kind = TransactionStmtKind::Savepoint;
+                self.record_completion_slot(completion::GrammarSlot::AnyName);
                 let location = self.location();
                 stmt.savepoint_name = Some(
                     self.consume_col_id()
@@ -466,6 +497,7 @@ impl Parser {
             TokenKind::Release => {
                 stmt.kind = TransactionStmtKind::Release;
                 self.consume(TokenKind::Savepoint);
+                self.record_completion_slot(completion::GrammarSlot::AnyName);
                 let location = self.location();
                 stmt.savepoint_name = Some(
                     self.consume_col_id()
@@ -490,6 +522,12 @@ impl Parser {
     fn parse_transaction_modes(&mut self) -> PResult<NodeList> {
         let mut options = Vec::new();
         while !self.at_statement_end() {
+            self.record_completion_tokens(&[
+                TokenKind::Isolation,
+                TokenKind::Read,
+                TokenKind::Deferrable,
+                TokenKind::Not,
+            ]);
             let location = self.location();
             let option = match self.peek_kind() {
                 TokenKind::Isolation => {
@@ -588,7 +626,7 @@ impl Parser {
 pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "SET requires a value"));
+        return Err(ParseError::syntax_exit(location, "SET requires a value"));
     }
     if tokens.len() == 1 {
         if matches!(tokens[0].kind, TokenKind::IConst | TokenKind::FConst) {
@@ -628,7 +666,7 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
     ) {
         return parse_expression_tokens(tokens);
     }
-    Err(ParseError::new(location, "invalid SET value"))
+    Err(ParseError::syntax_exit(location, "invalid SET value"))
 }
 
 pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
@@ -644,16 +682,18 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
         ) {
             return parse_setting_value_tokens(tokens);
         }
-        return Err(ParseError::new(location, "invalid time zone value"));
+        return Err(ParseError::syntax_exit(location, "invalid time zone value"));
     }
     if tokens.first().map(|token| token.kind) != Some(TokenKind::Interval) {
-        return Err(ParseError::new(location, "invalid time zone value"));
+        return Err(ParseError::syntax_exit(location, "invalid time zone value"));
     }
     if tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('(')) {
         let string_index = tokens
             .iter()
             .position(|token| token.kind == TokenKind::SConst)
-            .ok_or_else(|| ParseError::new(location, "time zone interval requires a string"))?;
+            .ok_or_else(|| {
+                ParseError::syntax_exit(location, "time zone interval requires a string")
+            })?;
         let qualifier = &tokens[string_index + 1..];
         if !matches!(
             qualifier,
@@ -675,7 +715,7 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
                 }
             ]
         ) {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 qualifier.first().map_or(location, |token| token.location()),
                 "time zone interval must be HOUR or HOUR TO MINUTE",
             ));

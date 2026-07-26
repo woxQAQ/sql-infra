@@ -2,6 +2,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_insert_column_list(&mut self) -> PResult<NodeList> {
+        self.record_completion_slot(completion::GrammarSlot::Column);
         let mut cols = Vec::new();
         if self.at(TokenKind::Char(')')) {
             return Err(self.error_here("column list cannot be empty"));
@@ -34,7 +35,7 @@ impl Parser {
         while !self.at(TokenKind::Char(')')) {
             if self.consume(TokenKind::Like) {
                 let relation = self
-                    .try_parse_qualified_range_var()
+                    .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("expected a relation after LIKE"))?;
                 let mut options = 0u32;
                 while matches!(
@@ -76,14 +77,19 @@ impl Parser {
                 }));
             } else {
                 let location = self.location();
-                let chunk =
+                let mut chunk =
                     self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                elements.push(parse_table_element_tokens(chunk).map_err(|mut error| {
-                    if error.location() == 0 {
-                        error.reanchor(location);
-                    }
-                    error
-                })?);
+                self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                self.append_completion_marker(&mut chunk);
+                elements.push(
+                    parse_table_element_tokens_with_completion(chunk, self.completion.clone())
+                        .map_err(|mut error| {
+                            if error.location() == 0 {
+                                error.reanchor(location);
+                            }
+                            error
+                        })?,
+                );
             }
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -103,14 +109,18 @@ impl Parser {
         }
         while !self.at(TokenKind::Char(')')) {
             let location = self.location();
-            let chunk = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let mut chunk =
+                self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            self.append_completion_marker(&mut chunk);
             elements.push(
-                parse_typed_table_element_tokens(chunk).map_err(|mut error| {
-                    if error.location() == 0 {
-                        error.reanchor(location);
-                    }
-                    error
-                })?,
+                parse_typed_table_element_tokens_with_completion(chunk, self.completion.clone())
+                    .map_err(|mut error| {
+                        if error.location() == 0 {
+                            error.reanchor(location);
+                        }
+                        error
+                    })?,
             );
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -234,6 +244,7 @@ impl Parser {
 
     pub(super) fn parse_typed_column_options(&mut self) -> PResult<ColumnDef> {
         let location = self.location();
+        self.record_completion_slot(completion::GrammarSlot::Column);
         let colname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("expected a typed table column name"))?,
@@ -260,6 +271,7 @@ impl Parser {
         let mut coll_clause = None;
         while !self.at(TokenKind::Eof) {
             if self.consume(TokenKind::Collate) {
+                self.record_completion_slot(completion::GrammarSlot::Collation);
                 let coll_location = self.previous_location();
                 let collname = self.parse_name_list();
                 if collname.is_empty() {
@@ -278,6 +290,7 @@ impl Parser {
             }
             let con_location = self.location();
             let conname = if self.consume(TokenKind::Constraint) {
+                self.record_completion_slot(completion::GrammarSlot::Constraint);
                 Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
@@ -305,15 +318,29 @@ impl Parser {
         Ok((constraints, coll_clause))
     }
 }
-pub(super) fn parse_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
+pub(super) fn parse_table_element_tokens_with_completion(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<Node> {
     let location = tokens.last().map_or(0, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     parser.parse_table_element_inner()
 }
-pub(super) fn parse_typed_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
+pub(super) fn parse_typed_table_element_tokens_with_completion(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<Node> {
     let location = tokens.last().map_or(0, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     parser.parse_typed_table_element_inner()
 }

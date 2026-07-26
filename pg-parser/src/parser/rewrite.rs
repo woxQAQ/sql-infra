@@ -12,12 +12,19 @@ impl Parser {
     //     SELECT | INSERT | UPDATE | DELETE
     pub(super) fn parse_rule(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Rule)?;
+        self.record_completion_slot(completion::GrammarSlot::Rule);
         let rulename = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE RULE requires a name"))?,
         );
         self.expect(TokenKind::As)?;
         self.expect(TokenKind::On)?;
+        self.record_completion_tokens(&[
+            TokenKind::Select,
+            TokenKind::Update,
+            TokenKind::Insert,
+            TokenKind::DeleteP,
+        ]);
         let event = match self.advance().kind {
             TokenKind::Select => CmdType::Select,
             TokenKind::Update => CmdType::Update,
@@ -29,7 +36,7 @@ impl Parser {
         };
         self.expect(TokenKind::To)?;
         let relation = Some(Box::new(
-            self.try_parse_qualified_range_var()
+            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CREATE RULE requires a target relation"))?,
         ));
         let where_clause = if self.consume(TokenKind::Where) {
@@ -49,9 +56,27 @@ impl Parser {
         let actions = if self.consume(TokenKind::Nothing) {
             Vec::new()
         } else if self.consume(TokenKind::Char('(')) {
-            let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let mut tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
+            if self.at_completion() && tokens.is_empty() {
+                self.record_completion_tokens(&[
+                    TokenKind::With,
+                    TokenKind::Select,
+                    TokenKind::Values,
+                    TokenKind::Table,
+                    TokenKind::Char('('),
+                    TokenKind::Insert,
+                    TokenKind::Update,
+                    TokenKind::DeleteP,
+                    TokenKind::Notify,
+                ]);
+                return Err(self.error_here("completion point in rule action list"));
+            }
+            if self.at_completion() {
+                self.append_completion_marker(&mut tokens);
+            }
+            let actions =
+                parse_statement_list_tokens_with_completion(tokens, self.completion.clone())?;
             self.expect(TokenKind::Char(')'))?;
-            let actions = parse_statement_list_tokens(tokens)?;
             if actions.iter().any(|action| !is_rule_action(action)) {
                 return Err(self.error_here("invalid statement in rule action list"));
             }
@@ -91,7 +116,7 @@ impl Parser {
     ) -> PResult<Node> {
         self.expect(TokenKind::View)?;
         let mut view_node = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::View)
             .ok_or_else(|| self.error_here("CREATE VIEW requires a view name"))?;
         view_node.relpersistence = relpersistence;
         let aliases = if self.consume(TokenKind::Char('(')) {
@@ -131,7 +156,7 @@ impl Parser {
         if recursive && with_check_option != ViewCheckOption::NoCheckOption {
             return Err(self.error_here("WITH CHECK OPTION is not supported on recursive views"));
         }
-        let query = parse_select_statement_tokens(query_tokens)?;
+        let query = self.parse_select_fragment_tokens(query_tokens)?;
         let query = if recursive {
             make_recursive_view_select(&view_node, &aliases, query)?
         } else {
@@ -192,7 +217,7 @@ pub(super) fn make_recursive_view_select(
     query: Node,
 ) -> PResult<Node> {
     let relname = view.relname.clone().ok_or_else(|| {
-        ParseError::new(0, "recursive view requires an unqualified relation name")
+        ParseError::syntax_exit(0, "recursive view requires an unqualified relation name")
     })?;
     let cte = Node::CommonTableExpr(CommonTableExpr {
         node_tag: NodeTag::CommonTableExpr,
@@ -208,10 +233,9 @@ pub(super) fn make_recursive_view_select(
             let Node::String(alias) = alias else {
                 unreachable!("recursive view aliases are String nodes");
             };
-            let alias = alias
-                .sval
-                .clone()
-                .ok_or_else(|| ParseError::new(0, "recursive view alias cannot be empty"))?;
+            let alias = alias.sval.clone().ok_or_else(|| {
+                ParseError::syntax_exit(0, "recursive view alias cannot be empty")
+            })?;
             Ok(Node::ResTarget(ResTarget {
                 node_tag: NodeTag::ResTarget,
                 val: Some(Box::new(Node::ColumnRef(ColumnRef {
@@ -239,12 +263,19 @@ pub(super) fn make_recursive_view_select(
         ..SelectStmt::default()
     }))
 }
-pub(super) fn parse_statement_list_tokens(mut tokens: Vec<Token>) -> PResult<NodeList> {
+pub(super) fn parse_statement_list_tokens_with_completion(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<NodeList> {
     let location = tokens.last().map_or(0, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     Ok(parser
-        .parse()?
+        .parse_controlled()?
         .into_iter()
         .filter_map(|stmt| stmt.stmt.map(|node| *node))
         .collect())

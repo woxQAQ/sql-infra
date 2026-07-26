@@ -41,15 +41,15 @@ impl Parser {
             TokenKind::Configuration => ObjectType::Tsconfiguration,
             _ => return Err(self.error_here("invalid TEXT SEARCH object type")),
         };
-        let defnames = self.parse_name_list_until_keywords(&[
-            TokenKind::Char('('),
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ]);
+        let name_stops = [TokenKind::Char('('), TokenKind::Char(';'), TokenKind::Eof];
+        let slot = completion::object_type_slot(kind);
+        self.record_completion_slot(slot);
+        self.record_completion_slot_before(slot, &name_stops);
+        let defnames = self.parse_name_list_until_keywords(&name_stops);
         if defnames.is_empty() {
             return Err(self.error_here("TEXT SEARCH object requires a name"));
         }
-        let definition = self.parse_parenthesized_definition()?;
+        let definition = self.parse_parenthesized_definition_for(Some(kind))?;
         Ok(Node::DefineStmt(DefineStmt {
             node_tag: NodeTag::DefineStmt,
             kind,
@@ -68,11 +68,13 @@ impl Parser {
     // ALTER TEXT SEARCH DICTIONARY name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
     // ALTER TEXT SEARCH DICTIONARY name SET SCHEMA new_schema
     pub(super) fn parse_alter_ts_dictionary(&mut self) -> PResult<Node> {
-        let dictname = self.parse_name_list_until_keywords(&[
-            TokenKind::Char('('),
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ]);
+        let name_stops = [TokenKind::Char('('), TokenKind::Char(';'), TokenKind::Eof];
+        self.record_completion_slot(completion::GrammarSlot::TextSearchDictionary);
+        self.record_completion_slot_before(
+            completion::GrammarSlot::TextSearchDictionary,
+            &name_stops,
+        );
+        let dictname = self.parse_name_list_until_keywords(&name_stops);
         if dictname.is_empty() {
             return Err(self.error_here("text search dictionary requires a name"));
         }
@@ -101,13 +103,19 @@ impl Parser {
     // ALTER TEXT SEARCH CONFIGURATION name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
     // ALTER TEXT SEARCH CONFIGURATION name SET SCHEMA new_schema
     pub(super) fn parse_alter_ts_configuration(&mut self) -> PResult<Node> {
-        let cfgname = self.parse_name_list_until_keywords(&[
+        let name_stops = [
             TokenKind::AddP,
             TokenKind::Alter,
             TokenKind::Drop,
             TokenKind::Char(';'),
             TokenKind::Eof,
-        ]);
+        ];
+        self.record_completion_slot(completion::GrammarSlot::TextSearchConfiguration);
+        self.record_completion_slot_before(
+            completion::GrammarSlot::TextSearchConfiguration,
+            &name_stops,
+        );
+        let cfgname = self.parse_name_list_until_keywords(&name_stops);
         if cfgname.is_empty() {
             return Err(self.error_here("text search configuration requires a name"));
         }
@@ -116,43 +124,71 @@ impl Parser {
             cfgname,
             ..AlterTsConfigurationStmt::default()
         };
+        self.record_completion_tokens(&[
+            TokenKind::AddP,
+            TokenKind::Alter,
+            TokenKind::Drop,
+            TokenKind::Rename,
+            TokenKind::Set,
+            TokenKind::Owner,
+        ]);
         match self.peek_kind() {
             TokenKind::AddP => {
                 self.advance();
                 self.expect(TokenKind::Mapping)?;
                 self.expect(TokenKind::For)?;
-                stmt.tokentype = self.parse_simple_name_list_until(&[TokenKind::With])?;
+                stmt.tokentype = self.parse_simple_name_list_until(
+                    &[TokenKind::With],
+                    completion::GrammarSlot::AnyName,
+                )?;
                 self.expect(TokenKind::With)?;
-                stmt.dicts =
-                    self.parse_any_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                stmt.dicts = self.parse_any_name_list_until_with_slot(
+                    &[TokenKind::Char(';'), TokenKind::Eof],
+                    completion::GrammarSlot::TextSearchDictionary,
+                )?;
                 stmt.kind = AlterTsConfigType::AddMapping;
             }
             TokenKind::Alter => {
                 self.advance();
                 self.expect(TokenKind::Mapping)?;
                 if self.consume(TokenKind::For) {
-                    stmt.tokentype =
-                        self.parse_simple_name_list_until(&[TokenKind::With, TokenKind::Replace])?;
+                    stmt.tokentype = self.parse_simple_name_list_until(
+                        &[TokenKind::With, TokenKind::Replace],
+                        completion::GrammarSlot::AnyName,
+                    )?;
                     if self.consume(TokenKind::Replace) {
-                        let old = self.parse_one_any_name(&[TokenKind::With])?;
+                        let old = self.parse_one_any_name_with_slot(
+                            &[TokenKind::With],
+                            completion::GrammarSlot::TextSearchDictionary,
+                        )?;
                         self.expect(TokenKind::With)?;
-                        let new =
-                            self.parse_one_any_name(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                        let new = self.parse_one_any_name_with_slot(
+                            &[TokenKind::Char(';'), TokenKind::Eof],
+                            completion::GrammarSlot::TextSearchDictionary,
+                        )?;
                         stmt.kind = AlterTsConfigType::ReplaceDictForToken;
                         stmt.dicts = vec![old, new];
                         stmt.replace = true;
                     } else {
                         self.expect(TokenKind::With)?;
                         stmt.kind = AlterTsConfigType::AlterMappingForToken;
-                        stmt.dicts = self
-                            .parse_any_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                        stmt.dicts = self.parse_any_name_list_until_with_slot(
+                            &[TokenKind::Char(';'), TokenKind::Eof],
+                            completion::GrammarSlot::TextSearchDictionary,
+                        )?;
                         stmt.override_ = true;
                     }
                 } else {
                     self.expect(TokenKind::Replace)?;
-                    let old = self.parse_one_any_name(&[TokenKind::With])?;
+                    let old = self.parse_one_any_name_with_slot(
+                        &[TokenKind::With],
+                        completion::GrammarSlot::TextSearchDictionary,
+                    )?;
                     self.expect(TokenKind::With)?;
-                    let new = self.parse_one_any_name(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                    let new = self.parse_one_any_name_with_slot(
+                        &[TokenKind::Char(';'), TokenKind::Eof],
+                        completion::GrammarSlot::TextSearchDictionary,
+                    )?;
                     stmt.kind = AlterTsConfigType::ReplaceDict;
                     stmt.dicts = vec![old, new];
                     stmt.replace = true;
@@ -163,8 +199,10 @@ impl Parser {
                 self.expect(TokenKind::Mapping)?;
                 stmt.missing_ok = self.consume_if_exists()?;
                 self.expect(TokenKind::For)?;
-                stmt.tokentype =
-                    self.parse_simple_name_list_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+                stmt.tokentype = self.parse_simple_name_list_until(
+                    &[TokenKind::Char(';'), TokenKind::Eof],
+                    completion::GrammarSlot::AnyName,
+                )?;
                 stmt.kind = AlterTsConfigType::DropMapping;
             }
             _ => {

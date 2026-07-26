@@ -9,11 +9,13 @@ impl Parser {
     //     EXECUTE { FUNCTION | PROCEDURE } function_name()
     pub(super) fn parse_create_event_trigger(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Trigger)?;
+        self.record_completion_slot(completion::GrammarSlot::EventTrigger);
         let trigname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE EVENT TRIGGER requires a name"))?,
         );
         self.expect(TokenKind::On)?;
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let eventname = Some(
             self.consume_col_label()
                 .ok_or_else(|| self.error_here("event trigger requires an event name"))?,
@@ -22,6 +24,7 @@ impl Parser {
         if self.consume(TokenKind::When) {
             loop {
                 let location = self.location();
+                self.record_completion_slot(completion::GrammarSlot::AnyName);
                 let name = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("event trigger WHEN requires a variable"))?;
@@ -29,11 +32,8 @@ impl Parser {
                 self.expect(TokenKind::Char('('))?;
                 let mut values = Vec::new();
                 loop {
-                    if !self.at(TokenKind::SConst) {
-                        return Err(self.error_here("event trigger values must be strings"));
-                    }
                     values.push(make_string_node(
-                        self.consume_string_like().unwrap_or_default(),
+                        self.consume_required_string("event trigger values must be strings")?,
                     ));
                     if !self.consume(TokenKind::Char(',')) {
                         break;
@@ -50,6 +50,7 @@ impl Parser {
         if !self.consume(TokenKind::Function) {
             self.expect(TokenKind::Procedure)?;
         }
+        self.record_completion_slot(completion::GrammarSlot::Function);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("event trigger function requires a name"));
@@ -73,10 +74,17 @@ impl Parser {
     // ALTER EVENT TRIGGER name RENAME TO new_name
     pub(super) fn parse_alter_event_trigger(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Trigger)?;
+        self.record_completion_slot(completion::GrammarSlot::EventTrigger);
         let trigname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER EVENT TRIGGER requires a name"))?,
         );
+        self.record_completion_tokens(&[
+            TokenKind::EnableP,
+            TokenKind::DisableP,
+            TokenKind::Rename,
+            TokenKind::Owner,
+        ]);
         let tgenabled = match self.peek_kind() {
             TokenKind::EnableP => {
                 self.advance();
@@ -128,6 +136,7 @@ impl Parser {
         if isconstraint && replace {
             return Err(self.error_here("OR REPLACE is not supported for constraint triggers"));
         }
+        self.record_completion_slot(completion::GrammarSlot::Trigger);
         let trigname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE TRIGGER requires a name"))?,
@@ -136,6 +145,11 @@ impl Parser {
             self.expect(TokenKind::After)?;
             0
         } else {
+            self.record_completion_tokens(&[
+                TokenKind::Before,
+                TokenKind::After,
+                TokenKind::Instead,
+            ]);
             match self.peek_kind() {
                 TokenKind::Before => {
                     self.advance();
@@ -160,13 +174,14 @@ impl Parser {
         let (events, columns) = self.parse_trigger_events()?;
         self.expect(TokenKind::On)?;
         let relation = Some(Box::new(
-            self.try_parse_qualified_range_var()
+            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CREATE TRIGGER requires a relation"))?,
         ));
         let constrrel = if isconstraint && self.consume(TokenKind::From) {
-            Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
-                || self.error_here("FROM requires a relation"),
-            )?))
+            Some(Box::new(
+                self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                    .ok_or_else(|| self.error_here("FROM requires a relation"))?,
+            ))
         } else {
             None
         };
@@ -197,7 +212,7 @@ impl Parser {
                 }));
             }
             if transition_rels.is_empty() {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     transition_start,
                     "REFERENCING requires at least one transition relation",
                 ));
@@ -288,6 +303,7 @@ impl Parser {
         if !self.consume(TokenKind::Function) {
             self.expect(TokenKind::Procedure)?;
         }
+        self.record_completion_slot(completion::GrammarSlot::Function);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("trigger function requires a name"));
@@ -296,6 +312,13 @@ impl Parser {
         let mut args = Vec::new();
         if !self.at(TokenKind::Char(')')) {
             loop {
+                self.record_completion_tokens(&[
+                    TokenKind::IConst,
+                    TokenKind::FConst,
+                    TokenKind::SConst,
+                    TokenKind::Char(')'),
+                ]);
+                self.record_completion_slot(completion::GrammarSlot::AnyName);
                 let token = self.peek().clone();
                 let value = match (&token.kind, &token.value) {
                     (TokenKind::IConst, Some(TokenValue::Integer(value))) => {

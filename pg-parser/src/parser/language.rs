@@ -12,6 +12,7 @@ impl Parser {
         pltrusted: bool,
     ) -> PResult<Node> {
         self.expect(TokenKind::Language)?;
+        self.record_completion_slot(completion::GrammarSlot::Language);
         let plname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE LANGUAGE requires a name"))?,
@@ -24,11 +25,13 @@ impl Parser {
                 options: Vec::new(),
             }));
         }
+        self.record_completion_slot(completion::GrammarSlot::Function);
         let plhandler = self.parse_name_list();
         if plhandler.is_empty() {
             return Err(self.error_here("HANDLER requires a function name"));
         }
         let plinline = if self.consume(TokenKind::InlineP) {
+            self.record_completion_slot(completion::GrammarSlot::Function);
             let name = self.parse_name_list();
             if name.is_empty() {
                 return Err(self.error_here("INLINE requires a function name"));
@@ -38,6 +41,7 @@ impl Parser {
             Vec::new()
         };
         let plvalidator = if self.consume(TokenKind::Validator) {
+            self.record_completion_slot(completion::GrammarSlot::Function);
             let name = self.parse_name_list();
             if name.is_empty() {
                 return Err(self.error_here("VALIDATOR requires a function name"));

@@ -11,14 +11,17 @@ impl Parser {
     //   } [, ... ]
     pub(super) fn parse_create_op_class(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Class)?;
-        let opclassname = self.parse_name_list_until_keywords(&[
+        let name_stops = [
             TokenKind::Default,
             TokenKind::For,
             TokenKind::Using,
             TokenKind::As,
             TokenKind::Char(';'),
             TokenKind::Eof,
-        ]);
+        ];
+        self.record_completion_slot(completion::GrammarSlot::OperatorClass);
+        self.record_completion_slot_before(completion::GrammarSlot::OperatorClass, &name_stops);
+        let opclassname = self.parse_name_list_until_keywords(&name_stops);
         if opclassname.is_empty() {
             return Err(self.error_here("CREATE OPERATOR CLASS requires a name"));
         }
@@ -30,16 +33,19 @@ impl Parser {
             .map(Box::new)
             .ok_or_else(|| self.error_here("operator class requires a data type"))?;
         self.expect(TokenKind::Using)?;
+        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
         let amname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("USING requires an access method"))?,
         );
         let opfamilyname = if self.consume(TokenKind::Family) {
-            let family = self.parse_name_list_until_keywords(&[
-                TokenKind::As,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ]);
+            let family_stops = [TokenKind::As, TokenKind::Char(';'), TokenKind::Eof];
+            self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
+            self.record_completion_slot_before(
+                completion::GrammarSlot::OperatorFamily,
+                &family_stops,
+            );
+            let family = self.parse_name_list_until_keywords(&family_stops);
             if family.is_empty() {
                 return Err(self.error_here("FAMILY requires a name"));
             }
@@ -65,15 +71,15 @@ impl Parser {
     // CREATE OPERATOR FAMILY name USING index_method
     pub(super) fn parse_create_op_family(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Family)?;
-        let opfamilyname = self.parse_name_list_until_keywords(&[
-            TokenKind::Using,
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ]);
+        let name_stops = [TokenKind::Using, TokenKind::Char(';'), TokenKind::Eof];
+        self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
+        self.record_completion_slot_before(completion::GrammarSlot::OperatorFamily, &name_stops);
+        let opfamilyname = self.parse_name_list_until_keywords(&name_stops);
         if opfamilyname.is_empty() {
             return Err(self.error_here("CREATE OPERATOR FAMILY requires a name"));
         }
         self.expect(TokenKind::Using)?;
+        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
         let amname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("USING requires an access method"))?,
@@ -109,17 +115,21 @@ impl Parser {
     //     SET SCHEMA new_schema
     pub(super) fn parse_alter_op_family(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Family)?;
-        let opfamilyname = self.parse_name_list_until_keywords(&[
+        let name_stops = [
             TokenKind::Using,
             TokenKind::AddP,
             TokenKind::Drop,
             TokenKind::Char(';'),
             TokenKind::Eof,
-        ]);
+        ];
+        self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
+        self.record_completion_slot_before(completion::GrammarSlot::OperatorFamily, &name_stops);
+        let opfamilyname = self.parse_name_list_until_keywords(&name_stops);
         if opfamilyname.is_empty() {
             return Err(self.error_here("ALTER OPERATOR FAMILY requires a name"));
         }
         self.expect(TokenKind::Using)?;
+        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
         let amname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("USING requires an access method"))?,
@@ -151,6 +161,7 @@ impl Parser {
         stops: &[TokenKind],
     ) -> PResult<Box<Node>> {
         let location = self.location();
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let colname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("expected an attribute name"))?,
@@ -160,6 +171,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("attribute requires a data type"))?,
         ));
         let coll_clause = if self.consume(TokenKind::Collate) {
+            self.record_completion_slot(completion::GrammarSlot::Collation);
             let coll_location = self.previous_location();
             let collname = self.parse_name_list_until_keywords(stops);
             if collname.is_empty() {
@@ -188,6 +200,11 @@ impl Parser {
     pub(super) fn parse_opclass_item_list(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
         let mut items = Vec::new();
         while !self.at_any(stops) {
+            self.record_completion_tokens(&[
+                TokenKind::Operator,
+                TokenKind::Function,
+                TokenKind::Storage,
+            ]);
             let itemtype = match self.peek_kind() {
                 TokenKind::Operator => {
                     self.advance();
@@ -229,6 +246,10 @@ impl Parser {
                 ));
             } else {
                 if itemtype == 2 && self.consume(TokenKind::Char('(')) {
+                    self.record_completion_slot_before(
+                        completion::GrammarSlot::Type,
+                        &[TokenKind::Char(')')],
+                    );
                     let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
                     self.expect(TokenKind::Char(')'))?;
                     item.class_args = parse_type_node_list(tokens)?;
@@ -255,8 +276,7 @@ impl Parser {
                             "FOR SEARCH / FOR ORDER BY is only valid for operator class operators",
                         ));
                     }
-                    if self.consume(TokenKind::Order) {
-                        self.expect(TokenKind::By)?;
+                    if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
                         item.order_family = self.parse_name_list_until_keywords(&[
                             TokenKind::Char(','),
                             TokenKind::Char(';'),
@@ -287,6 +307,7 @@ impl Parser {
     pub(super) fn parse_opclass_drop_list(&mut self) -> PResult<NodeList> {
         let mut items = Vec::new();
         loop {
+            self.record_completion_tokens(&[TokenKind::Operator, TokenKind::Function]);
             let itemtype = if self.consume(TokenKind::Operator) {
                 1
             } else if self.consume(TokenKind::Function) {
@@ -299,6 +320,10 @@ impl Parser {
                 _ => return Err(self.error_here("expected an operator family item number")),
             };
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot_before(
+                completion::GrammarSlot::Type,
+                &[TokenKind::Char(')')],
+            );
             let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
             let class_args = parse_type_node_list(tokens)?;
             if class_args.is_empty() {

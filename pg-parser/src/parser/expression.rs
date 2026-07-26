@@ -3,17 +3,22 @@ use super::*;
 pub(super) struct ExprParser {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
-    pub(super) error: Option<ParseError>,
+    pub(super) error: Option<ParserExit>,
+    pub(super) completion: Option<completion::SharedCollector>,
 }
 
 impl ExprParser {
-    pub(super) fn new(mut tokens: Vec<Token>) -> Self {
+    pub(super) fn with_completion(
+        mut tokens: Vec<Token>,
+        completion: Option<completion::SharedCollector>,
+    ) -> Self {
         let location = tokens.last().map_or(0, Token::end_location);
         tokens.push(Token::synthetic(TokenKind::Eof, location));
         Self {
             tokens,
             pos: 0,
             error: None,
+            completion,
         }
     }
 
@@ -30,13 +35,10 @@ impl ExprParser {
         let node = self.parse_c_expr().ok_or_else(|| {
             self.error
                 .take()
-                .unwrap_or_else(|| ParseError::new(location, "invalid common expression"))
+                .unwrap_or_else(|| ParseError::syntax_exit(location, "invalid common expression"))
         })?;
         if !self.at(TokenKind::Eof) {
-            return Err(ParseError::ranged(
-                self.peek().range,
-                "unexpected token after common expression",
-            ));
+            return Err(self.error_here("unexpected token after common expression"));
         }
         Ok(node)
     }
@@ -44,21 +46,21 @@ impl ExprParser {
     pub(super) fn parse_complete(mut self, restricted: bool) -> PResult<Node> {
         let location = self.location();
         let node = self.parse_expr_mode(0, restricted).ok_or_else(|| {
-            self.error
-                .take()
-                .unwrap_or_else(|| ParseError::new(location, "invalid or unsupported expression"))
+            self.error.take().unwrap_or_else(|| {
+                ParseError::syntax_exit(location, "invalid or unsupported expression")
+            })
         })?;
         if !self.at(TokenKind::Eof) {
-            return Err(ParseError::ranged(
-                self.peek().range,
-                "unexpected token after expression",
-            ));
+            return Err(self.error_here("unexpected token after expression"));
         }
         Ok(node)
     }
 
-    pub(super) fn parse_nested_select(&mut self, tokens: Vec<Token>) -> Option<Node> {
-        match parse_select_statement_tokens(tokens) {
+    pub(super) fn parse_nested_select(&mut self, mut tokens: Vec<Token>) -> Option<Node> {
+        if self.at_completion() {
+            tokens.push(self.peek().clone());
+        }
+        match parse_select_statement_tokens_with_completion(tokens, self.completion.clone()) {
             Ok(node) => Some(node),
             Err(error) => {
                 if self.error.is_none() {
@@ -85,6 +87,16 @@ impl ExprParser {
         let mut saw_special_predicate = false;
 
         loop {
+            if self.at_completion() {
+                self.record_completion_infix(
+                    min_bp,
+                    restricted,
+                    saw_is_predicate,
+                    saw_comparison,
+                    saw_special_predicate,
+                );
+                break;
+            }
             lhs = match self.peek_kind() {
                 TokenKind::Char('[') => {
                     if 90 < min_bp {
@@ -133,7 +145,11 @@ impl ExprParser {
                         break;
                     }
                     let location = self.advance().location();
-                    let collname = self.parse_name_nodes()?;
+                    self.record_completion_slot(completion::GrammarSlot::Collation);
+                    let collname = self.parse_name_nodes_with_slots(
+                        &[completion::GrammarSlot::Collation],
+                        false,
+                    )?;
                     Node::CollateClause(CollateClause {
                         node_tag: NodeTag::CollateClause,
                         arg: Some(Box::new(lhs)),
@@ -427,5 +443,81 @@ impl ExprParser {
         }
 
         Some(lhs)
+    }
+
+    fn record_completion_infix(
+        &self,
+        min_bp: u8,
+        restricted: bool,
+        saw_is_predicate: bool,
+        saw_comparison: bool,
+        saw_special_predicate: bool,
+    ) {
+        if min_bp <= 90 {
+            self.record_completion_tokens(&[TokenKind::Char('['), TokenKind::Char('.')]);
+        }
+        if min_bp <= 80 {
+            self.record_completion_tokens(&[TokenKind::TypeCast]);
+            if !restricted {
+                self.record_completion_tokens(&[TokenKind::Collate]);
+            }
+        }
+        if !restricted && min_bp <= 70 {
+            self.record_completion_tokens(&[TokenKind::Isnull, TokenKind::Notnull]);
+        }
+        if !restricted && min_bp <= 60 {
+            self.record_completion_tokens(&[TokenKind::At]);
+        }
+        if min_bp <= 55 {
+            self.record_completion_tokens(&[TokenKind::Char('^')]);
+        }
+        if min_bp <= 50 {
+            self.record_completion_tokens(&[
+                TokenKind::Char('*'),
+                TokenKind::Char('/'),
+                TokenKind::Char('%'),
+            ]);
+        }
+        if min_bp <= 45 {
+            self.record_completion_tokens(&[TokenKind::Char('+'), TokenKind::Char('-')]);
+        }
+        if min_bp <= 40 {
+            self.record_completion_tokens(&[
+                TokenKind::RightArrow,
+                TokenKind::Char('|'),
+                TokenKind::Operator,
+            ]);
+            self.record_completion_slot(completion::GrammarSlot::Operator);
+        }
+        if !restricted && min_bp <= 35 && !saw_special_predicate {
+            self.record_completion_tokens(&[
+                TokenKind::Not,
+                TokenKind::InP,
+                TokenKind::Like,
+                TokenKind::Ilike,
+                TokenKind::Similar,
+                TokenKind::Between,
+                TokenKind::Overlaps,
+            ]);
+        }
+        if min_bp <= 30 && !saw_comparison {
+            self.record_completion_tokens(&[
+                TokenKind::Char('='),
+                TokenKind::Char('<'),
+                TokenKind::Char('>'),
+                TokenKind::LessEquals,
+                TokenKind::GreaterEquals,
+                TokenKind::NotEquals,
+            ]);
+        }
+        if min_bp <= 25 && !saw_is_predicate {
+            self.record_completion_tokens(&[TokenKind::Is]);
+        }
+        if !restricted && min_bp <= 20 {
+            self.record_completion_tokens(&[TokenKind::And]);
+        }
+        if !restricted && min_bp <= 10 {
+            self.record_completion_tokens(&[TokenKind::Or]);
+        }
     }
 }

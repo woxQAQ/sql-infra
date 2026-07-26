@@ -6,11 +6,16 @@ impl Parser {
     // PREPARE name [ ( data_type [, ...] ) ] AS statement
     pub(super) fn parse_prepare(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Prepare)?;
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("PREPARE requires a statement name"))?,
         );
         let argtypes = if self.consume(TokenKind::Char('(')) {
+            self.record_completion_slot_before(
+                completion::GrammarSlot::Type,
+                &[TokenKind::Char(')')],
+            );
             let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
             let types = parse_type_node_list(tokens)?;
             self.expect(TokenKind::Char(')'))?;
@@ -19,6 +24,17 @@ impl Parser {
             Vec::new()
         };
         self.expect(TokenKind::As)?;
+        self.record_completion_tokens(&[
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::Table,
+            TokenKind::Char('('),
+            TokenKind::With,
+            TokenKind::Insert,
+            TokenKind::Update,
+            TokenKind::DeleteP,
+            TokenKind::Merge,
+        ]);
         if !matches!(
             self.peek_kind(),
             TokenKind::Select
@@ -53,6 +69,7 @@ impl Parser {
 
     pub(super) fn parse_execute_core(&mut self) -> PResult<ExecuteStmt> {
         self.expect(TokenKind::Execute)?;
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("EXECUTE requires a statement name"))?,
@@ -93,6 +110,7 @@ impl Parser {
         let (name, location) = if isall {
             (None, -1)
         } else {
+            self.record_completion_slot(completion::GrammarSlot::AnyName);
             let location = self.location() as ParseLoc;
             (
                 Some(self.consume_col_id().ok_or_else(|| {
@@ -130,6 +148,28 @@ impl Parser {
     //     FORMAT { TEXT | XML | JSON | YAML }
     pub(super) fn parse_explain(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Explain)?;
+        self.record_completion_tokens(&[
+            TokenKind::Char('('),
+            TokenKind::Analyze,
+            TokenKind::Analyse,
+            TokenKind::Verbose,
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::Table,
+            TokenKind::Char('('),
+            TokenKind::With,
+            TokenKind::Insert,
+            TokenKind::Update,
+            TokenKind::DeleteP,
+            TokenKind::Merge,
+            TokenKind::Declare,
+            TokenKind::Create,
+            TokenKind::Refresh,
+            TokenKind::Execute,
+        ]);
+        if self.at_completion() {
+            return Err(self.error_here("completion point after EXPLAIN"));
+        }
         let parenthesized = self.at(TokenKind::Char('('));
         let mut options = if parenthesized {
             self.parse_parenthesized_utility_option_list()?
@@ -177,18 +217,39 @@ impl Parser {
     // CALL name ( [ argument ] [, ...] )
     pub(super) fn parse_call(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Call)?;
-        let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
-        let funccall = match parse_expression_tokens(tokens)? {
-            Node::FuncCall(call)
-                if call.agg_filter.is_none()
-                    && call.over.is_none()
-                    && !call.agg_within_group
-                    && call.ignore_nulls == 0 =>
-            {
-                Some(Box::new(call))
-            }
-            _ => return Err(self.error_here("CALL requires a function application")),
-        };
+        self.record_completion_slot(completion::GrammarSlot::Procedure);
+        if self.at_completion() {
+            return Err(self.error_here("completion point at CALL routine name"));
+        }
+        let mut tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        if self.at_completion()
+            && matches!(
+                parse_expression_tokens(tokens.clone()),
+                Ok(Node::FuncCall(FuncCall {
+                    agg_filter: None,
+                    over: None,
+                    agg_within_group: false,
+                    ignore_nulls: 0,
+                    ..
+                }))
+            )
+        {
+            self.record_completion_tokens(&[TokenKind::Char(';')]);
+            return Err(self.error_here("completion point after CALL"));
+        }
+        self.append_completion_marker(&mut tokens);
+        let funccall =
+            match parse_expression_tokens_with_completion(tokens, self.completion.clone())? {
+                Node::FuncCall(call)
+                    if call.agg_filter.is_none()
+                        && call.over.is_none()
+                        && !call.agg_within_group
+                        && call.ignore_nulls == 0 =>
+                {
+                    Some(Box::new(call))
+                }
+                _ => return Err(self.error_here("CALL requires a function application")),
+            };
         Ok(Node::CallStmt(CallStmt {
             node_tag: NodeTag::CallStmt,
             funccall,

@@ -7,12 +7,21 @@ impl Parser {
     //     CURSOR [ { WITH | WITHOUT } HOLD ] FOR query
     pub(super) fn parse_declare_cursor(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Declare)?;
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let portalname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("DECLARE requires a cursor name"))?,
         );
         let mut options = CURSOR_OPT_FAST_PLAN;
         loop {
+            self.record_completion_tokens(&[
+                TokenKind::No,
+                TokenKind::Scroll,
+                TokenKind::Binary,
+                TokenKind::Insensitive,
+                TokenKind::Asensitive,
+                TokenKind::Cursor,
+            ]);
             match self.peek_kind() {
                 TokenKind::No => {
                     self.advance();
@@ -67,9 +76,11 @@ impl Parser {
     // CLOSE { name | ALL }
     pub(super) fn parse_close(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Close)?;
+        self.record_completion_tokens(&[TokenKind::All]);
         let portalname = if self.consume(TokenKind::All) {
             None
         } else {
+            self.record_completion_slot(completion::GrammarSlot::AnyName);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("CLOSE requires a cursor name or ALL"))?,
@@ -129,6 +140,7 @@ impl Parser {
         }
         let (direction, how_many, direction_keyword, location) = self.parse_fetch_direction()?;
         let _ = self.consume(TokenKind::From) || self.consume(TokenKind::InP);
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let portalname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("FETCH/MOVE requires a cursor name"))?,
@@ -147,6 +159,19 @@ impl Parser {
     pub(super) fn parse_fetch_direction(
         &mut self,
     ) -> PResult<(FetchDirection, i64, FetchDirectionKeywords, ParseLoc)> {
+        self.record_completion_tokens(&[
+            TokenKind::Next,
+            TokenKind::Prior,
+            TokenKind::FirstP,
+            TokenKind::LastP,
+            TokenKind::AbsoluteP,
+            TokenKind::RelativeP,
+            TokenKind::All,
+            TokenKind::Forward,
+            TokenKind::Backward,
+            TokenKind::From,
+            TokenKind::InP,
+        ]);
         if self.consume(TokenKind::Next) {
             return Ok((FetchDirection::Forward, 1, FetchDirectionKeywords::Next, -1));
         }

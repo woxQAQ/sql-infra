@@ -63,6 +63,9 @@ impl ExprParser {
         let arg = self.parse_expr(0)?;
         self.expect(TokenKind::As)?;
         let type_tokens = self.take_until_balanced(TokenKind::Char(')'));
+        if self.at_completion() {
+            self.record_completion_slot(completion::GrammarSlot::Type);
+        }
         let type_name = parse_type_name_tokens(type_tokens).ok()?;
         self.expect(TokenKind::Char(')'))?;
         if token.kind == TokenKind::Cast {

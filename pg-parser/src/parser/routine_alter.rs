@@ -32,7 +32,10 @@ impl Parser {
             _ => ObjectType::Function,
         };
         let action_starts = Self::alter_function_action_starts();
-        let func = Some(Box::new(self.parse_object_with_args_until(&action_starts)?));
+        let func = Some(Box::new(self.parse_object_with_args_until_with_slot(
+            &action_starts,
+            completion::object_type_slot(objtype),
+        )?));
         let actions = self.parse_alter_function_actions()?;
         if actions.is_empty() {
             return Err(self.error_here("ALTER FUNCTION requires at least one option"));
@@ -74,6 +77,30 @@ impl Parser {
     fn parse_alter_function_actions(&mut self) -> PResult<NodeList> {
         let mut actions = Vec::new();
         while !self.at_any(&[TokenKind::Restrict, TokenKind::Char(';'), TokenKind::Eof]) {
+            self.record_completion_tokens(&[
+                TokenKind::Called,
+                TokenKind::Returns,
+                TokenKind::StrictP,
+                TokenKind::Immutable,
+                TokenKind::Stable,
+                TokenKind::Volatile,
+                TokenKind::External,
+                TokenKind::Security,
+                TokenKind::Leakproof,
+                TokenKind::Not,
+                TokenKind::Cost,
+                TokenKind::Rows,
+                TokenKind::Support,
+                TokenKind::Set,
+                TokenKind::Reset,
+                TokenKind::Parallel,
+                TokenKind::Rename,
+                TokenKind::Owner,
+                TokenKind::Depends,
+            ]);
+            if !actions.is_empty() {
+                self.record_completion_tokens(&[TokenKind::Restrict, TokenKind::Char(';')]);
+            }
             let location = self.location();
             let (name, arg) = match self.peek_kind() {
                 TokenKind::Called => {
@@ -134,6 +161,7 @@ impl Parser {
                 }
                 TokenKind::Support => {
                     self.advance();
+                    self.record_completion_slot(completion::GrammarSlot::Function);
                     let names =
                         self.parse_name_list_until_keywords(&Self::alter_function_action_starts());
                     if names.is_empty() {
@@ -377,6 +405,10 @@ impl Parser {
         loop {
             let chunk_stops = extend_stops(stops, TokenKind::Char(','));
             let tokens = self.take_until_top_level(&chunk_stops);
+            if self.at_completion() {
+                self.record_completion_tokens(&[TokenKind::Default]);
+                self.record_completion_slot(completion::GrammarSlot::AnyName);
+            }
             args.push(parse_setting_value_tokens(tokens)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;

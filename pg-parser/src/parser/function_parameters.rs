@@ -37,21 +37,44 @@ pub(super) fn token_starts_builtin_type(kind: TokenKind) -> bool {
     )
 }
 
-pub(super) fn function_parameter_from_tokens(mut tokens: Vec<Token>) -> PResult<FunctionParameter> {
+pub(super) fn function_parameter_from_tokens(tokens: Vec<Token>) -> PResult<FunctionParameter> {
+    function_parameter_from_tokens_with_completion(tokens, None)
+}
+
+pub(super) fn function_parameter_from_tokens_with_completion(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<FunctionParameter> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected a function parameter"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "expected a function parameter",
+        ));
     }
 
     let default_index = tokens
         .iter()
         .position(|token| matches!(token.kind, TokenKind::Default | TokenKind::Char('=')));
+    if let Some(completion_index) = tokens
+        .iter()
+        .position(|token| token.kind == TokenKind::Completion)
+        && default_index.is_none_or(|default_index| completion_index <= default_index)
+        && let Some(collector) = &completion
+    {
+        let mut collector = collector.borrow_mut();
+        collector.slot(completion::GrammarSlot::Type);
+        collector.tokens(&[TokenKind::Char(')')]);
+        if completion_index > 0 {
+            collector.tokens(&[TokenKind::Char(',')]);
+        }
+    }
     let default_tokens = default_index.map(|index| tokens.split_off(index + 1));
     if default_index.is_some() {
         tokens.pop();
     }
     let defexpr = default_tokens
-        .map(parse_expression_tokens)
+        .map(|tokens| parse_expression_tokens_with_completion(tokens, completion.clone()))
         .transpose()?
         .map(Box::new);
 
@@ -103,7 +126,7 @@ pub(super) fn function_parameter_from_tokens(mut tokens: Vec<Token>) -> PResult<
 
     let arg_type = parse_func_type_tokens(tokens)
         .map(Box::new)
-        .map_err(|_| ParseError::new(location, "expected a function parameter type"))?;
+        .map_err(|_| ParseError::syntax_exit(location, "expected a function parameter type"))?;
     Ok(FunctionParameter {
         node_tag: NodeTag::FunctionParameter,
         name,

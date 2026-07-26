@@ -1,0 +1,23 @@
+- input: SELECT 'unfinished|
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: SELECT /* unfinished|
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: SELECT $tag$unfinished|
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: SELECT 1 -- unfinished|
+  want:
+    candidates:
+      tokens: []
+      slots: []

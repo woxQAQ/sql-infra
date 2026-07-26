@@ -15,7 +15,7 @@ impl Parser {
         self.expect(TokenKind::Sequence)?;
         let if_not_exists = self.consume_if_not_exists()?;
         let mut sequence_node = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Sequence)
             .ok_or_else(|| self.error_here("CREATE SEQUENCE requires a name"))?;
         sequence_node.relpersistence = relpersistence;
         let sequence = Some(Box::new(sequence_node));
@@ -47,9 +47,10 @@ impl Parser {
     pub(super) fn parse_alter_sequence(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Sequence)?;
         let missing_ok = self.consume_if_exists()?;
-        let sequence = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
-            || self.error_here("ALTER SEQUENCE requires a sequence name"),
-        )?));
+        let sequence = Some(Box::new(
+            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Sequence)
+                .ok_or_else(|| self.error_here("ALTER SEQUENCE requires a sequence name"))?,
+        ));
         let options = self.parse_sequence_options()?;
         if options.is_empty() {
             return Err(self.error_here("ALTER SEQUENCE requires at least one option"));
@@ -73,6 +74,7 @@ impl Parser {
             let (name, arg) = match self.peek_kind() {
                 TokenKind::As => {
                     self.advance();
+                    self.record_completion_slot(completion::GrammarSlot::Type);
                     let type_tokens = self.take_sequence_type_tokens();
                     if type_tokens.is_empty() {
                         return Err(self.error_here("AS requires a sequence data type"));
@@ -127,6 +129,8 @@ impl Parser {
                 TokenKind::Owned => {
                     self.advance();
                     self.expect(TokenKind::By)?;
+                    self.record_completion_tokens(&[TokenKind::None]);
+                    self.record_completion_slot(completion::GrammarSlot::Column);
                     let names = self.parse_name_list();
                     if names.is_empty() {
                         return Err(self.error_here("OWNED BY requires a name"));
@@ -143,6 +147,7 @@ impl Parser {
                 TokenKind::Sequence => {
                     self.advance();
                     self.expect(TokenKind::NameP)?;
+                    self.record_completion_slot(completion::GrammarSlot::Sequence);
                     let names = self.parse_name_list();
                     if names.is_empty() {
                         return Err(self.error_here("SEQUENCE NAME requires a name"));
@@ -189,6 +194,9 @@ impl Parser {
         let mut depth = 0usize;
         loop {
             let kind = self.peek_kind();
+            if kind == TokenKind::Completion {
+                break;
+            }
             if depth == 0
                 && matches!(
                     kind,
@@ -265,7 +273,10 @@ impl Parser {
                     value
                 })))
             }
-            _ => Err(ParseError::new(location, "expected a numeric value")),
+            _ => Err(ParseError::syntax_exit(
+                location,
+                "expected a numeric value",
+            )),
         }
     }
 

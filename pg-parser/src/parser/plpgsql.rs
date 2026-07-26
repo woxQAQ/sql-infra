@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn parse_assignment(sql: &str, nnames: i32) -> PResult<RawStmt> {
     if !(1..=3).contains(&nnames) {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             0,
             "PL/pgSQL assignment name count must be between 1 and 3",
         ));

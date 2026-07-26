@@ -24,6 +24,9 @@ impl Parser {
             TokenKind::GroupP => RoleStmtType::Group,
             _ => RoleStmtType::Role,
         };
+        if stmt_type == RoleStmtType::User {
+            self.record_completion_tokens(&[TokenKind::Mapping]);
+        }
         let role = Some(
             self.consume_role_id()?
                 .ok_or_else(|| self.error_here("CREATE ROLE requires a role name"))?,
@@ -52,6 +55,9 @@ impl Parser {
     // RENAME forms are handled by alter_identity.
     pub(super) fn parse_alter_role(&mut self) -> PResult<Node> {
         let role_kind = self.advance().kind;
+        if role_kind == TokenKind::User {
+            self.record_completion_tokens(&[TokenKind::Mapping]);
+        }
         let role = if self.at(TokenKind::All) {
             self.advance();
             None
@@ -205,20 +211,17 @@ impl Parser {
                     let arg = if self.consume(TokenKind::NullP) {
                         None
                     } else {
-                        if !self.at(TokenKind::SConst) {
-                            return Err(self.error_here("PASSWORD requires a string or NULL"));
-                        }
-                        self.consume_string_like().map(make_string_node)
+                        Some(make_string_node(self.consume_required_string(
+                            "PASSWORD requires a string or NULL",
+                        )?))
                     };
                     options.push(make_def_elem("password", arg, location));
                 }
                 TokenKind::Encrypted => {
                     self.advance();
                     self.expect(TokenKind::Password)?;
-                    if !self.at(TokenKind::SConst) {
-                        return Err(self.error_here("ENCRYPTED PASSWORD requires a string"));
-                    }
-                    let password = self.consume_string_like().unwrap_or_default();
+                    let password =
+                        self.consume_required_string("ENCRYPTED PASSWORD requires a string")?;
                     options.push(make_def_elem(
                         "password",
                         Some(make_string_node(password)),
@@ -242,10 +245,7 @@ impl Parser {
                 TokenKind::Valid => {
                     self.advance();
                     self.expect(TokenKind::Until)?;
-                    if !self.at(TokenKind::SConst) {
-                        return Err(self.error_here("VALID UNTIL requires a string"));
-                    }
-                    let value = self.consume_string_like().unwrap_or_default();
+                    let value = self.consume_required_string("VALID UNTIL requires a string")?;
                     options.push(make_def_elem(
                         "validUntil",
                         Some(make_string_node(value)),
@@ -313,7 +313,12 @@ impl Parser {
                         "bypassrls" => ("bypassrls", true),
                         "nobypassrls" => ("bypassrls", false),
                         "noinherit" => ("inherit", false),
-                        _ => return Err(ParseError::new(location, "invalid CREATE ROLE option")),
+                        _ => {
+                            return Err(ParseError::syntax_exit(
+                                location,
+                                "invalid CREATE ROLE option",
+                            ));
+                        }
                     };
                     options.push(make_def_elem(
                         defname,
@@ -409,12 +414,17 @@ impl Parser {
                         "nobypassrls" => ("bypassrls", false),
                         "noinherit" => ("inherit", false),
                         "unencrypted" => {
-                            return Err(ParseError::new(
+                            return Err(ParseError::syntax_exit(
                                 location,
                                 "UNENCRYPTED PASSWORD is not supported",
                             ));
                         }
-                        _ => return Err(ParseError::new(location, "invalid ALTER ROLE option")),
+                        _ => {
+                            return Err(ParseError::syntax_exit(
+                                location,
+                                "invalid ALTER ROLE option",
+                            ));
+                        }
                     };
                     options.push(make_def_elem(
                         name,

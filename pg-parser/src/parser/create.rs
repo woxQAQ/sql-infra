@@ -47,21 +47,70 @@ impl Parser {
         {
             return Err(self.error_here("OR REPLACE is not allowed for this CREATE statement"));
         }
+        self.record_completion_tokens(&[
+            TokenKind::Table,
+            TokenKind::Foreign,
+            TokenKind::Unique,
+            TokenKind::Index,
+            TokenKind::Schema,
+            TokenKind::Database,
+            TokenKind::Recursive,
+            TokenKind::View,
+            TokenKind::Materialized,
+            TokenKind::Extension,
+            TokenKind::Function,
+            TokenKind::Procedure,
+            TokenKind::User,
+            TokenKind::Role,
+            TokenKind::GroupP,
+            TokenKind::Sequence,
+            TokenKind::DomainP,
+            TokenKind::TypeP,
+            TokenKind::Publication,
+            TokenKind::Subscription,
+            TokenKind::Policy,
+            TokenKind::Trigger,
+            TokenKind::Constraint,
+            TokenKind::Event,
+            TokenKind::Language,
+            TokenKind::Server,
+            TokenKind::Tablespace,
+            TokenKind::Access,
+            TokenKind::Cast,
+            TokenKind::Default,
+            TokenKind::ConversionP,
+            TokenKind::Transform,
+            TokenKind::Statistics,
+            TokenKind::Operator,
+            TokenKind::Property,
+            TokenKind::Rule,
+            TokenKind::Assertion,
+            TokenKind::Aggregate,
+            TokenKind::Collation,
+            TokenKind::TextP,
+        ]);
         let node = match self.peek_kind() {
             TokenKind::Table => self.parse_create_table(false, relpersistence)?,
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::Table => {
+            TokenKind::Foreign => {
                 self.advance();
-                self.parse_create_table(true, b'p')?
+                self.record_completion_tokens(&[TokenKind::Table, TokenKind::DataP]);
+                if self.at(TokenKind::Table) {
+                    self.parse_create_table(true, b'p')?
+                } else {
+                    self.expect(TokenKind::DataP)?;
+                    self.expect(TokenKind::Wrapper)?;
+                    self.parse_create_fdw()?
+                }
             }
             TokenKind::Unique | TokenKind::Index => self.parse_index(false)?,
             TokenKind::Schema => self.parse_create_schema()?,
             TokenKind::Database => self.parse_createdb()?,
-            TokenKind::Recursive if self.peek_kind_n(1) == TokenKind::View => {
+            TokenKind::Recursive => {
                 self.advance();
                 self.parse_view(replace, relpersistence, true)?
             }
             TokenKind::View => self.parse_view(replace, relpersistence, false)?,
-            TokenKind::Materialized if self.peek_kind_n(1) == TokenKind::View => {
+            TokenKind::Materialized => {
                 if relpersistence == b't' {
                     return Err(self.error_here("MATERIALIZED VIEW cannot be temporary"));
                 }
@@ -82,23 +131,23 @@ impl Parser {
             TokenKind::Subscription => self.parse_create_subscription()?,
             TokenKind::Policy => self.parse_create_policy()?,
             TokenKind::Trigger => self.parse_create_trigger(replace, false)?,
-            TokenKind::Constraint if self.peek_kind_n(1) == TokenKind::Trigger => {
+            TokenKind::Constraint => {
                 self.advance();
                 self.parse_create_trigger(replace, true)?
             }
-            TokenKind::Event if self.peek_kind_n(1) == TokenKind::Trigger => {
+            TokenKind::Event => {
                 self.advance();
                 self.parse_create_event_trigger()?
             }
             TokenKind::Language => self.parse_create_language(replace, trusted)?,
             TokenKind::Server => self.parse_create_server()?,
             TokenKind::Tablespace => self.parse_create_tablespace()?,
-            TokenKind::Access if self.peek_kind_n(1) == TokenKind::Method => {
+            TokenKind::Access => {
                 self.advance();
                 self.parse_create_am()?
             }
             TokenKind::Cast => self.parse_create_cast()?,
-            TokenKind::Default if self.peek_kind_n(1) == TokenKind::ConversionP => {
+            TokenKind::Default => {
                 self.advance();
                 self.parse_create_conversion(true)?
             }
@@ -113,7 +162,7 @@ impl Parser {
                 self.advance();
                 self.parse_create_op_family()?
             }
-            TokenKind::Property if self.peek_kind_n(1) == TokenKind::Graph => {
+            TokenKind::Property => {
                 self.advance();
                 self.parse_create_prop_graph(relpersistence)?
             }
@@ -125,15 +174,7 @@ impl Parser {
             TokenKind::Aggregate => self.parse_define(ObjectType::Aggregate, replace)?,
             TokenKind::Operator => self.parse_define(ObjectType::Operator, replace)?,
             TokenKind::Collation => self.parse_define(ObjectType::Collation, replace)?,
-            TokenKind::TextP if self.peek_kind_n(1) == TokenKind::Search => {
-                self.parse_define_text_search()?
-            }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::DataP => {
-                self.advance();
-                self.expect(TokenKind::DataP)?;
-                self.expect(TokenKind::Wrapper)?;
-                self.parse_create_fdw()?
-            }
+            TokenKind::TextP => self.parse_define_text_search()?,
             other => return Err(self.error_here(format!("unsupported CREATE form {:?}", other))),
         };
         Ok(node)
@@ -159,7 +200,7 @@ impl Parser {
 
     fn parse_create_assertion(&mut self) -> PResult<Node> {
         let location = self.expect(TokenKind::Assertion)?.location();
-        Err(ParseError::new(
+        Err(ParseError::syntax_exit(
             location,
             "CREATE ASSERTION is not implemented by PostgreSQL",
         ))

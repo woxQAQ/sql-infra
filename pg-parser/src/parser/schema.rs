@@ -17,6 +17,7 @@ impl Parser {
     pub(super) fn parse_create_schema(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Schema)?;
         let if_not_exists = self.consume_if_not_exists()?;
+        self.record_completion_slot(completion::GrammarSlot::Schema);
         let schemaname = if self.at(TokenKind::Authorization) {
             None
         } else {
@@ -33,6 +34,7 @@ impl Parser {
             return Err(self.error_here("CREATE SCHEMA requires a name or AUTHORIZATION role"));
         }
         let mut schema_elts = Vec::new();
+        self.record_completion_tokens(&[TokenKind::Create, TokenKind::Grant]);
         while self.at_any(&[TokenKind::Create, TokenKind::Grant]) {
             if if_not_exists {
                 return Err(
@@ -63,6 +65,7 @@ impl Parser {
         while end < self.tokens.len() {
             let kind = self.tokens[end].kind;
             match kind {
+                TokenKind::Completion => break,
                 TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
                 TokenKind::Char(')') | TokenKind::Char(']') => {
                     depth = depth.saturating_sub(1);
@@ -93,7 +96,9 @@ impl Parser {
             end += 1;
         }
         self.pos = end;
-        let node = parse_statement_node_tokens(self.tokens[start..end].to_vec())?;
+        let mut tokens = self.tokens[start..end].to_vec();
+        self.append_completion_marker(&mut tokens);
+        let node = parse_statement_node_tokens_with_completion(tokens, self.completion.clone())?;
         if matches!(
             node,
             Node::CreateStmt(_)
@@ -108,7 +113,7 @@ impl Parser {
         ) {
             Ok(node)
         } else {
-            Err(ParseError::new(
+            Err(ParseError::syntax_exit(
                 location,
                 "statement type is not allowed in CREATE SCHEMA",
             ))

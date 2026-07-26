@@ -42,14 +42,27 @@ pub struct CompletionPrefix {
 
 pub struct ExpectationSet {
     pub tokens: Vec<TokenKind>,
+    /// 该位置语法上合法的固定多词单元，如 `GROUP BY`、`IF NOT EXISTS`。
+    /// 短语首 Token 一定同时出现在 `tokens` 中；短语不声称首 Token 没有
+    /// 其他延续方式。
+    pub phrases: Vec<&'static [TokenKind]>,
     pub slots: Vec<GrammarSlot>,
 }
 
 pub enum GrammarSlot {
     Relation,
+    Table,
+    View,
+    MaterializedView,
+    ForeignTable,
     Column,
+    Attribute,
     Function,
+    Procedure,
+    Routine,
+    Aggregate,
     Type,
+    Domain,
     Schema,
     Sequence,
     Index,
@@ -57,8 +70,28 @@ pub enum GrammarSlot {
     Collation,
     Operator,
     OperatorClass,
+    OperatorFamily,
     Role,
     Database,
+    AccessMethod,
+    Conversion,
+    EventTrigger,
+    Extension,
+    ForeignDataWrapper,
+    ForeignServer,
+    Language,
+    Policy,
+    PropertyGraph,
+    Publication,
+    Rule,
+    Statistics,
+    Subscription,
+    Tablespace,
+    TextSearchConfiguration,
+    TextSearchDictionary,
+    TextSearchParser,
+    TextSearchTemplate,
+    Trigger,
     AnyName,
 }
 
@@ -66,6 +99,20 @@ pub struct CompletionIntent {
     pub object_kinds: Vec<ObjectKind>,
     /// 当前补全片段之前已经完成的点分名称。
     pub qualifier: Vec<NamePart>,
+    /// 候选属于某个独立出现的 Catalog 对象时，记录该容器的语法 identity。
+    pub container: Option<ObjectContainer>,
+}
+
+pub struct ObjectContainer {
+    /// object_kinds 中受该容器约束的类别。
+    pub members: Vec<ObjectKind>,
+    pub reference: ObjectReference,
+}
+
+pub struct ObjectReference {
+    /// 同一个语法 identity 可能对应的 Catalog 对象类别。
+    pub object_kinds: Vec<ObjectKind>,
+    pub name: Vec<NamePart>,
 }
 
 pub struct NamePart {
@@ -80,8 +127,8 @@ pub struct NamePart {
 
 1. `statement_range` 和 `point` 确定本次补全处理哪条语句、在哪个 UTF-8 字节偏移量收集候选。
 2. `replacement_range` 和 `prefix` 描述当前正在输入的标识符片段。`raw` 用于保留用户输入，`normalized` 用于匹配，`quoting` 决定后续插入时采用哪种引用规则。
-3. `expectations` 记录该位置语法上允许的 Token 和 `GrammarSlot`，不包含任何 Catalog 对象。
-4. `intent` 将 `GrammarSlot` 转成 adapter 可查询的 `ObjectKind`，并通过 `qualifier` 保留当前片段之前的限定名。
+3. `expectations` 记录该位置语法上允许的 Token、固定短语和 `GrammarSlot`，不包含任何 Catalog 对象。Token 是单个终结符；短语把 `GROUP BY` 这类固定多词单元整体交给 adapter，省去在展示层重建配对规则。
+4. `intent` 将 `GrammarSlot` 转成 adapter 可查询的 `ObjectKind`，通过 `qualifier` 保留当前片段之前的限定名，并在子对象候选中通过 `container` 指明其所属对象。
 5. `scope` 记录当前语法位置可见的关系、CTE、DML 目标和外部查询层级，供 adapter 解析列候选。
 6. `recovery` 记录词法或作用域收集过程中发生的非致命问题；它不会清除已经得到的其他信息。
 
@@ -93,14 +140,18 @@ point             = 11
 replacement_range = [9, 11)
 prefix            = { raw: "na", normalized: "na", quoting: Unquoted }
 expectations      = { tokens: [], slots: [Column] }
-intent            = { object_kinds: [Column], qualifier: [u] }
+intent            = { object_kinds: [Column], qualifier: [u], container: None }
 scope.local       = [users AS u]
 recovery          = []
 ```
 
 `pg-completion` 到此停止。adapter 再使用 `qualifier = [u]` 在 `scope` 中定位 `users`，查询该关系的列，并用 `prefix = "na"` 过滤结果。Catalog 中是否真的存在 `users` 或匹配的列，不影响上述上下文的构造。
 
-`GrammarSlot` 描述语法，由 `pg-parser` 产生；`ObjectKind` 描述 Catalog 意图，由 `pg-completion` 拥有。两者不能合并成一个枚举：`AnyName` 可能对应多种对象类型，而 `Relation` 在不同 DDL 上下文中可能被缩小为表、视图、序列或索引。
+容器和限定名表达不同的语法关系。例如 `ALTER TABLE app.users DROP COLUMN na|` 的 qualifier 为空、prefix 是 `na`，而 intent 的 container 是 `{ members: [Column], reference: { object_kinds: [Table], name: [app, users] } }`。adapter 因而可以直接查询该表的列，不需要重新解析 `ALTER TABLE`。`COPY table (|)`、外键 `REFERENCES table (|)`、trigger 的 `UPDATE OF | ON table` 以及 type attribute 使用同一个模型；关系语法不能静态缩小到单一 Catalog 类别时，`ObjectReference.object_kinds` 保留所有合法类别。`members` 将容器关系限制在对应候选上，因此同一位置同时允许 `Column` 和 `Function` 时，函数仍按 search path 查询。
+
+`GrammarSlot` 描述语法，由 `pg-parser` 产生；`ObjectKind` 描述 Catalog 意图，由 `pg-completion` 拥有。两者不能合并成一个枚举：`AnyName` 只表示语法接受一个没有稳定 Catalog 类别的名称，不产生 `ObjectKind`；Catalog 名称使用具体 slot。查询 `FROM` 中的 `Relation` 保留开放的关系类别，DDL 产生式则发布 `Table`、`View`、`MaterializedView` 或 `ForeignTable` 等具体 slot，因此 `pg-completion` 不需要扫描整条语句猜测对象类别。
+
+由多个 Catalog 对象共同组成的 identity 不增加虚假的单一 slot。例如 transform identity 分别发布 `Type` 和 `Language`，user mapping identity 分别发布 `Role` 和 `ForeignServer`；adapter 按当前产生式所在的组成位置查询对应对象。
 
 `qualifier` 不包含正在输入的片段；当前片段只由 `CompletionPrefix` 表达。例如 `a.b|` 的 qualifier 是 `[a]`、prefix 是 `b`，`a.b.|` 的 qualifier 是 `[a, b]`、prefix 为空。限定名的具体语义取决于语法槽位和 adapter 元数据。
 
@@ -111,9 +162,11 @@ pub struct ScopeSnapshot {
     pub local: QueryScope,
     /// 相关外部作用域，最近的一层排在最前面。
     pub outer: Vec<QueryScope>,
-    /// 当前语句可见的 CTE 定义，包括尚未在 FROM 中引用的定义。
+    /// 当前语法位置可见的 CTE；内层查询优先，同名外层定义被遮蔽。
     pub ctes: Vec<CteDefinition>,
+    /// 当前语法位置可见的 DML 目标；INSERT 来源和 DML FROM 派生表内部为空。
     pub dml_target: Option<VisibleRelation>,
+    /// 当前语法位置可见的 MERGE 来源；解析来源自身时为空。
     pub merge_source: Option<VisibleRelation>,
 }
 
@@ -124,7 +177,7 @@ pub struct QueryScope {
 
 pub struct VisibleRelation {
     pub kind: RelationKind,
-    pub name: PartialObjectName,
+    pub name: Vec<NamePart>,
     pub alias: Option<NamePart>,
     pub explicit_columns: Vec<NamePart>,
     pub syntax_range: TextRange,
@@ -150,7 +203,8 @@ pub enum RelationKind {
 - 非 `LATERAL` 派生表看不到所属 `FROM` 列表中排在它之前的关系；`LATERAL` 派生表只能看到之前的条目。
 - CTE body 中使用的源关系不能泄漏到使用该 CTE 的查询作用域。
 - 集合运算的每个分支只看到自己的 `FROM` 作用域，看不到兄弟分支。
-- 显式 CTE/子查询别名列属于语法可知的输出列；推导出的输出列仍由 adapter 负责，除非后续 analysis 模块能够提供。
+- 显式 CTE/子查询别名列、表函数列定义以及 `ROWS FROM` 各函数的列定义属于语法可知的输出列；推导出的输出列仍由 adapter 负责，除非后续 analysis 模块能够提供。
+- DML 目标和来源只在 PostgreSQL 允许引用它们的位置出现；INSERT 来源、MERGE 来源自身和非 `LATERAL` 的 DML `FROM` 派生表不会继承目标关系。
 - 不支持的表表达式必须显式标记，不能为其虚构列。
 
 ## 内部 seam
@@ -167,6 +221,7 @@ pub fn collect_expectations(
 
 pub struct ParserExpectations {
     pub tokens: Vec<TokenKind>,
+    pub phrases: Vec<&'static [TokenKind]>,
     pub slots: Vec<GrammarSlot>,
 }
 ```
@@ -177,8 +232,11 @@ pub struct ParserExpectations {
 
 ```rust
 collector.tokens([TokenKind::Where, TokenKind::GroupP, TokenKind::Order]);
+collector.phrase(&[TokenKind::GroupP, TokenKind::By]);
 collector.slot(GrammarSlot::Column);
 ```
+
+短语由拥有该产生式的位置发布。`consume(A)` 后强制 `expect(B)` 的形态统一改写为 `consume_phrase(&[A, B])`，使发布点无法与解析行为漂移；批量候选列表和表达式尾部的子句跟随 Token 由固定的 follow 映射补齐对应短语。
 
 收集过程通过强类型控制流退出，而不是 panic 或伪造 `ParseError`。当前解析器采用预测式解析且没有回溯，因此不需要回滚候选；如果未来引入回溯，解析器 checkpoint 必须同时保存 collector 状态。
 
@@ -202,7 +260,7 @@ collector.slot(GrammarSlot::Column);
 3. 在替换范围起点向 `pg-parser` 请求强类型语法期望。
 4. 扫描当前语句的 Token，为其构造补全意图和作用域。
 
-这次扫描不是第二套 SQL 解析器。它只识别可见性所需的结构：语句边界、括号、查询层级、`WITH`、集合运算分支、`FROM`/`JOIN`、别名、`LATERAL`、子查询、表函数、`VALUES` 和 DML 目标。
+这次扫描不是第二套 SQL 解析器。它只识别补全上下文所需的结构：语句边界、括号、查询层级、`WITH`、集合运算分支、`FROM`/`JOIN`、别名、`LATERAL`、子查询、表函数、`VALUES`、DML 目标，以及由当前 `GrammarSlot` 要求的子对象容器 identity。
 
 ### 3. 调用方 adapter：解析元数据
 
@@ -210,8 +268,10 @@ adapter 接收 `CompletionContext`，结合自己的元数据源进行解析：
 
 ```text
 Token 期望           -> 关键字/操作符候选
+短语期望             -> GROUP BY、IF NOT EXISTS 等整体补全项
 Relation 意图        -> Schema/关系候选
 Column 意图 + 作用域 -> 可见关系中的列
+Column/Attribute + container -> 指定表、domain 或 type 中的子对象
 Function 意图        -> search_path 上可见的函数
 Type 意图            -> search_path 上可见的类型
 qualifier + prefix   -> 限定名逐级补全
@@ -244,17 +304,19 @@ pg-parser/src/
   parser/*.rs               各语法产生式在原位置发布 Token 和 GrammarSlot
 
 pg-parser/tests/
-  completion.rs             collect 入口、控制流和覆盖门禁
-  statements/*.rs           各语句族的候选产生式测试
+  statements/coverage.rs    合法语句 Token 边界采样
+  statements/*.rs           各语句族的解析回归语料
 
 pg-completion/
   Cargo.toml
   src/lib.rs                公开 interface 和 re-export
   src/prefix.rs             补全点归一化和替换范围
-  src/intent.rs             GrammarSlot -> CompletionIntent
+  src/intent.rs             GrammarSlot、限定名和容器 identity -> CompletionIntent
   src/scope.rs              查询层级和可见关系
   src/statement.rs          活动语句隔离
   tests/completion.rs       声明式场景测试 runner
+  tests/context.rs          公开上下文与作用域断言
+  tests/performance.rs      大输入分配与延迟门禁
   test-data/completion/     按语句族组织的 YAML 场景
 ```
 
@@ -288,7 +350,7 @@ pg-completion/
 ### 阶段 4：DDL、Utility 与 PostgreSQL 对象
 
 - CREATE/ALTER/DROP 对象意图。
-- 类型、Schema、序列、索引、约束、排序规则、操作符、操作符类、角色和数据库。
+- 类型、attribute、Schema、序列、索引、约束、排序规则、操作符、操作符类、角色和数据库。
 - `ALTER TABLE`、`DROP VIEW`、`COMMENT ON COLUMN` 等语句中的对象类别收窄。
 - SET/SHOW、事务、PREPARE、游标、COPY、VACUUM、EXPLAIN、CALL 以及其他已由顶层入口支持的 utility/admin 语句。
 - 所有语句族完成结构覆盖；涉及 Catalog 名称的位置完成对象覆盖。
@@ -305,7 +367,7 @@ pg-completion/
 
 补全行为测试采用声明式 YAML 夹具：`input` 使用唯一的 `|` 标记补全点，runner 删除标记、计算 UTF-8 偏移量、调用 `pg_completion::collect`，再对结果进行规范化比较。夹具按语句族拆分，避免一个文件随全语法覆盖无限增长。
 
-`want.candidates` 断言的是无 Catalog 的语法候选，而不是最终补全项：Token 候选对应关键字或操作符，slot 候选对应 `GrammarSlot`。它不包含 Catalog 对象名称、插入文本、定义、注释、优先级或排序分数。
+`want.candidates` 断言的是无 Catalog 的语法候选，而不是最终补全项：Token 候选对应关键字、操作符和标点（如 `(`、`*`、`::`），phrase 候选以规范拼写（如 `GROUP BY`、`IF NOT EXISTS`）断言固定多词单元，slot 候选对应 `GrammarSlot`。标点和操作符是语法期望的组成部分，哪些呈现为补全项由 adapter 决定；candidates 不包含 Catalog 对象名称、插入文本、定义、注释、优先级或排序分数。`phrases` 键缺省断言为空。
 
 ```yaml
 - input: SEL|
@@ -317,11 +379,16 @@ pg-completion/
 - input: SELECT u.| FROM users AS u
   want:
     candidates:
-      tokens: []
+      tokens: ['*']
       slots: [Column]
+    qualifier: [u]
+    scope:
+      local: [users AS u]
 ```
 
-每个用例只包含 `input` 和 `want.candidates`。`candidates` 执行精确集合比较，空的 `tokens` 和 `slots` 表示该位置没有语法候选。runner 在比较前按稳定规则排序、去重，因此 YAML 不依赖 collector 的遍历顺序。
+每个用例必须包含 `input` 和 `want.candidates`。`candidates` 执行精确集合比较，空的 `tokens` 和 `slots` 表示该位置没有语法候选。runner 在比较前按稳定规则排序、去重，因此 YAML 不依赖 collector 的遍历顺序。
+
+断言意图和作用域时，用例附加可选字段：`qualifier` 断言当前片段之前的限定名，`container` 断言容器 identity 的规范渲染，`scope` 断言整个作用域快照。`scope` 一旦出现即覆盖全部子字段，省略的子字段断言为空；关系按 SQL 可见性顺序比较，不排序。这些字段缺省时不参与断言，候选覆盖场景因此保持精简，作用域和容器行为由带对应字段的场景显式钉住。
 
 最低场景集覆盖：
 
@@ -334,9 +401,11 @@ pg-completion/
 除此之外，覆盖门禁维护一份与顶层语句分派入口对齐的语句族清单，并复用 `pg-parser/tests/statements/` 中的合法 SQL 作为样本：
 
 - 每个语句族至少有语句起始、主要子命令和语句末尾场景。
-- 在样本的 Token 边界调用 `collect`，验证不 panic；具有精确语义要求的边界必须登记 YAML 候选基线。
+- 在样本的每个 Token 起止边界调用 `collect`，验证不 panic 且至少发布一个 Token 或 slot；完整语句 EOF 可以为空，但不能残留 Catalog 对象 slot。
 - 新增顶层分派分支却没有登记相应语句族和场景时，CI 失败。
 
 Token 边界采样只能证明没有遗漏和崩溃，不能证明候选正确；候选正确性由 YAML 场景精确断言，parser 产生式级单元测试作为更近故障源的补充。
+
+性能门禁使用包含 5,000 个可见关系的前向作用域场景；计时前先预热，并将源码构造排除在统计外。debug 测试中单次 `collect` 的预算为 1 秒、150,000 次分配和 16 MiB 分配字节，三项任一超限都使 CI 失败。
 
 该模块的删除测试很直接：如果没有 `CompletionContext`，每个元数据 adapter 都必须重新实现前缀处理、错误输入恢复、语法期望推导、CTE 解析和嵌套可见性。将这些决策隐藏在 `collect` 后面，才能获得预期的 leverage 和 locality。

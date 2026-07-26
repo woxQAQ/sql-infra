@@ -28,7 +28,7 @@ impl Parser {
         self.expect(TokenKind::Insert)?;
         self.expect(TokenKind::Into)?;
         let mut relation = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
             .ok_or_else(|| self.error_here("INSERT INTO requires a relation name"))?;
         if self.consume(TokenKind::As) {
             relation.alias = Some(Box::new(Alias {

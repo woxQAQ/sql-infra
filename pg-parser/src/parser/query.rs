@@ -3,6 +3,15 @@ use super::*;
 impl Parser {
     pub(super) fn parse_with_statement(&mut self) -> PResult<Node> {
         let with = self.parse_with_clause()?;
+        self.record_completion_tokens(&[
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::Table,
+            TokenKind::Insert,
+            TokenKind::Update,
+            TokenKind::DeleteP,
+            TokenKind::Merge,
+        ]);
         let target = match self.peek_kind() {
             TokenKind::Select | TokenKind::Values | TokenKind::Table | TokenKind::Char('(') => {
                 WithTarget::Select
@@ -61,8 +70,8 @@ impl Parser {
             };
             self.expect(TokenKind::Char('('))?;
             let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let ctequery = self.parse_preparable_fragment_tokens(inner)?;
             self.expect(TokenKind::Char(')'))?;
-            let ctequery = parse_preparable_statement_tokens(inner)?;
             let search_clause = self.parse_cte_search_clause()?;
             let cycle_clause = self.parse_cte_cycle_clause()?;
             ctes.push(Node::CommonTableExpr(CommonTableExpr {
@@ -102,7 +111,8 @@ impl Parser {
         };
         self.expect(TokenKind::FirstP)?;
         self.expect(TokenKind::By)?;
-        let search_col_list = self.parse_simple_name_list_until(&[TokenKind::Set])?;
+        let search_col_list =
+            self.parse_simple_name_list_until(&[TokenKind::Set], completion::GrammarSlot::Column)?;
         self.expect(TokenKind::Set)?;
         let search_seq_column = Some(
             self.consume_col_id()
@@ -122,7 +132,8 @@ impl Parser {
             return Ok(None);
         }
         let location = self.previous_location();
-        let cycle_col_list = self.parse_simple_name_list_until(&[TokenKind::Set])?;
+        let cycle_col_list =
+            self.parse_simple_name_list_until(&[TokenKind::Set], completion::GrammarSlot::Column)?;
         self.expect(TokenKind::Set)?;
         let cycle_mark_column = Some(
             self.consume_col_id()
@@ -231,6 +242,7 @@ impl Parser {
     ) -> PResult<SelectStmt> {
         let mut lhs = self.parse_select_primary(with_clause)?;
 
+        self.record_completion_tokens(&[TokenKind::Union, TokenKind::Except, TokenKind::Intersect]);
         while let Some((op, precedence)) = select_set_operator(self.peek_kind()) {
             if precedence < min_precedence {
                 break;
@@ -259,8 +271,42 @@ impl Parser {
     }
 
     fn parse_select_primary(&mut self, with_clause: Option<WithClause>) -> PResult<SelectStmt> {
+        self.record_completion_tokens(&[
+            TokenKind::Values,
+            TokenKind::Table,
+            TokenKind::Select,
+            TokenKind::Char('('),
+        ]);
         if self.consume(TokenKind::Char('(')) {
-            let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let mut inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            if self.at_completion() {
+                if inner.is_empty() {
+                    self.record_completion_tokens(&[
+                        TokenKind::With,
+                        TokenKind::Select,
+                        TokenKind::Values,
+                        TokenKind::Table,
+                        TokenKind::Char('('),
+                    ]);
+                    return Err(self.error_here("completion point in parenthesized query"));
+                }
+                self.append_completion_marker(&mut inner);
+                return match parse_select_statement_tokens_with_completion(
+                    inner,
+                    self.completion.clone(),
+                )? {
+                    Node::SelectStmt(mut stmt) => {
+                        if with_clause.is_some() && stmt.with_clause.is_some() {
+                            return Err(self.error_here("multiple WITH clauses are not allowed"));
+                        }
+                        if let Some(with_clause) = with_clause {
+                            stmt.with_clause = Some(Box::new(with_clause));
+                        }
+                        Ok(stmt)
+                    }
+                    _ => unreachable!("parse_select_statement_tokens returned a non-select node"),
+                };
+            }
             self.expect(TokenKind::Char(')'))?;
             return match parse_select_statement_tokens(inner)? {
                 Node::SelectStmt(mut stmt) => {
@@ -309,6 +355,25 @@ impl Parser {
             }
             _ => {
                 self.expect(TokenKind::Select)?;
+                self.record_completion_tokens(&[
+                    TokenKind::All,
+                    TokenKind::Distinct,
+                    TokenKind::Into,
+                    TokenKind::From,
+                    TokenKind::Where,
+                    TokenKind::GroupP,
+                    TokenKind::Having,
+                    TokenKind::Window,
+                    TokenKind::Order,
+                    TokenKind::Limit,
+                    TokenKind::Offset,
+                    TokenKind::Fetch,
+                    TokenKind::For,
+                    TokenKind::Union,
+                    TokenKind::Intersect,
+                    TokenKind::Except,
+                    TokenKind::Char(';'),
+                ]);
                 if self.consume(TokenKind::All) {
                     stmt.distinct_clause.clear();
                 } else if self.consume(TokenKind::Distinct) {
@@ -389,8 +454,7 @@ impl Parser {
                 TokenKind::Eof,
             ])?);
         }
-        if self.consume(TokenKind::GroupP) {
-            self.expect(TokenKind::By)?;
+        if self.consume_phrase(&[TokenKind::GroupP, TokenKind::By])? {
             if self.consume(TokenKind::All) {
                 stmt.group_by_all = true;
             } else {
@@ -494,7 +558,7 @@ impl Parser {
         };
         self.consume(TokenKind::Table);
         let mut relation = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
             .ok_or_else(|| self.error_here("SELECT INTO requires a relation name"))?;
         relation.relpersistence = relpersistence;
         Ok(IntoClause {
@@ -505,8 +569,14 @@ impl Parser {
     }
 
     fn parse_select_tail(&mut self, stmt: &mut SelectStmt) -> PResult<()> {
-        if self.consume(TokenKind::Order) {
-            self.expect(TokenKind::By)?;
+        self.record_completion_tokens(&[
+            TokenKind::Order,
+            TokenKind::Limit,
+            TokenKind::Offset,
+            TokenKind::Fetch,
+            TokenKind::For,
+        ]);
+        if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
             stmt.sort_clause = self.parse_sort_list_strict_until(&[
                 TokenKind::Limit,
                 TokenKind::Offset,
@@ -610,7 +680,7 @@ impl Parser {
                 stmt.limit_offset = Some(Box::new(if has_row_suffix {
                     parse_select_fetch_first_value_tokens(offset_tokens)?
                 } else {
-                    parse_expression_tokens(offset_tokens)?
+                    self.parse_expression_fragment_tokens(offset_tokens)?
                 }));
                 if has_row_suffix {
                     self.advance();
@@ -628,8 +698,12 @@ impl Parser {
                     if matches!(self.peek_kind(), TokenKind::Row | TokenKind::Rows) {
                         Box::new(Node::AConst(AConst::integer(1, -1)))
                     } else {
-                        Box::new(parse_select_fetch_first_value_tokens(
-                            self.take_until_top_level(&[TokenKind::Row, TokenKind::Rows]),
+                        let mut tokens =
+                            self.take_until_top_level(&[TokenKind::Row, TokenKind::Rows]);
+                        self.append_completion_marker(&mut tokens);
+                        Box::new(parse_select_fetch_first_value_tokens_with_completion(
+                            tokens,
+                            self.completion.clone(),
                         )?)
                     },
                 );

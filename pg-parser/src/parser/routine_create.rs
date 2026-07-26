@@ -25,6 +25,7 @@ impl Parser {
     //   } ...
     pub(super) fn parse_create_function(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Function)?;
+        self.record_completion_slot(completion::GrammarSlot::Function);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("CREATE FUNCTION requires a function name"));
@@ -46,7 +47,7 @@ impl Parser {
                             | FunctionParameterMode::In
                             | FunctionParameterMode::Variadic
                     ) {
-                        return Err(ParseError::new(
+                        return Err(ParseError::syntax_exit(
                             parameter.location as usize,
                             "OUT and INOUT arguments aren't allowed in TABLE functions",
                         ));
@@ -74,6 +75,11 @@ impl Parser {
                 Some(Box::new(table_type))
             } else {
                 let location = self.location();
+                self.record_completion_slot(completion::GrammarSlot::Type);
+                self.record_completion_slot_before(
+                    completion::GrammarSlot::Type,
+                    Self::create_function_option_starts(),
+                );
                 let tokens = self.take_until_top_level(Self::create_function_option_starts());
                 Some(Box::new(parse_func_type_tokens(tokens).map_err(
                     |mut error| {
@@ -94,6 +100,7 @@ impl Parser {
             match self.peek_kind() {
                 TokenKind::Language => {
                     self.advance();
+                    self.record_completion_slot(completion::GrammarSlot::Language);
                     let language = self
                         .consume_non_reserved_word_or_sconst()
                         .ok_or_else(|| self.error_here("expected a language name"))?;
@@ -105,14 +112,11 @@ impl Parser {
                 }
                 TokenKind::As => {
                     self.advance();
-                    let first = self
-                        .consume_string_like()
-                        .ok_or_else(|| self.error_here("expected a function body string"))?;
+                    let first = self.consume_required_string("expected a function body string")?;
                     let mut bodies = vec![make_string_node(first)];
                     if self.consume(TokenKind::Char(',')) {
-                        let second = self.consume_string_like().ok_or_else(|| {
-                            self.error_here("expected a second function body string")
-                        })?;
+                        let second =
+                            self.consume_required_string("expected a second function body string")?;
                         bodies.push(make_string_node(second));
                     }
                     options.push(make_def_elem(
@@ -174,6 +178,7 @@ impl Parser {
                 }
                 TokenKind::Support => {
                     self.advance();
+                    self.record_completion_slot(completion::GrammarSlot::Function);
                     let name = self.parse_name_list();
                     if name.is_empty() {
                         return Err(self.error_here("SUPPORT requires a function name"));
@@ -312,6 +317,7 @@ impl Parser {
     //   } ...
     pub(super) fn parse_create_procedure(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Procedure)?;
+        self.record_completion_slot(completion::GrammarSlot::Procedure);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("CREATE PROCEDURE requires a procedure name"));
@@ -324,6 +330,7 @@ impl Parser {
             match self.peek_kind() {
                 TokenKind::Language => {
                     self.advance();
+                    self.record_completion_slot(completion::GrammarSlot::Language);
                     let language = self
                         .consume_non_reserved_word_or_sconst()
                         .ok_or_else(|| self.error_here("expected a language name"))?;
@@ -335,14 +342,11 @@ impl Parser {
                 }
                 TokenKind::As => {
                     self.advance();
-                    let first = self
-                        .consume_string_like()
-                        .ok_or_else(|| self.error_here("expected a procedure body string"))?;
+                    let first = self.consume_required_string("expected a procedure body string")?;
                     let mut bodies = vec![make_string_node(first)];
                     if self.consume(TokenKind::Char(',')) {
-                        let second = self.consume_string_like().ok_or_else(|| {
-                            self.error_here("expected a second procedure body string")
-                        })?;
+                        let second = self
+                            .consume_required_string("expected a second procedure body string")?;
                         bodies.push(make_string_node(second));
                     }
                     options.push(make_def_elem(
@@ -432,10 +436,12 @@ impl Parser {
         self.expect(TokenKind::Char('('))?;
         let mut parameters = Vec::new();
         while !self.at(TokenKind::Char(')')) {
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            parameters.push(Node::FunctionParameter(function_parameter_from_tokens(
-                tokens,
-            )?));
+            let mut tokens =
+                self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            self.append_completion_marker(&mut tokens);
+            parameters.push(Node::FunctionParameter(
+                function_parameter_from_tokens_with_completion(tokens, self.completion.clone())?,
+            ));
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
@@ -454,6 +460,10 @@ impl Parser {
             return Err(self.error_here("RETURNS TABLE requires at least one column"));
         }
         while !self.at(TokenKind::Char(')')) {
+            self.record_completion_slot_before(
+                completion::GrammarSlot::Type,
+                &[TokenKind::Char(','), TokenKind::Char(')')],
+            );
             let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
             let location = tokens
                 .first()
@@ -467,11 +477,13 @@ impl Parser {
                     )
                 })
                 .ok_or_else(|| {
-                    ParseError::new(location, "expected a table function column name")
+                    ParseError::syntax_exit(location, "expected a table function column name")
                 })?;
             let arg_type = parse_func_type_tokens(tokens[1..].to_vec())
                 .map(Box::new)
-                .map_err(|_| ParseError::new(location, "expected a table function column type"))?;
+                .map_err(|_| {
+                    ParseError::syntax_exit(location, "expected a table function column type")
+                })?;
             columns.push(Node::FunctionParameter(FunctionParameter {
                 node_tag: NodeTag::FunctionParameter,
                 name: Some(name),

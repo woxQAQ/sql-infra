@@ -127,10 +127,10 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
         .filter(|token| token.kind != TokenKind::Char(' '))
         .collect::<Vec<_>>();
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected an option"));
+        return Err(ParseError::syntax_exit(location, "expected an option"));
     }
     let first = token_name(&tokens[0])
-        .ok_or_else(|| ParseError::new(location, "expected an option name"))?;
+        .ok_or_else(|| ParseError::syntax_exit(location, "expected an option name"))?;
     if tokens.get(1).map(|token| token.kind) == Some(TokenKind::Char('.')) {
         return Err(ParseError::ranged(
             tokens[1].range,
@@ -154,7 +154,7 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
     }
     let arg = if tokens.is_empty() {
         if has_equals {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 "option requires a value after '='",
             ));
@@ -181,7 +181,7 @@ pub(super) fn parse_operator_def_arg(
     location: usize,
 ) -> PResult<Node> {
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "option requires a value"));
+        return Err(ParseError::syntax_exit(location, "option requires a value"));
     }
     if tokens.len() == 1 {
         let token = &tokens[0];
@@ -214,7 +214,7 @@ pub(super) fn parse_operator_def_arg(
         return parse_qualified_all_operator_tokens(tokens, location).map(name_list_node);
     }
     if tokens.iter().any(|token| is_operator_name_kind(token.kind)) {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "qualified operator values require OPERATOR(schema.operator)",
         ));
@@ -224,7 +224,10 @@ pub(super) fn parse_operator_def_arg(
 
 pub(super) fn parse_operator_name_tokens(tokens: Vec<Token>, location: usize) -> PResult<NodeList> {
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected an operator name"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "expected an operator name",
+        ));
     }
     let mut elements = Vec::new();
     let mut expect_component = true;
@@ -262,7 +265,7 @@ pub(super) fn parse_operator_name_tokens(tokens: Vec<Token>, location: usize) ->
         expect_component = false;
     }
     if expect_component {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "operator name cannot end with '.'",
         ));

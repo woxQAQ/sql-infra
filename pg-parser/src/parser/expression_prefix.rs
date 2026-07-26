@@ -51,6 +51,73 @@ impl ExprParser {
     }
 
     pub(super) fn parse_prefix(&mut self, restricted: bool) -> Option<Node> {
+        if self.at_completion() {
+            self.record_completion_tokens(&[
+                TokenKind::Char('+'),
+                TokenKind::Char('-'),
+                TokenKind::Operator,
+                TokenKind::Exists,
+                TokenKind::Array,
+                TokenKind::Case,
+                TokenKind::Grouping,
+                TokenKind::Collation,
+                TokenKind::Cast,
+                TokenKind::Treat,
+                TokenKind::Extract,
+                TokenKind::Normalize,
+                TokenKind::Position,
+                TokenKind::Overlay,
+                TokenKind::Substring,
+                TokenKind::Trim,
+                TokenKind::Xmlexists,
+                TokenKind::SystemUser,
+                TokenKind::CurrentDate,
+                TokenKind::CurrentTime,
+                TokenKind::CurrentTimestamp,
+                TokenKind::Localtime,
+                TokenKind::Localtimestamp,
+                TokenKind::CurrentRole,
+                TokenKind::CurrentUser,
+                TokenKind::User,
+                TokenKind::SessionUser,
+                TokenKind::CurrentCatalog,
+                TokenKind::CurrentSchema,
+                TokenKind::Xmlconcat,
+                TokenKind::Xmlelement,
+                TokenKind::Xmlforest,
+                TokenKind::Xmlparse,
+                TokenKind::Xmlpi,
+                TokenKind::Xmlroot,
+                TokenKind::Xmlserialize,
+                TokenKind::Json,
+                TokenKind::JsonObject,
+                TokenKind::JsonArray,
+                TokenKind::JsonScalar,
+                TokenKind::JsonSerialize,
+                TokenKind::JsonQuery,
+                TokenKind::JsonExists,
+                TokenKind::JsonValue,
+                TokenKind::JsonObjectagg,
+                TokenKind::JsonArrayagg,
+                TokenKind::MergeAction,
+                TokenKind::Row,
+                TokenKind::Char('('),
+                TokenKind::Char('*'),
+                TokenKind::Coalesce,
+                TokenKind::Greatest,
+                TokenKind::Least,
+                TokenKind::Nullif,
+                TokenKind::NullP,
+                TokenKind::TrueP,
+                TokenKind::FalseP,
+            ]);
+            if !restricted {
+                self.record_completion_tokens(&[TokenKind::Not, TokenKind::Default]);
+            }
+            self.record_completion_slot(completion::GrammarSlot::Column);
+            self.record_completion_slot(completion::GrammarSlot::Function);
+            return self.fail("completion point at expression start");
+        }
         if let Some(constant) = self.try_parse_typed_constant() {
             return Some(constant);
         }

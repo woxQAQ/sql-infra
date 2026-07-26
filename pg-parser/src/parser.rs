@@ -9,6 +9,8 @@ mod alter_collation;
 mod alter_identity;
 mod alter_table;
 mod alter_table_partition;
+pub mod completion;
+pub use completion::{GrammarSlot, ParserExpectations, collect_expectations};
 mod constraints;
 mod create;
 mod create_cast_transform;
@@ -80,7 +82,9 @@ mod xmltable_columns;
 use aggregate_signatures::*;
 use expression::ExprParser;
 use expression_helpers::*;
-use expression_json::{default_json_format, json_behavior_starts, parse_json_value_expr_tokens};
+use expression_json::{
+    default_json_format, json_behavior_starts, parse_json_value_expr_tokens_with_completion,
+};
 use fragment_parser::*;
 use function_parameters::*;
 use index::*;
@@ -99,9 +103,15 @@ pub struct ParseError {
     pub range: TextRange,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum ParserExit {
+    Syntax(ParseError),
+    Completion(TextRange),
+}
+
 impl ParseError {
-    pub(super) fn new(location: usize, message: impl Into<std::string::String>) -> Self {
-        Self {
+    fn syntax(location: usize, message: impl Into<std::string::String>) -> Self {
+        ParseError {
             range: TextRange::empty(
                 TextSize::try_from(location).expect("parser locations come from validated input"),
             ),
@@ -109,21 +119,67 @@ impl ParseError {
         }
     }
 
-    pub(super) fn ranged(range: TextRange, message: impl Into<std::string::String>) -> Self {
-        Self {
+    pub(super) fn syntax_exit(
+        location: usize,
+        message: impl Into<std::string::String>,
+    ) -> ParserExit {
+        ParserExit::Syntax(Self::syntax(location, message))
+    }
+
+    pub(super) fn ranged(range: TextRange, message: impl Into<std::string::String>) -> ParserExit {
+        ParserExit::Syntax(ParseError {
             range,
             message: message.into(),
-        }
+        })
     }
 
     pub fn location(&self) -> usize {
         self.range.start().into()
     }
+}
+
+impl ParserExit {
+    fn completion(range: TextRange) -> Self {
+        Self::Completion(range)
+    }
+
+    fn location(&self) -> usize {
+        match self {
+            Self::Syntax(error) => error.location(),
+            Self::Completion(range) => range.start().into(),
+        }
+    }
 
     pub(super) fn reanchor(&mut self, location: usize) {
-        self.range = TextRange::empty(
+        let range = TextRange::empty(
             TextSize::try_from(location).expect("parser locations come from validated input"),
         );
+        match self {
+            Self::Syntax(error) => error.range = range,
+            Self::Completion(completion_range) => *completion_range = range,
+        }
+    }
+
+    fn into_parse_error(self) -> ParseError {
+        match self {
+            Self::Syntax(error) => error,
+            Self::Completion(range) => ParseError {
+                message: "unexpected synthetic completion marker".to_owned(),
+                range,
+            },
+        }
+    }
+}
+
+impl From<ParseError> for ParserExit {
+    fn from(error: ParseError) -> Self {
+        Self::Syntax(error)
+    }
+}
+
+impl From<crate::lexer::LexError> for ParserExit {
+    fn from(error: crate::lexer::LexError) -> Self {
+        Self::Syntax(error.into())
     }
 }
 
@@ -146,10 +202,10 @@ impl std::error::Error for ParseError {}
 
 // ── Public API ────────────────────────────────────────────────────────────
 
-type PResult<T> = Result<T, ParseError>;
+type PResult<T> = Result<T, ParserExit>;
 type JsonBehaviorPair = (Option<Box<JsonBehavior>>, Option<Box<JsonBehavior>>);
 
-pub fn parse(sql: &str) -> PResult<Vec<RawStmt>> {
+pub fn parse(sql: &str) -> Result<Vec<RawStmt>, ParseError> {
     Ok(parse_with_ranges(sql)?
         .into_iter()
         .map(|statement| statement.raw)
@@ -161,14 +217,14 @@ pub fn parse(sql: &str) -> PResult<Vec<RawStmt>> {
 /// PostgreSQL-compatible `RawStmt::stmt_len` semantics remain unchanged;
 /// callers that need the real range of an unterminated final statement should
 /// use this interface.
-pub fn parse_with_ranges(sql: &str) -> PResult<Vec<ParsedStatement>> {
+pub fn parse_with_ranges(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
     Parser::new(sql)?.parse_with_ranges()
 }
 
-pub fn parse_one(sql: &str) -> PResult<RawStmt> {
+pub fn parse_one(sql: &str) -> Result<RawStmt, ParseError> {
     let mut stmts = parse(sql)?;
     if stmts.len() != 1 {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax(
             stmts.get(1).map_or(0, |stmt| stmt.stmt_location as usize),
             format!("expected one statement, found {}", stmts.len()),
         ));
@@ -176,18 +232,18 @@ pub fn parse_one(sql: &str) -> PResult<RawStmt> {
     Ok(stmts.remove(0))
 }
 
-pub fn parse_plpgsql_assignment(sql: &str, nnames: i32) -> PResult<RawStmt> {
-    plpgsql::parse_assignment(sql, nnames)
+pub fn parse_plpgsql_assignment(sql: &str, nnames: i32) -> Result<RawStmt, ParseError> {
+    plpgsql::parse_assignment(sql, nnames).map_err(ParserExit::into_parse_error)
 }
 
-pub fn parse_plpgsql_expression(sql: &str) -> PResult<RawStmt> {
-    plpgsql::parse_expression(sql)
+pub fn parse_plpgsql_expression(sql: &str) -> Result<RawStmt, ParseError> {
+    plpgsql::parse_expression(sql).map_err(ParserExit::into_parse_error)
 }
 
-pub fn parse_type_name(sql: &str) -> PResult<TypeName> {
+pub fn parse_type_name(sql: &str) -> Result<TypeName, ParseError> {
     let mut tokens = lex(sql)?;
     tokens.pop();
-    parse_type_name_tokens(tokens)
+    parse_type_name_tokens(tokens).map_err(ParserExit::into_parse_error)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -210,6 +266,7 @@ enum DescribedIdentityKind {
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    completion: Option<completion::SharedCollector>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -237,22 +294,33 @@ pub struct ParsedStatement {
 }
 
 impl Parser {
-    pub fn new(sql: &str) -> PResult<Self> {
+    pub fn new(sql: &str) -> Result<Self, ParseError> {
         Ok(Self {
             tokens: lex(sql)?,
             pos: 0,
+            completion: None,
         })
     }
 
-    pub fn parse(&mut self) -> PResult<Vec<RawStmt>> {
+    pub fn parse(&mut self) -> Result<Vec<RawStmt>, ParseError> {
+        self.parse_controlled()
+            .map_err(ParserExit::into_parse_error)
+    }
+
+    fn parse_controlled(&mut self) -> PResult<Vec<RawStmt>> {
         Ok(self
-            .parse_with_ranges()?
+            .parse_with_ranges_controlled()?
             .into_iter()
             .map(|statement| statement.raw)
             .collect())
     }
 
-    pub fn parse_with_ranges(&mut self) -> PResult<Vec<ParsedStatement>> {
+    pub fn parse_with_ranges(&mut self) -> Result<Vec<ParsedStatement>, ParseError> {
+        self.parse_with_ranges_controlled()
+            .map_err(ParserExit::into_parse_error)
+    }
+
+    fn parse_with_ranges_controlled(&mut self) -> PResult<Vec<ParsedStatement>> {
         let mut stmts = Vec::new();
         while !self.at(TokenKind::Eof) {
             while self.consume(TokenKind::Char(';')) {}
@@ -340,6 +408,9 @@ impl Parser {
         let mut out = Vec::new();
         let mut depth = 0usize;
         while !self.at(TokenKind::Eof) {
+            if self.at_completion() {
+                break;
+            }
             let kind = self.peek_kind();
             // Two-word combinations that need the previous token to disambiguate.
             let within_group = kind == TokenKind::GroupP
@@ -378,8 +449,20 @@ impl Parser {
         out
     }
 
+    /// Preserve the synthetic completion marker when a deferred fragment is
+    /// handed to another parser. The outer parser keeps its cursor at the
+    /// marker; the nested parser receives a clone and shares the collector.
+    pub(super) fn append_completion_marker(&self, tokens: &mut Vec<Token>) {
+        if self.at_completion() {
+            tokens.push(self.peek().clone());
+        }
+    }
+
     /// True if the cursor is at a statement boundary (`;` or EOF).
     pub(super) fn at_statement_end(&self) -> bool {
+        if self.at_completion() {
+            self.record_completion_tokens(&[TokenKind::Char(';')]);
+        }
         self.at(TokenKind::Char(';')) || self.at(TokenKind::Eof)
     }
 
@@ -404,6 +487,68 @@ impl Parser {
     /// LA(1): is the current token one of `kinds`?  Does not advance.
     pub(super) fn at_any(&self, kinds: &[TokenKind]) -> bool {
         kinds.contains(&self.peek_kind())
+    }
+
+    pub(super) fn at_completion(&self) -> bool {
+        self.peek_kind() == TokenKind::Completion
+    }
+
+    pub(super) fn record_completion_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_slot(&self, slot: completion::GrammarSlot) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().slot(slot);
+        }
+    }
+
+    pub(super) fn record_completion_phrase(&self, phrase: &'static [TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().phrase(phrase);
+        }
+    }
+
+    pub(super) fn record_completion_slot_before(
+        &self,
+        slot: completion::GrammarSlot,
+        stops: &[TokenKind],
+    ) {
+        if self.top_level_token_before_completion(stops) != Some(TokenKind::Char('.')) {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().slot(slot);
+        }
+    }
+
+    fn top_level_token_before_completion(&self, stops: &[TokenKind]) -> Option<TokenKind> {
+        let mut depth = 0usize;
+        let mut previous = None;
+        for token in &self.tokens[self.pos..] {
+            match token.kind {
+                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                TokenKind::Char(')') | TokenKind::Char(']') => {
+                    depth = depth.saturating_sub(1);
+                }
+                TokenKind::Completion if depth == 0 => return previous,
+                kind if depth == 0 && stops.contains(&kind) => return None,
+                kind if depth == 0 => previous = Some(kind),
+                _ => {}
+            }
+        }
+        None
     }
 
     /// Read-ahead (non-consuming): does `needle` appear at the **top level**
@@ -436,6 +581,10 @@ impl Parser {
     /// `true`; otherwise leave the cursor unchanged and return `false`.
     /// Corresponds to "optional / see-one-consume-one" in grammar productions.
     pub(super) fn consume(&mut self, kind: TokenKind) -> bool {
+        if self.at_completion() {
+            self.record_completion_tokens(&[kind]);
+            return false;
+        }
         if self.at(kind) {
             self.pos += 1;
             true
@@ -444,10 +593,28 @@ impl Parser {
         }
     }
 
+    /// Optional match of a fixed multi-token unit: if the head token matches,
+    /// every following token is required. Publishes the whole phrase as one
+    /// completion unit so adapters can render `GROUP BY` instead of `GROUP`.
+    pub(super) fn consume_phrase(&mut self, phrase: &'static [TokenKind]) -> PResult<bool> {
+        self.record_completion_phrase(phrase);
+        if !self.consume(phrase[0]) {
+            return Ok(false);
+        }
+        for kind in &phrase[1..] {
+            self.expect(*kind)?;
+        }
+        Ok(true)
+    }
+
     /// Required match: if the current token is `kind`, consume it and return
     /// a clone; otherwise emit a syntax error with the expected vs actual kind.
     /// Corresponds to mandatory tokens in productions.
     pub(super) fn expect(&mut self, kind: TokenKind) -> PResult<Token> {
+        if self.at_completion() {
+            self.record_completion_tokens(&[kind]);
+            return Err(self.error_here(format!("completion point before required {:?}", kind)));
+        }
         if self.at(kind) {
             Ok(self.advance().clone())
         } else {
@@ -459,7 +626,7 @@ impl Parser {
     /// At EOF stays at the last position (no out-of-bounds advance).
     /// This is the lowest-level consume; `consume` / `expect` are built on it.
     pub(super) fn advance(&mut self) -> &Token {
-        if !self.at(TokenKind::Eof) {
+        if !matches!(self.peek_kind(), TokenKind::Eof | TokenKind::Completion) {
             self.pos += 1;
         }
         &self.tokens[self.pos.saturating_sub(1)]
@@ -501,10 +668,13 @@ impl Parser {
             .unwrap_or(self.location())
     }
 
-    /// Construct a `ParseError` anchored at the current token position.
-    /// The single entry point for all parser error reporting.
-    pub(super) fn error_here(&self, message: impl Into<std::string::String>) -> ParseError {
-        ParseError::ranged(self.peek().range, message)
+    /// Construct parser control flow anchored at the current token position.
+    pub(super) fn error_here(&self, message: impl Into<std::string::String>) -> ParserExit {
+        if self.at_completion() && self.completion.is_some() {
+            ParserExit::completion(self.peek().range)
+        } else {
+            ParseError::ranged(self.peek().range, message)
+        }
     }
 }
 
@@ -514,67 +684,252 @@ impl Parser {
 // parser.  A few keywords are ambiguous and need bounded extra lookahead
 // (`peek_kind_n`) to disambiguate before committing to a branch.
 
+macro_rules! define_statement_families {
+    ($($family:ident => [$($starter:expr),+ $(,)?]),+ $(,)?) => {
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        enum StatementFamily {
+            $($family),+
+        }
+
+        const STATEMENT_FAMILIES: &[StatementFamily] = &[
+            $(StatementFamily::$family),+
+        ];
+
+        impl StatementFamily {
+            fn starters(self) -> &'static [TokenKind] {
+                match self {
+                    $(Self::$family => &[$($starter),+]),+
+                }
+            }
+
+            #[cfg(test)]
+            fn coverage_sample(self) -> &'static str {
+                match self {
+                    Self::With => "WITH x AS (SELECT 1) SELECT * FROM x",
+                    Self::Query => "SELECT 1",
+                    Self::Insert => "INSERT INTO t VALUES (1)",
+                    Self::Update => "UPDATE t SET id = 1",
+                    Self::Delete => "DELETE FROM t",
+                    Self::Merge => "MERGE INTO t USING s ON true WHEN MATCHED THEN DO NOTHING",
+                    Self::Create => "CREATE TABLE t (id int)",
+                    Self::Alter => "ALTER TABLE t ADD COLUMN c int",
+                    Self::Drop => "DROP TABLE t",
+                    Self::SetConstraints => "SET CONSTRAINTS ALL DEFERRED",
+                    Self::VariableSet => "SET work_mem = '4MB'",
+                    Self::VariableReset => "RESET work_mem",
+                    Self::VariableShow => "SHOW work_mem",
+                    Self::Transaction => "BEGIN",
+                    Self::PrepareTransaction => "PREPARE TRANSACTION 'tx'",
+                    Self::Prepare => "PREPARE q AS SELECT 1",
+                    Self::Execute => "EXECUTE q",
+                    Self::Deallocate => "DEALLOCATE q",
+                    Self::Declare => "DECLARE c CURSOR FOR SELECT 1",
+                    Self::Close => "CLOSE c",
+                    Self::FetchMove => "FETCH NEXT FROM c",
+                    Self::Copy => "COPY t FROM STDIN",
+                    Self::Vacuum => "ANALYZE t",
+                    Self::Explain => "EXPLAIN SELECT 1",
+                    Self::Call => "CALL f()",
+                    Self::Checkpoint => "CHECKPOINT",
+                    Self::Discard => "DISCARD ALL",
+                    Self::Lock => "LOCK TABLE t",
+                    Self::Listen => "LISTEN channel",
+                    Self::Unlisten => "UNLISTEN *",
+                    Self::Notify => "NOTIFY channel",
+                    Self::Load => "LOAD 'library'",
+                    Self::Refresh => "REFRESH MATERIALIZED VIEW mv",
+                    Self::Reindex => "REINDEX TABLE t",
+                    Self::Repack => "CLUSTER t",
+                    Self::Reassign => "REASSIGN OWNED BY old_role TO new_role",
+                    Self::Truncate => "TRUNCATE TABLE t",
+                    Self::Comment => "COMMENT ON TABLE t IS 'comment'",
+                    Self::SecurityLabel => "SECURITY LABEL ON TABLE t IS 'label'",
+                    Self::Grant => "GRANT SELECT ON TABLE t TO role_name",
+                    Self::Revoke => "REVOKE SELECT ON TABLE t FROM role_name",
+                    Self::Import => "IMPORT FOREIGN SCHEMA s FROM SERVER srv INTO public",
+                    Self::Do => "DO 'BEGIN END'",
+                    Self::Wait => "WAIT FOR LSN '0/0'",
+                }
+            }
+        }
+    };
+}
+
+define_statement_families! {
+    With => [TokenKind::With],
+    Query => [TokenKind::Select, TokenKind::Values, TokenKind::Table, TokenKind::Char('(')],
+    Insert => [TokenKind::Insert],
+    Update => [TokenKind::Update],
+    Delete => [TokenKind::DeleteP],
+    Merge => [TokenKind::Merge],
+    Create => [TokenKind::Create],
+    Alter => [TokenKind::Alter],
+    Drop => [TokenKind::Drop],
+    SetConstraints => [TokenKind::Set],
+    VariableSet => [TokenKind::Set],
+    VariableReset => [TokenKind::Reset],
+    VariableShow => [TokenKind::Show],
+    Transaction => [
+        TokenKind::BeginP,
+        TokenKind::Start,
+        TokenKind::Commit,
+        TokenKind::EndP,
+        TokenKind::Rollback,
+        TokenKind::AbortP,
+        TokenKind::Savepoint,
+        TokenKind::Release,
+    ],
+    PrepareTransaction => [TokenKind::Prepare],
+    Prepare => [TokenKind::Prepare],
+    Execute => [TokenKind::Execute],
+    Deallocate => [TokenKind::Deallocate],
+    Declare => [TokenKind::Declare],
+    Close => [TokenKind::Close],
+    FetchMove => [TokenKind::Fetch, TokenKind::Move],
+    Copy => [TokenKind::Copy],
+    Vacuum => [TokenKind::Vacuum, TokenKind::Analyze, TokenKind::Analyse],
+    Explain => [TokenKind::Explain],
+    Call => [TokenKind::Call],
+    Checkpoint => [TokenKind::Checkpoint],
+    Discard => [TokenKind::Discard],
+    Lock => [TokenKind::LockP],
+    Listen => [TokenKind::Listen],
+    Unlisten => [TokenKind::Unlisten],
+    Notify => [TokenKind::Notify],
+    Load => [TokenKind::Load],
+    Refresh => [TokenKind::Refresh],
+    Reindex => [TokenKind::Reindex],
+    Repack => [TokenKind::Cluster, TokenKind::Repack],
+    Reassign => [TokenKind::Reassign],
+    Truncate => [TokenKind::Truncate],
+    Comment => [TokenKind::Comment],
+    SecurityLabel => [TokenKind::Security],
+    Grant => [TokenKind::Grant],
+    Revoke => [TokenKind::Revoke],
+    Import => [TokenKind::ImportP],
+    Do => [TokenKind::Do],
+    Wait => [TokenKind::Wait],
+}
+
+fn classify_statement(first: TokenKind, second: TokenKind) -> Option<StatementFamily> {
+    Some(match first {
+        TokenKind::With => StatementFamily::With,
+        TokenKind::Select | TokenKind::Values | TokenKind::Table | TokenKind::Char('(') => {
+            StatementFamily::Query
+        }
+        TokenKind::Insert => StatementFamily::Insert,
+        TokenKind::Update => StatementFamily::Update,
+        TokenKind::DeleteP => StatementFamily::Delete,
+        TokenKind::Merge => StatementFamily::Merge,
+        TokenKind::Create => StatementFamily::Create,
+        TokenKind::Alter => StatementFamily::Alter,
+        TokenKind::Drop => StatementFamily::Drop,
+        TokenKind::Set if second == TokenKind::Constraints => StatementFamily::SetConstraints,
+        TokenKind::Set => StatementFamily::VariableSet,
+        TokenKind::Reset => StatementFamily::VariableReset,
+        TokenKind::Show => StatementFamily::VariableShow,
+        TokenKind::BeginP
+        | TokenKind::Start
+        | TokenKind::Commit
+        | TokenKind::EndP
+        | TokenKind::Rollback
+        | TokenKind::AbortP
+        | TokenKind::Savepoint
+        | TokenKind::Release => StatementFamily::Transaction,
+        TokenKind::Prepare if second == TokenKind::Transaction => {
+            StatementFamily::PrepareTransaction
+        }
+        TokenKind::Prepare => StatementFamily::Prepare,
+        TokenKind::Execute => StatementFamily::Execute,
+        TokenKind::Deallocate => StatementFamily::Deallocate,
+        TokenKind::Declare => StatementFamily::Declare,
+        TokenKind::Close => StatementFamily::Close,
+        TokenKind::Fetch | TokenKind::Move => StatementFamily::FetchMove,
+        TokenKind::Copy => StatementFamily::Copy,
+        TokenKind::Vacuum | TokenKind::Analyze | TokenKind::Analyse => StatementFamily::Vacuum,
+        TokenKind::Explain => StatementFamily::Explain,
+        TokenKind::Call => StatementFamily::Call,
+        TokenKind::Checkpoint => StatementFamily::Checkpoint,
+        TokenKind::Discard => StatementFamily::Discard,
+        TokenKind::LockP => StatementFamily::Lock,
+        TokenKind::Listen => StatementFamily::Listen,
+        TokenKind::Unlisten => StatementFamily::Unlisten,
+        TokenKind::Notify => StatementFamily::Notify,
+        TokenKind::Load => StatementFamily::Load,
+        TokenKind::Refresh => StatementFamily::Refresh,
+        TokenKind::Reindex => StatementFamily::Reindex,
+        TokenKind::Cluster | TokenKind::Repack => StatementFamily::Repack,
+        TokenKind::Reassign => StatementFamily::Reassign,
+        TokenKind::Truncate => StatementFamily::Truncate,
+        TokenKind::Comment => StatementFamily::Comment,
+        TokenKind::Security => StatementFamily::SecurityLabel,
+        TokenKind::Grant => StatementFamily::Grant,
+        TokenKind::Revoke => StatementFamily::Revoke,
+        TokenKind::ImportP => StatementFamily::Import,
+        TokenKind::Do => StatementFamily::Do,
+        TokenKind::Wait => StatementFamily::Wait,
+        _ => return None,
+    })
+}
+
 impl Parser {
     pub(super) fn parse_statement(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
-        match self.peek_kind() {
-            TokenKind::With => self.parse_with_statement(),
-            TokenKind::Select | TokenKind::Values | TokenKind::Table | TokenKind::Char('(') => {
-                Ok(Node::SelectStmt(self.parse_select(with_clause)?))
+        if self.at_completion() {
+            for family in STATEMENT_FAMILIES {
+                self.record_completion_tokens(family.starters());
             }
-            TokenKind::Insert => self.parse_insert(with_clause),
-            TokenKind::Update => self.parse_update(with_clause),
-            TokenKind::DeleteP => self.parse_delete(with_clause),
-            TokenKind::Merge => self.parse_merge(with_clause),
-            TokenKind::Create => self.parse_create(),
-            TokenKind::Alter => self.parse_alter(),
-            TokenKind::Drop => self.parse_drop(),
-            TokenKind::Set if self.peek_kind_n(1) == TokenKind::Constraints => {
-                self.parse_set_constraints()
-            }
-            TokenKind::Set => self.parse_variable_set(),
-            TokenKind::Reset => self.parse_variable_reset(),
-            TokenKind::Show => self.parse_variable_show(),
-            TokenKind::BeginP
-            | TokenKind::Start
-            | TokenKind::Commit
-            | TokenKind::EndP
-            | TokenKind::Rollback
-            | TokenKind::AbortP
-            | TokenKind::Savepoint
-            | TokenKind::Release => self.parse_transaction(),
-            TokenKind::Prepare if self.peek_kind_n(1) == TokenKind::Transaction => {
+            return Err(self.error_here("completion point at statement start"));
+        }
+        let first = self.peek_kind();
+        let Some(family) = classify_statement(first, self.peek_kind_n(1)) else {
+            return Err(self.error_here(format!("unexpected token {:?}", first)));
+        };
+        match family {
+            StatementFamily::With => self.parse_with_statement(),
+            StatementFamily::Query => Ok(Node::SelectStmt(self.parse_select(with_clause)?)),
+            StatementFamily::Insert => self.parse_insert(with_clause),
+            StatementFamily::Update => self.parse_update(with_clause),
+            StatementFamily::Delete => self.parse_delete(with_clause),
+            StatementFamily::Merge => self.parse_merge(with_clause),
+            StatementFamily::Create => self.parse_create(),
+            StatementFamily::Alter => self.parse_alter(),
+            StatementFamily::Drop => self.parse_drop(),
+            StatementFamily::SetConstraints => self.parse_set_constraints(),
+            StatementFamily::VariableSet => self.parse_variable_set(),
+            StatementFamily::VariableReset => self.parse_variable_reset(),
+            StatementFamily::VariableShow => self.parse_variable_show(),
+            StatementFamily::Transaction | StatementFamily::PrepareTransaction => {
                 self.parse_transaction()
             }
-            TokenKind::Prepare => self.parse_prepare(),
-            TokenKind::Execute => self.parse_execute(),
-            TokenKind::Deallocate => self.parse_deallocate(),
-            TokenKind::Declare => self.parse_declare_cursor(),
-            TokenKind::Close => self.parse_close(),
-            TokenKind::Fetch | TokenKind::Move => self.parse_fetch_or_move(),
-            TokenKind::Copy => self.parse_copy(),
-            TokenKind::Vacuum | TokenKind::Analyze | TokenKind::Analyse => self.parse_vacuum(),
-            TokenKind::Explain => self.parse_explain(),
-            TokenKind::Call => self.parse_call(),
-            TokenKind::Checkpoint => self.parse_checkpoint(),
-            TokenKind::Discard => self.parse_discard(),
-            TokenKind::LockP => self.parse_lock(),
-            TokenKind::Listen => self.parse_listen(),
-            TokenKind::Unlisten => self.parse_unlisten(),
-            TokenKind::Notify => self.parse_notify(),
-            TokenKind::Load => self.parse_load(),
-            TokenKind::Refresh => self.parse_refresh(),
-            TokenKind::Reindex => self.parse_reindex(),
-            TokenKind::Cluster | TokenKind::Repack => self.parse_repack(),
-            TokenKind::Reassign => self.parse_reassign_owned(),
-            TokenKind::Truncate => self.parse_truncate(),
-            TokenKind::Comment => self.parse_comment(),
-            TokenKind::Security => self.parse_security_label(),
-            TokenKind::Grant => self.parse_grant(true),
-            TokenKind::Revoke => self.parse_grant(false),
-            TokenKind::ImportP => self.parse_import_foreign_schema(),
-            TokenKind::Do => self.parse_do(),
-            TokenKind::Wait => self.parse_wait(),
-            other => Err(self.error_here(format!("unexpected token {:?}", other))),
+            StatementFamily::Prepare => self.parse_prepare(),
+            StatementFamily::Execute => self.parse_execute(),
+            StatementFamily::Deallocate => self.parse_deallocate(),
+            StatementFamily::Declare => self.parse_declare_cursor(),
+            StatementFamily::Close => self.parse_close(),
+            StatementFamily::FetchMove => self.parse_fetch_or_move(),
+            StatementFamily::Copy => self.parse_copy(),
+            StatementFamily::Vacuum => self.parse_vacuum(),
+            StatementFamily::Explain => self.parse_explain(),
+            StatementFamily::Call => self.parse_call(),
+            StatementFamily::Checkpoint => self.parse_checkpoint(),
+            StatementFamily::Discard => self.parse_discard(),
+            StatementFamily::Lock => self.parse_lock(),
+            StatementFamily::Listen => self.parse_listen(),
+            StatementFamily::Unlisten => self.parse_unlisten(),
+            StatementFamily::Notify => self.parse_notify(),
+            StatementFamily::Load => self.parse_load(),
+            StatementFamily::Refresh => self.parse_refresh(),
+            StatementFamily::Reindex => self.parse_reindex(),
+            StatementFamily::Repack => self.parse_repack(),
+            StatementFamily::Reassign => self.parse_reassign_owned(),
+            StatementFamily::Truncate => self.parse_truncate(),
+            StatementFamily::Comment => self.parse_comment(),
+            StatementFamily::SecurityLabel => self.parse_security_label(),
+            StatementFamily::Grant => self.parse_grant(true),
+            StatementFamily::Revoke => self.parse_grant(false),
+            StatementFamily::Import => self.parse_import_foreign_schema(),
+            StatementFamily::Do => self.parse_do(),
+            StatementFamily::Wait => self.parse_wait(),
         }
     }
 }

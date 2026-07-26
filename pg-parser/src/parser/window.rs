@@ -30,6 +30,17 @@ impl Parser {
         &mut self,
         location: usize,
     ) -> PResult<WindowDef> {
+        self.record_completion_tokens(&[
+            TokenKind::Partition,
+            TokenKind::Order,
+            TokenKind::Rows,
+            TokenKind::Range,
+            TokenKind::Groups,
+            TokenKind::Char(')'),
+        ]);
+        self.record_completion_phrase(&[TokenKind::Partition, TokenKind::By]);
+        self.record_completion_phrase(&[TokenKind::Order, TokenKind::By]);
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let mut window = WindowDef {
             node_tag: NodeTag::WindowDef,
             location: location as ParseLoc,
@@ -49,8 +60,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("invalid referenced window name"))?,
             );
         }
-        if self.consume(TokenKind::Partition) {
-            self.expect(TokenKind::By)?;
+        if self.consume_phrase(&[TokenKind::Partition, TokenKind::By])? {
             window.partition_clause = self.parse_expr_list_strict_until(&[
                 TokenKind::Order,
                 TokenKind::Rows,
@@ -62,8 +72,7 @@ impl Parser {
                 return Err(self.error_here("PARTITION BY requires an expression"));
             }
         }
-        if self.consume(TokenKind::Order) {
-            self.expect(TokenKind::By)?;
+        if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
             window.order_clause = self.parse_sort_list_strict_until(&[
                 TokenKind::Rows,
                 TokenKind::Range,

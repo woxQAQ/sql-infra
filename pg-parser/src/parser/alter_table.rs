@@ -23,6 +23,7 @@ impl Parser {
         self.expect(TokenKind::All)?;
         self.expect(TokenKind::InP)?;
         self.expect(TokenKind::Tablespace)?;
+        self.record_completion_slot(completion::GrammarSlot::Tablespace);
         let orig_tablespacename = self
             .consume_col_id()
             .ok_or_else(|| self.error_here("expected the source tablespace name"))?;
@@ -41,6 +42,7 @@ impl Parser {
         }
         self.expect(TokenKind::Set)?;
         self.expect(TokenKind::Tablespace)?;
+        self.record_completion_slot(completion::GrammarSlot::Tablespace);
         let new_tablespacename = self
             .consume_col_id()
             .ok_or_else(|| self.error_here("expected the destination tablespace name"))?;
@@ -57,9 +59,11 @@ impl Parser {
 
     pub(super) fn parse_alter_table_after_kind(&mut self, objtype: ObjectType) -> PResult<Node> {
         let missing_ok = self.consume_if_exists()?;
-        let relation = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
-            || self.error_here("ALTER relation requires a relation name"),
-        )?));
+        let slot = completion::object_type_slot(objtype);
+        let relation = Some(Box::new(
+            self.try_parse_qualified_range_var_with_slot(slot)
+                .ok_or_else(|| self.error_here("ALTER relation requires a relation name"))?,
+        ));
         let cmds = self.parse_alter_table_cmds(objtype)?;
         Ok(Node::AlterTableStmt(AlterTableStmt {
             node_tag: NodeTag::AlterTableStmt,
@@ -107,12 +111,16 @@ impl Parser {
         } else {
             cmd.subtype = AlterTableType::AddColumn;
             cmd.missing_ok = self.consume_if_not_exists()?;
-            let tokens = self.take_until_top_level(&[
+            let mut tokens = self.take_until_top_level(&[
                 TokenKind::Char(','),
                 TokenKind::Char(';'),
                 TokenKind::Eof,
             ]);
-            let Node::ColumnDef(column) = parse_table_element_tokens(tokens)? else {
+            self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(';')]);
+            self.append_completion_marker(&mut tokens);
+            let Node::ColumnDef(column) =
+                parse_table_element_tokens_with_completion(tokens, self.completion.clone())?
+            else {
                 return Err(self.error_here("ADD COLUMN requires a column definition"));
             };
             cmd.def = Some(Box::new(Node::ColumnDef(column)));
@@ -128,10 +136,13 @@ impl Parser {
         };
         if self.consume(TokenKind::Column) {
             cmd.subtype = AlterTableType::DropColumn;
+            self.record_completion_slot(completion::GrammarSlot::Column);
         } else if self.consume(TokenKind::Constraint) {
             cmd.subtype = AlterTableType::DropConstraint;
+            self.record_completion_slot(completion::GrammarSlot::Constraint);
         } else {
             cmd.subtype = AlterTableType::DropColumn;
+            self.record_completion_slot(completion::GrammarSlot::Column);
         }
         cmd.missing_ok = self.consume_if_exists()?;
         cmd.name = Some(
@@ -144,6 +155,15 @@ impl Parser {
 
     fn parse_alter_table_set_cmd(&mut self) -> PResult<AlterTableCmd> {
         self.expect(TokenKind::Set)?;
+        self.record_completion_tokens(&[
+            TokenKind::Schema,
+            TokenKind::Tablespace,
+            TokenKind::Logged,
+            TokenKind::Unlogged,
+            TokenKind::Access,
+            TokenKind::Without,
+            TokenKind::Char('('),
+        ]);
         let mut cmd = AlterTableCmd {
             node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
@@ -152,6 +172,7 @@ impl Parser {
             TokenKind::Tablespace => {
                 self.advance();
                 cmd.subtype = AlterTableType::SetTableSpace;
+                self.record_completion_slot(completion::GrammarSlot::Tablespace);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("SET TABLESPACE requires a name"))?,
@@ -170,6 +191,7 @@ impl Parser {
                 self.expect(TokenKind::Method)?;
                 cmd.subtype = AlterTableType::SetAccessMethod;
                 if !self.consume(TokenKind::Default) {
+                    self.record_completion_slot(completion::GrammarSlot::AccessMethod);
                     cmd.name = Some(self.consume_col_id().ok_or_else(|| {
                         self.error_here("SET ACCESS METHOD requires a method name or DEFAULT")
                     })?);
@@ -242,6 +264,7 @@ impl Parser {
                         Some(TokenKind::Replica) => AlterTableType::EnableReplicaTrig,
                         _ => AlterTableType::EnableTrig,
                     };
+                    self.record_completion_slot(completion::GrammarSlot::Trigger);
                     cmd.name = Some(self.consume_col_id().ok_or_else(|| {
                         self.error_here("ENABLE TRIGGER requires a trigger name")
                     })?);
@@ -254,6 +277,7 @@ impl Parser {
                     Some(TokenKind::Replica) => AlterTableType::EnableReplicaRule,
                     _ => AlterTableType::EnableRule,
                 };
+                self.record_completion_slot(completion::GrammarSlot::Rule);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("ENABLE RULE requires a rule name"))?,
@@ -292,6 +316,7 @@ impl Parser {
                     }
                     _ => {
                         cmd.subtype = AlterTableType::DisableTrig;
+                        self.record_completion_slot(completion::GrammarSlot::Trigger);
                         cmd.name = Some(self.consume_col_id().ok_or_else(|| {
                             self.error_here("DISABLE TRIGGER requires a trigger name")
                         })?);
@@ -301,6 +326,7 @@ impl Parser {
             TokenKind::Rule => {
                 self.advance();
                 cmd.subtype = AlterTableType::DisableRule;
+                self.record_completion_slot(completion::GrammarSlot::Rule);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("DISABLE RULE requires a rule name"))?,
@@ -332,6 +358,7 @@ impl Parser {
             TokenKind::Alter => {
                 self.advance();
                 if self.consume(TokenKind::Constraint) {
+                    self.record_completion_slot(completion::GrammarSlot::Constraint);
                     let conname = Some(self.consume_col_id().ok_or_else(|| {
                         self.error_here("ALTER CONSTRAINT requires a constraint name")
                     })?);
@@ -434,6 +461,7 @@ impl Parser {
                     }
                     cmd.num = value as i16;
                 } else {
+                    self.record_completion_slot(completion::GrammarSlot::Column);
                     cmd.name =
                         Some(self.consume_col_id().ok_or_else(|| {
                             self.error_here("ALTER COLUMN requires a column name")
@@ -468,6 +496,7 @@ impl Parser {
                         ])
                         .ok_or_else(|| self.error_here("ALTER COLUMN TYPE requires a type"))?;
                     let coll_clause = if self.consume(TokenKind::Collate) {
+                        self.record_completion_slot(completion::GrammarSlot::Collation);
                         let location = self.previous_location();
                         let collname = self.parse_name_list();
                         if collname.is_empty() {
@@ -769,6 +798,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::Constraint)?;
                 cmd.subtype = AlterTableType::ValidateConstraint;
+                self.record_completion_slot(completion::GrammarSlot::Constraint);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("VALIDATE CONSTRAINT requires a name"))?,
@@ -780,6 +810,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::On)?;
                 cmd.subtype = AlterTableType::ClusterOn;
+                self.record_completion_slot(completion::GrammarSlot::Index);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("CLUSTER ON requires an index name"))?,
@@ -804,6 +835,7 @@ impl Parser {
                     TokenKind::Using => {
                         self.advance();
                         self.expect(TokenKind::Index)?;
+                        self.record_completion_slot(completion::GrammarSlot::Index);
                         (
                             b'i',
                             Some(self.consume_col_id().ok_or_else(|| {
@@ -830,6 +862,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::To)?;
                 cmd.subtype = AlterTableType::ChangeOwner;
+                self.record_completion_slot(completion::GrammarSlot::Role);
                 cmd.newowner =
                     Some(Box::new(self.consume_role_spec().ok_or_else(|| {
                         self.error_here("OWNER TO requires a role")
@@ -842,7 +875,7 @@ impl Parser {
                 self.advance();
                 cmd.subtype = AlterTableType::AddInherit;
                 cmd.def = Some(Box::new(Node::RangeVar(
-                    self.try_parse_qualified_range_var()
+                    self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                         .ok_or_else(|| self.error_here("INHERIT requires a parent table"))?,
                 )));
             }
@@ -851,8 +884,10 @@ impl Parser {
                 if self.consume(TokenKind::Inherit) {
                     cmd.subtype = AlterTableType::DropInherit;
                     cmd.def = Some(Box::new(Node::RangeVar(
-                        self.try_parse_qualified_range_var()
-                            .ok_or_else(|| self.error_here("NO INHERIT requires a parent table"))?,
+                        self.try_parse_qualified_range_var_with_slot(
+                            completion::GrammarSlot::Table,
+                        )
+                        .ok_or_else(|| self.error_here("NO INHERIT requires a parent table"))?,
                     )));
                 } else if self.consume(TokenKind::Force) {
                     self.expect(TokenKind::Row)?;
@@ -865,6 +900,7 @@ impl Parser {
             }
             TokenKind::Of => {
                 let location = self.advance().location();
+                self.record_completion_slot(completion::GrammarSlot::Type);
                 let names = self.parse_name_list();
                 if names.is_empty() {
                     return Err(self.error_here("OF requires a type name"));

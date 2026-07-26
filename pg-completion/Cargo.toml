@@ -1,0 +1,11 @@
+[package]
+name = "pg-completion"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pg-parser = { path = "../pg-parser" }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"

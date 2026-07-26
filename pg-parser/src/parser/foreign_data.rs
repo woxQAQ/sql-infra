@@ -10,11 +10,13 @@ impl Parser {
         self.expect(TokenKind::User)?;
         self.expect(TokenKind::Mapping)?;
         self.expect(TokenKind::For)?;
+        self.record_completion_slot(completion::GrammarSlot::Role);
         let user =
             Some(Box::new(self.consume_auth_ident().ok_or_else(|| {
                 self.error_here("ALTER USER MAPPING requires a user")
             })?));
         self.expect(TokenKind::Server)?;
+        self.record_completion_slot(completion::GrammarSlot::ForeignServer);
         let servername = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("SERVER requires a server name"))?,
@@ -38,6 +40,7 @@ impl Parser {
     // ALTER FOREIGN DATA WRAPPER name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
     // ALTER FOREIGN DATA WRAPPER name RENAME TO new_name
     pub(super) fn parse_alter_fdw(&mut self) -> PResult<Node> {
+        self.record_completion_slot(completion::GrammarSlot::ForeignDataWrapper);
         let fdwname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER FOREIGN DATA WRAPPER requires a name"))?,
@@ -68,6 +71,7 @@ impl Parser {
     // ALTER SERVER name RENAME TO new_name
     pub(super) fn parse_alter_foreign_server(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Server)?;
+        self.record_completion_slot(completion::GrammarSlot::ForeignServer);
         let servername = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER SERVER requires a server name"))?,
@@ -107,6 +111,7 @@ impl Parser {
     //     [ VALIDATOR validator_function | NO VALIDATOR ]
     //     [ OPTIONS ( option 'value' [, ... ] ) ]
     pub(super) fn parse_create_fdw(&mut self) -> PResult<Node> {
+        self.record_completion_slot(completion::GrammarSlot::ForeignDataWrapper);
         let fdwname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE FOREIGN DATA WRAPPER requires a name"))?,
@@ -132,6 +137,7 @@ impl Parser {
             let (name, arg) = match self.peek_kind() {
                 kind @ (TokenKind::Handler | TokenKind::Validator | TokenKind::Connection) => {
                     self.advance();
+                    self.record_completion_slot(completion::GrammarSlot::Function);
                     let name = match kind {
                         TokenKind::Handler => "handler",
                         TokenKind::Validator => "validator",
@@ -177,6 +183,7 @@ impl Parser {
     pub(super) fn parse_create_server(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Server)?;
         let if_not_exists = self.consume_if_not_exists()?;
+        self.record_completion_slot(completion::GrammarSlot::ForeignServer);
         let servername = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE SERVER requires a name"))?,
@@ -184,24 +191,20 @@ impl Parser {
         let mut servertype = None;
         let mut version = None;
         if self.consume(TokenKind::TypeP) {
-            if !self.at(TokenKind::SConst) {
-                return Err(self.error_here("SERVER TYPE requires a string"));
-            }
-            servertype = self.consume_string_like();
+            servertype = Some(self.consume_required_string("SERVER TYPE requires a string")?);
         }
         if self.consume(TokenKind::VersionP) {
             if self.consume(TokenKind::NullP) {
                 version = None;
             } else {
-                if !self.at(TokenKind::SConst) {
-                    return Err(self.error_here("SERVER VERSION requires a string or NULL"));
-                }
-                version = self.consume_string_like();
+                version =
+                    Some(self.consume_required_string("SERVER VERSION requires a string or NULL")?);
             }
         }
         self.expect(TokenKind::Foreign)?;
         self.expect(TokenKind::DataP)?;
         self.expect(TokenKind::Wrapper)?;
+        self.record_completion_slot(completion::GrammarSlot::ForeignDataWrapper);
         let fdwname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("FOREIGN DATA WRAPPER requires a name"))?,
@@ -232,6 +235,7 @@ impl Parser {
         self.expect(TokenKind::Mapping)?;
         let if_not_exists = self.consume_if_not_exists()?;
         self.expect(TokenKind::For)?;
+        self.record_completion_slot(completion::GrammarSlot::Role);
         let user = if self.consume(TokenKind::User) {
             Some(Box::new(RoleSpec {
                 node_tag: NodeTag::RoleSpec,
@@ -245,6 +249,7 @@ impl Parser {
             })?))
         };
         self.expect(TokenKind::Server)?;
+        self.record_completion_slot(completion::GrammarSlot::ForeignServer);
         let servername = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("USER MAPPING requires a server"))?,

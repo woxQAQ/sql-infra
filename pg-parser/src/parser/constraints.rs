@@ -7,13 +7,18 @@ impl Parser {
     pub(super) fn parse_set_constraints(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Set)?;
         self.expect(TokenKind::Constraints)?;
+        self.record_completion_tokens(&[TokenKind::All]);
+        self.record_completion_slot(completion::GrammarSlot::Constraint);
         let constraints = if self.consume(TokenKind::All) {
             Vec::new()
         } else {
             let mut constraints = Vec::new();
             loop {
                 constraints.push(Node::RangeVar(
-                    self.try_parse_qualified_range_var().ok_or_else(|| {
+                    self.try_parse_qualified_range_var_with_slot(
+                        completion::GrammarSlot::Constraint,
+                    )
+                    .ok_or_else(|| {
                         self.error_here("SET CONSTRAINTS requires a constraint name or ALL")
                     })?,
                 ));
@@ -31,6 +36,7 @@ impl Parser {
             }
             constraints
         };
+        self.record_completion_tokens(&[TokenKind::Deferred, TokenKind::Immediate]);
         let deferred = if self.consume(TokenKind::Deferred) {
             true
         } else {
@@ -54,6 +60,21 @@ impl Parser {
             location: location as ParseLoc,
             ..Constraint::default()
         };
+        self.record_completion_tokens(&[
+            TokenKind::Not,
+            TokenKind::NullP,
+            TokenKind::Unique,
+            TokenKind::Primary,
+            TokenKind::Check,
+            TokenKind::Default,
+            TokenKind::Generated,
+            TokenKind::References,
+            TokenKind::Deferrable,
+            TokenKind::Initially,
+            TokenKind::Enforced,
+        ]);
+        self.record_completion_phrase(&[TokenKind::Not, TokenKind::NullP]);
+        self.record_completion_phrase(&[TokenKind::Primary, TokenKind::Key]);
         match self.peek_kind() {
             TokenKind::Not => {
                 self.advance();
@@ -202,6 +223,7 @@ impl Parser {
     pub(super) fn parse_table_constraint(&mut self) -> PResult<Constraint> {
         let location = self.location();
         let conname = if self.consume(TokenKind::Constraint) {
+            self.record_completion_slot(completion::GrammarSlot::Constraint);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
@@ -215,6 +237,17 @@ impl Parser {
             location: location as ParseLoc,
             ..Constraint::default()
         };
+        self.record_completion_tokens(&[
+            TokenKind::Check,
+            TokenKind::Not,
+            TokenKind::Unique,
+            TokenKind::Primary,
+            TokenKind::Foreign,
+            TokenKind::Exclude,
+        ]);
+        self.record_completion_phrase(&[TokenKind::Not, TokenKind::NullP]);
+        self.record_completion_phrase(&[TokenKind::Primary, TokenKind::Key]);
+        self.record_completion_phrase(&[TokenKind::Foreign, TokenKind::Key]);
         match self.peek_kind() {
             TokenKind::Check => {
                 self.advance();
@@ -229,6 +262,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::NullP)?;
                 constraint.contype = ConstrType::Notnull;
+                self.record_completion_slot(completion::GrammarSlot::Column);
                 constraint.keys = vec![make_string_node(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("NOT NULL requires a column name"))?,
@@ -261,6 +295,7 @@ impl Parser {
                 constraint.contype = ConstrType::Foreign;
                 constraint.is_enforced = true;
                 self.expect(TokenKind::Char('('))?;
+                self.record_completion_slot(completion::GrammarSlot::Column);
                 (constraint.fk_attrs, constraint.fk_with_period) =
                     self.parse_column_and_period_list_body()?;
                 self.expect(TokenKind::Char(')'))?;
@@ -271,6 +306,7 @@ impl Parser {
                 self.advance();
                 constraint.contype = ConstrType::Exclusion;
                 if self.consume(TokenKind::Using) {
+                    self.record_completion_slot(completion::GrammarSlot::AccessMethod);
                     constraint.access_method = Some(
                         self.consume_col_id()
                             .ok_or_else(|| self.error_here("USING requires an access method"))?,
@@ -283,7 +319,8 @@ impl Parser {
                     return Err(self.error_here("EXCLUDE requires at least one element"));
                 }
                 loop {
-                    let expr_tokens = self.take_until_top_level(&[TokenKind::With]);
+                    let mut expr_tokens = self.take_until_top_level(&[TokenKind::With]);
+                    self.append_completion_marker(&mut expr_tokens);
                     let expr_location = expr_tokens
                         .first()
                         .map_or(self.location(), |token| token.location());
@@ -291,17 +328,21 @@ impl Parser {
                         expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
                     let starts_with_cast =
                         expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-                    let index_elem = parse_index_elem_tokens(expr_tokens)?;
+                    let index_elem = parse_index_elem_tokens_with_completion(
+                        expr_tokens,
+                        self.completion.clone(),
+                    )?;
                     if let Some(expression) = index_elem.expr.as_deref()
                         && !starts_parenthesized
                         && !is_windowless_function_expression_node(expression, starts_with_cast)
                     {
-                        return Err(ParseError::new(
+                        return Err(ParseError::syntax_exit(
                             expr_location,
                             "exclusion expressions must be parenthesized unless they are function calls",
                         ));
                     }
                     self.expect(TokenKind::With)?;
+                    self.record_completion_slot(completion::GrammarSlot::Operator);
                     let operator_location = self.location();
                     let operator_tokens = if self.consume(TokenKind::Operator) {
                         self.expect(TokenKind::Char('('))?;
@@ -334,6 +375,7 @@ impl Parser {
                 self.expect(TokenKind::Char(')'))?;
                 if self.consume(TokenKind::Include) {
                     self.expect(TokenKind::Char('('))?;
+                    self.record_completion_slot(completion::GrammarSlot::Column);
                     constraint.including = self.parse_parenthesized_name_list_body()?;
                     self.expect(TokenKind::Char(')'))?;
                 }
@@ -369,6 +411,7 @@ impl Parser {
     ) -> PResult<()> {
         if self.consume(TokenKind::Using) {
             self.expect(TokenKind::Index)?;
+            self.record_completion_slot(completion::GrammarSlot::Index);
             constraint.indexname = Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("USING INDEX requires an index name"))?,
@@ -376,6 +419,7 @@ impl Parser {
             return Ok(());
         }
         self.expect(TokenKind::Char('('))?;
+        self.record_completion_slot(completion::GrammarSlot::Column);
         constraint.keys = self.parse_parenthesized_name_list_body()?;
         if self.consume(TokenKind::Without) {
             self.expect(TokenKind::Overlaps)?;
@@ -384,6 +428,7 @@ impl Parser {
         self.expect(TokenKind::Char(')'))?;
         if self.consume(TokenKind::Include) {
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot(completion::GrammarSlot::Column);
             constraint.including = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
         }
@@ -400,6 +445,7 @@ impl Parser {
         if self.consume(TokenKind::Using) {
             self.expect(TokenKind::Index)?;
             self.expect(TokenKind::Tablespace)?;
+            self.record_completion_slot(completion::GrammarSlot::Tablespace);
             constraint.indexspace = Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?,
@@ -414,10 +460,11 @@ impl Parser {
         allow_period: bool,
     ) -> PResult<()> {
         constraint.pktable = Some(Box::new(
-            self.try_parse_qualified_range_var()
+            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("REFERENCES requires a table name"))?,
         ));
         if self.consume(TokenKind::Char('(')) {
+            self.record_completion_slot(completion::GrammarSlot::Column);
             if allow_period {
                 (constraint.pk_attrs, constraint.pk_with_period) =
                     self.parse_column_and_period_list_body()?;

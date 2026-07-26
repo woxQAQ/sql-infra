@@ -278,48 +278,81 @@ pub(super) fn split_target_alias(tokens: Vec<Token>) -> (Option<std::string::Str
 }
 
 pub(super) fn parse_expression_tokens(tokens: Vec<Token>) -> PResult<Node> {
+    parse_expression_tokens_with_completion(tokens, None)
+}
+
+pub(super) fn parse_expression_tokens_with_completion(
+    tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<Node> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected an expression"));
+        return Err(ParseError::syntax_exit(location, "expected an expression"));
     }
-    ExprParser::new(tokens).parse().map_err(|mut error| {
-        if error.location() == 0 {
-            error.reanchor(location);
-        }
-        error
-    })
+    ExprParser::with_completion(tokens, completion)
+        .parse()
+        .map_err(|mut error| {
+            if error.location() == 0 {
+                error.reanchor(location);
+            }
+            error
+        })
 }
 
 pub(super) fn parse_b_expression_tokens(tokens: Vec<Token>) -> PResult<Node> {
+    parse_b_expression_tokens_with_completion(tokens, None)
+}
+
+pub(super) fn parse_b_expression_tokens_with_completion(
+    tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<Node> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "expected a restricted expression",
         ));
     }
-    ExprParser::new(tokens).parse_b().map_err(|mut error| {
-        if error.location() == 0 {
-            error.reanchor(location);
-        }
-        error
-    })
+    ExprParser::with_completion(tokens, completion)
+        .parse_b()
+        .map_err(|mut error| {
+            if error.location() == 0 {
+                error.reanchor(location);
+            }
+            error
+        })
 }
 
-pub(super) fn parse_c_expression_tokens(tokens: Vec<Token>) -> PResult<Node> {
+pub(super) fn parse_c_expression_tokens_with_completion(
+    tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<Node> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected a common expression"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "expected a common expression",
+        ));
     }
-    ExprParser::new(tokens).parse_c().map_err(|mut error| {
-        if error.location() == 0 {
-            error.reanchor(location);
-        }
-        error
-    })
+    ExprParser::with_completion(tokens, completion)
+        .parse_c()
+        .map_err(|mut error| {
+            if error.location() == 0 {
+                error.reanchor(location);
+            }
+            error
+        })
 }
 
 pub(super) fn parse_select_fetch_first_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
+    parse_select_fetch_first_value_tokens_with_completion(tokens, None)
+}
+
+pub(super) fn parse_select_fetch_first_value_tokens_with_completion(
+    tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<Node> {
     if matches!(
         tokens.as_slice(),
         [
@@ -333,9 +366,9 @@ pub(super) fn parse_select_fetch_first_value_tokens(tokens: Vec<Token>) -> PResu
             }
         ]
     ) {
-        parse_expression_tokens(tokens)
+        parse_expression_tokens_with_completion(tokens, completion)
     } else {
-        parse_c_expression_tokens(tokens)
+        parse_c_expression_tokens_with_completion(tokens, completion)
     }
 }
 
@@ -358,7 +391,7 @@ pub(super) fn parse_aexpr_const_tokens(tokens: Vec<Token>) -> PResult<Node> {
         let mut type_tokens = tokens[..*string_index].to_vec();
         type_tokens.extend_from_slice(&tokens[*string_index + 1..]);
         let type_name = parse_const_type_name_tokens(type_tokens)
-            .map_err(|_| ParseError::new(location, "invalid typed constant"))?;
+            .map_err(|_| ParseError::syntax_exit(location, "invalid typed constant"))?;
         let value = token_name(string_token)
             .ok_or_else(|| ParseError::ranged(string_token.range, "invalid string constant"))?;
         return Ok(Node::TypeCast(TypeCast {
@@ -372,5 +405,5 @@ pub(super) fn parse_aexpr_const_tokens(tokens: Vec<Token>) -> PResult<Node> {
         }));
     }
 
-    Err(ParseError::new(location, "expected a constant"))
+    Err(ParseError::syntax_exit(location, "expected a constant"))
 }

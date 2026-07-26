@@ -9,16 +9,18 @@ impl Parser {
     //     [ WITH ( subscription_parameter [= value] [, ... ] ) ]
     pub(super) fn parse_create_subscription(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Subscription)?;
+        self.record_completion_slot(completion::GrammarSlot::Subscription);
         let subname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE SUBSCRIPTION requires a name"))?,
         );
         let (servername, conninfo) = if self.consume(TokenKind::Connection) {
-            if !self.at(TokenKind::SConst) {
-                return Err(self.error_here("CONNECTION requires a string"));
-            }
-            (None, self.consume_string_like())
+            (
+                None,
+                Some(self.consume_required_string("CONNECTION requires a string")?),
+            )
         } else if self.consume(TokenKind::Server) {
+            self.record_completion_slot(completion::GrammarSlot::ForeignServer);
             (
                 Some(
                     self.consume_col_id()
@@ -69,10 +71,18 @@ impl Parser {
     //     [ ONLY ] table_name [ * ] [ ( column_name [, ... ] ) ] [ WHERE ( expression ) ]
     pub(super) fn parse_alter_publication(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Publication)?;
+        self.record_completion_slot(completion::GrammarSlot::Publication);
         let pubname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER PUBLICATION requires a name"))?,
         );
+        self.record_completion_tokens(&[
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Set,
+            TokenKind::Rename,
+            TokenKind::Owner,
+        ]);
         let action = match self.peek_kind() {
             TokenKind::AddP => AlterPublicationAction::AddObjects,
             TokenKind::Drop => AlterPublicationAction::DropObjects,
@@ -80,6 +90,9 @@ impl Parser {
             _ => return Err(self.error_here("expected ADD, DROP, or SET after publication name")),
         };
         self.advance();
+        if action == AlterPublicationAction::SetObjects {
+            self.record_completion_tokens(&[TokenKind::Char('(')]);
+        }
         let (pubobjects, for_all_tables, for_all_sequences, options) = if self
             .at(TokenKind::Char('('))
         {
@@ -122,6 +135,7 @@ impl Parser {
     pub(super) fn parse_alter_subscription(&mut self) -> PResult<Node> {
         let alter_location = self.previous_location();
         self.expect(TokenKind::Subscription)?;
+        self.record_completion_slot(completion::GrammarSlot::Subscription);
         let subname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER SUBSCRIPTION requires a name"))?,
@@ -131,6 +145,19 @@ impl Parser {
             subname,
             ..AlterSubscriptionStmt::default()
         };
+        self.record_completion_tokens(&[
+            TokenKind::Connection,
+            TokenKind::Server,
+            TokenKind::Set,
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Refresh,
+            TokenKind::EnableP,
+            TokenKind::DisableP,
+            TokenKind::Skip,
+            TokenKind::Rename,
+            TokenKind::Owner,
+        ]);
         stmt.kind = match self.peek_kind() {
             TokenKind::Connection => {
                 self.advance();
@@ -140,6 +167,7 @@ impl Parser {
             }
             TokenKind::Server => {
                 self.advance();
+                self.record_completion_slot(completion::GrammarSlot::ForeignServer);
                 stmt.servername = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("SERVER requires a server name"))?,
@@ -224,6 +252,7 @@ impl Parser {
     pub(super) fn parse_drop_subscription(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Subscription)?;
         let missing_ok = self.consume_if_exists()?;
+        self.record_completion_slot(completion::GrammarSlot::Subscription);
         let subname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("DROP SUBSCRIPTION requires a name"))?,
@@ -255,6 +284,7 @@ impl Parser {
     //     [ ONLY ] table_name [ * ] [ ( column_name [, ... ] ) ] [ WHERE ( expression ) ]
     pub(super) fn parse_create_publication(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Publication)?;
+        self.record_completion_slot(completion::GrammarSlot::Publication);
         let pubname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE PUBLICATION requires a name"))?,
@@ -287,6 +317,7 @@ impl Parser {
         let mut all_objects_mode = None;
         let mut continuation = None;
         loop {
+            self.record_completion_tokens(&[TokenKind::All, TokenKind::Table, TokenKind::Tables]);
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::All => {
@@ -309,7 +340,10 @@ impl Parser {
                             loop {
                                 self.consume(TokenKind::Table);
                                 let table_location = self.location();
-                                let relation = self.parse_relation_expr(false)?;
+                                let relation = self.parse_relation_expr_with_slot(
+                                    false,
+                                    completion::GrammarSlot::Table,
+                                )?;
                                 tables.push(Node::PublicationObjSpec(PublicationObjSpec {
                                     node_tag: NodeTag::PublicationObjSpec,
                                     pubobjtype: PublicationObjSpecType::ExceptTable,
@@ -352,6 +386,7 @@ impl Parser {
                     all_objects_mode = Some(false);
                     self.expect(TokenKind::InP)?;
                     self.expect(TokenKind::Schema)?;
+                    self.record_completion_slot(completion::GrammarSlot::Schema);
                     let location = self.location();
                     let current = self.consume(TokenKind::CurrentSchema);
                     let name = if current {
@@ -389,6 +424,7 @@ impl Parser {
                     if !explicit_table
                         && continuation == Some(PublicationObjSpecType::TablesInSchema)
                     {
+                        self.record_completion_slot(completion::GrammarSlot::Schema);
                         let current = self.consume(TokenKind::CurrentSchema);
                         let name = if current {
                             None
@@ -413,7 +449,8 @@ impl Parser {
                         }
                         continue;
                     }
-                    let relation = self.parse_relation_expr(false)?;
+                    let relation =
+                        self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
                     let columns = self.parse_optional_column_name_list()?;
                     let where_clause = if self.consume(TokenKind::Where) {
                         self.expect(TokenKind::Char('('))?;
@@ -457,6 +494,7 @@ impl Parser {
     pub(super) fn parse_publication_name_list(&mut self) -> PResult<NodeList> {
         let mut publications = Vec::new();
         loop {
+            self.record_completion_slot(completion::GrammarSlot::Publication);
             if self.at_any(&[TokenKind::With, TokenKind::Char(';'), TokenKind::Eof]) {
                 break;
             }

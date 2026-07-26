@@ -3,7 +3,39 @@ use super::*;
 impl Parser {
     pub(super) fn parse_alter(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Alter)?;
-        if self.peek_kind() == TokenKind::Default && self.peek_kind_n(1) == TokenKind::Privileges {
+        self.record_completion_tokens(&[
+            TokenKind::Default,
+            TokenKind::TypeP,
+            TokenKind::Table,
+            TokenKind::Index,
+            TokenKind::Sequence,
+            TokenKind::View,
+            TokenKind::Materialized,
+            TokenKind::Foreign,
+            TokenKind::Database,
+            TokenKind::SystemP,
+            TokenKind::Tablespace,
+            TokenKind::User,
+            TokenKind::Role,
+            TokenKind::GroupP,
+            TokenKind::DomainP,
+            TokenKind::Extension,
+            TokenKind::Collation,
+            TokenKind::Policy,
+            TokenKind::Property,
+            TokenKind::Publication,
+            TokenKind::Subscription,
+            TokenKind::Statistics,
+            TokenKind::Event,
+            TokenKind::Server,
+            TokenKind::Function,
+            TokenKind::Procedure,
+            TokenKind::Routine,
+            TokenKind::Aggregate,
+            TokenKind::Operator,
+            TokenKind::TextP,
+        ]);
+        if self.peek_kind() == TokenKind::Default {
             return self.parse_alter_default_privileges();
         }
         if self.peek_kind() == TokenKind::TypeP && self.looks_like_alter_enum() {
@@ -34,7 +66,7 @@ impl Parser {
             TokenKind::Index => self.parse_alter_table(ObjectType::Index)?,
             TokenKind::Sequence => self.parse_alter_sequence()?,
             TokenKind::View => self.parse_alter_table(ObjectType::View)?,
-            TokenKind::Materialized if self.peek_kind_n(1) == TokenKind::View => {
+            TokenKind::Materialized => {
                 self.advance();
                 self.expect(TokenKind::View)?;
                 if self.at(TokenKind::All) {
@@ -43,9 +75,16 @@ impl Parser {
                     self.parse_alter_table_after_kind(ObjectType::Matview)?
                 }
             }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::Table => {
+            TokenKind::Foreign => {
                 self.advance();
-                self.parse_alter_table(ObjectType::ForeignTable)?
+                self.record_completion_tokens(&[TokenKind::Table, TokenKind::DataP]);
+                if self.consume(TokenKind::Table) {
+                    self.parse_alter_table_after_kind(ObjectType::ForeignTable)?
+                } else {
+                    self.expect(TokenKind::DataP)?;
+                    self.expect(TokenKind::Wrapper)?;
+                    self.parse_alter_fdw()?
+                }
             }
             TokenKind::Database => self.parse_alter_database()?,
             TokenKind::SystemP => self.parse_alter_system()?,
@@ -62,22 +101,16 @@ impl Parser {
             TokenKind::Extension => self.parse_alter_extension()?,
             TokenKind::Collation => self.parse_alter_collation()?,
             TokenKind::Policy => self.parse_alter_policy()?,
-            TokenKind::Property if self.peek_kind_n(1) == TokenKind::Graph => {
+            TokenKind::Property => {
                 self.advance();
                 self.parse_alter_prop_graph()?
             }
             TokenKind::Publication => self.parse_alter_publication()?,
             TokenKind::Subscription => self.parse_alter_subscription()?,
             TokenKind::Statistics => self.parse_alter_stats()?,
-            TokenKind::Event if self.peek_kind_n(1) == TokenKind::Trigger => {
+            TokenKind::Event => {
                 self.advance();
                 self.parse_alter_event_trigger()?
-            }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::DataP => {
-                self.advance();
-                self.expect(TokenKind::DataP)?;
-                self.expect(TokenKind::Wrapper)?;
-                self.parse_alter_fdw()?
             }
             TokenKind::Server => self.parse_alter_foreign_server()?,
             TokenKind::Function
@@ -89,15 +122,30 @@ impl Parser {
                 self.parse_alter_op_family()?
             }
             TokenKind::Operator => self.parse_alter_operator()?,
-            TokenKind::TextP if self.peek_kind_n(1) == TokenKind::Search => {
+            TokenKind::TextP => {
                 self.advance();
-                self.consume(TokenKind::Search);
+                self.expect(TokenKind::Search)?;
                 if self.consume(TokenKind::Dictionary) {
                     self.parse_alter_ts_dictionary()?
                 } else {
                     self.expect(TokenKind::Configuration)?;
                     self.parse_alter_ts_configuration()?
                 }
+            }
+            _ if self.top_level_contains(TokenKind::Completion) => {
+                // Several ALTER families share an object identity and are
+                // dispatched by a later action keyword. At an identity
+                // completion point that keyword does not exist yet, so enter
+                // the shared identity production to publish its typed slot.
+                let identity = self.parse_alter_identity(&[
+                    TokenKind::Rename,
+                    TokenKind::Depends,
+                    TokenKind::Owner,
+                    TokenKind::Set,
+                    TokenKind::Completion,
+                ])?;
+                self.record_alter_identity_actions(&identity);
+                return Err(self.error_here("expected an ALTER action"));
             }
             other => return Err(self.error_here(format!("unsupported ALTER form {:?}", other))),
         };

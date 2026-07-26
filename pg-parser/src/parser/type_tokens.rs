@@ -28,7 +28,7 @@ pub(super) fn parse_simple_type_name_tokens(tokens: Vec<Token>) -> PResult<TypeN
     let location = tokens.first().map_or(0, |token| token.location());
     let type_name = parse_type_name_tokens(tokens)?;
     if type_name.setof || !type_name.array_bounds.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "simple type name cannot use SETOF or array bounds",
         ));
@@ -51,7 +51,7 @@ pub(super) fn parse_func_type_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
     {
         tokens.truncate(tokens.len() - 2);
         if tokens.is_empty() {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 "%TYPE requires a referenced name",
             ));
@@ -73,7 +73,7 @@ pub(super) fn parse_func_type_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
 pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected a type name"));
+        return Err(ParseError::syntax_exit(location, "expected a type name"));
     }
     let setof = if tokens.first().map(|token| token.kind) == Some(TokenKind::Setof) {
         tokens.remove(0);
@@ -82,7 +82,10 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         false
     };
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "SETOF requires a type name"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "SETOF requires a type name",
+        ));
     }
     let type_location = tokens[0].location();
 
@@ -118,14 +121,14 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         if array_bounds.is_empty() {
             array_bounds.push(Node::Integer(Integer::new(-1)));
         } else if array_bounds.len() != 1 {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 "SQL ARRAY syntax supports one dimension",
             ));
         }
     }
     if tokens.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "expected a type before array bounds",
         ));
@@ -163,7 +166,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
             ));
         }
         if modifier_tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 modifier_tokens
                     .last()
                     .map_or(location, |token| token.location()),
@@ -173,7 +176,10 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         let mut typmods = Vec::new();
         for chunk in split_top_level_commas(modifier_tokens) {
             if chunk.is_empty() {
-                return Err(ParseError::new(location, "invalid type modifier list"));
+                return Err(ParseError::syntax_exit(
+                    location,
+                    "invalid type modifier list",
+                ));
             }
             typmods.push(parse_expression_tokens(chunk)?);
         }
@@ -182,7 +188,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         (tokens, Vec::new())
     };
     if base_tokens.is_empty() {
-        return Err(ParseError::new(location, "expected a type name"));
+        return Err(ParseError::syntax_exit(location, "expected a type name"));
     }
 
     let kinds = base_tokens
@@ -208,14 +214,14 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
             {
                 let precision = value.ival;
                 if !(1..=53).contains(&precision) {
-                    return Err(ParseError::new(
+                    return Err(ParseError::syntax_exit(
                         location,
                         "FLOAT precision must be between 1 and 53",
                     ));
                 }
                 if precision <= 24 { "float4" } else { "float8" }
             } else {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     location,
                     "FLOAT accepts one integer precision",
                 ));
@@ -288,7 +294,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         [TokenKind::Json] => (system_type_names("json"), false),
         _ => {
             if timezone.is_some() {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     location,
                     "WITH/WITHOUT TIME ZONE requires TIME or TIMESTAMP",
                 ));
@@ -297,7 +303,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         }
     };
     if !typmods_allowed && !typmods.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "this type does not accept type modifiers",
         ));
@@ -308,7 +314,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         Vec::new()
     } else if kinds.first() == Some(&TokenKind::Interval) {
         if typmods.len() != 1 {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 "INTERVAL accepts one precision modifier",
             ));
@@ -354,7 +360,7 @@ fn parse_interval_mask(kinds: &[TokenKind], location: usize) -> PResult<i32> {
         [TokenKind::HourP, TokenKind::To, TokenKind::SecondP] => HOUR | MINUTE | SECOND,
         [TokenKind::MinuteP, TokenKind::To, TokenKind::SecondP] => MINUTE | SECOND,
         _ => {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 "invalid INTERVAL field specification",
             ));
@@ -390,7 +396,10 @@ pub(super) fn parse_qualified_type_names(tokens: &[Token]) -> PResult<NodeList> 
         expect_name = false;
     }
     if names.is_empty() || expect_name {
-        return Err(ParseError::new(location, "invalid qualified type name"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "invalid qualified type name",
+        ));
     }
     Ok(names)
 }
@@ -432,7 +441,10 @@ pub(super) fn parse_any_name_tokens(tokens: &[Token]) -> PResult<NodeList> {
         expect_name = false;
     }
     if names.is_empty() || expect_name {
-        return Err(ParseError::new(location, "invalid qualified object name"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "invalid qualified object name",
+        ));
     }
     Ok(names)
 }

@@ -17,11 +17,13 @@ impl Parser {
         let mut part_params = Vec::new();
         while !self.at(TokenKind::Char(')')) {
             let elem_location = self.location();
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let mut tokens =
+                self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            self.append_completion_marker(&mut tokens);
             let starts_parenthesized =
                 tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
             let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-            let parsed = parse_index_elem_tokens(tokens)?;
+            let parsed = parse_index_elem_tokens_with_completion(tokens, self.completion.clone())?;
             if !parsed.opclassopts.is_empty()
                 || parsed.ordering != SortByDir::Default
                 || parsed.nulls_ordering != SortByNulls::Default
@@ -34,7 +36,7 @@ impl Parser {
                 && !starts_parenthesized
                 && !is_windowless_function_expression_node(expression, starts_with_cast)
             {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     elem_location,
                     "partition expressions must be parenthesized unless they are function calls",
                 ));

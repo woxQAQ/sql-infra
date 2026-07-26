@@ -1,0 +1,478 @@
+- input: SET |
+  want:
+    candidates:
+      tokens: [LOCAL, NAMES, ROLE, SCHEMA, SESSION, TIME, TRANSACTION, XML]
+      slots: [AnyName]
+
+- input: SHOW |
+  want:
+    candidates:
+      tokens: [ALL, SESSION, TIME, TRANSACTION]
+      slots: [AnyName]
+
+- input: BEGIN |
+  want:
+    candidates:
+      tokens: [DEFERRABLE, ISOLATION, NOT, READ, TRANSACTION, WORK]
+      slots: []
+
+- input: END |
+  want:
+    candidates:
+      tokens: [AND, TRANSACTION, WORK]
+      slots: []
+
+- input: ABORT |
+  want:
+    candidates:
+      tokens: [AND, TRANSACTION, WORK]
+      slots: []
+
+- input: PREPARE q AS |
+  want:
+    candidates:
+      tokens: [(, DELETE, INSERT, MERGE, SELECT, TABLE, UPDATE, VALUES, WITH]
+      slots: []
+
+- input: PREPARE q AS UPDATE users SET |
+  want:
+    candidates:
+      tokens: [(]
+      slots: [Column]
+    scope:
+      dml_target: users
+
+- input: PREPARE |
+  want:
+    candidates:
+      tokens: []
+      slots: [AnyName]
+
+- input: SET ROLE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Role]
+
+- input: SET SESSION AUTHORIZATION |
+  want:
+    candidates:
+      tokens: [DEFAULT]
+      slots: [Role]
+
+- input: DECLARE c |
+  want:
+    candidates:
+      tokens: [ASENSITIVE, BINARY, CURSOR, INSENSITIVE, NO, SCROLL]
+      slots: []
+
+- input: DECLARE |
+  want:
+    candidates:
+      tokens: []
+      slots: [AnyName]
+
+- input: FETCH |
+  want:
+    candidates:
+      tokens: [ABSOLUTE, ALL, BACKWARD, FIRST, FORWARD, FROM, IN, LAST, NEXT, PRIOR, RELATIVE]
+      slots: [AnyName]
+
+- input: FETCH FROM |
+  want:
+    candidates:
+      tokens: []
+      slots: [AnyName]
+
+- input: COPY |
+  want:
+    candidates:
+      tokens: [(, BINARY]
+      slots: [Relation]
+
+- input: COPY (SELECT |
+  want:
+    candidates:
+      tokens: [(, '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXCEPT, EXISTS, EXTRACT, 'FALSE', FETCH, FOR, FROM, GREATEST, GROUP, GROUPING, HAVING, INTERSECT, INTO, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LIMIT, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OFFSET, OPERATOR, ORDER, OVERLAY, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', UNION, USER, WHERE, WINDOW, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+
+- input: COPY source_table TO STDOUT WITH (|)
+  want:
+    candidates:
+      tokens: [FORMAT]
+      slots: [AnyName]
+
+- input: COPY source_table TO STDOUT WITH (FORMAT |)
+  want:
+    candidates:
+      tokens: [(, ), '*', +, ',', '-', DEFAULT, 'FALSE', ON, 'TRUE']
+      slots: [AnyName]
+
+- input: COPY source_table TO STDOUT WITH (force_quote (|))
+  want:
+    candidates:
+      tokens: ['FALSE', ON, 'TRUE']
+      slots: [Column]
+
+- input: VACUUM |
+  want:
+    candidates:
+      tokens: [(, ANALYSE, ANALYZE, FREEZE, FULL, ONLY, VERBOSE]
+      slots: [MaterializedView, Table]
+
+- input: ANALYZE |
+  want:
+    candidates:
+      tokens: [(, ONLY, VERBOSE]
+      slots: [MaterializedView, Table]
+
+- input: ANALYSE |
+  want:
+    candidates:
+      tokens: [(, ONLY, VERBOSE]
+      slots: [MaterializedView, Table]
+
+- input: EXPLAIN |
+  want:
+    candidates:
+      tokens: [(, ANALYSE, ANALYZE, CREATE, DECLARE, DELETE, EXECUTE, INSERT, MERGE, REFRESH, SELECT, TABLE, UPDATE, VALUES, VERBOSE, WITH]
+      slots: []
+
+- input: EXPLAIN UPDATE users SET |
+  want:
+    candidates:
+      tokens: [(]
+      slots: [Column]
+    scope:
+      dml_target: users
+
+- input: CALL |
+  want:
+    candidates:
+      tokens: []
+      slots: [Procedure]
+
+- input: CALL f(|
+  want:
+    candidates:
+      tokens: [(, ), '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+
+- input: DISCARD |
+  want:
+    candidates:
+      tokens: [ALL, PLANS, SEQUENCES, TEMP, TEMPORARY]
+      slots: []
+
+- input: LOCK |
+  want:
+    candidates:
+      tokens: [ONLY, TABLE]
+      slots: [Table]
+
+- input: REFRESH MATERIALIZED VIEW |
+  want:
+    candidates:
+      tokens: [CONCURRENTLY]
+      slots: [MaterializedView]
+
+- input: REINDEX |
+  want:
+    candidates:
+      tokens: [(, DATABASE, INDEX, SCHEMA, SYSTEM, TABLE]
+      slots: []
+
+- input: TRUNCATE |
+  want:
+    candidates:
+      tokens: [ONLY, TABLE]
+      slots: [Table]
+
+- input: SET CONSTRAINTS |
+  want:
+    candidates:
+      tokens: [ALL]
+      slots: [Constraint]
+
+- input: RESET |
+  want:
+    candidates:
+      tokens: [ALL, SESSION, TIME, TRANSACTION]
+      slots: [AnyName]
+
+- input: SET work_mem TO |
+  want:
+    candidates:
+      tokens: [DEFAULT]
+      slots: [AnyName]
+
+- input: SET TIME ZONE |
+  want:
+    candidates:
+      tokens: [DEFAULT, LOCAL]
+      slots: [AnyName]
+
+- input: START TRANSACTION |
+  want:
+    candidates:
+      tokens: [DEFERRABLE, ISOLATION, NOT, READ]
+      slots: []
+
+- input: COMMIT |
+  want:
+    candidates:
+      tokens: [AND, PREPARED, TRANSACTION, WORK]
+      slots: []
+
+- input: ROLLBACK |
+  want:
+    candidates:
+      tokens: [AND, PREPARED, TO, TRANSACTION, WORK]
+      slots: []
+
+- input: SAVEPOINT |
+  want:
+    candidates:
+      tokens: []
+      slots: [AnyName]
+
+- input: RELEASE |
+  want:
+    candidates:
+      tokens: [SAVEPOINT]
+      slots: [AnyName]
+
+- input: ROLLBACK TO SAVEPOINT |
+  want:
+    candidates:
+      tokens: []
+      slots: [AnyName]
+
+- input: PREPARE TRANSACTION |
+  want:
+    candidates:
+      tokens: [SConst]
+      slots: []
+
+- input: EXECUTE |
+  want:
+    candidates:
+      tokens: []
+      slots: [AnyName]
+
+- input: DEALLOCATE |
+  want:
+    candidates:
+      tokens: [ALL, PREPARE]
+      slots: [AnyName]
+
+- input: CLOSE |
+  want:
+    candidates:
+      tokens: [ALL]
+      slots: [AnyName]
+
+- input: MOVE |
+  want:
+    candidates:
+      tokens: [ABSOLUTE, ALL, BACKWARD, FIRST, FORWARD, FROM, IN, LAST, NEXT, PRIOR, RELATIVE]
+      slots: [AnyName]
+
+- input: CHECKPOINT |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: LISTEN |
+  want:
+    candidates:
+      tokens: []
+      slots: [AnyName]
+
+- input: UNLISTEN |
+  want:
+    candidates:
+      tokens: ['*']
+      slots: [AnyName]
+
+- input: NOTIFY |
+  want:
+    candidates:
+      tokens: []
+      slots: [AnyName]
+
+- input: LOAD |
+  want:
+    candidates:
+      tokens: [SConst]
+      slots: []
+
+- input: CLUSTER |
+  want:
+    candidates:
+      tokens: [VERBOSE]
+      slots: [Index, Table]
+
+- input: REPACK |
+  want:
+    candidates:
+      tokens: [(, ONLY, USING]
+      slots: [Table]
+
+- input: REASSIGN |
+  want:
+    candidates:
+      tokens: [OWNED]
+      slots: []
+
+- input: REASSIGN OWNED BY |
+  want:
+    candidates:
+      tokens: []
+      slots: [Role]
+
+- input: REASSIGN OWNED BY old_role TO |
+  want:
+    candidates:
+      tokens: []
+      slots: [Role]
+
+- input: COMMENT |
+  want:
+    candidates:
+      tokens: [ON]
+      slots: []
+
+- input: COMMENT ON COLUMN t.|
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]
+
+- input: SECURITY |
+  want:
+    candidates:
+      tokens: [LABEL]
+      slots: []
+
+- input: SECURITY LABEL ON TABLE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: GRANT |
+  want:
+    candidates:
+      tokens: [ALL, ALTER]
+      slots: []
+
+- input: GRANT SELECT ON TABLE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: GRANT SELECT ON TABLE t TO |
+  want:
+    candidates:
+      tokens: [GROUP]
+      slots: [Role]
+
+- input: GRANT UPDATE ON t TO |
+  want:
+    candidates:
+      tokens: [GROUP]
+      slots: [Role]
+    scope: {}
+
+- input: REVOKE |
+  want:
+    candidates:
+      tokens: [ALL, ALTER, GRANT]
+      slots: []
+
+- input: REVOKE SELECT ON TABLE t FROM |
+  want:
+    candidates:
+      tokens: [GROUP]
+      slots: [Role]
+
+- input: IMPORT |
+  want:
+    candidates:
+      tokens: [FOREIGN]
+      slots: []
+
+- input: IMPORT FOREIGN SCHEMA |
+  want:
+    candidates:
+      tokens: []
+      slots: [Schema]
+
+- input: IMPORT FOREIGN SCHEMA s FROM SERVER |
+  want:
+    candidates:
+      tokens: []
+      slots: [ForeignServer]
+
+- input: IMPORT FOREIGN SCHEMA s FROM SERVER srv INTO |
+  want:
+    candidates:
+      tokens: []
+      slots: [Schema]
+
+- input: DO |
+  want:
+    candidates:
+      tokens: [LANGUAGE, SConst]
+      slots: []
+
+- input: DO LANGUAGE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Language]
+
+- input: WAIT |
+  want:
+    candidates:
+      tokens: [FOR]
+      slots: []
+
+- input: GRANT role_a TO |
+  want:
+    candidates:
+      tokens: []
+      slots: [Role]
+
+- input: GRANT USAGE ON SCHEMA |
+  want:
+    candidates:
+      tokens: []
+      slots: [Schema]
+
+- input: REINDEX INDEX |
+  want:
+    candidates:
+      tokens: [CONCURRENTLY]
+      slots: [Index]
+
+- input: REINDEX SCHEMA |
+  want:
+    candidates:
+      tokens: [CONCURRENTLY]
+      slots: [Schema]
+
+- input: REINDEX DATABASE |
+  want:
+    candidates:
+      tokens: [CONCURRENTLY]
+      slots: [Database]
+
+- input: VACUUM t (|
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]

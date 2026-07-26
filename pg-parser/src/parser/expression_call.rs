@@ -46,8 +46,7 @@ impl ExprParser {
                 if call.agg_distinct && call.args.is_empty() {
                     return self.fail("DISTINCT requires at least one function argument");
                 }
-                if self.consume(TokenKind::Order) {
-                    self.expect(TokenKind::By)?;
+                if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
                     call.agg_order = self.parse_expression_sort_list(TokenKind::Char(')'))?;
                 }
                 self.expect(TokenKind::Char(')'))?;
@@ -212,6 +211,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_function_decorations(&mut self, call: &mut FuncCall) -> Option<()> {
+        self.record_completion_phrase(&[TokenKind::Within, TokenKind::GroupP]);
         if self.consume(TokenKind::Within) {
             if !call.agg_order.is_empty() || call.agg_distinct || call.func_variadic {
                 return self.fail("WITHIN GROUP conflicts with function argument modifiers");
@@ -247,10 +247,15 @@ impl ExprParser {
         }
         if self.at(TokenKind::Char('(')) {
             let location = self.advance().location();
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
-            self.expect(TokenKind::Char(')'))?;
-            match parse_window_specification_tokens(tokens, location) {
-                Ok(window) => Some(Some(Box::new(window))),
+            let mut tokens = self.take_until_balanced(TokenKind::Char(')'));
+            if self.at_completion() {
+                tokens.push(self.peek().clone());
+            }
+            match parse_window_specification_tokens(tokens, location, self.completion.clone()) {
+                Ok(window) => {
+                    self.expect(TokenKind::Char(')'))?;
+                    Some(Some(Box::new(window)))
+                }
                 Err(error) => {
                     if self.error.is_none() {
                         self.error = Some(error);
@@ -318,11 +323,16 @@ impl ExprParser {
 pub(super) fn parse_window_specification_tokens(
     mut tokens: Vec<Token>,
     location: usize,
+    completion: Option<completion::SharedCollector>,
 ) -> PResult<WindowDef> {
     let end_location = tokens.last().map_or(location, Token::end_location);
     tokens.push(Token::synthetic(TokenKind::Char(')'), end_location));
     tokens.push(Token::synthetic(TokenKind::Eof, end_location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     let window = parser.parse_window_specification_body(location)?;
     if !parser.at(TokenKind::Eof) {
         return Err(parser.error_here("unexpected token after window specification"));

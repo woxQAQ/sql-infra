@@ -4,12 +4,14 @@ impl Parser {
     pub(super) fn parse_simple_name_list_until(
         &mut self,
         stops: &[TokenKind],
+        slot: completion::GrammarSlot,
     ) -> PResult<NodeList> {
         let mut names = Vec::new();
         loop {
             if self.at_any(stops) {
                 break;
             }
+            self.record_completion_slot(slot);
             names.push(make_string_node(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("expected a name"))?,
@@ -27,7 +29,13 @@ impl Parser {
         Ok(names)
     }
 
-    pub(super) fn parse_one_any_name(&mut self, stops: &[TokenKind]) -> PResult<Node> {
+    pub(super) fn parse_one_any_name_with_slot(
+        &mut self,
+        stops: &[TokenKind],
+        slot: completion::GrammarSlot,
+    ) -> PResult<Node> {
+        self.record_completion_slot(slot);
+        self.record_completion_slot_before(slot, stops);
         if self.at_any(stops) {
             return Err(self.error_here("expected a qualified name"));
         }
@@ -40,10 +48,14 @@ impl Parser {
         ))
     }
 
-    pub(super) fn parse_any_name_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+    pub(super) fn parse_any_name_list_until_with_slot(
+        &mut self,
+        stops: &[TokenKind],
+        slot: completion::GrammarSlot,
+    ) -> PResult<NodeList> {
         let mut names = Vec::new();
         loop {
-            names.push(self.parse_one_any_name(stops)?);
+            names.push(self.parse_one_any_name_with_slot(stops, slot)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
@@ -55,13 +67,22 @@ impl Parser {
     }
 
     pub(super) fn parse_function_expression(&mut self) -> PResult<Node> {
+        self.record_completion_slot(completion::GrammarSlot::Function);
         let start = self.pos;
         let remaining = &self.tokens[start..];
         let open = find_top_level_token(remaining, TokenKind::Char('('))
             .ok_or_else(|| self.error_here("function expression requires '('"))?;
-        let close = find_matching_close(remaining, open)
-            .ok_or_else(|| self.error_here("unterminated function expression"))?;
-        let expression = parse_expression_tokens(remaining[..=close].to_vec())?;
+        let close = match find_matching_close(remaining, open) {
+            Some(close) => close,
+            None => remaining
+                .iter()
+                .position(|token| token.kind == TokenKind::Completion)
+                .ok_or_else(|| self.error_here("unterminated function expression"))?,
+        };
+        let expression = parse_expression_tokens_with_completion(
+            remaining[..=close].to_vec(),
+            self.completion.clone(),
+        )?;
         if !is_function_expression_node(&expression) {
             return Err(self.error_here("expected a function expression"));
         }
@@ -91,7 +112,12 @@ impl Parser {
         }
     }
 
-    pub(super) fn try_parse_range_var(&mut self, allow_set_alias: bool) -> Option<RangeVar> {
+    pub(super) fn try_parse_range_var_with_slot(
+        &mut self,
+        allow_set_alias: bool,
+        slot: completion::GrammarSlot,
+    ) -> Option<RangeVar> {
+        self.record_completion_slot(slot);
         let location = self.location();
         let parts = self.consume_qualified_name_parts();
         if parts.is_empty() {
@@ -103,15 +129,26 @@ impl Parser {
     }
 
     pub(super) fn parse_relation_expr(&mut self, allow_alias: bool) -> PResult<RangeVar> {
+        self.parse_relation_expr_with_slot(allow_alias, completion::GrammarSlot::Relation)
+    }
+
+    pub(super) fn parse_relation_expr_with_slot(
+        &mut self,
+        allow_alias: bool,
+        slot: completion::GrammarSlot,
+    ) -> PResult<RangeVar> {
+        self.record_completion_slot(slot);
         let only = self.consume(TokenKind::Only);
         let parenthesized = only && self.consume(TokenKind::Char('('));
-        let mut range = self.try_parse_qualified_range_var().ok_or_else(|| {
-            self.error_here(if only {
-                "ONLY requires a table reference"
-            } else {
-                "expected a table reference"
-            })
-        })?;
+        let mut range = self
+            .try_parse_qualified_range_var_with_slot(slot)
+            .ok_or_else(|| {
+                self.error_here(if only {
+                    "ONLY requires a table reference"
+                } else {
+                    "expected a table reference"
+                })
+            })?;
         if parenthesized {
             self.expect(TokenKind::Char(')'))?;
         }
@@ -152,6 +189,14 @@ impl Parser {
     }
 
     pub(super) fn try_parse_qualified_range_var(&mut self) -> Option<RangeVar> {
+        self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Relation)
+    }
+
+    pub(super) fn try_parse_qualified_range_var_with_slot(
+        &mut self,
+        slot: completion::GrammarSlot,
+    ) -> Option<RangeVar> {
+        self.record_completion_slot(slot);
         let location = self.location();
         let parts = self.consume_qualified_name_parts();
         if parts.is_empty() {
@@ -408,6 +453,11 @@ impl Parser {
     }
 
     pub(super) fn consume_role_spec(&mut self) -> Option<RoleSpec> {
+        self.consume_role_spec_with_slot(completion::GrammarSlot::Role)
+    }
+
+    fn consume_role_spec_with_slot(&mut self, slot: completion::GrammarSlot) -> Option<RoleSpec> {
+        self.record_completion_slot(slot);
         let start = self.pos;
         let location = self.location();
         let roletype = match self.peek_kind() {
@@ -460,8 +510,19 @@ impl Parser {
     }
 
     pub(super) fn consume_role_id(&mut self) -> PResult<Option<std::string::String>> {
+        self.consume_role_id_with_slot(completion::GrammarSlot::Role)
+    }
+
+    pub(super) fn consume_new_role_id(&mut self) -> PResult<Option<std::string::String>> {
+        self.consume_role_id_with_slot(completion::GrammarSlot::AnyName)
+    }
+
+    fn consume_role_id_with_slot(
+        &mut self,
+        slot: completion::GrammarSlot,
+    ) -> PResult<Option<std::string::String>> {
         let location = self.location();
-        let Some(role) = self.consume_role_spec() else {
+        let Some(role) = self.consume_role_spec_with_slot(slot) else {
             return Ok(None);
         };
         if role.roletype != RoleSpecType::Cstring {
@@ -475,7 +536,7 @@ impl Parser {
                     RoleSpecType::Public => "public",
                     RoleSpecType::Cstring => unreachable!(),
                 });
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 format!("{name} cannot be used as a role name here"),
             ));
@@ -490,6 +551,9 @@ impl Parser {
         self.top_level_adjacent(TokenKind::AddP, TokenKind::ValueP)
             || self.top_level_adjacent(TokenKind::Rename, TokenKind::ValueP)
             || self.top_level_adjacent(TokenKind::Drop, TokenKind::ValueP)
+            || self.top_level_precedes_completion(TokenKind::AddP)
+            || self.top_level_precedes_completion(TokenKind::Rename)
+            || self.top_level_precedes_completion(TokenKind::Drop)
     }
 
     pub(super) fn looks_like_rename_stmt(&self) -> bool {
@@ -510,7 +574,9 @@ impl Parser {
     }
 
     pub(super) fn looks_like_alter_owner_stmt(&self) -> bool {
-        if !self.top_level_adjacent(TokenKind::Owner, TokenKind::To) {
+        if !self.top_level_adjacent(TokenKind::Owner, TokenKind::To)
+            && !self.top_level_precedes_completion(TokenKind::Owner)
+        {
             return false;
         }
         !matches!(
@@ -524,10 +590,11 @@ impl Parser {
 
     pub(super) fn looks_like_alter_composite_type(&self) -> bool {
         self.peek_kind() == TokenKind::TypeP
-            && self.top_level_contains(TokenKind::Attribute)
-            && (self.top_level_contains(TokenKind::AddP)
-                || self.top_level_contains(TokenKind::Drop)
-                || self.top_level_contains(TokenKind::Alter))
+            && ((self.top_level_contains(TokenKind::Attribute)
+                && (self.top_level_contains(TokenKind::AddP)
+                    || self.top_level_contains(TokenKind::Drop)
+                    || self.top_level_contains(TokenKind::Alter)))
+                || self.top_level_precedes_completion(TokenKind::Alter))
     }
 
     pub(super) fn top_level_contains(&self, needle: TokenKind) -> bool {
@@ -538,8 +605,17 @@ impl Parser {
 
     pub(super) fn top_level_adjacent(&self, first: TokenKind, second: TokenKind) -> bool {
         self.top_level_kinds()
+            .into_iter()
+            .filter(|kind| *kind != TokenKind::Completion)
+            .collect::<Vec<_>>()
             .windows(2)
             .any(|pair| pair == [first, second])
+    }
+
+    fn top_level_precedes_completion(&self, kind: TokenKind) -> bool {
+        self.top_level_kinds()
+            .windows(2)
+            .any(|pair| pair == [kind, TokenKind::Completion])
     }
 
     pub(super) fn top_level_kinds(&self) -> Vec<TokenKind> {
@@ -565,22 +641,11 @@ impl Parser {
     }
 
     pub(super) fn consume_if_exists(&mut self) -> PResult<bool> {
-        if self.consume(TokenKind::IfP) {
-            self.expect(TokenKind::Exists)?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.consume_phrase(&[TokenKind::IfP, TokenKind::Exists])
     }
 
     pub(super) fn consume_if_not_exists(&mut self) -> PResult<bool> {
-        if self.consume(TokenKind::IfP) {
-            self.expect(TokenKind::Not)?;
-            self.expect(TokenKind::Exists)?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        self.consume_phrase(&[TokenKind::IfP, TokenKind::Not, TokenKind::Exists])
     }
 
     pub(super) fn parse_drop_behavior(&mut self) -> DropBehavior {
@@ -593,6 +658,7 @@ impl Parser {
     }
 
     pub(super) fn consume_setting_name(&mut self) -> Option<std::string::String> {
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let start = self.pos;
         let mut parts = vec![self.consume_col_id()?];
         while self.consume(TokenKind::Char('.')) {
@@ -649,6 +715,7 @@ impl Parser {
         &mut self,
         message: &str,
     ) -> PResult<std::string::String> {
+        self.record_completion_tokens(&[TokenKind::SConst]);
         if !self.at(TokenKind::SConst) {
             return Err(self.error_here(message));
         }

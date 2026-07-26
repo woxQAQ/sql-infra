@@ -3,14 +3,14 @@ use super::*;
 pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<NodeList> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "aggregate definition cannot end with ','",
         ));
     }
     let chunks = split_top_level_commas(tokens);
     if chunks.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "aggregate definition cannot be empty",
         ));
@@ -20,7 +20,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
         .map(|tokens| {
             let item_location = tokens.first().map_or(location, |token| token.location());
             let Some(name_token) = tokens.first() else {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     item_location,
                     "old-style aggregate definition requires name = value",
                 ));
@@ -32,7 +32,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
                 ));
             }
             if tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('=')) {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     item_location,
                     "old-style aggregate definition requires name = value",
                 ));
@@ -61,7 +61,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
         ]);
     }
     if tokens.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "aggregate argument list cannot be empty",
         ));
@@ -92,7 +92,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
         Vec::new()
     } else {
         if direct_tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 direct_tokens
                     .last()
                     .map_or(location, |token| token.location()),
@@ -102,7 +102,10 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
         split_top_level_commas(direct_tokens)
     };
     if direct_chunks.iter().any(Vec::is_empty) {
-        return Err(ParseError::new(location, "invalid aggregate argument list"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "invalid aggregate argument list",
+        ));
     }
     let direct_count = if order_index.is_some() {
         direct_chunks.len() as i32
@@ -115,7 +118,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
     }
     if order_index.is_some() {
         if ordered_tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 ordered_tokens
                     .last()
                     .map_or(location, |token| token.location()),
@@ -124,7 +127,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
         }
         let ordered_chunks = split_top_level_commas(ordered_tokens);
         if ordered_chunks.is_empty() || ordered_chunks.iter().any(Vec::is_empty) {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 "ORDER BY requires aggregate arguments",
             ));
@@ -150,7 +153,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
                         .zip(direct_variadic.arg_type.as_deref())
                         .is_some_and(|(ordered, direct)| type_names_equal_ignoring_locations(ordered, direct)));
             if !compatible {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     ordered
                         .first()
                         .map_or(location, |parameter| parameter.location as usize),
@@ -196,13 +199,13 @@ fn parse_aggregate_parameter(tokens: Vec<Token>) -> PResult<FunctionParameter> {
             | FunctionParameterMode::In
             | FunctionParameterMode::Variadic
     ) {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "aggregates cannot have output arguments",
         ));
     }
     if parameter.defexpr.is_some() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "aggregate arguments cannot have default values",
         ));

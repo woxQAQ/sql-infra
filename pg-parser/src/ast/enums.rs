@@ -15,6 +15,9 @@ pub enum BareLabel {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum TokenKind {
     Eof,
+    /// Synthetic token used only by parser-native completion collection.
+    Completion,
+    Incomplete,
     Char(char),
     Ident,
     UIdent,

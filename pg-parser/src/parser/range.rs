@@ -2,6 +2,17 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_from_clause_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+        self.record_completion_slot(completion::GrammarSlot::Relation);
+        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_tokens(&[
+            TokenKind::LateralP,
+            TokenKind::Only,
+            TokenKind::Rows,
+            TokenKind::Xmltable,
+            TokenKind::JsonTable,
+            TokenKind::GraphTable,
+            TokenKind::Char('('),
+        ]);
         let mut items = Vec::new();
         while !self.at_any(stops) {
             items.push(self.parse_from_item(stops)?);
@@ -37,7 +48,49 @@ impl Parser {
             }
             Node::RangeVar(self.parse_relation_expr(true)?)
         } else if self.consume(TokenKind::Char('(')) {
-            let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let mut inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            if self.at_completion() {
+                if inner.is_empty() {
+                    self.record_completion_tokens(&[
+                        TokenKind::With,
+                        TokenKind::Select,
+                        TokenKind::Values,
+                        TokenKind::Table,
+                        TokenKind::Char('('),
+                        TokenKind::LateralP,
+                        TokenKind::Only,
+                        TokenKind::Rows,
+                        TokenKind::Xmltable,
+                        TokenKind::JsonTable,
+                        TokenKind::GraphTable,
+                    ]);
+                    self.record_completion_slot(completion::GrammarSlot::Relation);
+                    self.record_completion_slot(completion::GrammarSlot::Function);
+                    return Err(self.error_here("completion point in parenthesized FROM item"));
+                }
+                self.append_completion_marker(&mut inner);
+                if matches!(
+                    inner.first().map(|token| token.kind),
+                    Some(
+                        TokenKind::With | TokenKind::Select | TokenKind::Values | TokenKind::Table
+                    )
+                ) {
+                    let _ = parse_select_statement_tokens_with_completion(
+                        inner,
+                        self.completion.clone(),
+                    )?;
+                } else {
+                    let location = inner.last().map_or(self.location(), Token::end_location);
+                    inner.push(Token::synthetic(TokenKind::Eof, location));
+                    let mut nested = Parser {
+                        tokens: inner,
+                        pos: 0,
+                        completion: self.completion.clone(),
+                    };
+                    let _ = nested.parse_from_item(&[TokenKind::Eof])?;
+                }
+                unreachable!("completion marker must stop the nested FROM parser");
+            }
             self.expect(TokenKind::Char(')'))?;
             if matches!(
                 inner.first().map(|token| token.kind),
@@ -57,16 +110,20 @@ impl Parser {
                 let location = inner.last().map_or(self.location(), Token::end_location);
                 let mut tokens = inner;
                 tokens.push(Token::synthetic(TokenKind::Eof, location));
-                let mut nested = Parser { tokens, pos: 0 };
+                let mut nested = Parser {
+                    tokens,
+                    pos: 0,
+                    completion: None,
+                };
                 let mut item = nested.parse_from_item(&[TokenKind::Eof])?;
                 if !nested.at(TokenKind::Eof) {
-                    return Err(ParseError::new(
+                    return Err(ParseError::syntax_exit(
                         nested.location(),
                         "unexpected token in parenthesized FROM item",
                     ));
                 }
                 if !matches!(item, Node::JoinExpr(_) | Node::RangeSubselect(_)) {
-                    return Err(ParseError::new(
+                    return Err(ParseError::syntax_exit(
                         item_location,
                         "parenthesized FROM item must be a joined table or subquery",
                     ));
@@ -149,6 +206,7 @@ impl Parser {
                 return Err(self.error_here("TABLESAMPLE requires a relation"));
             }
             let location = self.location();
+            self.record_completion_slot(completion::GrammarSlot::Function);
             let method = self.parse_name_list();
             if method.is_empty() {
                 return Err(self.error_here("TABLESAMPLE requires a sampling method"));
@@ -206,7 +264,7 @@ impl Parser {
                 TokenKind::Char(','),
                 TokenKind::Char(')'),
             ]);
-            let expression = parse_expression_tokens(expression_tokens)?;
+            let expression = self.parse_expression_fragment_tokens(expression_tokens)?;
             if !is_function_expression_node(&expression) {
                 return Err(self.error_here("ROWS FROM items must be function expressions"));
             }

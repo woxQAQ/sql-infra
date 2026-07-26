@@ -1,0 +1,539 @@
+use pg_parser::{TextRange, TextSize, Token, TokenValue};
+
+use crate::{RecoveryIssue, RecoveryKind, lexical};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum IdentifierQuoting {
+    #[default]
+    Unquoted,
+    Quoted,
+    UnicodeQuoted,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CompletionPrefix {
+    pub raw: String,
+    pub normalized: String,
+    pub quoting: IdentifierQuoting,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NamePart {
+    pub text: String,
+    pub normalized: String,
+    pub quoted: bool,
+    pub range: TextRange,
+}
+
+pub(super) fn name_part_from_token(
+    source: &str,
+    base: TextSize,
+    token: &Token,
+) -> Option<NamePart> {
+    let text = match &token.value {
+        Some(TokenValue::String(value)) => value.clone(),
+        Some(TokenValue::Keyword(value)) => (*value).to_owned(),
+        _ => return None,
+    };
+    let start = usize::from(token.range.start());
+    let raw = source.get(start..usize::from(token.range.end()))?;
+    let quoted = raw.starts_with('"') || raw.to_ascii_lowercase().starts_with("u&\"");
+    Some(NamePart {
+        normalized: if quoted {
+            text.clone()
+        } else {
+            text.to_ascii_lowercase()
+        },
+        text,
+        quoted,
+        range: TextRange::new(add(base, token.range.start()), add(base, token.range.end())),
+    })
+}
+
+fn add(left: TextSize, right: TextSize) -> TextSize {
+    TextSize::new(
+        left.get()
+            .checked_add(right.get())
+            .expect("source range overflow"),
+    )
+}
+
+pub(super) struct NormalizedPoint {
+    pub point: TextSize,
+    pub issues: Vec<RecoveryIssue>,
+}
+
+pub(super) struct ExtractedPrefix {
+    pub prefix: CompletionPrefix,
+    pub range: TextRange,
+    pub qualifier: Vec<NamePart>,
+    pub issues: Vec<RecoveryIssue>,
+    pub suppress_expectations: bool,
+}
+
+pub(super) fn normalize_point(source: &str, requested: TextSize) -> NormalizedPoint {
+    let requested = usize::from(requested);
+    let mut point = requested.min(source.len());
+    let mut issues = Vec::new();
+    if requested > source.len() {
+        issues.push(RecoveryIssue {
+            kind: RecoveryKind::PointClampedToEof,
+            range: TextRange::empty(text_size(source.len())),
+        });
+    }
+    if !source.is_char_boundary(point) {
+        let original = point;
+        while !source.is_char_boundary(point) {
+            point -= 1;
+        }
+        issues.push(RecoveryIssue {
+            kind: RecoveryKind::PointMovedToCharBoundary,
+            range: TextRange::new(text_size(point), text_size(original)),
+        });
+    }
+    NormalizedPoint {
+        point: text_size(point),
+        issues,
+    }
+}
+
+pub(super) fn extract(source: &str, statement: TextRange, point: TextSize) -> ExtractedPrefix {
+    let point_usize = usize::from(point);
+    let statement_start = usize::from(statement.start());
+    let statement_end = usize::from(statement.end());
+    let context = lexical_context(source, statement_start, point_usize);
+    let suppressed = matches!(
+        context,
+        LexicalContext::SingleQuote { .. }
+            | LexicalContext::LineComment
+            | LexicalContext::BlockComment
+            | LexicalContext::DollarQuote
+    );
+    let (start, end, quoting, raw, normalized) = match context {
+        LexicalContext::DoubleQuote { open } => {
+            quoted_prefix(source, open, point_usize, statement_end)
+        }
+        LexicalContext::Normal
+            if point_usize > statement_start && source.as_bytes()[point_usize - 1] == b'"' =>
+        {
+            if let Some((part, start)) = name_part_ending_at(source, statement_start, point_usize) {
+                let unicode = source[start..point_usize]
+                    .get(..2)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("u&"));
+                let quote = if unicode { start + 2 } else { start };
+                (
+                    start,
+                    point_usize,
+                    if unicode {
+                        IdentifierQuoting::UnicodeQuoted
+                    } else {
+                        IdentifierQuoting::Quoted
+                    },
+                    source[quote + 1..point_usize - 1].to_owned(),
+                    part.normalized,
+                )
+            } else {
+                (
+                    point_usize,
+                    point_usize,
+                    IdentifierQuoting::Unquoted,
+                    String::new(),
+                    String::new(),
+                )
+            }
+        }
+        _ if suppressed => (
+            point_usize,
+            point_usize,
+            IdentifierQuoting::Unquoted,
+            String::new(),
+            String::new(),
+        ),
+        _ => {
+            let candidate_start = unquoted_start(source, statement_start, point_usize);
+            let identifier = source[candidate_start..point_usize]
+                .chars()
+                .next()
+                .is_some_and(is_identifier_start);
+            if identifier {
+                let end = unquoted_end(source, point_usize, statement_end);
+                let raw = source[candidate_start..point_usize].to_owned();
+                let normalized = raw.to_ascii_lowercase();
+                (
+                    candidate_start,
+                    end,
+                    IdentifierQuoting::Unquoted,
+                    raw,
+                    normalized,
+                )
+            } else {
+                (
+                    point_usize,
+                    point_usize,
+                    IdentifierQuoting::Unquoted,
+                    String::new(),
+                    String::new(),
+                )
+            }
+        }
+    };
+    let qualifier = if suppressed {
+        Vec::new()
+    } else {
+        qualifier_before(source, statement_start, start)
+    };
+    ExtractedPrefix {
+        prefix: CompletionPrefix {
+            raw,
+            normalized,
+            quoting,
+        },
+        range: TextRange::new(text_size(start), text_size(end)),
+        qualifier,
+        issues: Vec::new(),
+        suppress_expectations: suppressed,
+    }
+}
+
+fn quoted_prefix(
+    source: &str,
+    quote: usize,
+    point: usize,
+    upper_bound: usize,
+) -> (usize, usize, IdentifierQuoting, String, String) {
+    let unicode = quote >= 2 && source[quote - 2..quote].eq_ignore_ascii_case("u&");
+    let start = if unicode { quote - 2 } else { quote };
+    let end = quoted_identifier_end(source, point, upper_bound);
+    let raw = source[quote + 1..point].to_owned();
+    let normalized = raw.replace("\"\"", "\"");
+    (
+        start,
+        end,
+        if unicode {
+            IdentifierQuoting::UnicodeQuoted
+        } else {
+            IdentifierQuoting::Quoted
+        },
+        raw,
+        normalized,
+    )
+}
+
+fn quoted_identifier_end(source: &str, point: usize, upper_bound: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut cursor = point;
+    while cursor < upper_bound {
+        if bytes[cursor] != b'"' {
+            cursor += 1;
+        } else if bytes.get(cursor + 1) == Some(&b'"') && cursor + 1 < upper_bound {
+            cursor += 2;
+        } else {
+            return cursor + 1;
+        }
+    }
+    upper_bound
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LexicalContext {
+    Normal,
+    SingleQuote { escapes: bool },
+    DoubleQuote { open: usize },
+    LineComment,
+    BlockComment,
+    DollarQuote,
+}
+
+fn lexical_context(source: &str, start: usize, point: usize) -> LexicalContext {
+    let bytes = source.as_bytes();
+    let mut pos = start;
+    let mut context = LexicalContext::Normal;
+    let mut block_depth = 0usize;
+    let mut dollar_tag: Option<Vec<u8>> = None;
+    while pos < point {
+        match context {
+            LexicalContext::LineComment => {
+                if lexical::is_line_break(bytes[pos]) {
+                    context = LexicalContext::Normal;
+                }
+                pos += 1;
+            }
+            LexicalContext::BlockComment => {
+                if bytes[pos..].starts_with(b"/*") {
+                    block_depth += 1;
+                    pos += 2;
+                } else if bytes[pos..].starts_with(b"*/") {
+                    block_depth -= 1;
+                    pos += 2;
+                    if block_depth == 0 {
+                        context = LexicalContext::Normal;
+                    }
+                } else {
+                    pos += 1;
+                }
+            }
+            LexicalContext::DollarQuote => {
+                let tag = dollar_tag.as_ref().expect("dollar quote owns its tag");
+                if bytes[pos..].starts_with(tag) {
+                    pos += tag.len();
+                    dollar_tag = None;
+                    context = LexicalContext::Normal;
+                } else {
+                    pos += 1;
+                }
+            }
+            LexicalContext::SingleQuote { escapes } => {
+                if escapes && bytes[pos] == b'\\' {
+                    pos = (pos + 2).min(point);
+                } else if bytes[pos] == b'\'' {
+                    if bytes.get(pos + 1) == Some(&b'\'') {
+                        pos += 2;
+                    } else {
+                        context = LexicalContext::Normal;
+                        pos += 1;
+                    }
+                } else {
+                    pos += 1;
+                }
+            }
+            LexicalContext::DoubleQuote { .. } => {
+                if bytes[pos] == b'"' {
+                    if bytes.get(pos + 1) == Some(&b'"') {
+                        pos += 2;
+                    } else {
+                        context = LexicalContext::Normal;
+                        pos += 1;
+                    }
+                } else {
+                    pos += 1;
+                }
+            }
+            LexicalContext::Normal => {
+                if bytes[pos..].starts_with(b"--") {
+                    context = LexicalContext::LineComment;
+                    pos += 2;
+                } else if bytes[pos..].starts_with(b"/*") {
+                    context = LexicalContext::BlockComment;
+                    block_depth = 1;
+                    pos += 2;
+                } else if bytes[pos] == b'\'' {
+                    context = LexicalContext::SingleQuote {
+                        escapes: lexical::escape_string_starts_at_quote(bytes, pos),
+                    };
+                    pos += 1;
+                } else if bytes[pos] == b'"' {
+                    context = LexicalContext::DoubleQuote { open: pos };
+                    pos += 1;
+                } else if bytes[pos] == b'$' {
+                    if let Some(tag) = lexical::dollar_quote_tag(&bytes[pos..point]) {
+                        pos += tag.len();
+                        dollar_tag = Some(tag);
+                        context = LexicalContext::DollarQuote;
+                    } else {
+                        pos += 1;
+                    }
+                } else {
+                    pos += 1;
+                }
+            }
+        }
+    }
+    context
+}
+
+fn unquoted_start(source: &str, lower_bound: usize, point: usize) -> usize {
+    let mut start = point;
+    while start > lower_bound {
+        let previous = source[..start].char_indices().next_back().unwrap();
+        if is_identifier_continue(previous.1) {
+            start = previous.0;
+        } else {
+            break;
+        }
+    }
+    start
+}
+
+fn unquoted_end(source: &str, point: usize, upper_bound: usize) -> usize {
+    let mut end = point;
+    while end < upper_bound {
+        let Some(ch) = source[end..upper_bound].chars().next() else {
+            break;
+        };
+        if !is_identifier_continue(ch) {
+            break;
+        }
+        end += ch.len_utf8();
+    }
+    end
+}
+
+fn qualifier_before(source: &str, statement_start: usize, prefix_start: usize) -> Vec<NamePart> {
+    let mut cursor = prefix_start;
+    let mut reversed = Vec::new();
+    loop {
+        cursor = trim_ascii_space_back(source, statement_start, cursor);
+        if cursor == statement_start || source.as_bytes()[cursor - 1] != b'.' {
+            break;
+        }
+        cursor = trim_ascii_space_back(source, statement_start, cursor - 1);
+        let Some((part, start)) = name_part_ending_at(source, statement_start, cursor) else {
+            break;
+        };
+        reversed.push(part);
+        cursor = start;
+    }
+    reversed.reverse();
+    reversed
+}
+
+fn name_part_ending_at(source: &str, lower_bound: usize, end: usize) -> Option<(NamePart, usize)> {
+    if end == lower_bound {
+        return None;
+    }
+    if source.as_bytes()[end - 1] == b'"' {
+        let mut cursor = end - 1;
+        while cursor > lower_bound {
+            cursor -= 1;
+            if source.as_bytes()[cursor] == b'"' {
+                if cursor > lower_bound && source.as_bytes()[cursor - 1] == b'"' {
+                    cursor -= 1;
+                    continue;
+                }
+                let text = source[cursor + 1..end - 1].replace("\"\"", "\"");
+                let unicode_start = cursor.checked_sub(2).filter(|start| {
+                    *start >= lower_bound && source[*start..cursor].eq_ignore_ascii_case("u&")
+                });
+                let start = unicode_start.unwrap_or(cursor);
+                return Some((
+                    NamePart {
+                        normalized: text.clone(),
+                        text,
+                        quoted: true,
+                        range: TextRange::new(text_size(start), text_size(end)),
+                    },
+                    start,
+                ));
+            }
+        }
+        return None;
+    }
+    let start = unquoted_start(source, lower_bound, end);
+    if start == end {
+        return None;
+    }
+    let text = source[start..end].to_owned();
+    Some((
+        NamePart {
+            normalized: text.to_ascii_lowercase(),
+            text,
+            quoted: false,
+            range: TextRange::new(text_size(start), text_size(end)),
+        },
+        start,
+    ))
+}
+
+fn trim_ascii_space_back(source: &str, lower_bound: usize, mut end: usize) -> usize {
+    while end > lower_bound && source.as_bytes()[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    end
+}
+
+fn is_identifier_continue(ch: char) -> bool {
+    ch == '_' || ch == '$' || ch.is_alphanumeric() || !ch.is_ascii()
+}
+
+fn is_identifier_start(ch: char) -> bool {
+    ch == '_' || ch.is_alphabetic() || !ch.is_ascii()
+}
+
+fn text_size(value: usize) -> TextSize {
+    TextSize::try_from(value).expect("source length was represented by TextSize")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn range(source: &str) -> TextRange {
+        TextRange::new(TextSize::ZERO, text_size(source.len()))
+    }
+
+    #[test]
+    fn separates_qualifier_and_unquoted_prefix() {
+        let source = "select db.Schema.Na";
+        let extracted = extract(source, range(source), text_size(source.len()));
+        assert_eq!(extracted.prefix.raw, "Na");
+        assert_eq!(extracted.prefix.normalized, "na");
+        assert_eq!(
+            extracted
+                .qualifier
+                .iter()
+                .map(|part| part.normalized.as_str())
+                .collect::<Vec<_>>(),
+            ["db", "schema"]
+        );
+    }
+
+    #[test]
+    fn keeps_quoted_prefix_case() {
+        let source = "select s.\"Mixed";
+        let extracted = extract(source, range(source), text_size(source.len()));
+        assert_eq!(extracted.prefix.raw, "Mixed");
+        assert_eq!(extracted.prefix.normalized, "Mixed");
+        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::Quoted);
+        assert_eq!(extracted.qualifier[0].normalized, "s");
+    }
+
+    #[test]
+    fn replacement_range_covers_the_identifier_suffix() {
+        let source = "select SELect, s.\"Mixed\"";
+        let unquoted_point = source.find("SEL").unwrap() + 3;
+        let extracted = extract(source, range(source), text_size(unquoted_point));
+        assert_eq!(extracted.prefix.raw, "SEL");
+        assert_eq!(extracted.range, TextRange::new(text_size(7), text_size(13)));
+
+        let quoted_point = source.find("Mix").unwrap() + 3;
+        let extracted = extract(source, range(source), text_size(quoted_point));
+        assert_eq!(extracted.prefix.raw, "Mix");
+        assert_eq!(
+            extracted.range,
+            TextRange::new(
+                text_size(source.find('"').unwrap()),
+                text_size(source.len())
+            )
+        );
+
+        let source = "select \"MixedSuffix";
+        let point = source.find("Mix").unwrap() + 3;
+        let extracted = extract(source, range(source), text_size(point));
+        assert_eq!(
+            extracted.range,
+            TextRange::new(
+                text_size(source.find('"').unwrap()),
+                text_size(source.len())
+            )
+        );
+    }
+
+    #[test]
+    fn moves_point_to_utf8_boundary() {
+        let source = "名";
+        let normalized = normalize_point(source, TextSize::new(2));
+        assert_eq!(normalized.point, TextSize::ZERO);
+        assert_eq!(
+            normalized.issues[0].kind,
+            RecoveryKind::PointMovedToCharBoundary
+        );
+    }
+
+    #[test]
+    fn does_not_treat_quotes_inside_strings_as_identifier_prefixes() {
+        let source = "select 'not a \"name";
+        let extracted = extract(source, range(source), text_size(source.len()));
+        assert!(extracted.suppress_expectations);
+        assert!(extracted.prefix.raw.is_empty());
+    }
+}

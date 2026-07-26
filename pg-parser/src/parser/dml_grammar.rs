@@ -10,6 +10,7 @@ impl Parser {
         }
         if self.consume(TokenKind::CurrentP) {
             self.expect(TokenKind::Of)?;
+            self.record_completion_slot(completion::GrammarSlot::AnyName);
             let cursor_name = Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("CURRENT OF requires a cursor name"))?,
@@ -126,9 +127,13 @@ impl Parser {
             let infer_location = self.previous_location();
             let mut index_elems = Vec::new();
             while !self.at(TokenKind::Char(')')) {
-                let tokens =
+                let mut tokens =
                     self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                index_elems.push(Node::IndexElem(parse_index_elem_tokens(tokens)?));
+                self.append_completion_marker(&mut tokens);
+                index_elems.push(Node::IndexElem(parse_index_elem_tokens_with_completion(
+                    tokens,
+                    self.completion.clone(),
+                )?));
                 if !self.consume(TokenKind::Char(',')) {
                     break;
                 }
@@ -155,6 +160,7 @@ impl Parser {
         } else if self.consume(TokenKind::On) {
             let infer_location = self.previous_location();
             self.expect(TokenKind::Constraint)?;
+            self.record_completion_slot(completion::GrammarSlot::Constraint);
             let conname = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a constraint name"))?;
@@ -244,6 +250,8 @@ impl Parser {
     }
 
     pub(super) fn parse_set_clause_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+        self.record_completion_slot(completion::GrammarSlot::Column);
+        self.record_completion_slot_before(completion::GrammarSlot::Column, stops);
         let mut targets = Vec::new();
         while !self.at_any(stops) {
             if self.consume(TokenKind::Char('(')) {
@@ -319,8 +327,16 @@ impl Parser {
             } else if self.consume(TokenKind::Char('[')) {
                 let lower_or_index =
                     self.take_until_top_level(&[TokenKind::Char(':'), TokenKind::Char(']')]);
+                if self.at_completion() {
+                    let _ = self.parse_expression_fragment_tokens(lower_or_index)?;
+                    unreachable!("completion marker must stop assignment subscript parsing");
+                }
                 let (is_slice, lidx, uidx) = if self.consume(TokenKind::Char(':')) {
                     let upper = self.take_until_top_level(&[TokenKind::Char(']')]);
+                    if self.at_completion() {
+                        let _ = self.parse_expression_fragment_tokens(upper)?;
+                        unreachable!("completion marker must stop assignment slice parsing");
+                    }
                     (
                         true,
                         if lower_or_index.is_empty() {
@@ -384,6 +400,18 @@ impl Parser {
             };
             self.expect(TokenKind::Then)?;
 
+            match match_kind {
+                MergeMatchKind::Matched | MergeMatchKind::NotMatchedBySource => {
+                    self.record_completion_tokens(&[
+                        TokenKind::Update,
+                        TokenKind::DeleteP,
+                        TokenKind::Do,
+                    ]);
+                }
+                MergeMatchKind::NotMatchedByTarget => {
+                    self.record_completion_tokens(&[TokenKind::Insert, TokenKind::Do]);
+                }
+            }
             let (command_type, override_, target_list, values) = match self.peek_kind() {
                 TokenKind::Update => {
                     self.advance();

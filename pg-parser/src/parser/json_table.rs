@@ -7,12 +7,14 @@ impl Parser {
 
         let context_location = self.location();
         let context_tokens = self.take_until_top_level(&[TokenKind::Char(',')]);
-        let context_item = parse_json_value_expr_tokens(context_tokens).map_err(|mut error| {
-            if error.location() == 0 {
-                error.reanchor(context_location);
-            }
-            error
-        })?;
+        let context_item = self
+            .parse_json_value_fragment_tokens(context_tokens)
+            .map_err(|mut error| {
+                if error.location() == 0 {
+                    error.reanchor(context_location);
+                }
+                error
+            })?;
         self.expect(TokenKind::Char(','))?;
 
         let pathspec = self.parse_json_table_path_spec(false)?.ok_or_else(|| {
@@ -51,7 +53,7 @@ impl Parser {
         loop {
             let location = self.location();
             let value_tokens = self.take_until_top_level(&[TokenKind::As]);
-            let value = parse_json_value_expr_tokens(value_tokens)?;
+            let value = self.parse_json_value_fragment_tokens(value_tokens)?;
             self.expect(TokenKind::As)?;
             let name = self
                 .consume_col_label()
@@ -65,7 +67,7 @@ impl Parser {
                 break;
             }
             if self.at(TokenKind::Columns) {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     location,
                     "expected a JSON PASSING argument after ','",
                 ));
@@ -353,7 +355,7 @@ impl Parser {
                 let tokens = self.take_until_top_level(&[TokenKind::On]);
                 (
                     JsonBehaviorType::Default,
-                    Some(Box::new(parse_expression_tokens(tokens)?)),
+                    Some(Box::new(self.parse_expression_fragment_tokens(tokens)?)),
                 )
             }
             TokenKind::ErrorP => {

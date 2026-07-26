@@ -43,11 +43,13 @@ impl Parser {
     // CREATE TYPE name
     pub(super) fn parse_create_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
+        self.record_completion_slot(completion::GrammarSlot::Type);
         let type_location = self.location();
         let type_name = self.parse_name_list();
         if type_name.is_empty() {
             return Err(self.error_here("CREATE TYPE requires a type name"));
         }
+        self.record_completion_tokens(&[TokenKind::As, TokenKind::Char('(')]);
         if !self.consume(TokenKind::As) {
             let definition = if self.at(TokenKind::Char('(')) {
                 self.parse_parenthesized_definition()?
@@ -63,16 +65,15 @@ impl Parser {
             }));
         }
 
+        self.record_completion_tokens(&[TokenKind::EnumP, TokenKind::Range, TokenKind::Char('(')]);
         match self.peek_kind() {
             TokenKind::EnumP => {
                 self.advance();
                 self.expect(TokenKind::Char('('))?;
                 let mut vals = Vec::new();
                 while !self.at(TokenKind::Char(')')) {
-                    if !self.at(TokenKind::SConst) {
-                        return Err(self.error_here("enum labels must be string literals"));
-                    }
-                    let value = self.consume_string_like().unwrap_or_default();
+                    let value =
+                        self.consume_required_string("enum labels must be string literals")?;
                     vals.push(make_string_node(value));
                     if !self.consume(TokenKind::Char(',')) {
                         break;
@@ -131,6 +132,7 @@ impl Parser {
     // ALTER TYPE name SET ( property = value [, ... ] )
     pub(super) fn parse_alter_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
+        self.record_completion_slot(completion::GrammarSlot::Type);
         let type_name = self.parse_name_list_until_keywords(&[
             TokenKind::Set,
             TokenKind::Char(';'),
@@ -140,7 +142,7 @@ impl Parser {
             return Err(self.error_here("ALTER TYPE requires a type name"));
         }
         self.expect(TokenKind::Set)?;
-        let options = self.parse_operator_definition_list()?;
+        let options = self.parse_operator_definition_list(ObjectType::Type)?;
         self.expect_statement_end()?;
         Ok(Node::AlterTypeStmt(AlterTypeStmt {
             node_tag: NodeTag::AlterTypeStmt,
@@ -157,6 +159,7 @@ impl Parser {
     // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
     pub(super) fn parse_alter_enum(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
+        self.record_completion_slot(completion::GrammarSlot::Type);
         let type_name = self.parse_name_list_until_keywords(&[
             TokenKind::AddP,
             TokenKind::Rename,
@@ -173,9 +176,11 @@ impl Parser {
             return Err(self.error_here("ALTER TYPE requires an enum type name"));
         }
 
+        self.record_completion_tokens(&[TokenKind::AddP, TokenKind::Rename, TokenKind::Drop]);
         match self.peek_kind() {
             TokenKind::AddP => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::ValueP, TokenKind::Attribute]);
                 self.expect(TokenKind::ValueP)?;
                 stmt.skip_if_new_val_exists = self.consume_if_not_exists()?;
                 stmt.new_val = Some(self.consume_required_string("ADD VALUE requires a string")?);
@@ -193,6 +198,11 @@ impl Parser {
             }
             TokenKind::Rename => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::ValueP,
+                    TokenKind::Attribute,
+                    TokenKind::To,
+                ]);
                 self.expect(TokenKind::ValueP)?;
                 stmt.old_val =
                     Some(self.consume_required_string("RENAME VALUE requires a string")?);
@@ -201,9 +211,10 @@ impl Parser {
             }
             TokenKind::Drop => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::ValueP, TokenKind::Attribute]);
                 self.expect(TokenKind::ValueP)?;
                 self.consume_required_string("DROP VALUE requires a string")?;
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     self.previous_location(),
                     "dropping an enum value is not implemented",
                 ));
@@ -228,6 +239,7 @@ impl Parser {
     //         [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_composite_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
+        self.record_completion_slot(completion::GrammarSlot::Type);
         let type_location = self.location();
         let names = self.parse_name_list_until_keywords(&[
             TokenKind::AddP,
@@ -245,6 +257,7 @@ impl Parser {
         )));
         let mut cmds = Vec::new();
         loop {
+            self.record_completion_tokens(&[TokenKind::AddP, TokenKind::Drop, TokenKind::Alter]);
             cmds.push(Node::AlterTableCmd(self.parse_alter_composite_type_cmd()?));
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -287,6 +300,7 @@ impl Parser {
                 self.expect(TokenKind::Attribute)?;
                 cmd.subtype = AlterTableType::DropColumn;
                 cmd.missing_ok = self.consume_if_exists()?;
+                self.record_completion_slot(completion::GrammarSlot::Attribute);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("DROP ATTRIBUTE requires a name"))?,
@@ -298,6 +312,7 @@ impl Parser {
                 self.expect(TokenKind::Attribute)?;
                 cmd.subtype = AlterTableType::AlterColumnType;
                 let attribute_location = self.location();
+                self.record_completion_slot(completion::GrammarSlot::Attribute);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("ALTER ATTRIBUTE requires a name"))?,
@@ -318,6 +333,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("ALTER ATTRIBUTE TYPE requires a data type"))?,
                 ));
                 let coll_clause = if self.consume(TokenKind::Collate) {
+                    self.record_completion_slot(completion::GrammarSlot::Collation);
                     let location = self.previous_location();
                     let collname = self.parse_name_list_until_keywords(&[
                         TokenKind::Cascade,
