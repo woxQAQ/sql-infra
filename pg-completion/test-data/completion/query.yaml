@@ -299,3 +299,12 @@
       slots: [Relation]
     scope:
       local: [accounts]
+
+- input: SELECT * FROM users AS u WHERE lower(u.na|)
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]
+    qualifier: [u]
+    scope:
+      local: [users AS u]

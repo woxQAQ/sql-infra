@@ -216,7 +216,13 @@ fn references_container(
         .map(|(index, _)| index)
         .last()?;
     let (name, next) = qualified_name(source, base, tokens, reference + 1)?;
-    (tokens[next.saturating_sub(1)].range.end() <= point).then_some(ObjectReference {
+    if token_kind(tokens, next) != TokenKind::Char('(')
+        || tokens[next].range.end() > point
+        || matching_close(tokens, next).is_some_and(|close| tokens[close].range.start() < point)
+    {
+        return None;
+    }
+    Some(ObjectReference {
         object_kinds: vec![ObjectKind::Table],
         name,
     })
@@ -402,6 +408,19 @@ fn token_kind(tokens: &[Token], index: usize) -> TokenKind {
         .get(index)
         .map(|token| token.kind)
         .unwrap_or(TokenKind::Eof)
+}
+
+fn matching_close(tokens: &[Token], open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (index, token) in tokens.iter().enumerate().skip(open + 1) {
+        match token.kind {
+            TokenKind::Char('(') => depth += 1,
+            TokenKind::Char(')') if depth == 0 => return Some(index),
+            TokenKind::Char(')') => depth -= 1,
+            _ => {}
+        }
+    }
+    None
 }
 
 fn extend_unique(target: &mut Vec<ObjectKind>, values: &[ObjectKind]) {

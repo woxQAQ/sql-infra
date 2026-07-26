@@ -116,6 +116,59 @@ pub(super) fn incomplete_range(base: TextSize, tokens: &[Token]) -> Option<TextR
         .map(|range| absolute_range(base, range.start(), range.end()))
 }
 
+/// Clause keywords that end a `FROM` list when they appear at branch depth.
+const FROM_LIST_END: &[TokenKind] = &[
+    TokenKind::Where,
+    TokenKind::GroupP,
+    TokenKind::Having,
+    TokenKind::Window,
+    TokenKind::Order,
+    TokenKind::Limit,
+    TokenKind::Offset,
+    TokenKind::Fetch,
+    TokenKind::For,
+    TokenKind::Returning,
+];
+
+/// The `FROM` list of one SELECT set-operation branch.
+struct FromSegment {
+    /// Index of the `FROM` token.
+    from: usize,
+    /// First same-depth [`FROM_LIST_END`] keyword after the list, else the
+    /// branch end.
+    list_end: usize,
+    /// First same-depth set-operation keyword or depth drop after the SELECT.
+    branch_end: usize,
+}
+
+fn from_segment(
+    tokens: &[Token],
+    depths: &[usize],
+    select_index: usize,
+    depth: usize,
+) -> Option<FromSegment> {
+    let branch_end = (select_index + 1..tokens.len())
+        .find(|index| {
+            depths[*index] < depth
+                || (depths[*index] == depth
+                    && matches!(
+                        tokens[*index].kind,
+                        TokenKind::Union | TokenKind::Intersect | TokenKind::Except
+                    ))
+        })
+        .unwrap_or(tokens.len());
+    let from = (select_index + 1..branch_end)
+        .find(|index| depths[*index] == depth && tokens[*index].kind == TokenKind::From)?;
+    let list_end = (from + 1..branch_end)
+        .find(|index| depths[*index] == depth && FROM_LIST_END.contains(&tokens[*index].kind))
+        .unwrap_or(branch_end);
+    Some(FromSegment {
+        from,
+        list_end,
+        branch_end,
+    })
+}
+
 fn derived_table_container(
     tokens: &[Token],
     depths: &[usize],
@@ -130,36 +183,9 @@ fn derived_table_container(
             && matching_close(tokens, depths, *index, tokens.len())
                 .is_none_or(|close| tokens[close].range.start() >= point)
     })?;
-    let branch_end = (outer_select + 1..tokens.len())
-        .find(|index| {
-            depths[*index] < outer_depth
-                || (depths[*index] == outer_depth
-                    && matches!(
-                        tokens[*index].kind,
-                        TokenKind::Union | TokenKind::Intersect | TokenKind::Except
-                    ))
-        })
-        .unwrap_or(tokens.len());
-    let from = (outer_select + 1..branch_end)
-        .find(|index| depths[*index] == outer_depth && tokens[*index].kind == TokenKind::From)?;
-    let from_end = (from + 1..branch_end)
-        .find(|index| {
-            depths[*index] == outer_depth
-                && matches!(
-                    tokens[*index].kind,
-                    TokenKind::Where
-                        | TokenKind::GroupP
-                        | TokenKind::Having
-                        | TokenKind::Window
-                        | TokenKind::Order
-                        | TokenKind::Limit
-                        | TokenKind::Offset
-                        | TokenKind::Fetch
-                        | TokenKind::For
-                )
-        })
-        .unwrap_or(branch_end);
-    if !(from < open && open < from_end) {
+    let segment = from_segment(tokens, depths, outer_select, outer_depth)?;
+    let from = segment.from;
+    if !(from < open && open < segment.list_end) {
         return None;
     }
     let preceding_clause = (from + 1..open).rev().find(|index| {
@@ -248,8 +274,81 @@ fn enclosing_selects(
             _ => {}
         }
     }
+    if by_depth.is_empty()
+        && let Some(select) = wrapped_query_select_before_suffix(tokens, depths, point, point_depth)
+    {
+        by_depth.push((select, depths[select]));
+    }
+    by_depth.retain(|(select, depth)| {
+        !point_is_in_set_operation_suffix(tokens, depths, *select, *depth, point, point_depth)
+    });
     by_depth.sort_by_key(|(_, depth)| *depth);
     by_depth
+}
+
+fn point_is_in_set_operation_suffix(
+    tokens: &[Token],
+    depths: &[usize],
+    select: usize,
+    depth: usize,
+    point: TextSize,
+    point_depth: usize,
+) -> bool {
+    let has_set_operation = tokens.iter().enumerate().any(|(index, token)| {
+        token.range.start() < point
+            && depths[index] == depth
+            && matches!(
+                token.kind,
+                TokenKind::Union | TokenKind::Intersect | TokenKind::Except
+            )
+    });
+    let suffix_depth = depth.min(point_depth);
+    has_set_operation
+        && (select + 1..tokens.len()).any(|index| {
+            depths[index] == suffix_depth
+                && tokens[index].range.start() <= point
+                && matches!(
+                    tokens[index].kind,
+                    TokenKind::Order
+                        | TokenKind::Limit
+                        | TokenKind::Offset
+                        | TokenKind::Fetch
+                        | TokenKind::For
+                )
+        })
+}
+
+fn wrapped_query_select_before_suffix(
+    tokens: &[Token],
+    depths: &[usize],
+    point: TextSize,
+    point_depth: usize,
+) -> Option<usize> {
+    let suffix = tokens.iter().enumerate().rev().find_map(|(index, token)| {
+        (token.range.start() <= point
+            && depths[index] == point_depth
+            && matches!(
+                token.kind,
+                TokenKind::Order
+                    | TokenKind::Limit
+                    | TokenKind::Offset
+                    | TokenKind::Fetch
+                    | TokenKind::For
+            ))
+        .then_some(index)
+    })?;
+    let close = suffix.checked_sub(1)?;
+    if tokens[close].kind != TokenKind::Char(')') || depths[close] != point_depth {
+        return None;
+    }
+    let open = (0..close).rev().find(|index| {
+        tokens[*index].kind == TokenKind::Char('(')
+            && depths[*index] == point_depth
+            && matching_close(tokens, depths, *index, close + 1) == Some(close)
+    })?;
+    (open + 1..close)
+        .rev()
+        .find(|index| tokens[*index].kind == TokenKind::Select && depths[*index] > point_depth)
 }
 
 fn query_scope(
@@ -258,43 +357,11 @@ fn query_scope(
     depth: usize,
     ctes: &[CteDefinition],
 ) -> QueryScope {
-    let tokens = input.tokens;
-    let depths = input.depths;
-    let branch_end = (select_index + 1..tokens.len())
-        .find(|index| {
-            depths[*index] < depth
-                || (depths[*index] == depth
-                    && matches!(
-                        tokens[*index].kind,
-                        TokenKind::Union | TokenKind::Intersect | TokenKind::Except
-                    ))
-        })
-        .unwrap_or(tokens.len());
-    let Some(from_index) = (select_index + 1..branch_end)
-        .find(|index| depths[*index] == depth && tokens[*index].kind == TokenKind::From)
-    else {
+    let Some(segment) = from_segment(input.tokens, input.depths, select_index, depth) else {
         return QueryScope::default();
     };
-    let end = (from_index + 1..branch_end)
-        .find(|index| {
-            depths[*index] == depth
-                && matches!(
-                    tokens[*index].kind,
-                    TokenKind::Where
-                        | TokenKind::GroupP
-                        | TokenKind::Having
-                        | TokenKind::Window
-                        | TokenKind::Order
-                        | TokenKind::Limit
-                        | TokenKind::Offset
-                        | TokenKind::Fetch
-                        | TokenKind::For
-                        | TokenKind::Returning
-                )
-        })
-        .unwrap_or(branch_end);
     QueryScope {
-        relations: parse_from_relations(input, from_index + 1, end, depth, ctes),
+        relations: parse_from_relations(input, segment.from + 1, segment.list_end, depth, ctes),
     }
 }
 
@@ -307,26 +374,17 @@ fn apply_table_function_visibility(
     depth: usize,
     scope: &mut QueryScope,
 ) {
-    let branch_end = (select_index + 1..tokens.len())
-        .find(|index| {
-            depths[*index] < depth
-                || (depths[*index] == depth
-                    && matches!(
-                        tokens[*index].kind,
-                        TokenKind::Union | TokenKind::Intersect | TokenKind::Except
-                    ))
-        })
-        .unwrap_or(tokens.len());
-    let Some(from) = (select_index + 1..branch_end)
-        .find(|index| depths[*index] == depth && tokens[*index].kind == TokenKind::From)
-    else {
+    let Some(segment) = from_segment(tokens, depths, select_index, depth) else {
         return;
     };
-    let Some(open) = (from + 1..branch_end).find(|index| {
+    let from = segment.from;
+    // A scalar call in WHERE/GROUP BY/… matches the same name-then-paren
+    // shape, so the search must stop at the end of the FROM list.
+    let Some(open) = (from + 1..segment.list_end).find(|index| {
         tokens[*index].kind == TokenKind::Char('(')
             && depths[*index] == depth
             && tokens[*index].range.start() < point
-            && matching_close(tokens, depths, *index, branch_end)
+            && matching_close(tokens, depths, *index, segment.list_end)
                 .is_some_and(|close| tokens[close].range.end() >= point)
             && index.checked_sub(1).is_some_and(|previous| {
                 depths[previous] == depth && token_name(&tokens[previous]).is_some()
@@ -361,23 +419,17 @@ fn apply_join_condition_visibility(
     depth: usize,
     scope: &mut QueryScope,
 ) {
-    let branch_end = (select_index + 1..tokens.len())
-        .find(|index| {
-            depths[*index] < depth
-                || (depths[*index] == depth
-                    && matches!(
-                        tokens[*index].kind,
-                        TokenKind::Union | TokenKind::Intersect | TokenKind::Except
-                    ))
-        })
-        .unwrap_or(tokens.len());
-    let Some(from) = (select_index + 1..branch_end)
-        .find(|index| depths[*index] == depth && tokens[*index].kind == TokenKind::From)
-    else {
+    let Some(segment) = from_segment(tokens, depths, select_index, depth) else {
         return;
     };
-    let Some(on) = join_condition_boundary(tokens, depths, from + 1, branch_end, depth, point)
-    else {
+    let Some(on) = join_condition_boundary(
+        tokens,
+        depths,
+        segment.from + 1,
+        segment.branch_end,
+        depth,
+        point,
+    ) else {
         return;
     };
     let boundary = add(base, on);
@@ -1118,6 +1170,7 @@ fn collect_dml_scope(
             snapshot.dml_target = None;
             snapshot.merge_source = None;
         }
+        apply_merge_when_visibility(point, tokens, depths, first, snapshot);
     }
 
     let source_keyword = match tokens[first].kind {
@@ -1131,8 +1184,7 @@ fn collect_dml_scope(
     {
         let source_end = (source_start + 1..tokens.len())
             .find(|index| {
-                depths[*index] == depths[first]
-                    && matches!(tokens[*index].kind, TokenKind::Where | TokenKind::Returning)
+                depths[*index] == depths[first] && FROM_LIST_END.contains(&tokens[*index].kind)
             })
             .unwrap_or(tokens.len());
         let mut relations =
@@ -1175,6 +1227,62 @@ fn collect_dml_scope(
                 snapshot.local.relations.extend(relations);
             }
         }
+    }
+}
+
+fn apply_merge_when_visibility(
+    point: TextSize,
+    tokens: &[Token],
+    depths: &[usize],
+    merge: usize,
+    snapshot: &mut ScopeSnapshot,
+) {
+    let depth = depths[merge];
+    let mut case_depth = 0usize;
+    let mut active_when = None;
+    let mut clause_end = None;
+    for index in merge + 1..tokens.len() {
+        if depths[index] != depth {
+            continue;
+        }
+        match tokens[index].kind {
+            TokenKind::Case => case_depth += 1,
+            TokenKind::EndP if case_depth > 0 => case_depth -= 1,
+            TokenKind::When if case_depth == 0 => {
+                if tokens[index].range.start() <= point {
+                    active_when = Some(index);
+                } else if active_when.is_some() {
+                    clause_end = Some(tokens[index].range.start());
+                    break;
+                }
+            }
+            TokenKind::Returning if case_depth == 0 && active_when.is_some() => {
+                clause_end = Some(tokens[index].range.start());
+                break;
+            }
+            _ => {}
+        }
+    }
+    let Some(when) = active_when else {
+        return;
+    };
+    if clause_end.is_some_and(|end| point >= end)
+        || tokens.get(when + 1).map(|token| token.kind) != Some(TokenKind::Not)
+        || tokens.get(when + 2).map(|token| token.kind) != Some(TokenKind::Matched)
+    {
+        return;
+    }
+
+    match (
+        tokens.get(when + 3).map(|token| token.kind),
+        tokens.get(when + 4).map(|token| token.kind),
+    ) {
+        (Some(TokenKind::By), Some(TokenKind::Source)) => snapshot.merge_source = None,
+        (Some(TokenKind::By), Some(TokenKind::Target))
+        | (Some(TokenKind::And | TokenKind::Then), _) => {
+            snapshot.dml_target = None;
+        }
+        _ => {}
     }
 }
 
@@ -1239,21 +1347,10 @@ fn join_condition_boundary(
             let condition_end = (*index + 1..end)
                 .find(|candidate| {
                     depths[*candidate] == depth
-                        && matches!(
+                        && (matches!(
                             tokens[*candidate].kind,
-                            TokenKind::Char(',')
-                                | TokenKind::Join
-                                | TokenKind::Where
-                                | TokenKind::GroupP
-                                | TokenKind::Having
-                                | TokenKind::Window
-                                | TokenKind::Order
-                                | TokenKind::Limit
-                                | TokenKind::Offset
-                                | TokenKind::Fetch
-                                | TokenKind::For
-                                | TokenKind::Returning
-                        )
+                            TokenKind::Char(',') | TokenKind::Join
+                        ) || FROM_LIST_END.contains(&tokens[*candidate].kind))
                 })
                 .map_or_else(
                     || {
@@ -1476,6 +1573,46 @@ mod tests {
         let point = TextSize::try_from(sql.find("a.id").unwrap() + 2).unwrap();
         let scope = collect(sql, TextSize::ZERO, point).unwrap();
         assert_eq!(scope.local.relations.len(), 2);
+    }
+
+    #[test]
+    fn function_calls_past_the_from_list_keep_the_from_scope() {
+        for sql in [
+            "SELECT * FROM t WHERE lower(x)",
+            "SELECT * FROM t GROUP BY lower(x)",
+            "SELECT * FROM t HAVING count(x) > 0",
+            "SELECT * FROM t ORDER BY lower(x)",
+        ] {
+            let point = TextSize::try_from(sql.rfind('x').unwrap()).unwrap();
+            let scope = collect(sql, TextSize::ZERO, point).unwrap();
+            assert_eq!(scope.local.relations.len(), 1, "{sql}");
+            assert_eq!(scope.local.relations[0].name[0].normalized, "t", "{sql}");
+        }
+
+        let sql = "SELECT * FROM generate_series(1, x) g WHERE true";
+        let point = TextSize::try_from(sql.rfind("x)").unwrap()).unwrap();
+        let scope = collect(sql, TextSize::ZERO, point).unwrap();
+        assert!(
+            scope.local.relations.is_empty(),
+            "a FROM-list table function still sees only preceding items"
+        );
+    }
+
+    #[test]
+    fn parenthesized_query_suffix_keeps_the_query_scope() {
+        for sql in [
+            "(SELECT * FROM users AS u) ORDER BY u.id",
+            "(SELECT * FROM users AS u) LIMIT u.limit_value",
+        ] {
+            let point = TextSize::try_from(sql.len()).unwrap();
+            let scope = collect(sql, TextSize::ZERO, point).unwrap();
+            assert_eq!(scope.local.relations.len(), 1, "{sql}");
+            assert_eq!(
+                scope.local.relations[0].alias.as_ref().unwrap().normalized,
+                "u",
+                "{sql}"
+            );
+        }
     }
 
     #[test]

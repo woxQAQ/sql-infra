@@ -337,19 +337,16 @@ fn narrow_qualified_slots(
         .chain(scope.dml_target.iter())
         .chain(scope.merge_source.iter())
         .any(|relation| {
-            relation
-                .alias
-                .as_ref()
-                .is_some_and(|alias| alias.normalized == first.normalized)
-                || relation
-                    .name
-                    .last()
-                    .is_some_and(|name| name.normalized == first.normalized)
-        })
-        || scope
-            .ctes
-            .iter()
-            .any(|cte| cte.name.normalized == first.normalized);
+            relation.alias.as_ref().map_or_else(
+                || {
+                    relation
+                        .name
+                        .last()
+                        .is_some_and(|name| name.normalized == first.normalized)
+                },
+                |alias| alias.normalized == first.normalized,
+            )
+        });
     if visible {
         expectations
             .slots

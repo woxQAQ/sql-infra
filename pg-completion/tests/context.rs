@@ -112,6 +112,53 @@ fn filters_keywords_by_prefix_and_resolves_relation_qualifiers() {
     let context = collect(source, size(point));
     assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
     assert_eq!(context.intent.qualifier[0].normalized, "u");
+
+    let source = "SELECT accounts. FROM accounts AS a";
+    let context = collect(source, size(source.find(" FROM").unwrap()));
+    assert_eq!(
+        context.expectations.slots,
+        [GrammarSlot::Column, GrammarSlot::Function]
+    );
+
+    let source = "WITH c AS (SELECT 1) SELECT c.";
+    let context = collect(source, size(source.len()));
+    assert_eq!(
+        context.expectations.slots,
+        [GrammarSlot::Column, GrammarSlot::Function]
+    );
+
+    let source = "WITH c AS (SELECT 1) SELECT c. FROM c";
+    let context = collect(source, size(source.find(" FROM").unwrap()));
+    assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+}
+
+#[test]
+fn resolves_qualifiers_in_a_parenthesized_query_suffix() {
+    let source = "(SELECT * FROM users AS u) ORDER BY u.";
+    let context = collect(source, size(source.len()));
+
+    assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+    assert_eq!(context.scope.local.relations.len(), 1);
+    assert_eq!(
+        context.scope.local.relations[0]
+            .alias
+            .as_ref()
+            .unwrap()
+            .normalized,
+        "u"
+    );
+}
+
+#[test]
+fn set_operation_suffix_does_not_expose_a_branch_relation() {
+    for source in [
+        "SELECT a FROM left_table UNION SELECT b FROM right_table ORDER BY ",
+        "(SELECT a FROM left_table UNION SELECT b FROM right_table) ORDER BY ",
+    ] {
+        let context = collect(source, size(source.len()));
+        assert!(context.scope.local.relations.is_empty(), "{source:?}");
+        assert!(context.scope.outer.is_empty(), "{source:?}");
+    }
 }
 
 #[test]
@@ -259,6 +306,12 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
             "{source:?}"
         );
     }
+
+    let source = "CREATE TABLE child (parent_id int REFERENCES parent(id), value int CHECK ())";
+    let point = source.rfind("()").unwrap() + 1;
+    let context = collect(source, size(point));
+    assert!(context.expectations.slots.contains(&GrammarSlot::Column));
+    assert!(context.intent.container.is_none());
 }
 
 #[test]
@@ -404,6 +457,20 @@ fn handles_unicode_quoted_and_utf8_identifier_prefixes() {
     let context = collect(escaped, size(escaped.len()));
     assert_eq!(context.prefix.raw, "A\"\"B");
     assert_eq!(context.prefix.normalized, "A\"B");
+
+    let unicode_escape = r#"SELECT U&"u\0061". FROM users AS U&"u\0061""#;
+    let point = unicode_escape.find(" FROM").unwrap();
+    let context = collect(unicode_escape, size(point));
+    assert_eq!(context.intent.qualifier[0].normalized, "ua");
+    assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+    assert_eq!(
+        context.scope.local.relations[0]
+            .alias
+            .as_ref()
+            .unwrap()
+            .normalized,
+        "ua"
+    );
 
     let utf8 = "SELECT 名称后缀";
     let point = utf8.find('名').unwrap() + '名'.len_utf8();
@@ -685,6 +752,27 @@ fn merge_actions_keep_target_and_source_visible() {
     );
     assert_eq!(context.intent.qualifier[0].normalized, "source");
     assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+}
+
+#[test]
+fn merge_not_matched_actions_expose_only_existing_rows() {
+    let prefix =
+        "MERGE INTO target_table AS target USING source_table AS source ON target.id = source.id ";
+    let target_only = format!("{prefix}WHEN NOT MATCHED BY SOURCE AND ");
+    let context = collect(&target_only, size(target_only.len()));
+    assert!(context.scope.dml_target.is_some());
+    assert!(context.scope.merge_source.is_none());
+
+    let source_only = format!("{prefix}WHEN NOT MATCHED BY TARGET AND ");
+    let context = collect(&source_only, size(source_only.len()));
+    assert!(context.scope.dml_target.is_none());
+    assert!(context.scope.merge_source.is_some());
+
+    let source_only = format!("{prefix}WHEN NOT MATCHED THEN INSERT VALUES (source.)");
+    let point = source_only.find("source.)").unwrap() + "source.".len();
+    let context = collect(&source_only, size(point));
+    assert!(context.scope.dml_target.is_none());
+    assert!(context.scope.merge_source.is_some());
 }
 
 #[test]

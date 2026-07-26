@@ -30,14 +30,18 @@ pub(super) fn name_part_from_token(
     base: TextSize,
     token: &Token,
 ) -> Option<NamePart> {
-    let text = match &token.value {
+    let mut text = match &token.value {
         Some(TokenValue::String(value)) => value.clone(),
         Some(TokenValue::Keyword(value)) => (*value).to_owned(),
         _ => return None,
     };
     let start = usize::from(token.range.start());
     let raw = source.get(start..usize::from(token.range.end()))?;
-    let quoted = raw.starts_with('"') || raw.to_ascii_lowercase().starts_with("u&\"");
+    let unicode_quoted = raw.to_ascii_lowercase().starts_with("u&\"");
+    let quoted = raw.starts_with('"') || unicode_quoted;
+    if unicode_quoted {
+        text = decode_unicode_identifier(&text, '\\').unwrap_or(text);
+    }
     Some(NamePart {
         normalized: if quoted {
             text.clone()
@@ -111,7 +115,7 @@ pub(super) fn extract(source: &str, statement: TextRange, point: TextSize) -> Ex
     );
     let (start, end, quoting, raw, normalized) = match context {
         LexicalContext::DoubleQuote { open } => {
-            quoted_prefix(source, open, point_usize, statement_end)
+            quoted_prefix(source, statement_start, open, point_usize, statement_end)
         }
         LexicalContext::Normal
             if point_usize > statement_start && source.as_bytes()[point_usize - 1] == b'"' =>
@@ -197,15 +201,22 @@ pub(super) fn extract(source: &str, statement: TextRange, point: TextSize) -> Ex
 
 fn quoted_prefix(
     source: &str,
+    lower_bound: usize,
     quote: usize,
     point: usize,
     upper_bound: usize,
 ) -> (usize, usize, IdentifierQuoting, String, String) {
-    let unicode = quote >= 2 && source[quote - 2..quote].eq_ignore_ascii_case("u&");
-    let start = if unicode { quote - 2 } else { quote };
+    let unicode_start = unicode_quote_start(source, lower_bound, quote);
+    let unicode = unicode_start.is_some();
+    let start = unicode_start.unwrap_or(quote);
     let end = quoted_identifier_end(source, point, upper_bound);
     let raw = source[quote + 1..point].to_owned();
-    let normalized = raw.replace("\"\"", "\"");
+    let unescaped = raw.replace("\"\"", "\"");
+    let normalized = if unicode {
+        decode_unicode_identifier(&unescaped, '\\').unwrap_or(unescaped)
+    } else {
+        unescaped
+    };
     (
         start,
         end,
@@ -217,6 +228,76 @@ fn quoted_prefix(
         raw,
         normalized,
     )
+}
+
+fn unicode_quote_start(source: &str, lower_bound: usize, quote: usize) -> Option<usize> {
+    let start = quote.checked_sub(2)?;
+    if start < lower_bound || !source[start..quote].eq_ignore_ascii_case("u&") {
+        return None;
+    }
+    (start == lower_bound
+        || source[lower_bound..start]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| !is_identifier_continue(ch)))
+    .then_some(start)
+}
+
+fn decode_unicode_identifier(input: &str, escape: char) -> Option<String> {
+    let chars = input.chars().collect::<Vec<_>>();
+    let mut decoded = String::with_capacity(input.len());
+    let mut index = 0usize;
+    while index < chars.len() {
+        if chars[index] != escape {
+            decoded.push(chars[index]);
+            index += 1;
+            continue;
+        }
+        if chars.get(index + 1) == Some(&escape) {
+            decoded.push(escape);
+            index += 2;
+            continue;
+        }
+
+        let plus = chars.get(index + 1) == Some(&'+');
+        let digits_start = index + if plus { 2 } else { 1 };
+        let width = if plus { 6 } else { 4 };
+        let digits_end = digits_start.checked_add(width)?;
+        let value = unicode_escape_value(&chars, digits_start, digits_end)?;
+        index = digits_end;
+
+        let codepoint = if (0xD800..=0xDBFF).contains(&value) {
+            if chars.get(index) != Some(&escape) {
+                return None;
+            }
+            let second_end = index.checked_add(5)?;
+            let second = unicode_escape_value(&chars, index + 1, second_end)?;
+            if !(0xDC00..=0xDFFF).contains(&second) {
+                return None;
+            }
+            index = second_end;
+            0x10000 + ((value - 0xD800) << 10) + (second - 0xDC00)
+        } else if (0xDC00..=0xDFFF).contains(&value) {
+            return None;
+        } else {
+            value
+        };
+        if codepoint == 0 {
+            return None;
+        }
+        decoded.push(char::from_u32(codepoint)?);
+    }
+    Some(decoded)
+}
+
+fn unicode_escape_value(chars: &[char], start: usize, end: usize) -> Option<u32> {
+    if end > chars.len() {
+        return None;
+    }
+    chars[start..end].iter().try_fold(0u32, |value, ch| {
+        ch.to_digit(16)
+            .and_then(|digit| value.checked_mul(16)?.checked_add(digit))
+    })
 }
 
 fn quoted_identifier_end(source: &str, point: usize, upper_bound: usize) -> usize {
@@ -400,11 +481,12 @@ fn name_part_ending_at(source: &str, lower_bound: usize, end: usize) -> Option<(
                     cursor -= 1;
                     continue;
                 }
-                let text = source[cursor + 1..end - 1].replace("\"\"", "\"");
-                let unicode_start = cursor.checked_sub(2).filter(|start| {
-                    *start >= lower_bound && source[*start..cursor].eq_ignore_ascii_case("u&")
-                });
+                let mut text = source[cursor + 1..end - 1].replace("\"\"", "\"");
+                let unicode_start = unicode_quote_start(source, lower_bound, cursor);
                 let start = unicode_start.unwrap_or(cursor);
+                if unicode_start.is_some() {
+                    text = decode_unicode_identifier(&text, '\\').unwrap_or(text);
+                }
                 return Some((
                     NamePart {
                         normalized: text.clone(),
@@ -535,5 +617,56 @@ mod tests {
         let extracted = extract(source, range(source), text_size(source.len()));
         assert!(extracted.suppress_expectations);
         assert!(extracted.prefix.raw.is_empty());
+    }
+
+    #[test]
+    fn unicode_quote_prefix_requires_a_token_boundary() {
+        let source = "select fooU&\"Mixed\"";
+        let point = source.find("Mix").unwrap() + 3;
+        let extracted = extract(source, range(source), text_size(point));
+        let quote = source.find('"').unwrap();
+        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::Quoted);
+        assert_eq!(extracted.range.start(), text_size(quote));
+        let extracted = extract(source, range(source), text_size(source.len()));
+        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::Quoted);
+        assert_eq!(extracted.range.start(), text_size(quote));
+
+        let source = "select U&\"Mixed\"";
+        let point = source.find("Mix").unwrap() + 3;
+        let extracted = extract(source, range(source), text_size(point));
+        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
+        assert_eq!(
+            extracted.range.start(),
+            text_size(source.find("U&").unwrap())
+        );
+        let extracted = extract(source, range(source), text_size(source.len()));
+        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
+        assert_eq!(
+            extracted.range.start(),
+            text_size(source.find("U&").unwrap())
+        );
+    }
+
+    #[test]
+    fn decodes_unicode_identifier_escapes_for_matching() {
+        assert_eq!(
+            decode_unicode_identifier(r"d\0061t\+000061", '\\').as_deref(),
+            Some("data")
+        );
+        assert_eq!(
+            decode_unicode_identifier(r"face\D83D\DE00", '\\').as_deref(),
+            Some("face😀")
+        );
+        assert_eq!(
+            decode_unicode_identifier(r"slash\\name", '\\').as_deref(),
+            Some(r"slash\name")
+        );
+        assert!(decode_unicode_identifier(r"unfinished\00", '\\').is_none());
+
+        let source = r#"select U&"S\0063hema".U&"M\0069x""#;
+        let point = source.find(r"\0069").unwrap() + r"\0069".len();
+        let extracted = extract(source, range(source), text_size(point));
+        assert_eq!(extracted.prefix.normalized, "Mi");
+        assert_eq!(extracted.qualifier[0].normalized, "Schema");
     }
 }
