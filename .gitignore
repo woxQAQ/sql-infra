@@ -4,3 +4,4 @@ omni
 playground/dist/
 playground/node_modules/
 playground/src/generated/
+node_modules

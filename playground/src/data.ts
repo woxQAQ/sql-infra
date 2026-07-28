@@ -1,0 +1,107 @@
+import type { CatalogDocument } from "./types";
+
+export const OBJECT_KINDS = [
+  "Table",
+  "View",
+  "MaterializedView",
+  "ForeignTable",
+  "Sequence",
+  "Index",
+  "Column",
+  "Attribute",
+  "Function",
+  "Procedure",
+  "Routine",
+  "Aggregate",
+  "Type",
+  "Domain",
+  "Schema",
+  "Constraint",
+  "Collation",
+  "Operator",
+  "OperatorClass",
+  "OperatorFamily",
+  "Role",
+  "Database",
+  "AccessMethod",
+  "Conversion",
+  "EventTrigger",
+  "Extension",
+  "ForeignDataWrapper",
+  "ForeignServer",
+  "Language",
+  "Policy",
+  "PropertyGraph",
+  "Publication",
+  "Rule",
+  "Statistics",
+  "Subscription",
+  "Tablespace",
+  "TextSearchConfiguration",
+  "TextSearchDictionary",
+  "TextSearchParser",
+  "TextSearchTemplate",
+  "Trigger",
+] as const;
+
+export const DEFAULT_CATALOG = JSON.stringify(
+  {
+    searchPath: ["public"],
+    objects: [
+      { kind: "Schema", name: ["public"] },
+      { kind: "Schema", name: ["analytics"] },
+      { kind: "Schema", name: ["u"] },
+      {
+        kind: "Table",
+        name: ["public", "users"],
+        detail: "application users",
+        members: [
+          { kind: "Column", name: "id", detail: "bigint, primary key" },
+          { kind: "Column", name: "name", detail: "text" },
+          { kind: "Column", name: "email", detail: "text" },
+          { kind: "Column", name: "created_at", detail: "timestamptz" },
+        ],
+      },
+      {
+        kind: "Table",
+        name: ["public", "orders"],
+        detail: "customer orders",
+        members: [
+          { kind: "Column", name: "id", detail: "bigint, primary key" },
+          { kind: "Column", name: "user_id", detail: "bigint" },
+          { kind: "Column", name: "total", detail: "numeric(12, 2)" },
+          { kind: "Column", name: "status", detail: "order_status" },
+        ],
+      },
+      {
+        kind: "Table",
+        name: ["analytics", "events"],
+        members: [
+          { kind: "Column", name: "event_id", detail: "uuid" },
+          { kind: "Column", name: "payload", detail: "jsonb" },
+        ],
+      },
+      {
+        kind: "Function",
+        name: ["u", "refresh"],
+        detail: "refresh() returns void",
+      },
+      {
+        kind: "Function",
+        name: ["u", "rebuild_cache"],
+        detail: "rebuild_cache(text) returns boolean",
+      },
+      {
+        kind: "Type",
+        name: ["public", "order_status"],
+        detail: "pending | paid | shipped",
+      },
+      { kind: "Sequence", name: ["public", "users_id_seq"] },
+      { kind: "Role", name: ["app_reader"] },
+    ],
+  } satisfies CatalogDocument,
+  null,
+  2,
+);
+
+export const INITIAL_QUERY = "SELECT u.|\nFROM public.users AS u;";

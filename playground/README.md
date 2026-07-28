@@ -1,8 +1,8 @@
 # pg-completion playground
 
-A local Monaco playground backed by the real `pg-completion` collector. The
-Rust adapter is compiled to WebAssembly and runs in a Web Worker; the browser
-does not send SQL or catalog data to a server.
+A Vue 3 and Monaco playground backed by the real `pg-completion` collector.
+The Rust adapter is compiled to WebAssembly and runs in a Web Worker; the
+browser does not send SQL or catalog data to a server.
 
 ## Run
 
@@ -72,6 +72,9 @@ outside `searchPath` are inserted with a qualified name.
   context DTO, and the one-operation JSON/WASM interface.
 - `src/completion.worker.ts`: owns the WASM instance and serializes requests.
 - `src/worker-client.ts`: asynchronous browser-side request client.
-- `src/main.ts`: Monaco providers, scenarios, Catalog validation, and the
-  inspector.
+- `src/composables/usePlayground.ts`: Monaco provider, initial query, Catalog
+  validation, worker requests, and completion state.
+- `src/components`: Vue editor shells, inspector views, and
+  responsive workspace navigation.
+- `src/monaco.ts`: Monaco workers, SQL themes, and Catalog JSON schema.
 - `scripts/build-wasm.mjs`: reproducible Rust-to-WASM build and asset copy.
