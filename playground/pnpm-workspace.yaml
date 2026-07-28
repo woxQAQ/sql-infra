@@ -1,0 +1,4 @@
+allowBuilds:
+  # Vite invokes esbuild's platform-binary installer. No other dependency is
+  # allowed to run lifecycle build scripts.
+  esbuild: true

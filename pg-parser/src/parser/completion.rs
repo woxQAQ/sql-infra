@@ -44,6 +44,8 @@ pub enum GrammarSlot {
     TextSearchParser,
     TextSearchTemplate,
     Trigger,
+    Privilege,
+    Alias,
     AnyName,
 }
 
@@ -99,7 +101,7 @@ pub(super) const fn object_type_slot(object_type: ObjectType) -> GrammarSlot {
 
 pub(super) fn definition_value_slot(object_type: ObjectType, name: &str) -> Option<GrammarSlot> {
     match (object_type, name) {
-        (ObjectType::Operator, "function" | "procedure" | "restrict" | "join") => {
+        (ObjectType::Operator, "function" | "procedure" | "restrict" | "join" | "joins") => {
             Some(GrammarSlot::Function)
         }
         (ObjectType::Operator, "leftarg" | "rightarg") => Some(GrammarSlot::Type),
@@ -142,9 +144,33 @@ pub(super) const fn follow_phrase(kind: TokenKind) -> Option<&'static [TokenKind
     }
 }
 
+/// Statement starters that are legal where an expression production admits
+/// a parenthesized subquery. Keep this separate from the top-level statement
+/// dispatcher: utility statements are never valid in these positions.
+pub(super) const SUBQUERY_START_TOKENS: &[TokenKind] = &[
+    TokenKind::Select,
+    TokenKind::With,
+    TokenKind::Values,
+    TokenKind::Table,
+];
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ParserExpectations {
     pub tokens: Vec<TokenKind>,
+    /// Tokens introduced directly by the active grammar production.
+    pub direct_tokens: Vec<TokenKind>,
+    /// Keyword alternatives observed through parser lookahead predicates.
+    /// These are syntactically reachable but are not eager editor items until
+    /// the user starts typing a prefix.
+    pub lookahead_tokens: Vec<TokenKind>,
+    /// Tokens that can start the active expression.
+    pub expression_start_tokens: Vec<TokenKind>,
+    /// Tokens that extend the already parsed expression.
+    pub expression_continuation_tokens: Vec<TokenKind>,
+    /// Tokens that end the active expression and continue in its enclosing
+    /// production. This is a subset of `tokens`; the remaining tokens extend
+    /// the expression itself.
+    pub follow_tokens: Vec<TokenKind>,
     /// Fixed multi-token units that are grammatical at the point, e.g.
     /// `GROUP BY` or `IF NOT EXISTS`. Each phrase's head token also appears
     /// in `tokens`; a phrase does not claim the head has no other
@@ -162,15 +188,48 @@ pub(super) type SharedCollector = std::rc::Rc<std::cell::RefCell<CompletionColle
 
 impl CompletionCollector {
     pub(super) fn tokens(&mut self, kinds: &[TokenKind]) {
+        Self::insert_tokens(&mut self.expectations.tokens, kinds);
+        Self::insert_tokens(&mut self.expectations.direct_tokens, kinds);
+    }
+
+    pub(super) fn expression_start_tokens(&mut self, kinds: &[TokenKind]) {
+        Self::insert_tokens(&mut self.expectations.tokens, kinds);
+        Self::insert_tokens(&mut self.expectations.expression_start_tokens, kinds);
+    }
+
+    pub(super) fn lookahead_tokens(&mut self, kinds: &[TokenKind]) {
+        let keywords = kinds
+            .iter()
+            .copied()
+            .filter(|kind| crate::KEYWORDS.iter().any(|keyword| keyword.kind == *kind))
+            .collect::<Vec<_>>();
+        Self::insert_tokens(&mut self.expectations.tokens, &keywords);
+        Self::insert_tokens(&mut self.expectations.lookahead_tokens, &keywords);
+    }
+
+    pub(super) fn expression_continuation_tokens(&mut self, kinds: &[TokenKind]) {
+        Self::insert_tokens(&mut self.expectations.tokens, kinds);
+        Self::insert_tokens(&mut self.expectations.expression_continuation_tokens, kinds);
+    }
+
+    pub(super) fn expression_continuation_phrase(&mut self, phrase: &'static [TokenKind]) {
+        debug_assert!(phrase.len() > 1, "a single-token phrase is just a token");
+        self.expression_continuation_tokens(&phrase[..1]);
+        if !self.expectations.phrases.contains(&phrase) {
+            self.expectations.phrases.push(phrase);
+        }
+    }
+
+    fn insert_tokens(target: &mut Vec<TokenKind>, kinds: &[TokenKind]) {
         for kind in kinds {
             if matches!(
                 kind,
                 TokenKind::Eof | TokenKind::Completion | TokenKind::Char(';')
-            ) || self.expectations.tokens.contains(kind)
+            ) || target.contains(kind)
             {
                 continue;
             }
-            self.expectations.tokens.push(*kind);
+            target.push(*kind);
         }
     }
 
@@ -182,7 +241,28 @@ impl CompletionCollector {
         }
     }
 
+    pub(super) fn follow_tokens(&mut self, kinds: &[TokenKind]) {
+        Self::insert_tokens(&mut self.expectations.tokens, kinds);
+        Self::insert_tokens(&mut self.expectations.follow_tokens, kinds);
+    }
+
+    pub(super) fn follow_phrase(&mut self, phrase: &'static [TokenKind]) {
+        debug_assert!(phrase.len() > 1, "a single-token phrase is just a token");
+        self.follow_tokens(&phrase[..1]);
+        if !self.expectations.phrases.contains(&phrase) {
+            self.expectations.phrases.push(phrase);
+        }
+    }
+
     pub(super) fn slot(&mut self, slot: GrammarSlot) {
+        if slot == GrammarSlot::AnyName && !self.expectations.slots.is_empty() {
+            return;
+        }
+        if slot != GrammarSlot::AnyName {
+            self.expectations
+                .slots
+                .retain(|candidate| *candidate != GrammarSlot::AnyName);
+        }
         if !self.expectations.slots.contains(&slot) {
             self.expectations.slots.push(slot);
         }
@@ -238,6 +318,32 @@ pub fn collect_expectations(
 mod tests {
     use super::*;
 
+    fn assert_token_provenance(source: &str, expectations: &ParserExpectations) {
+        for token in &expectations.tokens {
+            assert!(
+                expectations.direct_tokens.contains(token)
+                    || expectations.lookahead_tokens.contains(token)
+                    || expectations.expression_start_tokens.contains(token)
+                    || expectations.expression_continuation_tokens.contains(token)
+                    || expectations.follow_tokens.contains(token),
+                "token without provenance in {source:?}: {token:?}: {expectations:?}"
+            );
+        }
+        for token in expectations
+            .direct_tokens
+            .iter()
+            .chain(&expectations.lookahead_tokens)
+            .chain(&expectations.expression_start_tokens)
+            .chain(&expectations.expression_continuation_tokens)
+            .chain(&expectations.follow_tokens)
+        {
+            assert!(
+                expectations.tokens.contains(token),
+                "provenance token missing from union in {source:?}: {token:?}: {expectations:?}"
+            );
+        }
+    }
+
     #[test]
     fn collects_statement_starters() {
         let candidates = collect_expectations("", TextSize::ZERO).unwrap();
@@ -267,12 +373,13 @@ mod tests {
             points.sort_unstable();
             points.dedup();
             for point in points {
-                collect_expectations(source, point).unwrap_or_else(|error| {
+                let expectations = collect_expectations(source, point).unwrap_or_else(|error| {
                     panic!(
                         "completion failed for family sample {source:?} at byte {}: {error}",
                         usize::from(point)
                     )
                 });
+                assert_token_provenance(source, &expectations);
             }
 
             let complete = collect_expectations(
@@ -288,8 +395,8 @@ mod tests {
                 complete
                     .slots
                     .iter()
-                    .all(|slot| *slot == GrammarSlot::Operator),
-                "complete family sample published a stale object slot: {source:?}: {complete:?}"
+                    .all(|slot| *slot == GrammarSlot::Alias),
+                "complete family sample published a stale catalog slot: {source:?}: {complete:?}"
             );
         }
     }
@@ -304,6 +411,66 @@ mod tests {
         let candidates = collect_expectations("SELECT * FROM ", TextSize::new(14)).unwrap();
         assert!(candidates.slots.contains(&GrammarSlot::Relation));
         assert!(candidates.slots.contains(&GrammarSlot::Function));
+    }
+
+    #[test]
+    fn collects_relation_slot_after_schema_qualifier() {
+        let sql = "SELECT * FROM public.";
+        let candidates = collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+        assert!(candidates.slots.contains(&GrammarSlot::Relation));
+    }
+
+    #[test]
+    fn collects_alias_slots_without_leaking_past_explicit_as() {
+        let implicit = "SELECT * FROM public.orders o";
+        let point = TextSize::try_from(implicit.rfind('o').unwrap()).unwrap();
+        let implicit = collect_expectations(implicit, point).unwrap();
+        assert!(implicit.slots.contains(&GrammarSlot::Alias));
+
+        let explicit = "SELECT * FROM public.orders AS ";
+        let explicit =
+            collect_expectations(explicit, TextSize::try_from(explicit.len()).unwrap()).unwrap();
+        assert_eq!(explicit.slots, [GrammarSlot::Alias]);
+        assert!(explicit.tokens.is_empty(), "{explicit:?}");
+        assert!(explicit.phrases.is_empty(), "{explicit:?}");
+    }
+
+    #[test]
+    fn collects_join_starter_after_relation_alias() {
+        for sql in [
+            "SELECT * FROM public.orders o ",
+            "SELECT * FROM public.orders AS o ",
+        ] {
+            let candidates =
+                collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+            assert!(candidates.tokens.contains(&TokenKind::Join), "{sql}");
+        }
+    }
+
+    #[test]
+    fn separates_expression_continuations_from_enclosing_follows() {
+        let sql = "SELECT * FROM public.users JOIN public.orders ON users.id ";
+        let candidates = collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+
+        for continuation in [TokenKind::Char('='), TokenKind::Between, TokenKind::And] {
+            assert!(candidates.tokens.contains(&continuation), "{candidates:?}");
+            assert!(
+                candidates
+                    .expression_continuation_tokens
+                    .contains(&continuation),
+                "{continuation:?}: {candidates:?}"
+            );
+            assert!(
+                !candidates.follow_tokens.contains(&continuation),
+                "{continuation:?}: {candidates:?}"
+            );
+        }
+        for follow in [TokenKind::Join, TokenKind::Where, TokenKind::GroupP] {
+            assert!(
+                candidates.follow_tokens.contains(&follow),
+                "{follow:?}: {candidates:?}"
+            );
+        }
     }
 
     #[test]
@@ -370,7 +537,19 @@ mod tests {
         assert!(select.tokens.contains(&TokenKind::From));
         assert!(select.tokens.contains(&TokenKind::And));
         assert!(select.tokens.contains(&TokenKind::TypeCast));
-        assert!(select.slots.contains(&GrammarSlot::Operator));
+        assert!(select.follow_tokens.contains(&TokenKind::From));
+        assert!(select.follow_tokens.contains(&TokenKind::Char(',')));
+        assert!(
+            select
+                .expression_continuation_tokens
+                .contains(&TokenKind::And)
+        );
+        assert!(
+            select
+                .expression_continuation_tokens
+                .contains(&TokenKind::TypeCast)
+        );
+        assert!(!select.slots.contains(&GrammarSlot::Operator));
 
         let sql = "SELECT * FROM t WHERE true";
         let where_clause =

@@ -52,9 +52,10 @@ impl ExprParser {
 
     pub(super) fn parse_prefix(&mut self, restricted: bool) -> Option<Node> {
         if self.at_completion() {
-            self.record_completion_tokens(&[
+            self.record_completion_expression_start_tokens(&[
                 TokenKind::Char('+'),
                 TokenKind::Char('-'),
+                TokenKind::Op,
                 TokenKind::Operator,
                 TokenKind::Exists,
                 TokenKind::Array,
@@ -112,7 +113,10 @@ impl ExprParser {
                 TokenKind::FalseP,
             ]);
             if !restricted {
-                self.record_completion_tokens(&[TokenKind::Not, TokenKind::Default]);
+                self.record_completion_expression_start_tokens(&[
+                    TokenKind::Not,
+                    TokenKind::Default,
+                ]);
             }
             self.record_completion_slot(completion::GrammarSlot::Column);
             self.record_completion_slot(completion::GrammarSlot::Function);
@@ -122,6 +126,11 @@ impl ExprParser {
             return Some(constant);
         }
         let token = self.peek().clone();
+        if token.kind == TokenKind::Collation && self.peek_kind_n(1) == TokenKind::Completion {
+            self.advance();
+            self.record_completion_tokens(&[TokenKind::For]);
+            return self.fail("COLLATION requires FOR");
+        }
         match token.kind {
             TokenKind::Not => {
                 if restricted {

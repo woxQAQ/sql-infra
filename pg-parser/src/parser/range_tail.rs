@@ -22,18 +22,18 @@ impl Parser {
                         ..ResTarget::default()
                     }));
                 } else {
-                    let tokens =
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                    let (name, expr_tokens) = split_alias(tokens);
-                    let name = name.ok_or_else(|| {
-                        ParseError::syntax_exit(target_location, "XML namespace requires AS alias")
-                    })?;
+                    let expr_tokens = self.take_until_top_level(&[TokenKind::As]);
+                    self.record_expression_follow_tokens(&expr_tokens, &[TokenKind::As], true);
+                    let value = self.parse_b_expression_fragment_tokens(expr_tokens)?;
+                    self.expect(TokenKind::As)?;
+                    self.record_completion_slot(completion::GrammarSlot::Alias);
+                    let name = self
+                        .consume_col_label()
+                        .ok_or_else(|| self.error_here("XML namespace requires AS alias"))?;
                     namespaces.push(Node::ResTarget(ResTarget {
                         node_tag: NodeTag::ResTarget,
                         name: Some(name),
-                        val: Some(Box::new(
-                            self.parse_b_expression_fragment_tokens(expr_tokens)?,
-                        )),
+                        val: Some(Box::new(value)),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
                     }));
@@ -49,6 +49,11 @@ impl Parser {
             self.expect(TokenKind::Char(','))?;
         }
         let row_tokens = self.take_until_top_level(&[TokenKind::Passing]);
+        if self.at_completion()
+            && parse_c_expression_tokens_with_completion(row_tokens.clone(), None).is_ok()
+        {
+            self.record_completion_follow_tokens(&[TokenKind::Passing]);
+        }
         let rowexpr = Box::new(self.parse_c_expression_fragment_tokens(row_tokens)?);
         self.expect(TokenKind::Passing)?;
         if self.consume(TokenKind::By)
@@ -57,6 +62,17 @@ impl Parser {
             return Err(self.error_here("BY requires REF or VALUE"));
         }
         let mut doc_tokens = self.take_until_top_level(&[TokenKind::Columns]);
+        if self.at_completion()
+            && doc_tokens.last().map(|token| token.kind) == Some(TokenKind::By)
+            && parse_c_expression_tokens_with_completion(
+                doc_tokens[..doc_tokens.len() - 1].to_vec(),
+                None,
+            )
+            .is_ok()
+        {
+            doc_tokens.pop();
+            self.record_completion_tokens(&[TokenKind::RefP, TokenKind::ValueP]);
+        }
         if doc_tokens.len() >= 2
             && doc_tokens[doc_tokens.len() - 2].kind == TokenKind::By
             && matches!(
@@ -65,6 +81,11 @@ impl Parser {
             )
         {
             doc_tokens.truncate(doc_tokens.len() - 2);
+        }
+        if self.at_completion()
+            && parse_c_expression_tokens_with_completion(doc_tokens.clone(), None).is_ok()
+        {
+            self.record_completion_follow_tokens(&[TokenKind::By, TokenKind::Columns]);
         }
         let docexpr = self.parse_c_expression_fragment_tokens(doc_tokens)?;
         self.expect(TokenKind::Columns)?;

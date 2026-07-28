@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum DefElemValueGrammar {
+    Generic,
+    Subscription,
+}
+
 pub(super) fn parse_aggregate_with_args_tokens(
     tokens: Vec<Token>,
     location: usize,
@@ -277,10 +283,14 @@ fn parse_object_with_args_tokens_impl(
 
 impl Parser {
     pub(super) fn parse_type_name_until(&mut self, stops: &[TokenKind]) -> Option<TypeName> {
-        self.record_completion_slot(completion::GrammarSlot::Type);
-        self.record_completion_slot_before(completion::GrammarSlot::Type, stops);
+        self.record_completion_slot_within(completion::GrammarSlot::Type, stops);
         let location = self.location();
         let tokens = self.take_until_top_level(stops);
+        if self.at_completion() {
+            let mut completion_tokens = tokens.clone();
+            self.append_completion_marker(&mut completion_tokens);
+            record_type_name_completion(&completion_tokens, self.completion.as_ref());
+        }
         tokens_to_type_name(tokens).map(|mut type_name| {
             type_name.location = location as ParseLoc;
             type_name
@@ -333,6 +343,9 @@ impl Parser {
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
         self.record_completion_slot(completion::GrammarSlot::Aggregate);
+        if self.at_completion() {
+            return Err(self.error_here("expected an aggregate signature"));
+        }
         let mut objects = Vec::new();
         while !self.at_any(stops) {
             let location = self.location();
@@ -356,6 +369,9 @@ impl Parser {
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
         self.record_completion_slot(completion::GrammarSlot::Operator);
+        if self.at_completion() {
+            return Err(self.error_here("expected an operator signature"));
+        }
         let mut objects = Vec::new();
         while !self.at_any(stops) {
             let location = self.location();
@@ -397,6 +413,9 @@ impl Parser {
         slot: completion::GrammarSlot,
     ) -> PResult<NodeList> {
         self.record_completion_slot(slot);
+        if self.at_completion() {
+            return Err(self.error_here("expected a routine signature"));
+        }
         let mut objects = Vec::new();
         while !self.at_any(stops) {
             let location = self.location();
@@ -433,6 +452,41 @@ impl Parser {
         }
         if depth != 0 {
             self.record_completion_slot(completion::GrammarSlot::Type);
+            if let Some(open) = find_top_level_token(tokens, TokenKind::Char('(')) {
+                let arguments = &tokens[open + 1..];
+                if name_slot == completion::GrammarSlot::Aggregate
+                    && !arguments.iter().any(|token| token.kind == TokenKind::Order)
+                    && parse_aggregate_args(arguments.to_vec()).is_ok()
+                {
+                    self.record_completion_phrase(&[TokenKind::Order, TokenKind::By]);
+                }
+                if name_slot != completion::GrammarSlot::Operator {
+                    let mut nested_depth = 0usize;
+                    let mut active_start = 0usize;
+                    for (index, token) in arguments.iter().enumerate() {
+                        match token.kind {
+                            TokenKind::Char('(') | TokenKind::Char('[') => nested_depth += 1,
+                            TokenKind::Char(')') | TokenKind::Char(']') => {
+                                nested_depth = nested_depth.saturating_sub(1)
+                            }
+                            TokenKind::Char(',') if nested_depth == 0 => active_start = index + 1,
+                            _ => {}
+                        }
+                    }
+                    let mut active_parameter = arguments[active_start..].to_vec();
+                    active_parameter.push(self.peek().clone());
+                    let _ = function_parameter_from_tokens_with_completion(
+                        active_parameter,
+                        self.completion.clone(),
+                    );
+                }
+            }
+            if depth == 1 && tokens.last().map(|token| token.kind) != Some(TokenKind::Char(',')) {
+                self.record_completion_tokens(&[TokenKind::Char(')')]);
+                if tokens.last().map(|token| token.kind) != Some(TokenKind::Char('(')) {
+                    self.record_completion_tokens(&[TokenKind::Char(',')]);
+                }
+            }
         } else if tokens.is_empty()
             || tokens.last().map(|token| token.kind) == Some(TokenKind::Char('.'))
         {
@@ -443,6 +497,17 @@ impl Parser {
     }
 
     pub(super) fn parse_parenthesized_def_elem_list_strict(&mut self) -> PResult<NodeList> {
+        self.parse_parenthesized_def_elem_list_with(DefElemValueGrammar::Generic)
+    }
+
+    pub(super) fn parse_subscription_option_list(&mut self) -> PResult<NodeList> {
+        self.parse_parenthesized_def_elem_list_with(DefElemValueGrammar::Subscription)
+    }
+
+    fn parse_parenthesized_def_elem_list_with(
+        &mut self,
+        value_grammar: DefElemValueGrammar,
+    ) -> PResult<NodeList> {
         self.expect(TokenKind::Char('('))?;
         if self.at(TokenKind::Char(')')) {
             return Err(self.error_here("option list cannot be empty"));
@@ -452,6 +517,10 @@ impl Parser {
             let location = self.location();
             self.record_completion_slot(completion::GrammarSlot::AnyName);
             let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            self.record_def_elem_value_candidates(value_grammar, &tokens);
+            if self.at_completion() && tokens.len() == 1 && token_name(&tokens[0]).is_some() {
+                self.record_completion_follow_tokens(&[TokenKind::Char('=')]);
+            }
             let def = tokens_to_def_elem(tokens, location)?;
             defs.push(Node::DefElem(def));
             if !self.consume(TokenKind::Char(',')) {
@@ -463,6 +532,32 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(defs)
+    }
+
+    fn record_def_elem_value_candidates(
+        &self,
+        value_grammar: DefElemValueGrammar,
+        tokens: &[Token],
+    ) {
+        if !self.at_completion()
+            || value_grammar == DefElemValueGrammar::Generic
+            || tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('='))
+            || tokens.len() != 2
+        {
+            return;
+        }
+        let Some(name) = token_name(&tokens[0]).map(|name| name.to_ascii_lowercase()) else {
+            return;
+        };
+        match name.as_str() {
+            "binary" | "copy_data" | "create_slot" | "disable_on_error" | "enabled"
+            | "failover" | "password_required" | "refresh" | "run_as_owner" | "streaming"
+            | "two_phase" => {
+                self.record_completion_tokens(&[TokenKind::TrueP, TokenKind::FalseP]);
+            }
+            "slot_name" => self.record_completion_tokens(&[TokenKind::None]),
+            _ => {}
+        }
     }
 
     pub(super) fn parse_def_elem_list(&mut self) -> PResult<NodeList> {
@@ -517,7 +612,8 @@ impl Parser {
                 };
                 Some(make_string_node(value))
             };
-            if !self.at_any(&[TokenKind::Char(','), TokenKind::Char(')')]) {
+            if !self.at_completion() && !self.at_any(&[TokenKind::Char(','), TokenKind::Char(')')])
+            {
                 return Err(self.error_here("unexpected token after utility option"));
             }
             options.push(make_def_elem(&name, arg, location));
@@ -622,7 +718,7 @@ impl Parser {
                     .and_then(|object_type| completion::definition_value_slot(object_type, &name));
                 if let Some(slot) = value_slot {
                     self.record_completion_slot(slot);
-                    self.record_completion_slot_before(
+                    self.record_completion_slot_within(
                         slot,
                         &[TokenKind::Char(','), TokenKind::Char(')')],
                     );
@@ -640,6 +736,16 @@ impl Parser {
                 }
                 let tokens =
                     self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                if let Some(slot) = value_slot
+                    && self.at_completion()
+                    && (tokens.is_empty()
+                        || matches!(
+                            tokens.last().map(|token| token.kind),
+                            Some(TokenKind::Char('.') | TokenKind::Char('('))
+                        ))
+                {
+                    self.record_completion_slot(slot);
+                }
                 if tokens.is_empty() {
                     return Err(self.error_here("definition '=' requires a value"));
                 }

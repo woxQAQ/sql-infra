@@ -19,6 +19,11 @@ impl Parser {
             let elem_location = self.location();
             let mut tokens =
                 self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            if tokens_end_at_top_level(&tokens)
+                && parse_index_elem_tokens_with_completion(tokens.clone(), None).is_ok()
+            {
+                self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            }
             self.append_completion_marker(&mut tokens);
             let starts_parenthesized =
                 tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));

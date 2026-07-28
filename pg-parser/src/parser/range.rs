@@ -14,12 +14,12 @@ impl Parser {
             TokenKind::Char('('),
         ]);
         let mut items = Vec::new();
-        while !self.at_any(stops) {
+        while self.at_completion() || !self.at_any(stops) {
             items.push(self.parse_from_item(stops)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at_any(stops) {
+            if !self.at_completion() && self.at_any(stops) {
                 return Err(self.error_here("expected a FROM item after ','"));
             }
         }
@@ -30,7 +30,27 @@ impl Parser {
     }
 
     pub(super) fn parse_from_item(&mut self, stops: &[TokenKind]) -> PResult<Node> {
+        self.record_completion_slot(completion::GrammarSlot::Relation);
+        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_tokens(&[
+            TokenKind::LateralP,
+            TokenKind::Only,
+            TokenKind::Rows,
+            TokenKind::Xmltable,
+            TokenKind::JsonTable,
+            TokenKind::GraphTable,
+            TokenKind::Char('('),
+        ]);
         let lateral = self.consume(TokenKind::LateralP);
+        if lateral {
+            self.record_completion_slot(completion::GrammarSlot::Function);
+            self.record_completion_tokens(&[
+                TokenKind::Char('('),
+                TokenKind::Rows,
+                TokenKind::Xmltable,
+                TokenKind::JsonTable,
+            ]);
+        }
         let mut base = if self.at(TokenKind::GraphTable) {
             if lateral {
                 return Err(self.error_here("LATERAL is not allowed before GRAPH_TABLE"));
@@ -49,6 +69,7 @@ impl Parser {
             Node::RangeVar(self.parse_relation_expr(true)?)
         } else if self.consume(TokenKind::Char('(')) {
             let mut inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            self.record_completion_tokens(&[TokenKind::Char(')')]);
             if self.at_completion() {
                 if inner.is_empty() {
                     self.record_completion_tokens(&[
@@ -89,7 +110,7 @@ impl Parser {
                     };
                     let _ = nested.parse_from_item(&[TokenKind::Eof])?;
                 }
-                unreachable!("completion marker must stop the nested FROM parser");
+                return Err(self.error_here("completion point in parenthesized FROM item"));
             }
             self.expect(TokenKind::Char(')'))?;
             if matches!(
@@ -171,9 +192,12 @@ impl Parser {
                 }
             }
             let name_tokens = self.take_until_top_level(&name_stops);
-            let looks_like_function_name = self.at(TokenKind::Char('('))
-                && !name_tokens.is_empty()
-                && parse_qualified_type_names(&name_tokens).is_ok();
+            let can_be_function_name =
+                !name_tokens.is_empty() && parse_qualified_type_names(&name_tokens).is_ok();
+            if can_be_function_name {
+                self.record_completion_tokens(&[TokenKind::Char('(')]);
+            }
+            let looks_like_function_name = self.at(TokenKind::Char('(')) && can_be_function_name;
             if looks_like_function_name {
                 self.pos = save;
                 let function = self.parse_function_expression()?;
@@ -234,7 +258,19 @@ impl Parser {
                 location: location as ParseLoc,
             });
         }
-        while !self.at_any(&extend_stops(stops, TokenKind::Char(','))) {
+        loop {
+            self.record_completion_tokens(&[
+                TokenKind::Join,
+                TokenKind::InnerP,
+                TokenKind::Left,
+                TokenKind::Right,
+                TokenKind::Full,
+                TokenKind::Cross,
+                TokenKind::Natural,
+            ]);
+            if self.at_any(&extend_stops(stops, TokenKind::Char(','))) {
+                break;
+            }
             if matches!(
                 self.peek_kind(),
                 TokenKind::Join
@@ -264,6 +300,11 @@ impl Parser {
                 TokenKind::Char(','),
                 TokenKind::Char(')'),
             ]);
+            self.record_expression_follow_tokens(
+                &expression_tokens,
+                &[TokenKind::As, TokenKind::Char(','), TokenKind::Char(')')],
+                false,
+            );
             let expression = self.parse_expression_fragment_tokens(expression_tokens)?;
             if !is_function_expression_node(&expression) {
                 return Err(self.error_here("ROWS FROM items must be function expressions"));
@@ -312,6 +353,7 @@ impl Parser {
             self.expect(TokenKind::Char(')'))?;
             return Ok((None, coldeflist));
         }
+        self.record_completion_slot(completion::GrammarSlot::Alias);
         let aliasname = if has_as {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("expected a function alias"))?
@@ -326,6 +368,7 @@ impl Parser {
             aliasname: Some(aliasname),
             ..Alias::default()
         });
+        self.record_completion_tokens(&[TokenKind::Char('(')]);
         if !self.at(TokenKind::Char('(')) {
             return Ok((Some(alias), Vec::new()));
         }
@@ -333,8 +376,26 @@ impl Parser {
         let save = self.pos;
         self.advance();
         let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
-        self.pos = save;
         let chunks = split_top_level_commas(inner);
+        if self.at_completion()
+            && chunks.last().is_some_and(|chunk| {
+                chunk.len() == 1
+                    && chunk.first().is_some_and(|token| {
+                        token_name_in_categories(
+                            token,
+                            &[KeywordCategory::Unreserved, KeywordCategory::ColName],
+                        )
+                        .is_some()
+                    })
+            })
+        {
+            // `alias(column |)` is still ambiguous: the active name may end
+            // an alias column list, or it may begin `column type` in a table
+            // function definition. Preserve both productions until a comma,
+            // closing parenthesis, or type token resolves the branch.
+            self.record_completion_slot(completion::GrammarSlot::Type);
+        }
+        self.pos = save;
         let is_alias_column_list = !chunks.is_empty()
             && chunks.iter().all(|chunk| {
                 chunk.len() == 1

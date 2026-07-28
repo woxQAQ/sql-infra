@@ -31,6 +31,7 @@ impl Parser {
             return Err(self.error_here("CREATE FUNCTION requires a function name"));
         }
         let mut parameters = self.parse_function_parameters()?;
+        self.record_completion_tokens(&[TokenKind::Returns]);
         let has_return_clause = self.at(TokenKind::Returns)
             && !(self.peek_kind_n(1) == TokenKind::NullP && self.peek_kind_n(2) == TokenKind::On);
         let return_type = if has_return_clause {
@@ -81,6 +82,11 @@ impl Parser {
                     Self::create_function_option_starts(),
                 );
                 let tokens = self.take_until_top_level(Self::create_function_option_starts());
+                if self.at_completion() {
+                    let mut completion_tokens = tokens.clone();
+                    self.append_completion_marker(&mut completion_tokens);
+                    record_type_name_completion(&completion_tokens, self.completion.as_ref());
+                }
                 Some(Box::new(parse_func_type_tokens(tokens).map_err(
                     |mut error| {
                         if error.location() == 0 {
@@ -96,6 +102,7 @@ impl Parser {
         let mut options = Vec::new();
         let mut sql_body = None;
         while !self.at_statement_end() {
+            self.record_completion_tokens(Self::create_function_option_starts());
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::Language => {
@@ -326,6 +333,7 @@ impl Parser {
         let mut options = Vec::new();
         let mut sql_body = None;
         while !self.at_statement_end() {
+            self.record_completion_tokens(Self::create_procedure_option_starts());
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::Language => {
@@ -460,14 +468,24 @@ impl Parser {
             return Err(self.error_here("RETURNS TABLE requires at least one column"));
         }
         while !self.at(TokenKind::Char(')')) {
-            self.record_completion_slot_before(
-                completion::GrammarSlot::Type,
-                &[TokenKind::Char(','), TokenKind::Char(')')],
-            );
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let stops = [TokenKind::Char(','), TokenKind::Char(')')];
+            let mut tokens = self.take_until_top_level(&stops);
+            self.append_completion_marker(&mut tokens);
             let location = tokens
                 .first()
                 .map_or(self.location(), |token| token.location());
+            if let Some(completion_index) = tokens
+                .iter()
+                .position(|token| token.kind == TokenKind::Completion)
+                && let Some(collector) = &self.completion
+            {
+                let mut collector = collector.borrow_mut();
+                if completion_index == 0 {
+                    collector.slot(completion::GrammarSlot::AnyName);
+                } else {
+                    collector.slot(completion::GrammarSlot::Type);
+                }
+            }
             let name = tokens
                 .first()
                 .and_then(|token| {

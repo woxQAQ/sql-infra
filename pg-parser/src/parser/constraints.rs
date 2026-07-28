@@ -78,6 +78,11 @@ impl Parser {
         match self.peek_kind() {
             TokenKind::Not => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::NullP,
+                    TokenKind::Deferrable,
+                    TokenKind::Enforced,
+                ]);
                 match self.peek_kind() {
                     TokenKind::NullP => {
                         self.advance();
@@ -153,6 +158,7 @@ impl Parser {
             }
             TokenKind::Generated => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::Always, TokenKind::By]);
                 let generated_when = match self.peek_kind() {
                     TokenKind::Always => {
                         self.advance();
@@ -320,6 +326,12 @@ impl Parser {
                 }
                 loop {
                     let mut expr_tokens = self.take_until_top_level(&[TokenKind::With]);
+                    if self.at_completion()
+                        && parse_index_elem_tokens_with_completion(expr_tokens.clone(), None)
+                            .is_ok()
+                    {
+                        self.record_completion_tokens(&[TokenKind::With]);
+                    }
                     self.append_completion_marker(&mut expr_tokens);
                     let expr_location = expr_tokens
                         .first()
@@ -346,6 +358,7 @@ impl Parser {
                     let operator_location = self.location();
                     let operator_tokens = if self.consume(TokenKind::Operator) {
                         self.expect(TokenKind::Char('('))?;
+                        self.record_completion_slot(completion::GrammarSlot::Operator);
                         let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
                         self.expect(TokenKind::Char(')'))?;
                         tokens
@@ -535,10 +548,12 @@ impl Parser {
                 break;
             }
             if self.at(TokenKind::Period)
-                && self.peek_kind_n(1) != TokenKind::Char(')')
-                && self.peek_kind_n(2) == TokenKind::Char(')')
+                && (self.peek_kind_n(1) == TokenKind::Completion
+                    || (self.peek_kind_n(1) != TokenKind::Char(')')
+                        && self.peek_kind_n(2) == TokenKind::Char(')')))
             {
                 self.advance();
+                self.record_completion_slot(completion::GrammarSlot::Column);
                 columns.push(make_string_node(self.consume_col_id().ok_or_else(
                     || self.error_here("PERIOD requires a foreign key column name"),
                 )?));
@@ -553,6 +568,12 @@ impl Parser {
     }
 
     pub(super) fn parse_foreign_key_action(&mut self) -> PResult<(u8, NodeList)> {
+        self.record_completion_tokens(&[
+            TokenKind::No,
+            TokenKind::Restrict,
+            TokenKind::Cascade,
+            TokenKind::Set,
+        ]);
         match self.peek_kind() {
             TokenKind::No => {
                 self.advance();
@@ -608,6 +629,20 @@ impl Parser {
         let mut saw_initially = None;
         let mut saw_enforced = None;
         while !self.at_any(&[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof]) {
+            let mut attributes = Vec::new();
+            if supports_deferrable {
+                attributes.extend([TokenKind::Deferrable, TokenKind::Initially]);
+            }
+            if supports_enforcement {
+                attributes.push(TokenKind::Enforced);
+            }
+            if supports_deferrable || supports_enforcement || supports_not_valid {
+                attributes.push(TokenKind::Not);
+            }
+            if supports_no_inherit {
+                attributes.push(TokenKind::No);
+            }
+            self.record_completion_follow_tokens(&attributes);
             match self.peek_kind() {
                 TokenKind::Deferrable => {
                     self.advance();
@@ -660,6 +695,17 @@ impl Parser {
                 }
                 TokenKind::Not => {
                     self.advance();
+                    let mut after_not = Vec::new();
+                    if supports_deferrable {
+                        after_not.push(TokenKind::Deferrable);
+                    }
+                    if supports_not_valid {
+                        after_not.push(TokenKind::Valid);
+                    }
+                    if supports_enforcement {
+                        after_not.push(TokenKind::Enforced);
+                    }
+                    self.record_completion_tokens(&after_not);
                     match self.peek_kind() {
                         TokenKind::Deferrable => {
                             self.advance();

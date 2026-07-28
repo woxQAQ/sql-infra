@@ -1,5 +1,19 @@
 use super::*;
 
+const COPY_LEGACY_OPTION_STARTS: &[TokenKind] = &[
+    TokenKind::Binary,
+    TokenKind::Csv,
+    TokenKind::Json,
+    TokenKind::Freeze,
+    TokenKind::HeaderP,
+    TokenKind::Delimiter,
+    TokenKind::NullP,
+    TokenKind::Quote,
+    TokenKind::Escape,
+    TokenKind::Encoding,
+    TokenKind::Force,
+];
+
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-copy.html
@@ -77,6 +91,13 @@ impl Parser {
             false
         };
         let is_program = self.consume(TokenKind::Program);
+        if !is_program {
+            self.record_completion_tokens(&[if is_from {
+                TokenKind::Stdin
+            } else {
+                TokenKind::Stdout
+            }]);
+        }
         let filename = match self.peek_kind() {
             TokenKind::SConst => self.consume_string_like(),
             TokenKind::Stdin | TokenKind::Stdout => {
@@ -89,6 +110,9 @@ impl Parser {
             return Err(self.error_here("STDIN/STDOUT is not allowed with PROGRAM"));
         }
 
+        if query.is_none() {
+            self.record_completion_lookahead_tokens(&[TokenKind::Using, TokenKind::Delimiters]);
+        }
         if query.is_none() && (self.at(TokenKind::Using) || self.at(TokenKind::Delimiters)) {
             let location = self.location();
             self.consume(TokenKind::Using);
@@ -153,7 +177,12 @@ impl Parser {
     }
 
     pub(super) fn parse_copy_options(&mut self) -> PResult<NodeList> {
-        self.consume(TokenKind::With);
+        self.record_completion_lookahead_tokens(COPY_LEGACY_OPTION_STARTS);
+        self.record_completion_tokens(&[TokenKind::Char('(')]);
+        let with = self.consume_follow(TokenKind::With);
+        if with {
+            self.record_completion_tokens(&[TokenKind::Char('(')]);
+        }
         if self.at(TokenKind::Char('(')) {
             self.expect(TokenKind::Char('('))?;
             if self.at(TokenKind::Char(')')) {
@@ -183,6 +212,7 @@ impl Parser {
 
         let mut options = Vec::new();
         while !self.at_statement_end() && !self.at(TokenKind::Where) {
+            self.record_completion_lookahead_tokens(COPY_LEGACY_OPTION_STARTS);
             let location = self.location();
             let (name, arg) = match self.peek_kind() {
                 TokenKind::Binary => {
@@ -349,14 +379,12 @@ impl Parser {
                 (TokenKind::Freeze, "freeze"),
                 (TokenKind::Verbose, "verbose"),
             ] {
-                if self.at(kind) {
-                    let token = self.advance().clone();
-                    options.push(make_def_elem(name, None, token.location()));
+                if self.consume(kind) {
+                    options.push(make_def_elem(name, None, self.previous_location()));
                 }
             }
-            if matches!(self.peek_kind(), TokenKind::Analyze | TokenKind::Analyse) {
-                let token = self.advance().clone();
-                options.push(make_def_elem("analyze", None, token.location()));
+            if self.consume(TokenKind::Analyze) || self.consume(TokenKind::Analyse) {
+                options.push(make_def_elem("analyze", None, self.previous_location()));
             }
         } else if options.is_empty() && self.at(TokenKind::Verbose) {
             let token = self.advance().clone();
@@ -451,9 +479,16 @@ impl Parser {
     }
 
     pub(super) fn parse_lock_mode(&mut self) -> PResult<i32> {
+        self.record_completion_tokens(&[
+            TokenKind::Access,
+            TokenKind::Row,
+            TokenKind::Share,
+            TokenKind::Exclusive,
+        ]);
         let mode = match self.peek_kind() {
             TokenKind::Access => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::Share, TokenKind::Exclusive]);
                 match self.peek_kind() {
                     TokenKind::Share => {
                         self.advance();
@@ -468,6 +503,7 @@ impl Parser {
             }
             TokenKind::Row => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::Share, TokenKind::Exclusive]);
                 match self.peek_kind() {
                     TokenKind::Share => {
                         self.advance();
@@ -482,6 +518,7 @@ impl Parser {
             }
             TokenKind::Share => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::Update, TokenKind::Row]);
                 match self.peek_kind() {
                     TokenKind::Update => {
                         self.advance();
@@ -630,6 +667,13 @@ impl Parser {
         } else {
             Vec::new()
         };
+        self.record_completion_tokens(&[
+            TokenKind::Index,
+            TokenKind::Table,
+            TokenKind::Schema,
+            TokenKind::SystemP,
+            TokenKind::Database,
+        ]);
         let kind = match self.advance().kind {
             TokenKind::Index => ReindexObjectType::Index,
             TokenKind::Table => ReindexObjectType::Table,

@@ -41,6 +41,15 @@ impl Parser {
             }));
         }
         let relation = Some(Box::new(relation));
+        self.record_completion_tokens(&[
+            TokenKind::Char('('),
+            TokenKind::Overriding,
+            TokenKind::Default,
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::With,
+            TokenKind::Table,
+        ]);
         let mut cols = Vec::new();
         if self.at(TokenKind::Char('('))
             && !matches!(
@@ -69,6 +78,14 @@ impl Parser {
         } else {
             OverridingKind::NotSet
         };
+        self.record_completion_tokens(&[
+            TokenKind::Default,
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::With,
+            TokenKind::Table,
+            TokenKind::Char('('),
+        ]);
         let select_stmt = if self.consume(TokenKind::Default) {
             if !cols.is_empty() || override_ != OverridingKind::NotSet {
                 return Err(

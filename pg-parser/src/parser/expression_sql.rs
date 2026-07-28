@@ -4,6 +4,7 @@ use super::*;
 impl ExprParser {
     pub(super) fn parse_case_expr(&mut self) -> Option<Node> {
         let location = self.expect(TokenKind::Case)?.location();
+        self.record_completion_tokens(&[TokenKind::When]);
         let arg = if self.at(TokenKind::When) {
             None
         } else {
@@ -64,7 +65,9 @@ impl ExprParser {
         self.expect(TokenKind::As)?;
         let type_tokens = self.take_until_balanced(TokenKind::Char(')'));
         if self.at_completion() {
-            self.record_completion_slot(completion::GrammarSlot::Type);
+            let mut completion_tokens = type_tokens.clone();
+            completion_tokens.push(self.peek().clone());
+            record_type_name_completion(&completion_tokens, self.completion.as_ref());
         }
         let type_name = parse_type_name_tokens(type_tokens).ok()?;
         self.expect(TokenKind::Char(')'))?;
@@ -93,6 +96,15 @@ impl ExprParser {
     pub(super) fn parse_extract_func(&mut self) -> Option<Node> {
         let location = self.expect(TokenKind::Extract)?.location();
         self.expect(TokenKind::Char('('))?;
+        self.record_completion_tokens(&[
+            TokenKind::YearP,
+            TokenKind::MonthP,
+            TokenKind::DayP,
+            TokenKind::HourP,
+            TokenKind::MinuteP,
+            TokenKind::SecondP,
+        ]);
+        self.record_completion_slot(completion::GrammarSlot::AnyName);
         let field_token = self.peek().clone();
         if !matches!(
             field_token.kind,
@@ -131,6 +143,12 @@ impl ExprParser {
         self.expect(TokenKind::Char('('))?;
         let mut args = vec![self.parse_expr(0)?];
         if self.consume(TokenKind::Char(',')) {
+            self.record_completion_tokens(&[
+                TokenKind::Nfc,
+                TokenKind::Nfd,
+                TokenKind::Nfkc,
+                TokenKind::Nfkd,
+            ]);
             let form_token = self.advance().clone();
             let form = match form_token.kind {
                 TokenKind::Nfc => "NFC",
@@ -238,6 +256,7 @@ impl ExprParser {
             }));
         }
         let first = self.parse_expr(36)?;
+        self.record_completion_tokens(&[TokenKind::From, TokenKind::For, TokenKind::Similar]);
         let args = match self.peek_kind() {
             TokenKind::From => {
                 self.advance();
@@ -329,10 +348,12 @@ impl ExprParser {
         self.expect(TokenKind::Char('('))?;
         let xpath = self.parse_c_expr()?;
         self.expect(TokenKind::Passing)?;
+        self.record_completion_lookahead_tokens(&[TokenKind::By]);
         if self.at(TokenKind::By) {
             self.parse_xml_passing_mechanism()?;
         }
         let document = self.parse_c_expr()?;
+        self.record_completion_lookahead_tokens(&[TokenKind::By]);
         if self.at(TokenKind::By) {
             self.parse_xml_passing_mechanism()?;
         }

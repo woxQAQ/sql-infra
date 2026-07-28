@@ -36,6 +36,14 @@ impl Parser {
         let mut coll_clause = None;
         let mut constraints = Vec::new();
         while !self.at_statement_end() {
+            self.record_completion_lookahead_tokens(&[
+                TokenKind::Collate,
+                TokenKind::Constraint,
+                TokenKind::Default,
+                TokenKind::Not,
+                TokenKind::NullP,
+                TokenKind::Check,
+            ]);
             if self.consume(TokenKind::Collate) {
                 self.record_completion_slot(completion::GrammarSlot::Collation);
                 let location = self.previous_location();
@@ -253,6 +261,7 @@ impl Parser {
         } else {
             None
         };
+        self.record_completion_tokens(&[TokenKind::Check, TokenKind::Not]);
         let (contype, raw_expr, keys) = match self.peek_kind() {
             TokenKind::Check => {
                 self.advance();
@@ -284,6 +293,13 @@ impl Parser {
         let mut initially_deferred = None;
         let mut enforced = None;
         loop {
+            self.record_completion_lookahead_tokens(&[
+                TokenKind::Deferrable,
+                TokenKind::Initially,
+                TokenKind::No,
+                TokenKind::Enforced,
+                TokenKind::Not,
+            ]);
             match self.peek_kind() {
                 TokenKind::Deferrable => {
                     self.advance();
@@ -292,6 +308,10 @@ impl Parser {
                 }
                 TokenKind::Initially => {
                     self.advance();
+                    self.record_completion_lookahead_tokens(&[
+                        TokenKind::Immediate,
+                        TokenKind::Deferred,
+                    ]);
                     let value = match self.peek_kind() {
                         TokenKind::Immediate => false,
                         TokenKind::Deferred => true,
@@ -315,6 +335,11 @@ impl Parser {
                 }
                 TokenKind::Not => {
                     self.advance();
+                    self.record_completion_lookahead_tokens(&[
+                        TokenKind::Deferrable,
+                        TokenKind::Valid,
+                        TokenKind::Enforced,
+                    ]);
                     match self.peek_kind() {
                         TokenKind::Deferrable => {
                             self.advance();

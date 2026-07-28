@@ -8,6 +8,12 @@ impl Parser {
             .ok_or_else(|| self.error_here("CREATE PROPERTY GRAPH requires a name"))?;
         pgname.relpersistence = relpersistence;
         let pgname = Some(Box::new(pgname));
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Vertex,
+            TokenKind::Node,
+            TokenKind::Edge,
+            TokenKind::Relationship,
+        ]);
         let vertex_tables = if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
             self.advance();
             self.expect(TokenKind::Tables)?;
@@ -15,6 +21,7 @@ impl Parser {
         } else {
             Vec::new()
         };
+        self.record_completion_lookahead_tokens(&[TokenKind::Edge, TokenKind::Relationship]);
         let edge_tables = if matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
             self.advance();
             self.expect(TokenKind::Tables)?;
@@ -63,7 +70,9 @@ impl Parser {
                     self.advance();
                     self.expect(TokenKind::Tables)?;
                     stmt.add_vertex_tables = self.parse_prop_graph_vertex_list()?;
+                    self.record_completion_lookahead_tokens(&[TokenKind::AddP]);
                     if self.consume(TokenKind::AddP) {
+                        self.record_completion_tokens(&[TokenKind::Edge, TokenKind::Relationship]);
                         if !matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
                             return Err(self.error_here("second ADD must introduce EDGE TABLES"));
                         }
@@ -336,6 +345,7 @@ impl Parser {
 
     pub(super) fn parse_prop_graph_properties(&mut self) -> PResult<PropGraphProperties> {
         let location = self.location();
+        self.record_completion_lookahead_tokens(&[TokenKind::Properties, TokenKind::No]);
         if self.consume(TokenKind::No) {
             self.expect(TokenKind::Properties)?;
             return Ok(PropGraphProperties {
@@ -387,6 +397,12 @@ impl Parser {
 
     pub(super) fn parse_prop_graph_labels(&mut self) -> PResult<NodeList> {
         let mut labels = Vec::new();
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Label,
+            TokenKind::Default,
+            TokenKind::Properties,
+            TokenKind::No,
+        ]);
         if matches!(self.peek_kind(), TokenKind::Properties | TokenKind::No) {
             let location = self.location();
             let properties = Some(Box::new(self.parse_prop_graph_properties()?));
@@ -412,6 +428,7 @@ impl Parser {
                 self.expect(TokenKind::Label)?;
                 None
             };
+            self.record_completion_lookahead_tokens(&[TokenKind::Properties, TokenKind::No]);
             let properties = if matches!(self.peek_kind(), TokenKind::Properties | TokenKind::No) {
                 Some(Box::new(self.parse_prop_graph_properties()?))
             } else {

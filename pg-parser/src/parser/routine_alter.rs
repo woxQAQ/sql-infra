@@ -50,7 +50,7 @@ impl Parser {
         }))
     }
 
-    fn alter_function_action_starts() -> [TokenKind; 19] {
+    fn alter_function_action_starts() -> [TokenKind; 23] {
         [
             TokenKind::Called,
             TokenKind::Returns,
@@ -68,6 +68,10 @@ impl Parser {
             TokenKind::Set,
             TokenKind::Reset,
             TokenKind::Parallel,
+            TokenKind::Rename,
+            TokenKind::Owner,
+            TokenKind::Depends,
+            TokenKind::No,
             TokenKind::Restrict,
             TokenKind::Char(';'),
             TokenKind::Eof,
@@ -97,6 +101,7 @@ impl Parser {
                 TokenKind::Rename,
                 TokenKind::Owner,
                 TokenKind::Depends,
+                TokenKind::No,
             ]);
             if !actions.is_empty() {
                 self.record_completion_tokens(&[TokenKind::Restrict, TokenKind::Char(';')]);
@@ -181,6 +186,11 @@ impl Parser {
                         .ok_or_else(|| self.error_here("PARALLEL requires a mode"))?;
                     ("parallel", Some(make_string_node(value)))
                 }
+                TokenKind::No => {
+                    self.advance();
+                    self.expect(TokenKind::Depends)?;
+                    return Err(self.error_here("NO DEPENDS is handled by generic ALTER"));
+                }
                 _ => return Err(self.error_here("invalid ALTER FUNCTION option")),
             };
             actions.push(make_def_elem(name, arg, location));
@@ -189,6 +199,7 @@ impl Parser {
     }
 
     fn parse_routine_security(&mut self) -> PResult<bool> {
+        self.record_completion_tokens(&[TokenKind::Definer, TokenKind::Invoker]);
         match self.peek_kind() {
             TokenKind::Definer => {
                 self.advance();
@@ -303,6 +314,7 @@ impl Parser {
         }
         if self.consume(TokenKind::Role) {
             stmt.name = Some("role".to_owned());
+            self.record_completion_slot(completion::GrammarSlot::Role);
             let value = self
                 .consume_string_like()
                 .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;

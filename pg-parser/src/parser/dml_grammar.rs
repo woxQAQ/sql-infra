@@ -71,11 +71,12 @@ impl Parser {
     pub(super) fn parse_for_portion_of_clause(
         &mut self,
     ) -> PResult<Option<Box<ForPortionOfClause>>> {
-        if self.peek_kind() != TokenKind::For || self.peek_kind_n(1) != TokenKind::Portion {
+        self.record_completion_lookahead_tokens(&[TokenKind::For]);
+        if self.peek_kind() != TokenKind::For {
             return Ok(None);
         }
         self.advance();
-        self.advance();
+        self.expect(TokenKind::Portion)?;
         self.expect(TokenKind::Of)?;
         let location = self.location();
         let range_name = self
@@ -174,6 +175,7 @@ impl Parser {
             None
         };
         self.expect(TokenKind::Do)?;
+        self.record_completion_tokens(&[TokenKind::Nothing, TokenKind::Update, TokenKind::Select]);
         let (action, lock_strength, target_list, where_clause) = match self.peek_kind() {
             TokenKind::Nothing => {
                 self.advance();
@@ -253,7 +255,7 @@ impl Parser {
         self.record_completion_slot(completion::GrammarSlot::Column);
         self.record_completion_slot_before(completion::GrammarSlot::Column, stops);
         let mut targets = Vec::new();
-        while !self.at_any(stops) {
+        while self.at_completion() || !self.at_any(stops) {
             if self.consume(TokenKind::Char('(')) {
                 let mut names = Vec::new();
                 loop {
@@ -306,7 +308,7 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at_any(stops) {
+            if !self.at_completion() && self.at_any(stops) {
                 return Err(self.error_here("expected an assignment after ','"));
             }
         }
@@ -329,13 +331,13 @@ impl Parser {
                     self.take_until_top_level(&[TokenKind::Char(':'), TokenKind::Char(']')]);
                 if self.at_completion() {
                     let _ = self.parse_expression_fragment_tokens(lower_or_index)?;
-                    unreachable!("completion marker must stop assignment subscript parsing");
+                    return Err(self.error_here("completion point in assignment subscript"));
                 }
                 let (is_slice, lidx, uidx) = if self.consume(TokenKind::Char(':')) {
                     let upper = self.take_until_top_level(&[TokenKind::Char(']')]);
                     if self.at_completion() {
                         let _ = self.parse_expression_fragment_tokens(upper)?;
-                        unreachable!("completion marker must stop assignment slice parsing");
+                        return Err(self.error_here("completion point in assignment slice"));
                     }
                     (
                         true,

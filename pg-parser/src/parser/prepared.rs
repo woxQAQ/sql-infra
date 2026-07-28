@@ -12,7 +12,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("PREPARE requires a statement name"))?,
         );
         let argtypes = if self.consume(TokenKind::Char('(')) {
-            self.record_completion_slot_before(
+            self.record_completion_slot_within(
                 completion::GrammarSlot::Type,
                 &[TokenKind::Char(')')],
             );
@@ -95,6 +95,7 @@ impl Parser {
         if !self.consume(TokenKind::With) {
             return Ok(false);
         }
+        self.record_completion_tokens(&[TokenKind::No, TokenKind::DataP]);
         let skip_data = self.consume(TokenKind::No);
         self.expect(TokenKind::DataP)?;
         Ok(skip_data)

@@ -83,6 +83,11 @@ impl Parser {
                 return Err(self.error_here("ORDER BY requires a sort expression"));
             }
         }
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Rows,
+            TokenKind::Range,
+            TokenKind::Groups,
+        ]);
         if matches!(
             self.peek_kind(),
             TokenKind::Rows | TokenKind::Range | TokenKind::Groups
@@ -132,7 +137,15 @@ impl Parser {
             window.frame_options |= start_options | FRAMEOPTION_END_CURRENT_ROW;
             window.start_offset = start_offset;
         }
-        if self.consume(TokenKind::Exclude) {
+        if self.consume_follow(TokenKind::Exclude) {
+            self.record_completion_tokens(&[
+                TokenKind::CurrentP,
+                TokenKind::GroupP,
+                TokenKind::Ties,
+                TokenKind::No,
+            ]);
+            self.record_completion_phrase(&[TokenKind::CurrentP, TokenKind::Row]);
+            self.record_completion_phrase(&[TokenKind::No, TokenKind::Others]);
             window.frame_options |= match self.peek_kind() {
                 TokenKind::CurrentP => {
                     self.advance();
@@ -238,6 +251,12 @@ impl Parser {
     }
 
     pub(super) fn parse_locking_strength(&mut self) -> PResult<LockClauseStrength> {
+        self.record_completion_tokens(&[
+            TokenKind::Update,
+            TokenKind::No,
+            TokenKind::Share,
+            TokenKind::Key,
+        ]);
         match self.peek_kind() {
             TokenKind::Update => {
                 self.advance();

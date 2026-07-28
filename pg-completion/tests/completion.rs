@@ -1,10 +1,10 @@
 use std::{collections::HashSet, fs, path::Path};
 
 use pg_completion::{
-    CompletionContext, CteDefinition, GrammarSlot, NamePart, ObjectContainer, RelationKind,
-    ScopeSnapshot, VisibleRelation, collect,
+    CompletionContext, CteDefinition, GrammarSlot, NamePart, ObjectContainer, ObjectKind,
+    RelationKind, ScopeSnapshot, VisibleRelation, collect,
 };
-use pg_parser::{KEYWORDS, TextSize, TokenKind, lex};
+use pg_parser::{KEYWORDS, TextSize, TokenKind, lex, parse_one};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -12,6 +12,13 @@ use serde::{Deserialize, Serialize};
 struct Case {
     input: String,
     want: Want,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PositionWitness {
+    name: String,
+    sql: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -62,6 +69,9 @@ fn completion_candidates() {
         .filter(|path| {
             path.extension()
                 .is_some_and(|extension| extension == "yaml")
+                && path
+                    .file_name()
+                    .is_none_or(|name| name != "position-witnesses.yaml")
         })
         .collect::<Vec<_>>();
     files.sort();
@@ -183,6 +193,314 @@ fn completion_candidates() {
     );
 }
 
+#[test]
+fn every_token_in_complete_family_witnesses_is_reachable_through_completion() {
+    let witnesses = completion_witnesses();
+    let mut missing = Vec::new();
+
+    for (name, source) in witnesses {
+        parse_one(&source)
+            .unwrap_or_else(|error| panic!("completion witness {name:?} is invalid: {error}"));
+        let tokens = lex(&source)
+            .unwrap_or_else(|error| panic!("failed to lex family witness {source:?}: {error}"));
+
+        for token in tokens
+            .iter()
+            .filter(|token| !matches!(token.kind, TokenKind::Eof | TokenKind::Char(';')))
+        {
+            let original_point = token.range.start();
+            let original = collect(&source, original_point);
+            assert_expectation_provenance(&source, &original);
+
+            let (prefix_source, point) = source_before_token(&source, token.range.start(), "");
+            let context = collect(&prefix_source, TextSize::try_from(point).unwrap());
+            assert_expectation_provenance(&prefix_source, &context);
+
+            let token_is_raw_syntax = raw_syntax_token(token.kind);
+            let token_is_name = matches!(token.kind, TokenKind::Ident | TokenKind::UIdent);
+            if token_is_raw_syntax
+                && !expectations_accept_token(&context, token.kind)
+                && context.expectations.slots.is_empty()
+            {
+                missing.push(format!(
+                    "missing raw token {:?} at byte {} in {:?}: {:?}",
+                    token.kind,
+                    usize::from(token.range.start()),
+                    name,
+                    context.expectations
+                ));
+                continue;
+            }
+            if token_is_name && context.expectations.slots.is_empty() {
+                missing.push(format!(
+                    "identifier position has no GrammarSlot at byte {} in {:?}: {:?}",
+                    usize::from(token.range.start()),
+                    name,
+                    context.expectations
+                ));
+                continue;
+            }
+
+            let Some(keyword) = KEYWORDS.iter().find(|keyword| keyword.kind == token.kind) else {
+                continue;
+            };
+            if !context.expectations.tokens.contains(&token.kind) {
+                continue;
+            }
+            let token_text =
+                &source[usize::from(token.range.start())..usize::from(token.range.end())];
+            let label = keyword.word.to_ascii_uppercase();
+            let recovered = token_text
+                .char_indices()
+                .map(|(index, character)| index + character.len_utf8())
+                .any(|prefix_len| {
+                    let (prefixed, point) = source_before_token(
+                        &source,
+                        token.range.start(),
+                        &token_text[..prefix_len],
+                    );
+                    let prefixed = collect(&prefixed, TextSize::try_from(point).unwrap());
+                    prefixed.expectations.tokens.contains(&token.kind)
+                        && prefixed
+                            .syntax_completions()
+                            .iter()
+                            .any(|completion| completion.label == label)
+                });
+            if !recovered {
+                missing.push(format!(
+                    "no typed keyword prefix recovers {label} at byte {} in {:?}",
+                    usize::from(token.range.start()),
+                    name
+                ));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "completion witness gaps:\n{}",
+        missing.join("\n")
+    );
+}
+
+#[test]
+fn editor_projection_stays_quiet_across_every_witness_boundary() {
+    let mut violations = Vec::new();
+
+    for (name, source) in completion_witnesses() {
+        parse_one(&source)
+            .unwrap_or_else(|error| panic!("completion witness {name:?} is invalid: {error}"));
+        let tokens = lex(&source)
+            .unwrap_or_else(|error| panic!("failed to lex completion witness {name:?}: {error}"));
+        let mut points = tokens
+            .iter()
+            .filter(|token| token.kind != TokenKind::Eof)
+            .flat_map(|token| [token.range.start(), token.range.end()])
+            .collect::<Vec<_>>();
+        points.push(TextSize::try_from(source.len()).expect("witness length fits TextSize"));
+        points.sort_unstable();
+        points.dedup();
+
+        for point in points {
+            let context = collect(&source, point);
+            check_editor_projection(&name, point, &context, &mut violations);
+        }
+
+        let complete_source = format!("{source} ");
+        let end = collect(
+            &complete_source,
+            TextSize::try_from(complete_source.len()).expect("witness length fits TextSize"),
+        );
+        let stale_slots = end
+            .expectations
+            .slots
+            .iter()
+            .filter(|slot| **slot != GrammarSlot::Alias)
+            .collect::<Vec<_>>();
+        if !stale_slots.is_empty() || !end.intent.object_kinds.is_empty() {
+            violations.push(format!(
+                "{name:?} has stale catalog intent at the complete statement: slots={:?}, kinds={:?}",
+                end.expectations.slots, end.intent.object_kinds
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "editor projection invariant failures:\n{}",
+        violations.join("\n")
+    );
+}
+
+fn completion_witnesses() -> Vec<(String, String)> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data/completion/family-ends.yaml");
+    let cases: Vec<Case> =
+        serde_yaml::from_str(&fs::read_to_string(&path).expect("read family witnesses"))
+            .expect("parse family witnesses");
+    let position_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data/completion/position-witnesses.yaml");
+    let positions: Vec<PositionWitness> =
+        serde_yaml::from_str(&fs::read_to_string(&position_path).expect("read position witnesses"))
+            .expect("parse position witnesses");
+    let mut witnesses = cases
+        .into_iter()
+        .map(|case| {
+            let (source, _) = remove_caret(&case.input);
+            (case.input, source)
+        })
+        .collect::<Vec<_>>();
+    witnesses.extend(
+        positions
+            .into_iter()
+            .map(|witness| (witness.name, witness.sql)),
+    );
+    witnesses
+}
+
+fn check_editor_projection(
+    name: &str,
+    point: TextSize,
+    context: &CompletionContext,
+    violations: &mut Vec<String>,
+) {
+    let operator_slot = context.expectations.slots.contains(&GrammarSlot::Operator);
+    let operator_intent = context.intent.object_kinds.contains(&ObjectKind::Operator);
+    if operator_slot != operator_intent {
+        violations.push(format!(
+            "{name:?} at byte {} does not map the explicit Operator slot exactly: slots={:?}, kinds={:?}",
+            usize::from(point),
+            context.expectations.slots,
+            context.intent.object_kinds
+        ));
+    }
+    if !operator_slot
+        && !context
+            .expectations
+            .expression_continuation_tokens
+            .is_empty()
+        && operator_intent
+    {
+        violations.push(format!(
+            "{name:?} at byte {} exposes an Operator catalog query from an ordinary expression continuation",
+            usize::from(point)
+        ));
+    }
+
+    for completion in context.syntax_completions() {
+        let words = completion
+            .label
+            .split_ascii_whitespace()
+            .collect::<Vec<_>>();
+        let keyword_only = !words.is_empty()
+            && words.iter().all(|word| {
+                KEYWORDS
+                    .iter()
+                    .any(|keyword| keyword.word.eq_ignore_ascii_case(word))
+            });
+        if !keyword_only {
+            violations.push(format!(
+                "{name:?} at byte {} exposes punctuation or a symbolic operator as an editor item: {:?}",
+                usize::from(point),
+                completion
+            ));
+            continue;
+        }
+        if context.prefix.raw.is_empty() {
+            let head = KEYWORDS
+                .iter()
+                .find(|keyword| keyword.word.eq_ignore_ascii_case(words[0]))
+                .expect("keyword-only completion has a keyword head")
+                .kind;
+            let eager = context.expectations.direct_tokens.contains(&head)
+                || (head != TokenKind::Operator
+                    && context.expectations.expression_start_tokens.contains(&head));
+            if !eager {
+                violations.push(format!(
+                    "{name:?} at byte {} eagerly exposes a lookahead/follow/expression-tail-only item: {:?}",
+                    usize::from(point),
+                    completion
+                ));
+            }
+        }
+    }
+}
+
+fn expectations_accept_token(context: &CompletionContext, kind: TokenKind) -> bool {
+    context.expectations.tokens.contains(&kind)
+        || (context.expectations.tokens.contains(&TokenKind::Op)
+            && matches!(
+                kind,
+                TokenKind::Op
+                    | TokenKind::RightArrow
+                    | TokenKind::LessEquals
+                    | TokenKind::GreaterEquals
+                    | TokenKind::NotEquals
+                    | TokenKind::Char(
+                        '+' | '-'
+                            | '*'
+                            | '/'
+                            | '%'
+                            | '^'
+                            | '<'
+                            | '>'
+                            | '='
+                            | '~'
+                            | '!'
+                            | '@'
+                            | '#'
+                            | '&'
+                            | '|'
+                            | '?'
+                            | '`'
+                            | ':'
+                    )
+            ))
+}
+
+fn source_before_token(source: &str, start: TextSize, partial: &str) -> (String, usize) {
+    let start = usize::from(start);
+    let mut prefix = String::with_capacity(start + partial.len() + 1);
+    prefix.push_str(&source[..start]);
+    prefix.push(' ');
+    prefix.push_str(partial);
+    let point = prefix.len();
+    (prefix, point)
+}
+
+fn raw_syntax_token(kind: TokenKind) -> bool {
+    KEYWORDS.iter().any(|keyword| keyword.kind == kind)
+        || matches!(
+            kind,
+            TokenKind::Char(_)
+                | TokenKind::Op
+                | TokenKind::TypeCast
+                | TokenKind::DotDot
+                | TokenKind::ColonEquals
+                | TokenKind::EqualsGreater
+                | TokenKind::LessEquals
+                | TokenKind::GreaterEquals
+                | TokenKind::NotEquals
+                | TokenKind::RightArrow
+        )
+}
+
+fn assert_expectation_provenance(source: &str, context: &CompletionContext) {
+    for token in &context.expectations.tokens {
+        assert!(
+            context.expectations.direct_tokens.contains(token)
+                || context.expectations.lookahead_tokens.contains(token)
+                || context.expectations.expression_start_tokens.contains(token)
+                || context
+                    .expectations
+                    .expression_continuation_tokens
+                    .contains(token)
+                || context.expectations.follow_tokens.contains(token),
+            "token without provenance in {source:?}: {token:?}: {:?}",
+            context.expectations
+        );
+    }
+}
+
 macro_rules! grammar_slots {
     ($($slot:ident),+ $(,)?) => {
         fn all_grammar_slots() -> &'static [GrammarSlot] {
@@ -240,6 +558,8 @@ grammar_slots! {
     TextSearchParser,
     TextSearchTemplate,
     Trigger,
+    Privilege,
+    Alias,
     AnyName,
 }
 

@@ -8,7 +8,7 @@ impl Parser {
     ) -> PResult<NodeList> {
         let mut names = Vec::new();
         loop {
-            if self.at_any(stops) {
+            if !self.at_completion() && self.at_any(stops) {
                 break;
             }
             self.record_completion_slot(slot);
@@ -19,7 +19,7 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at_any(stops) {
+            if !self.at_completion() && self.at_any(stops) {
                 return Err(self.error_here("expected a name after ','"));
             }
         }
@@ -36,7 +36,7 @@ impl Parser {
     ) -> PResult<Node> {
         self.record_completion_slot(slot);
         self.record_completion_slot_before(slot, stops);
-        if self.at_any(stops) {
+        if !self.at_completion() && self.at_any(stops) {
             return Err(self.error_here("expected a qualified name"));
         }
         let parts = self.consume_name_parts();
@@ -59,7 +59,7 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at_any(stops) {
+            if !self.at_completion() && self.at_any(stops) {
                 return Err(self.error_here("expected a qualified name after ','"));
             }
         }
@@ -91,10 +91,11 @@ impl Parser {
     }
 
     pub(super) fn parse_name_list(&mut self) -> NodeList {
-        self.consume_name_parts()
-            .into_iter()
-            .map(make_string_node)
-            .collect()
+        let parts = self.consume_name_parts();
+        if !parts.is_empty() {
+            self.record_completion_tokens(&[TokenKind::Char('.')]);
+        }
+        parts.into_iter().map(make_string_node).collect()
     }
 
     pub(super) fn parse_func_name_list(&mut self) -> NodeList {
@@ -105,7 +106,7 @@ impl Parser {
     }
 
     pub(super) fn parse_name_list_until_keywords(&mut self, stops: &[TokenKind]) -> NodeList {
-        if self.at_any(stops) {
+        if !self.at_completion() && self.at_any(stops) {
             Vec::new()
         } else {
             self.parse_name_list()
@@ -116,16 +117,16 @@ impl Parser {
         &mut self,
         allow_set_alias: bool,
         slot: completion::GrammarSlot,
-    ) -> Option<RangeVar> {
+    ) -> PResult<Option<RangeVar>> {
         self.record_completion_slot(slot);
         let location = self.location();
-        let parts = self.consume_qualified_name_parts();
+        let parts = self.consume_qualified_name_parts(slot);
         if parts.is_empty() {
-            return None;
+            return Ok(None);
         }
         let mut range = range_var_from_parts(parts, location);
-        range.alias = self.parse_optional_alias(allow_set_alias);
-        Some(range)
+        range.alias = self.parse_optional_alias(allow_set_alias)?;
+        Ok(Some(range))
     }
 
     pub(super) fn parse_relation_expr(&mut self, allow_alias: bool) -> PResult<RangeVar> {
@@ -137,6 +138,7 @@ impl Parser {
         allow_alias: bool,
         slot: completion::GrammarSlot,
     ) -> PResult<RangeVar> {
+        self.record_completion_tokens(&[TokenKind::Only]);
         self.record_completion_slot(slot);
         let only = self.consume(TokenKind::Only);
         let parenthesized = only && self.consume(TokenKind::Char('('));
@@ -162,23 +164,32 @@ impl Parser {
         Ok(range)
     }
 
-    pub(super) fn parse_optional_alias(&mut self, allow_set_alias: bool) -> Option<Box<Alias>> {
+    pub(super) fn parse_optional_alias(
+        &mut self,
+        allow_set_alias: bool,
+    ) -> PResult<Option<Box<Alias>>> {
         let has_as = self.consume(TokenKind::As);
-        if has_as || (allow_set_alias || !self.at(TokenKind::Set)) {
-            self.consume_col_id().map(|aliasname| {
-                Box::new(Alias {
-                    node_tag: NodeTag::Alias,
-                    aliasname: Some(aliasname),
-                    ..Alias::default()
-                })
-            })
+        self.record_completion_slot(completion::GrammarSlot::Alias);
+        let aliasname = if has_as {
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("AS requires an alias"))?
+        } else if allow_set_alias || !self.at(TokenKind::Set) {
+            let Some(aliasname) = self.consume_col_id() else {
+                return Ok(None);
+            };
+            aliasname
         } else {
-            None
-        }
+            return Ok(None);
+        };
+        Ok(Some(Box::new(Alias {
+            node_tag: NodeTag::Alias,
+            aliasname: Some(aliasname),
+            ..Alias::default()
+        })))
     }
 
     pub(super) fn parse_optional_alias_clause(&mut self) -> PResult<Option<Box<Alias>>> {
-        let Some(mut alias) = self.parse_optional_alias(true) else {
+        let Some(mut alias) = self.parse_optional_alias(true)? else {
             return Ok(None);
         };
         if self.consume(TokenKind::Char('(')) {
@@ -198,7 +209,7 @@ impl Parser {
     ) -> Option<RangeVar> {
         self.record_completion_slot(slot);
         let location = self.location();
-        let parts = self.consume_qualified_name_parts();
+        let parts = self.consume_qualified_name_parts(slot);
         if parts.is_empty() {
             None
         } else {
@@ -252,7 +263,10 @@ impl Parser {
         parts
     }
 
-    pub(super) fn consume_qualified_name_parts(&mut self) -> Vec<std::string::String> {
+    pub(super) fn consume_qualified_name_parts(
+        &mut self,
+        slot: completion::GrammarSlot,
+    ) -> Vec<std::string::String> {
         let mut parts = Vec::new();
         let Some(first) = self.consume_col_id() else {
             return parts;
@@ -260,6 +274,11 @@ impl Parser {
         parts.push(first);
         while parts.len() < 3 && self.consume(TokenKind::Char('.')) {
             if self.at(TokenKind::Char('*')) {
+                self.pos = self.pos.saturating_sub(1);
+                break;
+            }
+            if self.at_completion() {
+                self.record_completion_slot(slot);
                 self.pos = self.pos.saturating_sub(1);
                 break;
             }
@@ -280,6 +299,10 @@ impl Parser {
     }
 
     pub(super) fn consume_identifier(&mut self) -> Option<std::string::String> {
+        if self.at_completion() {
+            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            return None;
+        }
         if !matches!(self.peek_kind(), TokenKind::Ident | TokenKind::UIdent) {
             return None;
         }
@@ -316,6 +339,10 @@ impl Parser {
         &mut self,
         categories: &[KeywordCategory],
     ) -> Option<std::string::String> {
+        if self.at_completion() {
+            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            return None;
+        }
         let token = self.peek().clone();
         let accepted = matches!(token.kind, TokenKind::Ident | TokenKind::UIdent)
             || match &token.value {
@@ -332,46 +359,99 @@ impl Parser {
     }
 
     pub(super) fn consume_object_type(&mut self) -> Option<ObjectType> {
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Access,
+            TokenKind::Aggregate,
+            TokenKind::Cast,
+            TokenKind::Collation,
+            TokenKind::ConversionP,
+            TokenKind::Database,
+            TokenKind::DomainP,
+            TokenKind::Event,
+            TokenKind::Extension,
+            TokenKind::Foreign,
+            TokenKind::Function,
+            TokenKind::Index,
+            TokenKind::Language,
+            TokenKind::Materialized,
+            TokenKind::Operator,
+            TokenKind::Policy,
+            TokenKind::Procedure,
+            TokenKind::Procedural,
+            TokenKind::Property,
+            TokenKind::Publication,
+            TokenKind::Routine,
+            TokenKind::Rule,
+            TokenKind::Schema,
+            TokenKind::Sequence,
+            TokenKind::Server,
+            TokenKind::Statistics,
+            TokenKind::Subscription,
+            TokenKind::Table,
+            TokenKind::Tablespace,
+            TokenKind::TextP,
+            TokenKind::Transform,
+            TokenKind::Trigger,
+            TokenKind::TypeP,
+            TokenKind::View,
+        ]);
+        let start = self.pos;
         let ty = match self.peek_kind() {
-            TokenKind::Event if self.peek_kind_n(1) == TokenKind::Trigger => {
+            TokenKind::Event => {
                 self.advance();
-                self.advance();
+                if !self.consume(TokenKind::Trigger) {
+                    self.pos = start;
+                    return None;
+                }
                 return Some(ObjectType::EventTrigger);
             }
-            TokenKind::Property if self.peek_kind_n(1) == TokenKind::Graph => {
+            TokenKind::Property => {
                 self.advance();
-                self.advance();
+                if !self.consume(TokenKind::Graph) {
+                    self.pos = start;
+                    return None;
+                }
                 return Some(ObjectType::Propgraph);
             }
-            TokenKind::TextP
-                if self.peek_kind_n(1) == TokenKind::Search
-                    && matches!(
-                        self.peek_kind_n(2),
-                        TokenKind::Parser
-                            | TokenKind::Dictionary
-                            | TokenKind::Template
-                            | TokenKind::Configuration
-                    ) =>
-            {
+            TokenKind::TextP => {
                 self.advance();
-                self.advance();
-                let ty = match self.advance().kind {
+                if !self.consume(TokenKind::Search) {
+                    self.pos = start;
+                    return None;
+                }
+                self.record_completion_lookahead_tokens(&[
+                    TokenKind::Parser,
+                    TokenKind::Dictionary,
+                    TokenKind::Template,
+                    TokenKind::Configuration,
+                ]);
+                let ty = match self.peek_kind() {
                     TokenKind::Parser => ObjectType::Tsparser,
                     TokenKind::Dictionary => ObjectType::Tsdictionary,
                     TokenKind::Template => ObjectType::Tstemplate,
                     TokenKind::Configuration => ObjectType::Tsconfiguration,
-                    _ => unreachable!(),
+                    _ => {
+                        self.pos = start;
+                        return None;
+                    }
                 };
+                self.advance();
                 return Some(ty);
             }
-            TokenKind::Procedural if self.peek_kind_n(1) == TokenKind::Language => {
+            TokenKind::Procedural => {
                 self.advance();
-                self.advance();
+                if !self.consume(TokenKind::Language) {
+                    self.pos = start;
+                    return None;
+                }
                 return Some(ObjectType::Language);
             }
-            TokenKind::Access if self.peek_kind_n(1) == TokenKind::Method => {
+            TokenKind::Access => {
                 self.advance();
-                self.advance();
+                if !self.consume(TokenKind::Method) {
+                    self.pos = start;
+                    return None;
+                }
                 ObjectType::AccessMethod
             }
             TokenKind::Aggregate => ObjectType::Aggregate,
@@ -402,27 +482,26 @@ impl Parser {
             TokenKind::Tablespace => ObjectType::Tablespace,
             TokenKind::Statistics => ObjectType::StatisticExt,
             TokenKind::Foreign => {
-                if self.peek_kind_n(1) == TokenKind::Table {
-                    self.advance();
-                    self.advance();
+                self.advance();
+                if self.consume(TokenKind::Table) {
                     ObjectType::ForeignTable
-                } else if self.peek_kind_n(1) == TokenKind::DataP
-                    && self.peek_kind_n(2) == TokenKind::Wrapper
-                {
-                    self.advance();
-                    self.advance();
-                    self.advance();
+                } else if self.consume(TokenKind::DataP) {
+                    if !self.consume(TokenKind::Wrapper) {
+                        self.pos = start;
+                        return None;
+                    }
                     ObjectType::Fdw
                 } else {
+                    self.pos = start;
                     return None;
                 }
             }
             TokenKind::Materialized => {
-                if self.peek_kind_n(1) != TokenKind::View {
+                self.advance();
+                if !self.consume(TokenKind::View) {
+                    self.pos = start;
                     return None;
                 }
-                self.advance();
-                self.advance();
                 ObjectType::Matview
             }
             _ => return None,
@@ -433,6 +512,13 @@ impl Parser {
                 | ObjectType::ForeignTable
                 | ObjectType::Fdw
                 | ObjectType::Matview
+                | ObjectType::EventTrigger
+                | ObjectType::Propgraph
+                | ObjectType::Tsparser
+                | ObjectType::Tsdictionary
+                | ObjectType::Tstemplate
+                | ObjectType::Tsconfiguration
+                | ObjectType::Language
         ) {
             self.advance();
         }
@@ -448,7 +534,11 @@ impl Parser {
                 ..RoleSpec::default()
             })
         } else {
-            self.consume_role_spec()
+            self.consume_role_spec_with_slot_and_specials(
+                completion::GrammarSlot::Role,
+                &[TokenKind::CurrentRole, TokenKind::CurrentUser],
+            )
+            .filter(|role| role.roletype != RoleSpecType::SessionUser)
         }
     }
 
@@ -456,8 +546,28 @@ impl Parser {
         self.consume_role_spec_with_slot(completion::GrammarSlot::Role)
     }
 
+    pub(super) fn consume_role_spec_without_special_suggestions(&mut self) -> Option<RoleSpec> {
+        self.consume_role_spec_with_slot_and_specials(completion::GrammarSlot::Role, &[])
+    }
+
     fn consume_role_spec_with_slot(&mut self, slot: completion::GrammarSlot) -> Option<RoleSpec> {
+        self.consume_role_spec_with_slot_and_specials(
+            slot,
+            &[
+                TokenKind::CurrentRole,
+                TokenKind::CurrentUser,
+                TokenKind::SessionUser,
+            ],
+        )
+    }
+
+    fn consume_role_spec_with_slot_and_specials(
+        &mut self,
+        slot: completion::GrammarSlot,
+        suggested_specials: &[TokenKind],
+    ) -> Option<RoleSpec> {
         self.record_completion_slot(slot);
+        self.record_completion_lookahead_tokens(suggested_specials);
         let start = self.pos;
         let location = self.location();
         let roletype = match self.peek_kind() {
@@ -522,7 +632,7 @@ impl Parser {
         slot: completion::GrammarSlot,
     ) -> PResult<Option<std::string::String>> {
         let location = self.location();
-        let Some(role) = self.consume_role_spec_with_slot(slot) else {
+        let Some(role) = self.consume_role_spec_with_slot_and_specials(slot, &[]) else {
             return Ok(None);
         };
         if role.roletype != RoleSpecType::Cstring {
@@ -548,12 +658,26 @@ impl Parser {
         if self.peek_kind() != TokenKind::TypeP {
             return false;
         }
-        self.top_level_adjacent(TokenKind::AddP, TokenKind::ValueP)
-            || self.top_level_adjacent(TokenKind::Rename, TokenKind::ValueP)
-            || self.top_level_adjacent(TokenKind::Drop, TokenKind::ValueP)
-            || self.top_level_precedes_completion(TokenKind::AddP)
-            || self.top_level_precedes_completion(TokenKind::Rename)
-            || self.top_level_precedes_completion(TokenKind::Drop)
+        let kinds = self.top_level_kinds();
+        let Some(action) = kinds.iter().position(|kind| {
+            matches!(
+                kind,
+                TokenKind::AddP
+                    | TokenKind::Rename
+                    | TokenKind::Drop
+                    | TokenKind::Alter
+                    | TokenKind::Set
+            )
+        }) else {
+            return false;
+        };
+        matches!(
+            kinds.get(action),
+            Some(TokenKind::AddP | TokenKind::Rename | TokenKind::Drop)
+        ) && matches!(
+            kinds.get(action + 1),
+            Some(TokenKind::ValueP | TokenKind::Completion)
+        )
     }
 
     pub(super) fn looks_like_rename_stmt(&self) -> bool {
@@ -690,6 +814,12 @@ impl Parser {
     }
 
     pub(super) fn consume_opt_boolean_or_string(&mut self) -> Option<std::string::String> {
+        self.record_completion_tokens(&[
+            TokenKind::SConst,
+            TokenKind::TrueP,
+            TokenKind::FalseP,
+            TokenKind::On,
+        ]);
         let token = self.peek().clone();
         let accepted = matches!(
             token.kind,

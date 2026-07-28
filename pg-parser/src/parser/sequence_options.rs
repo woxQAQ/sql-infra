@@ -71,11 +71,31 @@ impl Parser {
             && !self.at(TokenKind::Char(','))
         {
             let location = self.location();
+            self.record_completion_lookahead_tokens(&[
+                TokenKind::As,
+                TokenKind::Cache,
+                TokenKind::Cycle,
+                TokenKind::No,
+                TokenKind::Increment,
+                TokenKind::Logged,
+                TokenKind::Maxvalue,
+                TokenKind::Minvalue,
+                TokenKind::Owned,
+                TokenKind::Sequence,
+                TokenKind::Start,
+                TokenKind::Restart,
+                TokenKind::Unlogged,
+            ]);
             let (name, arg) = match self.peek_kind() {
                 TokenKind::As => {
                     self.advance();
                     self.record_completion_slot(completion::GrammarSlot::Type);
                     let type_tokens = self.take_sequence_type_tokens();
+                    if self.at_completion() {
+                        let mut completion_tokens = type_tokens.clone();
+                        self.append_completion_marker(&mut completion_tokens);
+                        record_type_name_completion(&completion_tokens, self.completion.as_ref());
+                    }
                     if type_tokens.is_empty() {
                         return Err(self.error_here("AS requires a sequence data type"));
                     }
@@ -92,6 +112,11 @@ impl Parser {
                 }
                 TokenKind::No => {
                     self.advance();
+                    self.record_completion_lookahead_tokens(&[
+                        TokenKind::Cycle,
+                        TokenKind::Maxvalue,
+                        TokenKind::Minvalue,
+                    ]);
                     let option = match self.peek_kind() {
                         TokenKind::Cycle => ("cycle", Some(Node::Boolean(Boolean::new(false)))),
                         TokenKind::Maxvalue => ("maxvalue", None),

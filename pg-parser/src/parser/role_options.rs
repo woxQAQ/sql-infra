@@ -58,12 +58,16 @@ impl Parser {
         if role_kind == TokenKind::User {
             self.record_completion_tokens(&[TokenKind::Mapping]);
         }
-        let role = if self.at(TokenKind::All) {
+        let all_roles = role_kind != TokenKind::GroupP && self.at(TokenKind::All);
+        let role = if all_roles {
             self.advance();
             None
         } else {
             self.consume_role_spec().map(Box::new)
         };
+        if self.at_completion() && role.is_none() && !all_roles {
+            return Err(self.error_here("expected an ALTER ROLE target"));
+        }
         if role_kind == TokenKind::GroupP {
             let role = role.ok_or_else(|| self.error_here("ALTER GROUP requires a group name"))?;
             let action = if self.consume(TokenKind::AddP) {
@@ -91,6 +95,9 @@ impl Parser {
                 action,
             }));
         }
+        if role.is_none() {
+            self.record_completion_tokens(&[TokenKind::InP, TokenKind::Set, TokenKind::Reset]);
+        }
         if role.is_none()
             && !matches!(
                 self.peek_kind(),
@@ -108,6 +115,7 @@ impl Parser {
         } else {
             None
         };
+        self.record_completion_tokens(&[TokenKind::Set, TokenKind::Reset]);
         if matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
             let setstmt = Some(Box::new(self.parse_variable_set_like(false)?));
             return Ok(Node::AlterRoleSetStmt(AlterRoleSetStmt {
@@ -144,7 +152,16 @@ impl Parser {
     pub(super) fn parse_drop_role(&mut self) -> PResult<Node> {
         self.advance();
         let missing_ok = self.consume_if_exists()?;
-        let roles = self.parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+        let mut roles = Vec::new();
+        loop {
+            let role = self
+                .consume_role_spec_without_special_suggestions()
+                .ok_or_else(|| self.error_here("DROP ROLE requires a role name"))?;
+            roles.push(Node::RoleSpec(role));
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+        }
         Ok(Node::DropRoleStmt(DropRoleStmt {
             node_tag: NodeTag::DropRoleStmt,
             roles,

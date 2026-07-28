@@ -5,6 +5,7 @@ impl Parser {
         self.expect(TokenKind::Alter)?;
         self.record_completion_tokens(&[
             TokenKind::Default,
+            TokenKind::Access,
             TokenKind::TypeP,
             TokenKind::Table,
             TokenKind::Index,
@@ -27,6 +28,11 @@ impl Parser {
             TokenKind::Subscription,
             TokenKind::Statistics,
             TokenKind::Event,
+            TokenKind::Language,
+            TokenKind::LargeP,
+            TokenKind::Procedural,
+            TokenKind::Rule,
+            TokenKind::Schema,
             TokenKind::Server,
             TokenKind::Function,
             TokenKind::Procedure,
@@ -34,6 +40,7 @@ impl Parser {
             TokenKind::Aggregate,
             TokenKind::Operator,
             TokenKind::TextP,
+            TokenKind::Trigger,
         ]);
         if self.peek_kind() == TokenKind::Default {
             return self.parse_alter_default_privileges();
@@ -53,22 +60,49 @@ impl Parser {
         if self.looks_like_alter_owner_stmt() {
             return self.parse_alter_owner();
         }
+        if self.top_level_contains(TokenKind::Completion)
+            && (self.peek_kind() == TokenKind::Aggregate
+                || (self.peek_kind() == TokenKind::Operator
+                    && matches!(
+                        self.peek_kind_n(1),
+                        TokenKind::Class | TokenKind::Completion
+                    )))
+        {
+            let identity = self.parse_alter_identity(&[
+                TokenKind::Rename,
+                TokenKind::Depends,
+                TokenKind::Owner,
+                TokenKind::Set,
+                TokenKind::Completion,
+            ])?;
+            self.record_alter_identity_actions(&identity);
+            return Err(self.error_here("expected an ALTER action"));
+        }
         let node = match self.peek_kind() {
-            TokenKind::Table if self.peek_kind_n(1) == TokenKind::All => {
+            TokenKind::Table => {
                 self.advance();
-                self.parse_alter_table_move_all(ObjectType::Table)?
+                self.record_completion_tokens(&[TokenKind::All]);
+                if self.at(TokenKind::All) {
+                    self.parse_alter_table_move_all(ObjectType::Table)?
+                } else {
+                    self.parse_alter_table_after_kind(ObjectType::Table)?
+                }
             }
-            TokenKind::Table => self.parse_alter_table(ObjectType::Table)?,
-            TokenKind::Index if self.peek_kind_n(1) == TokenKind::All => {
+            TokenKind::Index => {
                 self.advance();
-                self.parse_alter_table_move_all(ObjectType::Index)?
+                self.record_completion_tokens(&[TokenKind::All]);
+                if self.at(TokenKind::All) {
+                    self.parse_alter_table_move_all(ObjectType::Index)?
+                } else {
+                    self.parse_alter_table_after_kind(ObjectType::Index)?
+                }
             }
-            TokenKind::Index => self.parse_alter_table(ObjectType::Index)?,
             TokenKind::Sequence => self.parse_alter_sequence()?,
             TokenKind::View => self.parse_alter_table(ObjectType::View)?,
             TokenKind::Materialized => {
                 self.advance();
                 self.expect(TokenKind::View)?;
+                self.record_completion_tokens(&[TokenKind::All]);
                 if self.at(TokenKind::All) {
                     self.parse_alter_table_move_all(ObjectType::Matview)?
                 } else {

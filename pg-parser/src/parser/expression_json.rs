@@ -11,6 +11,10 @@ impl ExprParser {
                     self.parse_json_object_constructor(token.location())
                 } else {
                     let first = self.parse_function_argument()?;
+                    self.record_completion_expression_continuation_tokens(&[
+                        TokenKind::ValueP,
+                        TokenKind::Char(':'),
+                    ]);
                     let args = self.parse_plain_function_arguments_after(first)?;
                     self.expect(TokenKind::Char(')'))?;
                     Some(Node::FuncCall(FuncCall {
@@ -153,12 +157,19 @@ impl ExprParser {
         ) {
             type_tokens.push(self.advance().clone());
         }
-        if self.at_completion() {
-            self.record_completion_slot(completion::GrammarSlot::Type);
-            self.record_completion_tokens(&[TokenKind::Format]);
-            return self.fail("completion point in JSON RETURNING type");
+        let completing_type = self.at_completion();
+        if completing_type {
+            let mut completion_tokens = type_tokens.clone();
+            completion_tokens.push(self.peek().clone());
+            record_type_name_completion(&completion_tokens, self.completion.as_ref());
         }
-        let type_name = tokens_to_type_name(type_tokens).map(Box::new)?;
+        let type_name = match tokens_to_type_name(type_tokens).map(Box::new) {
+            Some(type_name) => type_name,
+            None if completing_type => {
+                return self.fail("completion point in JSON RETURNING type");
+            }
+            None => return None,
+        };
         let format = Some(Box::new(
             self.parse_json_format()?
                 .unwrap_or_else(default_json_format),
@@ -255,6 +266,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_json_array_constructor(&mut self, location: usize) -> Option<Node> {
+        self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
             let mut depth = 0usize;

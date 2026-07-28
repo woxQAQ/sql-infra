@@ -125,6 +125,19 @@ impl Parser {
             location: -1,
             ..VariableSetStmt::default()
         };
+        if self.peek_kind() == TokenKind::Transaction
+            && self.peek_kind_n(1) == TokenKind::Completion
+        {
+            self.advance();
+            self.record_completion_tokens(&[
+                TokenKind::Snapshot,
+                TokenKind::Isolation,
+                TokenKind::Read,
+                TokenKind::Deferrable,
+                TokenKind::Not,
+            ]);
+            return Err(self.error_here("completion point after SET TRANSACTION"));
+        }
         match self.peek_kind() {
             TokenKind::Transaction if self.peek_kind_n(1) != TokenKind::Snapshot => {
                 self.advance();
@@ -158,9 +171,43 @@ impl Parser {
                 if self.consume(TokenKind::Default) || self.consume(TokenKind::Local) {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
-                    self.record_completion_tokens(&[TokenKind::Default, TokenKind::Local]);
+                    self.record_completion_tokens(&[
+                        TokenKind::Default,
+                        TokenKind::Local,
+                        TokenKind::Interval,
+                    ]);
                     self.record_completion_slot(completion::GrammarSlot::AnyName);
                     let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+                    if self.at_completion()
+                        && tokens.first().map(|token| token.kind) == Some(TokenKind::Interval)
+                    {
+                        let qualifier = tokens
+                            .iter()
+                            .position(|token| token.kind == TokenKind::SConst)
+                            .map_or(&[][..], |string_index| &tokens[string_index + 1..]);
+                        match qualifier {
+                            [] if tokens.iter().any(|token| token.kind == TokenKind::SConst) => {
+                                self.record_completion_lookahead_tokens(&[TokenKind::HourP]);
+                            }
+                            [
+                                Token {
+                                    kind: TokenKind::HourP,
+                                    ..
+                                },
+                            ] => self.record_completion_lookahead_tokens(&[TokenKind::To]),
+                            [
+                                Token {
+                                    kind: TokenKind::HourP,
+                                    ..
+                                },
+                                Token {
+                                    kind: TokenKind::To,
+                                    ..
+                                },
+                            ] => self.record_completion_tokens(&[TokenKind::MinuteP]),
+                            _ => {}
+                        }
+                    }
                     stmt.args = vec![parse_time_zone_value_tokens(tokens)?];
                 }
                 stmt.jumble_args = true;
@@ -225,6 +272,7 @@ impl Parser {
             TokenKind::XmlP => {
                 self.advance();
                 self.expect(TokenKind::Option)?;
+                self.record_completion_tokens(&[TokenKind::DocumentP, TokenKind::ContentP]);
                 let (value, value_location) = match self.peek_kind() {
                     TokenKind::DocumentP => ("DOCUMENT", self.advance().location() as ParseLoc),
                     TokenKind::ContentP => ("CONTENT", self.advance().location() as ParseLoc),
@@ -533,6 +581,11 @@ impl Parser {
                 TokenKind::Isolation => {
                     self.advance();
                     self.expect(TokenKind::Level)?;
+                    self.record_completion_tokens(&[
+                        TokenKind::Read,
+                        TokenKind::Repeatable,
+                        TokenKind::Serializable,
+                    ]);
                     let value_location = self.location();
                     let value = match self.peek_kind() {
                         TokenKind::Read => {
@@ -566,6 +619,7 @@ impl Parser {
                 }
                 TokenKind::Read => {
                     self.advance();
+                    self.record_completion_tokens(&[TokenKind::Only, TokenKind::Write]);
                     let read_only = match self.peek_kind() {
                         TokenKind::Only => true,
                         TokenKind::Write => false,

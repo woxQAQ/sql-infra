@@ -143,6 +143,9 @@ impl Parser {
         self.expect(TokenKind::On)?;
         let mut stats_tokens =
             self.take_until_top_level(&[TokenKind::From, TokenKind::Char(';'), TokenKind::Eof]);
+        if tokens_end_at_top_level(&stats_tokens) {
+            self.record_completion_tokens(&[TokenKind::From]);
+        }
         self.append_completion_marker(&mut stats_tokens);
         let exprs = parse_stats_params_with_completion(stats_tokens, self.completion.clone())?;
         self.expect(TokenKind::From)?;

@@ -38,6 +38,7 @@ impl Parser {
                     .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("expected a relation after LIKE"))?;
                 let mut options = 0u32;
+                self.record_completion_follow_tokens(&[TokenKind::Including, TokenKind::Excluding]);
                 while matches!(
                     self.peek_kind(),
                     TokenKind::Including | TokenKind::Excluding
@@ -46,6 +47,18 @@ impl Parser {
                     if !include {
                         self.expect(TokenKind::Excluding)?;
                     }
+                    self.record_completion_tokens(&[
+                        TokenKind::Comments,
+                        TokenKind::Compression,
+                        TokenKind::Constraints,
+                        TokenKind::Defaults,
+                        TokenKind::Generated,
+                        TokenKind::IdentityP,
+                        TokenKind::Indexes,
+                        TokenKind::Statistics,
+                        TokenKind::Storage,
+                        TokenKind::All,
+                    ]);
                     let option = match self.advance().kind {
                         TokenKind::Comments => TableLikeOption::Comments as u32,
                         TokenKind::Compression => TableLikeOption::Compression as u32,
@@ -68,6 +81,10 @@ impl Parser {
                     } else {
                         options &= !option;
                     }
+                    self.record_completion_follow_tokens(&[
+                        TokenKind::Including,
+                        TokenKind::Excluding,
+                    ]);
                 }
                 elements.push(Node::TableLikeClause(TableLikeClause {
                     node_tag: NodeTag::TableLikeClause,
@@ -134,6 +151,15 @@ impl Parser {
     }
 
     pub(super) fn parse_table_element_inner(&mut self) -> PResult<Node> {
+        self.record_completion_tokens(&[
+            TokenKind::Constraint,
+            TokenKind::Check,
+            TokenKind::Not,
+            TokenKind::Unique,
+            TokenKind::Primary,
+            TokenKind::Foreign,
+            TokenKind::Exclude,
+        ]);
         let node = if matches!(
             self.peek_kind(),
             TokenKind::Constraint
@@ -153,6 +179,15 @@ impl Parser {
     }
 
     pub(super) fn parse_typed_table_element_inner(&mut self) -> PResult<Node> {
+        self.record_completion_tokens(&[
+            TokenKind::Constraint,
+            TokenKind::Check,
+            TokenKind::Not,
+            TokenKind::Unique,
+            TokenKind::Primary,
+            TokenKind::Foreign,
+            TokenKind::Exclude,
+        ]);
         let node = if matches!(
             self.peek_kind(),
             TokenKind::Constraint

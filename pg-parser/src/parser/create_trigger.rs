@@ -188,7 +188,11 @@ impl Parser {
         let mut transition_rels = Vec::new();
         if !isconstraint && self.consume(TokenKind::Referencing) {
             let transition_start = self.location();
-            while matches!(self.peek_kind(), TokenKind::Old | TokenKind::New) {
+            loop {
+                self.record_completion_lookahead_tokens(&[TokenKind::Old, TokenKind::New]);
+                if !matches!(self.peek_kind(), TokenKind::Old | TokenKind::New) {
+                    break;
+                }
                 let is_new = self.consume(TokenKind::New);
                 if !is_new {
                     self.expect(TokenKind::Old)?;
@@ -224,6 +228,12 @@ impl Parser {
             let mut saw_deferrable = None;
             let mut saw_initially = None;
             loop {
+                self.record_completion_lookahead_tokens(&[
+                    TokenKind::Deferrable,
+                    TokenKind::Not,
+                    TokenKind::Initially,
+                    TokenKind::Enforced,
+                ]);
                 match self.peek_kind() {
                     TokenKind::Deferrable => {
                         self.advance();

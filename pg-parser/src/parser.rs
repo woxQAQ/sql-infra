@@ -481,11 +481,17 @@ impl Parser {
 
     /// LA(1): does the current token equal `kind`?  Does not advance.
     pub(super) fn at(&self, kind: TokenKind) -> bool {
+        if self.peek_kind() == TokenKind::Completion {
+            self.record_completion_lookahead_tokens(&[kind]);
+        }
         self.peek_kind() == kind
     }
 
     /// LA(1): is the current token one of `kinds`?  Does not advance.
     pub(super) fn at_any(&self, kinds: &[TokenKind]) -> bool {
+        if self.peek_kind() == TokenKind::Completion {
+            self.record_completion_lookahead_tokens(kinds);
+        }
         kinds.contains(&self.peek_kind())
     }
 
@@ -499,6 +505,33 @@ impl Parser {
         }
         if let Some(collector) = &self.completion {
             collector.borrow_mut().tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_lookahead_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().lookahead_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_follow_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().follow_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_follow_phrase(&self, phrase: &'static [TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().follow_phrase(phrase);
         }
     }
 
@@ -526,6 +559,25 @@ impl Parser {
         stops: &[TokenKind],
     ) {
         if self.top_level_token_before_completion(stops) != Some(TokenKind::Char('.')) {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().slot(slot);
+        }
+    }
+
+    /// Publish a slot when the completion marker is anywhere inside the
+    /// fragment delimited by top-level `stops`, not only at its first token.
+    pub(super) fn record_completion_slot_within(
+        &self,
+        slot: completion::GrammarSlot,
+        stops: &[TokenKind],
+    ) {
+        let follows_fragment_separator = matches!(
+            self.top_level_token_before_completion(stops),
+            Some(TokenKind::Char('.') | TokenKind::Char(',') | TokenKind::Char('('))
+        );
+        if !self.at_completion() && !follows_fragment_separator {
             return;
         }
         if let Some(collector) = &self.completion {
@@ -583,6 +635,22 @@ impl Parser {
     pub(super) fn consume(&mut self, kind: TokenKind) -> bool {
         if self.at_completion() {
             self.record_completion_tokens(&[kind]);
+            return false;
+        }
+        if self.at(kind) {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Match an optional token that follows an already complete production.
+    /// Unlike `consume`, the token remains hidden from empty-prefix editor
+    /// completion and is recovered once the user starts typing it.
+    pub(super) fn consume_follow(&mut self, kind: TokenKind) -> bool {
+        if self.at_completion() {
+            self.record_completion_follow_tokens(&[kind]);
             return false;
         }
         if self.at(kind) {

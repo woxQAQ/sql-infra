@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use pg_parser::{GrammarSlot, TextSize, collect_expectations, lex};
+use pg_parser::{KEYWORDS, KeywordCategory, TextSize, collect_expectations, lex};
 
 use super::smoke::CASES;
 
@@ -98,15 +98,105 @@ fn completion_collection_handles_every_smoke_statement_token_boundary() {
             complete.tokens
         );
         assert!(
-            complete
-                .slots
-                .iter()
-                .all(|slot| *slot == GrammarSlot::Operator),
+            complete.slots.iter().all(|slot| matches!(
+                slot,
+                pg_parser::GrammarSlot::Alias | pg_parser::GrammarSlot::AnyName
+            )),
             "complete smoke case published a stale object slot for {:?}: {:?}",
             case.sql,
             complete.slots
         );
     }
+}
+
+#[test]
+fn completion_publishes_every_reserved_keyword_in_smoke_statements() {
+    let reserved = KEYWORDS
+        .iter()
+        .filter(|keyword| keyword.category == KeywordCategory::Reserved)
+        .map(|keyword| keyword.kind)
+        .collect::<Vec<_>>();
+    let mut missing = Vec::new();
+
+    for case in CASES {
+        let tokens = lex(case.sql)
+            .unwrap_or_else(|error| panic!("failed to lex smoke case {:?}: {error}", case.sql));
+        for token in tokens.iter().filter(|token| reserved.contains(&token.kind)) {
+            let expectations = collect_expectations(case.sql, token.range.start())
+                .unwrap_or_else(|error| panic!("completion failed for {:?}: {error}", case.sql));
+            if !expectations.tokens.contains(&token.kind) {
+                missing.push(format!(
+                    "{:?} at byte {} in {:?}: {:?}",
+                    token.kind,
+                    usize::from(token.range.start()),
+                    case.sql,
+                    expectations
+                ));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "reserved keyword completion gaps:\n{}",
+        missing.join("\n")
+    );
+}
+
+#[test]
+fn completion_publishes_every_punctuation_token_in_smoke_statements() {
+    let mut missing = Vec::new();
+
+    for case in CASES {
+        let tokens = lex(case.sql)
+            .unwrap_or_else(|error| panic!("failed to lex smoke case {:?}: {error}", case.sql));
+        for token in tokens.iter().filter(
+            |token| matches!(token.kind, pg_parser::TokenKind::Char(character) if character != ';'),
+        ) {
+            let expectations = collect_expectations(case.sql, token.range.start())
+                .unwrap_or_else(|error| panic!("completion failed for {:?}: {error}", case.sql));
+            let operator_name = expectations
+                .slots
+                .contains(&pg_parser::GrammarSlot::Operator)
+                && matches!(
+                    token.kind,
+                    pg_parser::TokenKind::Char(
+                        '+' | '-'
+                            | '*'
+                            | '/'
+                            | '%'
+                            | '^'
+                            | '<'
+                            | '>'
+                            | '='
+                            | '~'
+                            | '!'
+                            | '@'
+                            | '#'
+                            | '&'
+                            | '|'
+                            | '?'
+                            | '`'
+                            | ':'
+                    )
+                );
+            if !expectations.tokens.contains(&token.kind) && !operator_name {
+                missing.push(format!(
+                    "{:?} at byte {} in {:?}: {:?}",
+                    token.kind,
+                    usize::from(token.range.start()),
+                    case.sql,
+                    expectations
+                ));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "punctuation completion gaps:\n{}",
+        missing.join("\n")
+    );
 }
 
 #[test]

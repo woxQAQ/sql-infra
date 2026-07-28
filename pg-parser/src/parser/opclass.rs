@@ -246,7 +246,7 @@ impl Parser {
                 ));
             } else {
                 if itemtype == 2 && self.consume(TokenKind::Char('(')) {
-                    self.record_completion_slot_before(
+                    self.record_completion_slot_within(
                         completion::GrammarSlot::Type,
                         &[TokenKind::Char(')')],
                     );
@@ -320,7 +320,7 @@ impl Parser {
                 _ => return Err(self.error_here("expected an operator family item number")),
             };
             self.expect(TokenKind::Char('('))?;
-            self.record_completion_slot_before(
+            self.record_completion_slot_within(
                 completion::GrammarSlot::Type,
                 &[TokenKind::Char(')')],
             );

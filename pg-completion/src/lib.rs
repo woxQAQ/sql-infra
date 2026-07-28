@@ -25,15 +25,96 @@ pub struct CompletionContext {
     pub recovery: CompletionRecovery,
 }
 
+impl CompletionContext {
+    /// Returns syntax items worth presenting in an editor.
+    ///
+    /// Raw grammar expectations remain available on `expectations`. This
+    /// projection removes punctuation and symbolic operators, and defers
+    /// expression continuations and enclosing follows until the user starts
+    /// typing the next token. Callers therefore do not need statement- or
+    /// clause-specific suppression rules.
+    pub fn syntax_completions(&self) -> Vec<SyntaxCompletion> {
+        let mut completions = Vec::new();
+        for kind in &self.expectations.tokens {
+            let Some(label) = keyword_spelling(*kind) else {
+                continue;
+            };
+            if self.prefix.raw.is_empty() && !self.expectations.eager_without_prefix(*kind) {
+                continue;
+            }
+            completions.push(SyntaxCompletion {
+                insert_text: label.clone(),
+                label,
+                kind: SyntaxCompletionKind::Keyword,
+                is_follow: self.expectations.follow_tokens.contains(kind),
+            });
+        }
+        for phrase in &self.expectations.phrases {
+            let labels = phrase
+                .iter()
+                .filter_map(|kind| keyword_spelling(*kind))
+                .collect::<Vec<_>>();
+            if labels.len() != phrase.len()
+                || (self.prefix.raw.is_empty()
+                    && !self.expectations.eager_without_prefix(phrase[0]))
+            {
+                continue;
+            }
+            let label = labels.join(" ");
+            completions.push(SyntaxCompletion {
+                insert_text: label.clone(),
+                label,
+                kind: SyntaxCompletionKind::Phrase,
+                is_follow: self.expectations.follow_tokens.contains(&phrase[0]),
+            });
+        }
+        completions
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SyntaxCompletionKind {
+    Keyword,
+    Phrase,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SyntaxCompletion {
+    pub label: String,
+    pub insert_text: String,
+    pub kind: SyntaxCompletionKind,
+    pub is_follow: bool,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExpectationSet {
     pub tokens: Vec<TokenKind>,
+    /// Tokens introduced directly by the active grammar production.
+    pub direct_tokens: Vec<TokenKind>,
+    /// Keyword alternatives observed through parser lookahead predicates.
+    /// They remain quiet without a prefix.
+    pub lookahead_tokens: Vec<TokenKind>,
+    /// Tokens that can start the active expression.
+    pub expression_start_tokens: Vec<TokenKind>,
+    /// Tokens that extend the already parsed expression.
+    pub expression_continuation_tokens: Vec<TokenKind>,
+    /// Tokens that leave the active expression for its enclosing production.
+    /// This is a subset of `tokens`; callers can rank expression continuations
+    /// ahead of clause transitions without reconstructing parser state.
+    pub follow_tokens: Vec<TokenKind>,
     /// Fixed multi-token units that are grammatical at the point, e.g.
     /// `GROUP BY` or `IF NOT EXISTS`. Each phrase's head token also appears
     /// in `tokens`; a phrase does not claim the head has no other
     /// continuation.
     pub phrases: Vec<&'static [TokenKind]>,
     pub slots: Vec<GrammarSlot>,
+}
+
+impl ExpectationSet {
+    fn eager_without_prefix(&self, kind: TokenKind) -> bool {
+        self.direct_tokens.contains(&kind)
+            || (kind != TokenKind::Operator && self.expression_start_tokens.contains(&kind))
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -128,6 +209,9 @@ pub struct VisibleRelation {
     pub name: Vec<NamePart>,
     pub alias: Option<NamePart>,
     pub explicit_columns: Vec<NamePart>,
+    /// The relation can only be referenced through its alias; its columns do
+    /// not participate in unqualified column lookup.
+    pub qualified_only: bool,
     pub syntax_range: TextRange,
     pub body_range: Option<TextRange>,
     pub lateral: bool,
@@ -226,6 +310,11 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
     let mut expectations = match expectation_result {
         Ok(expectations) => ExpectationSet {
             tokens: expectations.tokens,
+            direct_tokens: expectations.direct_tokens,
+            lookahead_tokens: expectations.lookahead_tokens,
+            expression_start_tokens: expectations.expression_start_tokens,
+            expression_continuation_tokens: expectations.expression_continuation_tokens,
+            follow_tokens: expectations.follow_tokens,
             phrases: expectations.phrases,
             slots: expectations.slots,
         },
@@ -245,7 +334,6 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
         ),
         Err(_) => ScopeSnapshot::default(),
     };
-    narrow_qualified_slots(&mut expectations, &prefix.qualifier, &scope);
     let mut intent = intent::from_expectations(&expectations);
     intent.qualifier = prefix.qualifier;
     if let Ok(output) = &completion_lex {
@@ -282,18 +370,68 @@ fn absolute_lex_range(base: usize, range: TextRange) -> TextRange {
 fn filter_token_prefix(expectations: &mut ExpectationSet, prefix: &CompletionPrefix) {
     if prefix.quoting != IdentifierQuoting::Unquoted {
         expectations.tokens.clear();
+        expectations.direct_tokens.clear();
+        expectations.lookahead_tokens.clear();
+        expectations.expression_start_tokens.clear();
+        expectations.expression_continuation_tokens.clear();
+        expectations.follow_tokens.clear();
         expectations.phrases.clear();
         return;
     }
     if prefix.normalized.is_empty() {
         return;
     }
+    let matching_syntax = expectations
+        .tokens
+        .iter()
+        .filter(|kind| {
+            token_spelling(**kind)
+                .is_some_and(|candidate| candidate.starts_with(&prefix.normalized))
+        })
+        .take(2)
+        .count();
+    let exact_syntax = expectations
+        .tokens
+        .iter()
+        .any(|kind| token_spelling(*kind).is_some_and(|candidate| candidate == prefix.normalized));
+    if expectations.slots.contains(&GrammarSlot::Alias) && matching_syntax != 1 && !exact_syntax {
+        expectations.tokens.clear();
+        expectations.direct_tokens.clear();
+        expectations.lookahead_tokens.clear();
+        expectations.expression_start_tokens.clear();
+        expectations.expression_continuation_tokens.clear();
+        expectations.follow_tokens.clear();
+        expectations.phrases.clear();
+        return;
+    }
     expectations.tokens.retain(|kind| {
         token_spelling(*kind).is_some_and(|candidate| candidate.starts_with(&prefix.normalized))
     });
+    expectations
+        .direct_tokens
+        .retain(|kind| expectations.tokens.contains(kind));
+    expectations
+        .lookahead_tokens
+        .retain(|kind| expectations.tokens.contains(kind));
+    expectations
+        .expression_start_tokens
+        .retain(|kind| expectations.tokens.contains(kind));
+    expectations
+        .expression_continuation_tokens
+        .retain(|kind| expectations.tokens.contains(kind));
+    expectations
+        .follow_tokens
+        .retain(|kind| expectations.tokens.contains(kind));
     expectations.phrases.retain(|phrase| {
         token_spelling(phrase[0]).is_some_and(|head| head.starts_with(&prefix.normalized))
     });
+}
+
+fn keyword_spelling(kind: TokenKind) -> Option<String> {
+    KEYWORDS
+        .iter()
+        .find(|keyword| keyword.kind == kind)
+        .map(|keyword| keyword.word.to_ascii_uppercase())
 }
 
 fn token_spelling(kind: TokenKind) -> Option<String> {
@@ -313,43 +451,5 @@ fn token_spelling(kind: TokenKind) -> Option<String> {
         TokenKind::NotEquals => Some("<>".to_owned()),
         TokenKind::RightArrow => Some("->".to_owned()),
         _ => None,
-    }
-}
-
-fn narrow_qualified_slots(
-    expectations: &mut ExpectationSet,
-    qualifier: &[NamePart],
-    scope: &ScopeSnapshot,
-) {
-    if !expectations.slots.contains(&GrammarSlot::Column)
-        || !expectations.slots.contains(&GrammarSlot::Function)
-    {
-        return;
-    }
-    let Some(first) = qualifier.first() else {
-        return;
-    };
-    let visible = scope
-        .local
-        .relations
-        .iter()
-        .chain(scope.outer.iter().flat_map(|outer| &outer.relations))
-        .chain(scope.dml_target.iter())
-        .chain(scope.merge_source.iter())
-        .any(|relation| {
-            relation.alias.as_ref().map_or_else(
-                || {
-                    relation
-                        .name
-                        .last()
-                        .is_some_and(|name| name.normalized == first.normalized)
-                },
-                |alias| alias.normalized == first.normalized,
-            )
-        });
-    if visible {
-        expectations
-            .slots
-            .retain(|slot| *slot != GrammarSlot::Function);
     }
 }

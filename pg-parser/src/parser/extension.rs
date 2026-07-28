@@ -18,6 +18,11 @@ impl Parser {
         self.consume(TokenKind::With);
         let mut options = Vec::new();
         while !self.at_statement_end() {
+            self.record_completion_lookahead_tokens(&[
+                TokenKind::Schema,
+                TokenKind::VersionP,
+                TokenKind::Cascade,
+            ]);
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::Schema => {
@@ -115,6 +120,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER EXTENSION requires a name"))?,
         );
+        self.record_completion_tokens(&[TokenKind::Update, TokenKind::AddP, TokenKind::Drop]);
         if matches!(self.peek_kind(), TokenKind::AddP | TokenKind::Drop) {
             let action = if self.consume(TokenKind::AddP) {
                 1
@@ -157,17 +163,55 @@ impl Parser {
     }
 
     fn parse_extension_member_object(&mut self) -> PResult<(ObjectType, Node)> {
+        self.record_completion_tokens(&[
+            TokenKind::Access,
+            TokenKind::Aggregate,
+            TokenKind::Cast,
+            TokenKind::Collation,
+            TokenKind::ConversionP,
+            TokenKind::Database,
+            TokenKind::DomainP,
+            TokenKind::Event,
+            TokenKind::Extension,
+            TokenKind::Foreign,
+            TokenKind::Function,
+            TokenKind::Index,
+            TokenKind::Language,
+            TokenKind::Materialized,
+            TokenKind::Operator,
+            TokenKind::Procedure,
+            TokenKind::Procedural,
+            TokenKind::Property,
+            TokenKind::Publication,
+            TokenKind::Role,
+            TokenKind::Routine,
+            TokenKind::Schema,
+            TokenKind::Sequence,
+            TokenKind::Server,
+            TokenKind::Statistics,
+            TokenKind::Subscription,
+            TokenKind::Table,
+            TokenKind::Tablespace,
+            TokenKind::TextP,
+            TokenKind::Transform,
+            TokenKind::TypeP,
+            TokenKind::View,
+        ]);
+        if self.at(TokenKind::Operator)
+            && !matches!(self.peek_kind_n(1), TokenKind::Class | TokenKind::Family)
+        {
+            self.advance();
+            self.record_completion_tokens(&[TokenKind::Class, TokenKind::Family]);
+            self.record_completion_slot(completion::GrammarSlot::Operator);
+            let object =
+                self.parse_operator_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+            return Ok((ObjectType::Operator, Node::ObjectWithArgs(object)));
+        }
         let function_type = match self.peek_kind() {
             TokenKind::Aggregate => Some(ObjectType::Aggregate),
             TokenKind::Function => Some(ObjectType::Function),
             TokenKind::Procedure => Some(ObjectType::Procedure),
             TokenKind::Routine => Some(ObjectType::Routine),
-            TokenKind::Operator
-                if self.peek_kind_n(1) != TokenKind::Class
-                    && self.peek_kind_n(1) != TokenKind::Family =>
-            {
-                Some(ObjectType::Operator)
-            }
             _ => None,
         };
         if let Some(objtype) = function_type {
@@ -263,6 +307,7 @@ impl Parser {
             }
             TokenKind::Foreign => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::DataP, TokenKind::Table]);
                 match self.peek_kind() {
                     TokenKind::DataP => {
                         self.advance();
@@ -298,6 +343,12 @@ impl Parser {
             TokenKind::TextP => {
                 self.advance();
                 self.expect(TokenKind::Search)?;
+                self.record_completion_tokens(&[
+                    TokenKind::Parser,
+                    TokenKind::Dictionary,
+                    TokenKind::Template,
+                    TokenKind::Configuration,
+                ]);
                 match self.advance().kind {
                     TokenKind::Parser => ObjectType::Tsparser,
                     TokenKind::Dictionary => ObjectType::Tsdictionary,

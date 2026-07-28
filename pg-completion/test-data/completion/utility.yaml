@@ -93,7 +93,7 @@
 - input: COPY (SELECT |
   want:
     candidates:
-      tokens: [(, '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXCEPT, EXISTS, EXTRACT, 'FALSE', FETCH, FOR, FROM, GREATEST, GROUP, GROUPING, HAVING, INTERSECT, INTO, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LIMIT, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OFFSET, OPERATOR, ORDER, OVERLAY, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', UNION, USER, WHERE, WINDOW, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      tokens: [(, '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXCEPT, EXISTS, EXTRACT, 'FALSE', FETCH, FOR, FROM, GREATEST, GROUP, GROUPING, HAVING, INTERSECT, INTO, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LIMIT, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OFFSET, OPERATOR, ORDER, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', UNION, USER, WHERE, WINDOW, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
       slots: [Column, Function]
 
 - input: COPY source_table TO STDOUT WITH (|)
@@ -105,13 +105,13 @@
 - input: COPY source_table TO STDOUT WITH (FORMAT |)
   want:
     candidates:
-      tokens: [(, ), '*', +, ',', '-', DEFAULT, 'FALSE', ON, 'TRUE']
+      tokens: [(, ), '*', +, ',', '-', DEFAULT, 'FALSE', ON, SConst, 'TRUE']
       slots: [AnyName]
 
 - input: COPY source_table TO STDOUT WITH (force_quote (|))
   want:
     candidates:
-      tokens: ['FALSE', ON, 'TRUE']
+      tokens: ['FALSE', ON, SConst, 'TRUE']
       slots: [Column]
 
 - input: VACUUM |
@@ -155,7 +155,7 @@
 - input: CALL f(|
   want:
     candidates:
-      tokens: [(, ), '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      tokens: [(, ), '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, VARIADIC, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
       slots: [Column, Function]
 
 - input: DISCARD |
@@ -209,7 +209,7 @@
 - input: SET TIME ZONE |
   want:
     candidates:
-      tokens: [DEFAULT, LOCAL]
+      tokens: [DEFAULT, INTERVAL, LOCAL]
       slots: [AnyName]
 
 - input: START TRANSACTION |
@@ -329,13 +329,13 @@
 - input: REASSIGN OWNED BY |
   want:
     candidates:
-      tokens: []
+      tokens: [CURRENT_ROLE, CURRENT_USER, SESSION_USER]
       slots: [Role]
 
 - input: REASSIGN OWNED BY old_role TO |
   want:
     candidates:
-      tokens: []
+      tokens: [CURRENT_ROLE, CURRENT_USER, SESSION_USER]
       slots: [Role]
 
 - input: COMMENT |
@@ -343,6 +343,24 @@
     candidates:
       tokens: [ON]
       slots: []
+
+- input: COMMENT ON |
+  want:
+    candidates:
+      tokens: [ACCESS, AGGREGATE, CAST, COLLATION, COLUMN, CONSTRAINT, CONVERSION, DATABASE, DOMAIN, EVENT, EXTENSION, FOREIGN, FUNCTION, INDEX, LANGUAGE, LARGE, MATERIALIZED, OPERATOR, POLICY, PROCEDURAL, PROCEDURE, PROPERTY, PUBLICATION, ROLE, ROUTINE, RULE, SCHEMA, SEQUENCE, SERVER, STATISTICS, SUBSCRIPTION, TABLE, TABLESPACE, TEXT, TRANSFORM, TRIGGER, TYPE, VIEW]
+      slots: []
+
+- input: COMMENT ON OPERATOR |
+  want:
+    candidates:
+      tokens: [CLASS, FAMILY]
+      slots: [Operator]
+
+- input: COMMENT ON CONSTRAINT c ON |
+  want:
+    candidates:
+      tokens: [DOMAIN]
+      slots: [Table]
 
 - input: COMMENT ON COLUMN t.|
   want:
@@ -356,17 +374,47 @@
       tokens: [LABEL]
       slots: []
 
+- input: SECURITY LABEL ON |
+  want:
+    candidates:
+      tokens: [ACCESS, AGGREGATE, COLLATION, COLUMN, CONVERSION, DATABASE, DOMAIN, EVENT, EXTENSION, FOREIGN, FUNCTION, INDEX, LANGUAGE, LARGE, MATERIALIZED, PROCEDURAL, PROCEDURE, PROPERTY, PUBLICATION, ROLE, ROUTINE, SCHEMA, SEQUENCE, SERVER, STATISTICS, SUBSCRIPTION, TABLE, TABLESPACE, TEXT, TYPE, VIEW]
+      slots: []
+
 - input: SECURITY LABEL ON TABLE |
   want:
     candidates:
       tokens: []
       slots: [Table]
 
+- input: COMMENT ON FOREIGN |
+  want:
+    candidates:
+      tokens: [DATA, TABLE]
+      slots: []
+
+- input: COMMENT ON TEXT SEARCH |
+  want:
+    candidates:
+      tokens: [CONFIGURATION, DICTIONARY, PARSER, TEMPLATE]
+      slots: []
+
+- input: ALTER EXTENSION e ADD OPERATOR |
+  want:
+    candidates:
+      tokens: [CLASS, FAMILY]
+      slots: [Operator]
+
+- input: ALTER EXTENSION e ADD FOREIGN |
+  want:
+    candidates:
+      tokens: [DATA, TABLE]
+      slots: []
+
 - input: GRANT |
   want:
     candidates:
-      tokens: [ALL, ALTER]
-      slots: []
+      tokens: [ALL, ALTER, CREATE, DELETE, EXECUTE, INSERT, REFERENCES, SELECT, SET, TEMP, TEMPORARY, TRIGGER, TRUNCATE, UPDATE]
+      slots: [Privilege, Role]
 
 - input: GRANT SELECT ON TABLE |
   want:
@@ -374,29 +422,53 @@
       tokens: []
       slots: [Table]
 
+- input: GRANT SELECT ON ALL |
+  want:
+    candidates:
+      tokens: [FUNCTIONS, PROCEDURES, ROUTINES, SEQUENCES, TABLES]
+      slots: []
+
+- input: GRANT USAGE ON FOREIGN |
+  want:
+    candidates:
+      tokens: [DATA, SERVER]
+      slots: []
+
+- input: GRANT USAGE ON PROPERTY |
+  want:
+    candidates:
+      tokens: [GRAPH]
+      slots: []
+
+- input: GRANT SELECT ON LARGE |
+  want:
+    candidates:
+      tokens: [OBJECT]
+      slots: []
+
 - input: GRANT SELECT ON TABLE t TO |
   want:
     candidates:
-      tokens: [GROUP]
+      tokens: [CURRENT_ROLE, CURRENT_USER, GROUP, SESSION_USER]
       slots: [Role]
 
 - input: GRANT UPDATE ON t TO |
   want:
     candidates:
-      tokens: [GROUP]
+      tokens: [CURRENT_ROLE, CURRENT_USER, GROUP, SESSION_USER]
       slots: [Role]
     scope: {}
 
 - input: REVOKE |
   want:
     candidates:
-      tokens: [ALL, ALTER, GRANT]
-      slots: []
+      tokens: [ALL, ALTER, CREATE, DELETE, EXECUTE, GRANT, INSERT, REFERENCES, SELECT, SET, TEMP, TEMPORARY, TRIGGER, TRUNCATE, UPDATE]
+      slots: [Privilege, Role]
 
 - input: REVOKE SELECT ON TABLE t FROM |
   want:
     candidates:
-      tokens: [GROUP]
+      tokens: [CURRENT_ROLE, CURRENT_USER, GROUP, SESSION_USER]
       slots: [Role]
 
 - input: IMPORT |
@@ -444,7 +516,7 @@
 - input: GRANT role_a TO |
   want:
     candidates:
-      tokens: []
+      tokens: [CURRENT_ROLE, CURRENT_USER, SESSION_USER]
       slots: [Role]
 
 - input: GRANT USAGE ON SCHEMA |

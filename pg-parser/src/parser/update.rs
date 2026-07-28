@@ -16,14 +16,14 @@ impl Parser {
     pub(super) fn parse_update(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::Update)?;
         let mut relation = Some(Box::new(
-            self.try_parse_range_var_with_slot(false, completion::GrammarSlot::Table)
+            self.try_parse_range_var_with_slot(false, completion::GrammarSlot::Table)?
                 .ok_or_else(|| self.error_here("UPDATE requires a relation name"))?,
         ));
         let for_portion_of = self.parse_for_portion_of_clause()?;
         if for_portion_of.is_some()
             && let Some(relation) = relation.as_mut()
         {
-            relation.alias = self.parse_optional_alias(false);
+            relation.alias = self.parse_optional_alias(false)?;
         }
         self.expect(TokenKind::Set)?;
         let target_list = self.parse_set_clause_list_until(&[

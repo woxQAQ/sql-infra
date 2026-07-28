@@ -36,6 +36,13 @@ impl Parser {
             true
         };
         let cmd_name = if self.consume(TokenKind::For) {
+            self.record_completion_tokens(&[
+                TokenKind::All,
+                TokenKind::Select,
+                TokenKind::Insert,
+                TokenKind::Update,
+                TokenKind::DeleteP,
+            ]);
             let command = match self.advance().kind {
                 TokenKind::All => "all",
                 TokenKind::Select => "select",

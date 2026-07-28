@@ -45,6 +45,38 @@ impl Parser {
             let first = self.take_until_top_level(&[TokenKind::Char(')')]);
             if self.at_completion() {
                 self.record_completion_slot(completion::GrammarSlot::Type);
+                let mut active_start = 0usize;
+                let mut depth = 0usize;
+                let mut saw_order_by = false;
+                for (index, token) in first.iter().enumerate() {
+                    match token.kind {
+                        TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                        TokenKind::Char(')') | TokenKind::Char(']') => {
+                            depth = depth.saturating_sub(1)
+                        }
+                        TokenKind::Order
+                            if depth == 0
+                                && first.get(index + 1).map(|token| token.kind)
+                                    == Some(TokenKind::By) =>
+                        {
+                            saw_order_by = true;
+                            active_start = index + 2;
+                        }
+                        TokenKind::Char(',') if depth == 0 => active_start = index + 1,
+                        _ => {}
+                    }
+                }
+                if !saw_order_by
+                    && (first.is_empty() || parse_aggregate_args(first.clone()).is_ok())
+                {
+                    self.record_completion_phrase(&[TokenKind::Order, TokenKind::By]);
+                }
+                let mut active_parameter = first[active_start..].to_vec();
+                self.append_completion_marker(&mut active_parameter);
+                let _ = function_parameter_from_tokens_with_completion(
+                    active_parameter,
+                    self.completion.clone(),
+                );
             }
             self.expect(TokenKind::Char(')'))?;
             let aggregate_args = parse_aggregate_args(first.clone());

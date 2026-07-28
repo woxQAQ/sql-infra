@@ -27,10 +27,48 @@ impl Parser {
     }
 
     fn parse_alter_object_kind(&mut self) -> PResult<ObjectType> {
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Access,
+            TokenKind::Aggregate,
+            TokenKind::Collation,
+            TokenKind::ConversionP,
+            TokenKind::Database,
+            TokenKind::DomainP,
+            TokenKind::Event,
+            TokenKind::Extension,
+            TokenKind::Foreign,
+            TokenKind::Function,
+            TokenKind::GroupP,
+            TokenKind::Index,
+            TokenKind::Language,
+            TokenKind::LargeP,
+            TokenKind::Materialized,
+            TokenKind::Operator,
+            TokenKind::Policy,
+            TokenKind::Procedure,
+            TokenKind::Procedural,
+            TokenKind::Property,
+            TokenKind::Publication,
+            TokenKind::Role,
+            TokenKind::Routine,
+            TokenKind::Rule,
+            TokenKind::Schema,
+            TokenKind::Sequence,
+            TokenKind::Server,
+            TokenKind::Statistics,
+            TokenKind::Subscription,
+            TokenKind::Table,
+            TokenKind::Tablespace,
+            TokenKind::TextP,
+            TokenKind::Trigger,
+            TokenKind::TypeP,
+            TokenKind::User,
+            TokenKind::View,
+        ]);
         let kind = match self.peek_kind() {
-            TokenKind::Access if self.peek_kind_n(1) == TokenKind::Method => {
+            TokenKind::Access => {
                 self.advance();
-                self.advance();
+                self.expect(TokenKind::Method)?;
                 ObjectType::AccessMethod
             }
             TokenKind::Aggregate => ObjectType::Aggregate,
@@ -38,22 +76,22 @@ impl Parser {
             TokenKind::ConversionP => ObjectType::Conversion,
             TokenKind::Database => ObjectType::Database,
             TokenKind::DomainP => ObjectType::Domain,
-            TokenKind::Event if self.peek_kind_n(1) == TokenKind::Trigger => {
+            TokenKind::Event => {
                 self.advance();
-                self.advance();
+                self.expect(TokenKind::Trigger)?;
                 ObjectType::EventTrigger
             }
             TokenKind::Extension => ObjectType::Extension,
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::DataP => {
+            TokenKind::Foreign => {
                 self.advance();
-                self.expect(TokenKind::DataP)?;
-                self.expect(TokenKind::Wrapper)?;
-                ObjectType::Fdw
-            }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::Table => {
-                self.advance();
-                self.advance();
-                ObjectType::ForeignTable
+                self.record_completion_tokens(&[TokenKind::DataP, TokenKind::Table]);
+                if self.consume(TokenKind::Table) {
+                    ObjectType::ForeignTable
+                } else {
+                    self.expect(TokenKind::DataP)?;
+                    self.expect(TokenKind::Wrapper)?;
+                    ObjectType::Fdw
+                }
             }
             TokenKind::Function => ObjectType::Function,
             TokenKind::GroupP | TokenKind::Role | TokenKind::User => ObjectType::Role,
@@ -62,32 +100,32 @@ impl Parser {
                 self.advance();
                 ObjectType::Language
             }
-            TokenKind::LargeP if self.peek_kind_n(1) == TokenKind::ObjectP => {
+            TokenKind::LargeP => {
                 self.advance();
-                self.advance();
+                self.expect(TokenKind::ObjectP)?;
                 ObjectType::Largeobject
             }
-            TokenKind::Materialized if self.peek_kind_n(1) == TokenKind::View => {
+            TokenKind::Materialized => {
                 self.advance();
-                self.advance();
+                self.expect(TokenKind::View)?;
                 ObjectType::Matview
             }
-            TokenKind::Operator if self.peek_kind_n(1) == TokenKind::Class => {
+            TokenKind::Operator => {
                 self.advance();
-                self.advance();
-                ObjectType::Opclass
+                self.record_completion_lookahead_tokens(&[TokenKind::Class, TokenKind::Family]);
+                if self.consume(TokenKind::Class) {
+                    ObjectType::Opclass
+                } else if self.consume(TokenKind::Family) {
+                    ObjectType::Opfamily
+                } else {
+                    ObjectType::Operator
+                }
             }
-            TokenKind::Operator if self.peek_kind_n(1) == TokenKind::Family => {
-                self.advance();
-                self.advance();
-                ObjectType::Opfamily
-            }
-            TokenKind::Operator => ObjectType::Operator,
             TokenKind::Policy => ObjectType::Policy,
             TokenKind::Procedure => ObjectType::Procedure,
-            TokenKind::Property if self.peek_kind_n(1) == TokenKind::Graph => {
+            TokenKind::Property => {
                 self.advance();
-                self.advance();
+                self.expect(TokenKind::Graph)?;
                 ObjectType::Propgraph
             }
             TokenKind::Publication => ObjectType::Publication,
@@ -100,14 +138,32 @@ impl Parser {
             TokenKind::Subscription => ObjectType::Subscription,
             TokenKind::Table => ObjectType::Table,
             TokenKind::Tablespace => ObjectType::Tablespace,
-            TokenKind::TextP if self.peek_kind_n(1) == TokenKind::Search => {
+            TokenKind::TextP => {
                 self.advance();
-                self.advance();
-                match self.advance().kind {
-                    TokenKind::Parser => ObjectType::Tsparser,
-                    TokenKind::Dictionary => ObjectType::Tsdictionary,
-                    TokenKind::Template => ObjectType::Tstemplate,
-                    TokenKind::Configuration => ObjectType::Tsconfiguration,
+                self.expect(TokenKind::Search)?;
+                self.record_completion_tokens(&[
+                    TokenKind::Parser,
+                    TokenKind::Dictionary,
+                    TokenKind::Template,
+                    TokenKind::Configuration,
+                ]);
+                match self.peek_kind() {
+                    TokenKind::Parser => {
+                        self.advance();
+                        ObjectType::Tsparser
+                    }
+                    TokenKind::Dictionary => {
+                        self.advance();
+                        ObjectType::Tsdictionary
+                    }
+                    TokenKind::Template => {
+                        self.advance();
+                        ObjectType::Tstemplate
+                    }
+                    TokenKind::Configuration => {
+                        self.advance();
+                        ObjectType::Tsconfiguration
+                    }
                     _ => return Err(self.error_here("invalid TEXT SEARCH object type")),
                 }
             }
@@ -139,6 +195,7 @@ impl Parser {
                 | ObjectType::Tstemplate
                 | ObjectType::Tsconfiguration
                 | ObjectType::Language
+                | ObjectType::Operator
         ) {
             self.advance();
         }

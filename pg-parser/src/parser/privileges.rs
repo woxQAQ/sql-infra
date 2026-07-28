@@ -1,5 +1,41 @@
 use super::*;
 
+const ACCESS_PRIVILEGE_STARTS: &[TokenKind] = &[
+    TokenKind::All,
+    TokenKind::Alter,
+    TokenKind::Create,
+    TokenKind::DeleteP,
+    TokenKind::Execute,
+    TokenKind::Insert,
+    TokenKind::References,
+    TokenKind::Select,
+    TokenKind::Set,
+    TokenKind::Temp,
+    TokenKind::Temporary,
+    TokenKind::Trigger,
+    TokenKind::Truncate,
+    TokenKind::Update,
+];
+
+const PRIVILEGE_TARGET_STARTS: &[TokenKind] = &[
+    TokenKind::All,
+    TokenKind::Table,
+    TokenKind::Sequence,
+    TokenKind::Function,
+    TokenKind::Procedure,
+    TokenKind::Routine,
+    TokenKind::Database,
+    TokenKind::DomainP,
+    TokenKind::Language,
+    TokenKind::Schema,
+    TokenKind::Tablespace,
+    TokenKind::TypeP,
+    TokenKind::Parameter,
+    TokenKind::Foreign,
+    TokenKind::Property,
+    TokenKind::LargeP,
+];
+
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html
@@ -182,6 +218,7 @@ impl Parser {
         } else {
             false
         };
+        self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
         let privileges = self.parse_access_privileges()?;
         self.expect(TokenKind::On)?;
         self.record_completion_tokens(&[
@@ -461,6 +498,9 @@ impl Parser {
     //   | SESSION_USER
     pub(super) fn parse_grant(&mut self, is_grant: bool) -> PResult<Node> {
         self.advance();
+        self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
+        self.record_completion_slot(completion::GrammarSlot::Privilege);
+        self.record_completion_slot(completion::GrammarSlot::Role);
         let mut revoke_grant_option = false;
         if !is_grant && self.consume(TokenKind::Grant) {
             self.expect(TokenKind::Option)?;
@@ -478,6 +518,8 @@ impl Parser {
     }
 
     fn parse_object_grant(&mut self, is_grant: bool, revoke_grant_option: bool) -> PResult<Node> {
+        self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
+        self.record_completion_slot(completion::GrammarSlot::Privilege);
         let privileges = self.parse_access_privileges()?;
         self.expect(TokenKind::On)?;
         let (targtype, objtype, objects) = self.parse_privilege_target()?;
@@ -534,9 +576,14 @@ impl Parser {
 
     fn parse_role_grant(&mut self, is_grant: bool) -> PResult<Node> {
         let mut opt = Vec::new();
+        if !is_grant && self.peek_kind_n(1) == TokenKind::Completion {
+            self.advance();
+            self.record_completion_tokens(&[TokenKind::Option, TokenKind::On, TokenKind::From]);
+            return Err(self.error_here("expected a REVOKE continuation"));
+        }
         if !is_grant
             && self.peek_kind_n(1) == TokenKind::Option
-            && self.peek_kind_n(2) == TokenKind::For
+            && matches!(self.peek_kind_n(2), TokenKind::For | TokenKind::Completion)
         {
             let location = self.location();
             let name = self
@@ -555,10 +602,12 @@ impl Parser {
         } else {
             TokenKind::From
         };
-        if self.at(TokenKind::All) {
+        if self.peek_kind() == TokenKind::All && !self.top_level_contains(TokenKind::Completion) {
             return Err(self.error_here("GRANT/REVOKE ROLE requires an explicit role list"));
         }
+        self.record_completion_slot(completion::GrammarSlot::Role);
         let granted_roles = self.parse_access_privileges_until(separator)?;
+        self.record_completion_tokens(&[TokenKind::On]);
         self.expect(separator)?;
         let grantee_roles = self.parse_role_specs_until(
             &[
@@ -624,6 +673,10 @@ impl Parser {
     }
 
     fn parse_access_privileges_until(&mut self, stop: TokenKind) -> PResult<NodeList> {
+        self.record_completion_slot(completion::GrammarSlot::Privilege);
+        if stop != TokenKind::On {
+            self.record_completion_slot(completion::GrammarSlot::Role);
+        }
         if self.consume(TokenKind::All) {
             self.consume(TokenKind::Privileges);
             let cols = self.parse_optional_column_name_list()?;
@@ -638,7 +691,11 @@ impl Parser {
             };
         }
         let mut privileges = Vec::new();
-        while !self.at(stop) {
+        while self.at_completion() || !self.at(stop) {
+            self.record_completion_slot(completion::GrammarSlot::Privilege);
+            if stop != TokenKind::On {
+                self.record_completion_slot(completion::GrammarSlot::Role);
+            }
             let (name, allow_columns) = if self.consume(TokenKind::Alter) {
                 self.expect(TokenKind::SystemP)?;
                 ("alter system".to_owned(), false)
@@ -671,7 +728,7 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at(stop) {
+            if self.peek_kind() == stop {
                 return Err(self.error_here("expected a privilege or role after ','"));
             }
         }
@@ -701,7 +758,15 @@ impl Parser {
     }
 
     fn parse_privilege_target(&mut self) -> PResult<(GrantTargetType, ObjectType, NodeList)> {
+        self.record_completion_tokens(PRIVILEGE_TARGET_STARTS);
         if self.consume(TokenKind::All) {
+            self.record_completion_tokens(&[
+                TokenKind::Tables,
+                TokenKind::Sequences,
+                TokenKind::Functions,
+                TokenKind::Procedures,
+                TokenKind::Routines,
+            ]);
             let objtype = match self.peek_kind() {
                 TokenKind::Tables => ObjectType::Table,
                 TokenKind::Sequences => ObjectType::Sequence,
@@ -778,20 +843,21 @@ impl Parser {
                 self.advance();
                 ObjectType::ParameterAcl
             }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::DataP => {
+            TokenKind::Foreign => {
                 self.advance();
-                self.advance();
-                self.expect(TokenKind::Wrapper)?;
-                ObjectType::Fdw
+                self.record_completion_tokens(&[TokenKind::DataP, TokenKind::Server]);
+                if self.consume(TokenKind::DataP) {
+                    self.expect(TokenKind::Wrapper)?;
+                    ObjectType::Fdw
+                } else if self.consume(TokenKind::Server) {
+                    ObjectType::ForeignServer
+                } else {
+                    return Err(self.error_here("expected DATA WRAPPER or SERVER after FOREIGN"));
+                }
             }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::Server => {
+            TokenKind::Property => {
                 self.advance();
-                self.advance();
-                ObjectType::ForeignServer
-            }
-            TokenKind::Property if self.peek_kind_n(1) == TokenKind::Graph => {
-                self.advance();
-                self.advance();
+                self.expect(TokenKind::Graph)?;
                 ObjectType::Propgraph
             }
             TokenKind::LargeP => {
@@ -895,7 +961,7 @@ impl Parser {
         allow_group_prefix: bool,
     ) -> PResult<NodeList> {
         let mut roles = Vec::new();
-        while !self.at_any(stops) {
+        while self.at_completion() || !self.at_any(stops) {
             if allow_group_prefix {
                 self.consume(TokenKind::GroupP);
             }
@@ -906,7 +972,7 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at_any(stops) {
+            if !self.at_completion() && self.at_any(stops) {
                 return Err(self.error_here("expected a role after ','"));
             }
         }

@@ -152,6 +152,7 @@ impl Parser {
         };
         self.expect(TokenKind::As)?;
         let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        self.record_view_check_option_completion(&tokens);
         let (query_tokens, with_check_option) = split_view_check_option(tokens);
         if recursive && with_check_option != ViewCheckOption::NoCheckOption {
             return Err(self.error_here("WITH CHECK OPTION is not supported on recursive views"));
@@ -171,6 +172,48 @@ impl Parser {
             options,
             with_check_option,
         }))
+    }
+
+    fn record_view_check_option_completion(&self, tokens: &[Token]) {
+        if !self.at_completion() {
+            return;
+        }
+        if parse_select_statement_tokens(tokens.to_vec()).is_ok() {
+            self.record_completion_tokens(&[TokenKind::With]);
+            return;
+        }
+        let kinds = tokens.iter().map(|token| token.kind).collect::<Vec<_>>();
+        let suffix = if kinds.last() == Some(&TokenKind::With) {
+            Some((
+                1,
+                &[TokenKind::Local, TokenKind::Cascaded, TokenKind::Check][..],
+            ))
+        } else if kinds.len() >= 2
+            && kinds[kinds.len() - 2] == TokenKind::With
+            && matches!(kinds.last(), Some(TokenKind::Local | TokenKind::Cascaded))
+        {
+            Some((2, &[TokenKind::Check][..]))
+        } else if kinds.len() >= 2
+            && kinds[kinds.len() - 2..] == [TokenKind::With, TokenKind::Check]
+        {
+            Some((2, &[TokenKind::Option][..]))
+        } else if kinds.len() >= 3
+            && kinds[kinds.len() - 3] == TokenKind::With
+            && matches!(
+                kinds.get(kinds.len() - 2),
+                Some(TokenKind::Local | TokenKind::Cascaded)
+            )
+            && kinds.last() == Some(&TokenKind::Check)
+        {
+            Some((3, &[TokenKind::Option][..]))
+        } else {
+            None
+        };
+        if let Some((suffix_len, candidates)) = suffix
+            && parse_select_statement_tokens(tokens[..tokens.len() - suffix_len].to_vec()).is_ok()
+        {
+            self.record_completion_tokens(candidates);
+        }
     }
 }
 pub(super) fn is_rule_action(node: &Node) -> bool {

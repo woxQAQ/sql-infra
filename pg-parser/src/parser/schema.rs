@@ -97,6 +97,24 @@ impl Parser {
         }
         self.pos = end;
         let mut tokens = self.tokens[start..end].to_vec();
+        if self.at_completion()
+            && parse_statement_node_tokens(tokens.clone()).is_ok_and(|node| {
+                matches!(
+                    node,
+                    Node::CreateStmt(_)
+                        | Node::IndexStmt(_)
+                        | Node::CreateDomainStmt(_)
+                        | Node::CreateFunctionStmt(_)
+                        | Node::CreateSeqStmt(_)
+                        | Node::CreateTrigStmt(_)
+                        | Node::DefineStmt(_)
+                        | Node::GrantStmt(_)
+                        | Node::ViewStmt(_)
+                )
+            })
+        {
+            self.record_completion_tokens(&[TokenKind::Create, TokenKind::Grant]);
+        }
         self.append_completion_marker(&mut tokens);
         let node = parse_statement_node_tokens_with_completion(tokens, self.completion.clone())?;
         if matches!(

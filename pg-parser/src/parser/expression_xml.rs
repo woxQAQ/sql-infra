@@ -184,12 +184,25 @@ impl ExprParser {
         let mut type_tokens = Vec::new();
         while !matches!(
             self.peek_kind(),
-            TokenKind::Indent | TokenKind::No | TokenKind::Char(')') | TokenKind::Eof
+            TokenKind::Indent
+                | TokenKind::No
+                | TokenKind::Char(')')
+                | TokenKind::Completion
+                | TokenKind::Eof
         ) {
             type_tokens.push(self.advance().clone());
         }
+        let completing_type = self.at_completion();
+        if completing_type {
+            let mut completion_tokens = type_tokens.clone();
+            completion_tokens.push(self.peek().clone());
+            record_simple_type_name_completion(&completion_tokens, self.completion.as_ref());
+        }
         let type_name = match parse_simple_type_name_tokens(type_tokens) {
             Ok(type_name) => Box::new(type_name),
+            Err(_) if completing_type => {
+                return self.fail("completion point in XMLSERIALIZE type");
+            }
             Err(error) => {
                 if self.error.is_none() {
                     self.error = Some(error);
@@ -197,6 +210,11 @@ impl ExprParser {
                 return None;
             }
         };
+        if self.at_completion() {
+            self.record_completion_lookahead_tokens(&[TokenKind::Indent, TokenKind::No]);
+            self.record_completion_tokens(&[TokenKind::Char(')')]);
+            return self.fail("completion point after XMLSERIALIZE type");
+        }
         let indent = if self.consume(TokenKind::Indent) {
             true
         } else if self.consume(TokenKind::No) {

@@ -34,7 +34,7 @@ impl Parser {
         self.expect(TokenKind::Publication)?;
         let publication = self.parse_publication_name_list()?;
         let options = if self.consume(TokenKind::With) {
-            self.parse_parenthesized_def_elem_list_strict()?
+            self.parse_subscription_option_list()?
         } else {
             Vec::new()
         };
@@ -174,16 +174,17 @@ impl Parser {
                 );
                 AlterSubscriptionType::Server
             }
-            TokenKind::Set if self.peek_kind_n(1) == TokenKind::Char('(') => {
+            TokenKind::Set => {
                 self.advance();
-                stmt.options = self.parse_parenthesized_def_elem_list_strict()?;
-                AlterSubscriptionType::Options
-            }
-            TokenKind::Set if self.peek_kind_n(1) == TokenKind::Publication => {
-                self.advance();
-                self.advance();
-                stmt.publication = self.parse_publication_name_list()?;
-                AlterSubscriptionType::SetPublication
+                self.record_completion_tokens(&[TokenKind::Char('('), TokenKind::Publication]);
+                if self.at(TokenKind::Char('(')) {
+                    stmt.options = self.parse_subscription_option_list()?;
+                    AlterSubscriptionType::Options
+                } else {
+                    self.expect(TokenKind::Publication)?;
+                    stmt.publication = self.parse_publication_name_list()?;
+                    AlterSubscriptionType::SetPublication
+                }
             }
             TokenKind::AddP => {
                 self.advance();
@@ -240,7 +241,7 @@ impl Parser {
                 | AlterSubscriptionType::RefreshPublication
         ) && self.consume(TokenKind::With)
         {
-            stmt.options = self.parse_parenthesized_def_elem_list_strict()?;
+            stmt.options = self.parse_subscription_option_list()?;
         }
         self.expect_statement_end()?;
         Ok(Node::AlterSubscriptionStmt(stmt))
@@ -495,6 +496,9 @@ impl Parser {
         let mut publications = Vec::new();
         loop {
             self.record_completion_slot(completion::GrammarSlot::Publication);
+            if self.at_completion() {
+                return Err(self.error_here("expected a publication name"));
+            }
             if self.at_any(&[TokenKind::With, TokenKind::Char(';'), TokenKind::Eof]) {
                 break;
             }

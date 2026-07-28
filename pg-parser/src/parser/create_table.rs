@@ -159,14 +159,19 @@ impl Parser {
         relation_node.relpersistence = relpersistence;
         let relation = Some(Box::new(relation_node));
         if !foreign
-            && self
+            && (self
                 .has_top_level_token_before(TokenKind::As, &[TokenKind::Char(';'), TokenKind::Eof])
+                || self.completion_follows_create_table_as_target())
         {
             return self.parse_create_table_as_target(relation, if_not_exists);
         }
         let mut inh_relations = Vec::new();
         let mut partbound = None;
         let mut of_typename = None;
+        self.record_completion_tokens(&[TokenKind::Char('('), TokenKind::Partition, TokenKind::Of]);
+        if !foreign {
+            self.record_completion_tokens(&[TokenKind::As]);
+        }
         let table_elts = match self.peek_kind() {
             TokenKind::Partition => {
                 self.advance();
@@ -234,12 +239,13 @@ impl Parser {
         let (partspec, access_method, options, oncommit, tablespacename) = if foreign {
             (None, None, Vec::new(), OnCommitAction::Noop, None)
         } else {
+            self.record_completion_follow_phrase(&[TokenKind::Partition, TokenKind::By]);
             let partspec = if self.at(TokenKind::Partition) {
                 Some(Box::new(self.parse_partition_spec()?))
             } else {
                 None
             };
-            let access_method = if self.consume(TokenKind::Using) {
+            let access_method = if self.consume_follow(TokenKind::Using) {
                 self.record_completion_slot(completion::GrammarSlot::AccessMethod);
                 Some(
                     self.consume_col_id()
@@ -248,16 +254,16 @@ impl Parser {
             } else {
                 None
             };
-            let options = if self.consume(TokenKind::With) {
+            let options = if self.consume_follow(TokenKind::With) {
                 self.parse_parenthesized_reloptions()?
             } else {
-                if self.consume(TokenKind::Without) {
+                if self.consume_follow(TokenKind::Without) {
                     self.expect(TokenKind::Oids)?;
                 }
                 Vec::new()
             };
             let oncommit = self.parse_on_commit_option()?;
-            let tablespacename = if self.consume(TokenKind::Tablespace) {
+            let tablespacename = if self.consume_follow(TokenKind::Tablespace) {
                 self.record_completion_slot(completion::GrammarSlot::Tablespace);
                 Some(
                     self.consume_col_id()
@@ -369,6 +375,7 @@ impl Parser {
             }));
         }
         let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        self.record_with_data_suffix_completion(&query_tokens);
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
         let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
         Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
@@ -389,6 +396,63 @@ impl Parser {
             if_not_exists,
             ..CreateTableAsStmt::default()
         }))
+    }
+
+    fn completion_follows_create_table_as_target(&self) -> bool {
+        let mut depth = 0usize;
+        let mut completion = None;
+        for (offset, token) in self.tokens[self.pos..].iter().enumerate() {
+            match token.kind {
+                TokenKind::Completion if depth == 0 => {
+                    completion = Some(self.pos + offset);
+                    break;
+                }
+                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
+                TokenKind::Char(';') | TokenKind::Eof if depth == 0 => break,
+                _ => {}
+            }
+        }
+        let Some(completion) = completion else {
+            return false;
+        };
+        if completion == self.pos {
+            return false;
+        }
+        let mut tokens = self.tokens[self.pos..completion].to_vec();
+        tokens.push(Token::synthetic(
+            TokenKind::Eof,
+            self.tokens[completion].location(),
+        ));
+        let mut probe = Parser {
+            tokens,
+            pos: 0,
+            completion: None,
+        };
+        probe.parse_create_table_as_target_prefix().is_ok()
+    }
+
+    fn parse_create_table_as_target_prefix(&mut self) -> PResult<()> {
+        if self.consume(TokenKind::Char('(')) {
+            self.parse_parenthesized_name_list_body()?;
+            self.expect(TokenKind::Char(')'))?;
+        }
+        if self.consume(TokenKind::Using) {
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("USING requires an access method"))?;
+        }
+        if self.consume(TokenKind::With) {
+            self.parse_parenthesized_reloptions()?;
+        } else if self.consume(TokenKind::Without) {
+            self.expect(TokenKind::Oids)?;
+        }
+        self.parse_on_commit_option()?;
+        if self.consume(TokenKind::Tablespace) {
+            self.consume_col_id()
+                .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?;
+        }
+        self.expect(TokenKind::Eof)?;
+        Ok(())
     }
 
     fn parse_on_commit_option(&mut self) -> PResult<OnCommitAction> {
@@ -472,6 +536,7 @@ impl Parser {
         };
         self.expect(TokenKind::As)?;
         let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        self.record_with_data_suffix_completion(&query_tokens);
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
         let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
         Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
@@ -491,6 +556,27 @@ impl Parser {
             if_not_exists,
             ..CreateTableAsStmt::default()
         }))
+    }
+
+    fn record_with_data_suffix_completion(&self, tokens: &[Token]) {
+        if !self.at_completion() {
+            return;
+        }
+        if parse_select_statement_tokens(tokens.to_vec()).is_ok() {
+            self.record_completion_tokens(&[TokenKind::With]);
+            return;
+        }
+        let kinds = tokens.iter().map(|token| token.kind).collect::<Vec<_>>();
+        if kinds.last() == Some(&TokenKind::With)
+            && parse_select_statement_tokens(tokens[..tokens.len() - 1].to_vec()).is_ok()
+        {
+            self.record_completion_tokens(&[TokenKind::No, TokenKind::DataP]);
+        } else if kinds.len() >= 2
+            && kinds[kinds.len() - 2..] == [TokenKind::With, TokenKind::No]
+            && parse_select_statement_tokens(tokens[..tokens.len() - 2].to_vec()).is_ok()
+        {
+            self.record_completion_tokens(&[TokenKind::DataP]);
+        }
     }
 }
 pub(super) fn split_with_data_suffix(mut tokens: Vec<Token>) -> (Vec<Token>, bool) {

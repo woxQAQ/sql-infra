@@ -27,8 +27,7 @@ impl Parser {
         self.expect(TokenKind::On)?;
         self.record_completion_slot(completion::GrammarSlot::MaterializedView);
         let relation = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
-                .ok_or_else(|| self.error_here("CREATE INDEX requires a relation"))?,
+            self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?,
         ));
         let access_method = if self.consume(TokenKind::Using) {
             self.record_completion_slot(completion::GrammarSlot::AccessMethod);
@@ -107,6 +106,11 @@ impl Parser {
         loop {
             let mut tokens =
                 self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            if tokens_end_at_top_level(&tokens)
+                && parse_index_elem_tokens_with_completion(tokens.clone(), None).is_ok()
+            {
+                self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            }
             self.append_completion_marker(&mut tokens);
             let location = tokens
                 .first()
@@ -220,6 +224,7 @@ pub(super) fn parse_index_elem_tokens_with_completion(
         if element.opclass.is_empty() {
             return Err(suffix.error_here("expected an operator class name"));
         }
+        suffix.record_completion_follow_tokens(&[TokenKind::Char('(')]);
         if suffix.at(TokenKind::Char('(')) {
             element.opclassopts = suffix.parse_parenthesized_reloptions()?;
         }

@@ -7,6 +7,11 @@ impl Parser {
 
         let context_location = self.location();
         let context_tokens = self.take_until_top_level(&[TokenKind::Char(',')]);
+        if self.at_completion()
+            && parse_json_value_expr_tokens_with_completion(context_tokens.clone(), None).is_ok()
+        {
+            self.record_completion_follow_tokens(&[TokenKind::Char(',')]);
+        }
         let context_item = self
             .parse_json_value_fragment_tokens(context_tokens)
             .map_err(|mut error| {
@@ -53,6 +58,11 @@ impl Parser {
         loop {
             let location = self.location();
             let value_tokens = self.take_until_top_level(&[TokenKind::As]);
+            if self.at_completion()
+                && parse_json_value_expr_tokens_with_completion(value_tokens.clone(), None).is_ok()
+            {
+                self.record_completion_follow_tokens(&[TokenKind::As]);
+            }
             let value = self.parse_json_value_fragment_tokens(value_tokens)?;
             self.expect(TokenKind::As)?;
             let name = self
@@ -66,7 +76,7 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at(TokenKind::Columns) {
+            if self.peek_kind() == TokenKind::Columns {
                 return Err(ParseError::syntax_exit(
                     location,
                     "expected a JSON PASSING argument after ','",
@@ -313,6 +323,7 @@ impl Parser {
     pub(super) fn parse_json_table_behavior_clauses(&mut self) -> PResult<JsonBehaviorPair> {
         let mut on_empty = None;
         let mut on_error = None;
+        self.record_completion_follow_tokens(json_behavior_tokens());
         while json_behavior_starts(self.peek_kind()) {
             let behavior = self.parse_json_table_behavior()?;
             self.expect(TokenKind::On)?;
@@ -331,6 +342,7 @@ impl Parser {
                 }
                 on_error = Some(Box::new(behavior));
             }
+            self.record_completion_follow_tokens(json_behavior_tokens());
         }
         Ok((on_empty, on_error))
     }
@@ -338,6 +350,7 @@ impl Parser {
     pub(super) fn parse_json_table_on_error_clause(
         &mut self,
     ) -> PResult<Option<Box<JsonBehavior>>> {
+        self.record_completion_follow_tokens(json_behavior_tokens());
         if !json_behavior_starts(self.peek_kind()) {
             return Ok(None);
         }
@@ -402,4 +415,16 @@ impl Parser {
             ..JsonBehavior::default()
         })
     }
+}
+
+fn json_behavior_tokens() -> &'static [TokenKind] {
+    &[
+        TokenKind::Default,
+        TokenKind::ErrorP,
+        TokenKind::NullP,
+        TokenKind::TrueP,
+        TokenKind::FalseP,
+        TokenKind::Unknown,
+        TokenKind::EmptyP,
+    ]
 }

@@ -45,6 +45,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<FunctionParameter> {
+    record_type_name_completion(&tokens, completion.as_ref());
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
@@ -64,10 +65,49 @@ pub(super) fn function_parameter_from_tokens_with_completion(
     {
         let mut collector = collector.borrow_mut();
         collector.slot(completion::GrammarSlot::Type);
+        let can_start_parameter_mode = completion_index == 0
+            || (completion_index == 1
+                && tokens.first().is_some_and(|token| {
+                    function_parameter_mode(token.kind).is_none()
+                        && !token_starts_builtin_type(token.kind)
+                        && token_name_in_categories(
+                            token,
+                            &[KeywordCategory::Unreserved, KeywordCategory::TypeFuncName],
+                        )
+                        .is_some()
+                }));
+        if can_start_parameter_mode {
+            collector.lookahead_tokens(&[
+                TokenKind::InP,
+                TokenKind::OutP,
+                TokenKind::Inout,
+                TokenKind::Variadic,
+            ]);
+        } else if tokens.first().map(|token| token.kind) == Some(TokenKind::InP)
+            && completion_index == 1
+        {
+            collector.lookahead_tokens(&[TokenKind::OutP]);
+        }
+        if function_parameter_from_tokens(tokens[..completion_index].to_vec()).is_ok() {
+            collector.lookahead_tokens(&[TokenKind::Default]);
+        }
         collector.tokens(&[TokenKind::Char(')')]);
         if completion_index > 0 {
             collector.tokens(&[TokenKind::Char(',')]);
         }
+    }
+    if let (Some(completion_index), Some(default_index)) = (
+        tokens
+            .iter()
+            .position(|token| token.kind == TokenKind::Completion),
+        default_index,
+    ) && completion_index > default_index + 1
+        && parse_expression_tokens(tokens[default_index + 1..completion_index].to_vec()).is_ok()
+        && let Some(collector) = &completion
+    {
+        collector
+            .borrow_mut()
+            .follow_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
     }
     let default_tokens = default_index.map(|index| tokens.split_off(index + 1));
     if default_index.is_some() {

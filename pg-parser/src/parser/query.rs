@@ -70,6 +70,7 @@ impl Parser {
             };
             self.expect(TokenKind::Char('('))?;
             let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            self.record_completion_tokens(&[TokenKind::Char(')')]);
             let ctequery = self.parse_preparable_fragment_tokens(inner)?;
             self.expect(TokenKind::Char(')'))?;
             let search_clause = self.parse_cte_search_clause()?;
@@ -141,8 +142,14 @@ impl Parser {
         );
         let (cycle_mark_value, cycle_mark_default) = if self.consume(TokenKind::To) {
             let value_tokens = self.take_until_top_level(&[TokenKind::Default]);
+            if self.at_completion() && value_tokens.is_empty() {
+                self.record_completion_slot(completion::GrammarSlot::Type);
+            }
             self.expect(TokenKind::Default)?;
             let default_tokens = self.take_until_top_level(&[TokenKind::Using]);
+            if self.at_completion() && default_tokens.is_empty() {
+                self.record_completion_slot(completion::GrammarSlot::Type);
+            }
             (
                 Some(Box::new(parse_aexpr_const_tokens(value_tokens)?)),
                 Some(Box::new(parse_aexpr_const_tokens(default_tokens)?)),
@@ -664,7 +671,7 @@ impl Parser {
                     return Err(self.error_here("multiple OFFSET clauses are not allowed"));
                 }
                 saw_offset = true;
-                let offset_tokens = self.take_until_top_level(&[
+                let offset_stops = [
                     TokenKind::Row,
                     TokenKind::Rows,
                     TokenKind::Limit,
@@ -675,8 +682,10 @@ impl Parser {
                     TokenKind::Except,
                     TokenKind::Char(';'),
                     TokenKind::Eof,
-                ]);
-                let has_row_suffix = self.at(TokenKind::Row) || self.at(TokenKind::Rows);
+                ];
+                let offset_tokens = self.take_until_top_level(&offset_stops);
+                self.record_expression_follow_tokens(&offset_tokens, &offset_stops, false);
+                let has_row_suffix = matches!(self.peek_kind(), TokenKind::Row | TokenKind::Rows);
                 stmt.limit_offset = Some(Box::new(if has_row_suffix {
                     parse_select_fetch_first_value_tokens(offset_tokens)?
                 } else {
@@ -694,12 +703,21 @@ impl Parser {
                 if !(self.consume(TokenKind::FirstP) || self.consume(TokenKind::Next)) {
                     return Err(self.error_here("FETCH requires FIRST or NEXT"));
                 }
+                self.record_completion_tokens(&[TokenKind::Row, TokenKind::Rows]);
                 stmt.limit_count = Some(
                     if matches!(self.peek_kind(), TokenKind::Row | TokenKind::Rows) {
                         Box::new(Node::AConst(AConst::integer(1, -1)))
                     } else {
                         let mut tokens =
                             self.take_until_top_level(&[TokenKind::Row, TokenKind::Rows]);
+                        if self.at_completion()
+                            && parse_select_fetch_first_value_tokens(tokens.clone()).is_ok()
+                        {
+                            self.record_completion_follow_tokens(&[
+                                TokenKind::Row,
+                                TokenKind::Rows,
+                            ]);
+                        }
                         self.append_completion_marker(&mut tokens);
                         Box::new(parse_select_fetch_first_value_tokens_with_completion(
                             tokens,

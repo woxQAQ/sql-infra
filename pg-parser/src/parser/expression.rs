@@ -1,5 +1,13 @@
 use super::*;
 
+const NEGATED_PREDICATE_TOKENS: &[TokenKind] = &[
+    TokenKind::InP,
+    TokenKind::Like,
+    TokenKind::Ilike,
+    TokenKind::Similar,
+    TokenKind::Between,
+];
+
 pub(super) struct ExprParser {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
@@ -87,6 +95,16 @@ impl ExprParser {
         let mut saw_special_predicate = false;
 
         loop {
+            if !restricted
+                && min_bp <= 35
+                && !saw_special_predicate
+                && self.at(TokenKind::Not)
+                && self.peek_kind_n(1) == TokenKind::Completion
+            {
+                self.advance();
+                self.record_completion_expression_continuation_tokens(NEGATED_PREDICATE_TOKENS);
+                return self.fail("NOT requires IN, LIKE, ILIKE, SIMILAR, or BETWEEN");
+            }
             if self.at_completion() {
                 self.record_completion_infix(
                     min_bp,
@@ -221,16 +239,7 @@ impl ExprParser {
                     let rhs = self.parse_expr_mode(21, restricted)?;
                     make_bool_expr(BoolExprType::AndExpr, lhs, rhs, location)
                 }
-                TokenKind::Not
-                    if matches!(
-                        self.peek_kind_n(1),
-                        TokenKind::InP
-                            | TokenKind::Like
-                            | TokenKind::Ilike
-                            | TokenKind::Similar
-                            | TokenKind::Between
-                    ) =>
-                {
+                TokenKind::Not if NEGATED_PREDICATE_TOKENS.contains(&self.peek_kind_n(1)) => {
                     if restricted || 35 < min_bp {
                         break;
                     }
@@ -454,54 +463,59 @@ impl ExprParser {
         saw_special_predicate: bool,
     ) {
         if min_bp <= 90 {
-            self.record_completion_tokens(&[TokenKind::Char('['), TokenKind::Char('.')]);
+            self.record_completion_expression_continuation_tokens(&[
+                TokenKind::Char('['),
+                TokenKind::Char('.'),
+            ]);
         }
         if min_bp <= 80 {
-            self.record_completion_tokens(&[TokenKind::TypeCast]);
+            self.record_completion_expression_continuation_tokens(&[TokenKind::TypeCast]);
             if !restricted {
-                self.record_completion_tokens(&[TokenKind::Collate]);
+                self.record_completion_expression_continuation_tokens(&[TokenKind::Collate]);
             }
         }
         if !restricted && min_bp <= 70 {
-            self.record_completion_tokens(&[TokenKind::Isnull, TokenKind::Notnull]);
+            self.record_completion_expression_continuation_tokens(&[
+                TokenKind::Isnull,
+                TokenKind::Notnull,
+            ]);
         }
         if !restricted && min_bp <= 60 {
-            self.record_completion_tokens(&[TokenKind::At]);
+            self.record_completion_expression_continuation_tokens(&[TokenKind::At]);
         }
         if min_bp <= 55 {
-            self.record_completion_tokens(&[TokenKind::Char('^')]);
+            self.record_completion_expression_continuation_tokens(&[TokenKind::Char('^')]);
         }
         if min_bp <= 50 {
-            self.record_completion_tokens(&[
+            self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Char('*'),
                 TokenKind::Char('/'),
                 TokenKind::Char('%'),
             ]);
         }
         if min_bp <= 45 {
-            self.record_completion_tokens(&[TokenKind::Char('+'), TokenKind::Char('-')]);
+            self.record_completion_expression_continuation_tokens(&[
+                TokenKind::Char('+'),
+                TokenKind::Char('-'),
+            ]);
         }
         if min_bp <= 40 {
-            self.record_completion_tokens(&[
+            self.record_completion_expression_continuation_tokens(&[
                 TokenKind::RightArrow,
                 TokenKind::Char('|'),
+                TokenKind::Op,
                 TokenKind::Operator,
             ]);
-            self.record_completion_slot(completion::GrammarSlot::Operator);
         }
         if !restricted && min_bp <= 35 && !saw_special_predicate {
-            self.record_completion_tokens(&[
+            self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Not,
-                TokenKind::InP,
-                TokenKind::Like,
-                TokenKind::Ilike,
-                TokenKind::Similar,
-                TokenKind::Between,
                 TokenKind::Overlaps,
             ]);
+            self.record_completion_expression_continuation_tokens(NEGATED_PREDICATE_TOKENS);
         }
         if min_bp <= 30 && !saw_comparison {
-            self.record_completion_tokens(&[
+            self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Char('='),
                 TokenKind::Char('<'),
                 TokenKind::Char('>'),
@@ -511,13 +525,13 @@ impl ExprParser {
             ]);
         }
         if min_bp <= 25 && !saw_is_predicate {
-            self.record_completion_tokens(&[TokenKind::Is]);
+            self.record_completion_expression_continuation_tokens(&[TokenKind::Is]);
         }
         if !restricted && min_bp <= 20 {
-            self.record_completion_tokens(&[TokenKind::And]);
+            self.record_completion_expression_continuation_tokens(&[TokenKind::And]);
         }
         if !restricted && min_bp <= 10 {
-            self.record_completion_tokens(&[TokenKind::Or]);
+            self.record_completion_expression_continuation_tokens(&[TokenKind::Or]);
         }
     }
 }

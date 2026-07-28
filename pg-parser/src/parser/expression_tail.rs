@@ -110,6 +110,7 @@ impl ExprParser {
 
     pub(super) fn parse_parenthesized_expr(&mut self) -> Option<Node> {
         let location = self.expect(TokenKind::Char('('))?.location();
+        self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
             let subselect = self.parse_nested_select(tokens)?;
@@ -144,6 +145,7 @@ impl ExprParser {
         if !self.consume(TokenKind::Char('(')) {
             return None;
         }
+        self.record_completion_tokens(completion::SUBQUERY_START_TOKENS);
         let tokens = self.take_until_balanced(TokenKind::Char(')'));
         let subselect = self.parse_nested_select(tokens)?;
         self.expect(TokenKind::Char(')'))?;
@@ -211,6 +213,7 @@ impl ExprParser {
         match op {
             TokenKind::InP => {
                 let list_start = self.expect(TokenKind::Char('('))?.location();
+                self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
                 if self.starts_statement() {
                     let tokens = self.take_until_balanced(TokenKind::Char(')'));
                     let subselect = self.parse_nested_select(tokens)?;
@@ -320,6 +323,11 @@ impl ExprParser {
     }
 
     pub(super) fn quantified_sub_link_type(&self) -> Option<SubLinkType> {
+        self.record_completion_expression_continuation_tokens(&[
+            TokenKind::Any,
+            TokenKind::Some,
+            TokenKind::All,
+        ]);
         match self.peek_kind() {
             TokenKind::Any | TokenKind::Some => Some(SubLinkType::AnySublink),
             TokenKind::All => Some(SubLinkType::AllSublink),
@@ -364,6 +372,7 @@ impl ExprParser {
         let sub_link_type = self.quantified_sub_link_type()?;
         self.advance();
         self.expect(TokenKind::Char('('))?;
+        self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
             let subselect = self.parse_nested_select(tokens)?;
@@ -438,6 +447,21 @@ impl ExprParser {
         restricted: bool,
     ) -> Option<Node> {
         let negated = self.consume(TokenKind::Not);
+        self.record_completion_tokens(&[TokenKind::DocumentP, TokenKind::Distinct]);
+        if !restricted {
+            self.record_completion_tokens(&[
+                TokenKind::Json,
+                TokenKind::Normalized,
+                TokenKind::Nfc,
+                TokenKind::Nfd,
+                TokenKind::Nfkc,
+                TokenKind::Nfkd,
+                TokenKind::NullP,
+                TokenKind::TrueP,
+                TokenKind::FalseP,
+                TokenKind::Unknown,
+            ]);
+        }
         if self.consume(TokenKind::DocumentP) {
             let document = Node::XmlExpr(XmlExpr {
                 xpr: Expr::new(NodeTag::XmlExpr),
@@ -487,6 +511,14 @@ impl ExprParser {
             });
         }
         if !restricted && self.consume(TokenKind::Json) {
+            self.record_completion_tokens(&[
+                TokenKind::ValueP,
+                TokenKind::Array,
+                TokenKind::ObjectP,
+                TokenKind::Scalar,
+                TokenKind::With,
+                TokenKind::Without,
+            ]);
             let item_type = match self.peek_kind() {
                 TokenKind::ValueP => JsonValueType::Any,
                 TokenKind::Array => JsonValueType::Array,
@@ -591,7 +623,7 @@ impl ExprParser {
         for end in start + 1..self.tokens.len() {
             let token = &self.tokens[end - 1];
             if token.kind == TokenKind::Completion {
-                self.record_completion_slot(completion::GrammarSlot::Type);
+                record_type_name_completion(&self.tokens[start..end], self.completion.as_ref());
             }
             if end - 1 > start
                 && depth == 0
@@ -698,6 +730,10 @@ impl ExprParser {
         &mut self,
         categories: &[KeywordCategory],
     ) -> Option<std::string::String> {
+        if self.at_completion() {
+            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            return None;
+        }
         if !self.identifier_in_categories(categories) {
             return None;
         }
@@ -794,6 +830,47 @@ impl ExprParser {
         }
         if let Some(collector) = &self.completion {
             collector.borrow_mut().tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_lookahead_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().lookahead_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_expression_start_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().expression_start_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_expression_continuation_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().expression_continuation_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_expression_continuation_phrase(
+        &self,
+        phrase: &'static [TokenKind],
+    ) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector
+                .borrow_mut()
+                .expression_continuation_phrase(phrase);
         }
     }
 

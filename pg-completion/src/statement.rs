@@ -102,7 +102,7 @@ fn statement_bounds(source: &str, point: usize) -> (usize, usize) {
             double_quote = true;
             pos += 1;
         } else if bytes[pos] == b'$' {
-            if let Some(tag) = lexical::dollar_quote_tag(&bytes[pos..]) {
+            if let Some(tag) = lexical::dollar_quote_tag(bytes, pos, bytes.len()) {
                 pos += tag.len();
                 dollar_tag = Some(tag);
             } else {
@@ -160,6 +160,15 @@ mod tests {
         assert_eq!(
             containing_statement(sql, text_size(sql.len())),
             TextRange::new(text_size(12), text_size(sql.len()))
+        );
+    }
+
+    #[test]
+    fn does_not_treat_an_identifier_suffix_as_a_dollar_quote() {
+        let sql = "select name$tag$; select 2";
+        assert_eq!(
+            containing_statement(sql, text_size(sql.len())),
+            TextRange::new(text_size(18), text_size(sql.len()))
         );
     }
 }

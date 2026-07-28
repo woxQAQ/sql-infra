@@ -110,7 +110,10 @@ fn filters_keywords_by_prefix_and_resolves_relation_qualifiers() {
     let source = "SELECT u. FROM users AS u";
     let point = source.find(" FROM").unwrap();
     let context = collect(source, size(point));
-    assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+    assert_eq!(
+        context.expectations.slots,
+        [GrammarSlot::Column, GrammarSlot::Function]
+    );
     assert_eq!(context.intent.qualifier[0].normalized, "u");
 
     let source = "SELECT accounts. FROM accounts AS a";
@@ -129,7 +132,10 @@ fn filters_keywords_by_prefix_and_resolves_relation_qualifiers() {
 
     let source = "WITH c AS (SELECT 1) SELECT c. FROM c";
     let context = collect(source, size(source.find(" FROM").unwrap()));
-    assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+    assert_eq!(
+        context.expectations.slots,
+        [GrammarSlot::Column, GrammarSlot::Function]
+    );
 }
 
 #[test]
@@ -137,7 +143,10 @@ fn resolves_qualifiers_in_a_parenthesized_query_suffix() {
     let source = "(SELECT * FROM users AS u) ORDER BY u.";
     let context = collect(source, size(source.len()));
 
-    assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+    assert_eq!(
+        context.expectations.slots,
+        [GrammarSlot::Column, GrammarSlot::Function]
+    );
     assert_eq!(context.scope.local.relations.len(), 1);
     assert_eq!(
         context.scope.local.relations[0]
@@ -176,6 +185,102 @@ fn filters_phrases_by_their_head_token_prefix() {
     assert_eq!(
         context.expectations.phrases,
         [&[TokenKind::Order, TokenKind::By][..]]
+    );
+}
+
+#[test]
+fn relation_alias_prefix_does_not_offer_clause_keywords() {
+    for source in [
+        "SELECT * FROM public.orders o",
+        "SELECT * FROM public.orders AS o",
+    ] {
+        let context = collect(source, size(source.len()));
+        assert!(
+            context.expectations.tokens.is_empty(),
+            "{source}: {context:?}"
+        );
+        assert!(
+            context.expectations.phrases.is_empty(),
+            "{source}: {context:?}"
+        );
+    }
+
+    let keyword = "SELECT * FROM public.orders ORDER";
+    let context = collect(keyword, size(keyword.len()));
+    assert_eq!(context.expectations.tokens, [TokenKind::Order]);
+    assert_eq!(
+        context.expectations.phrases,
+        [&[TokenKind::Order, TokenKind::By][..]]
+    );
+}
+
+#[test]
+fn join_prefix_after_relation_alias_offers_join() {
+    for source in [
+        "SELECT * FROM public.orders o j",
+        "SELECT * FROM public.orders AS o j",
+        "SELECT * FROM accounts a JOIN public.orders AS o ON true j",
+    ] {
+        let context = collect(source, size(source.len()));
+        assert_eq!(context.expectations.tokens, [TokenKind::Join], "{source}");
+    }
+}
+
+#[test]
+fn preserves_expression_follow_provenance_for_callers() {
+    let source = "SELECT * FROM public.users JOIN public.orders ON users.id ";
+    let context = collect(source, size(source.len()));
+
+    assert!(context.syntax_completions().is_empty());
+    assert!(!context.expectations.slots.contains(&GrammarSlot::Operator));
+    assert!(!context.intent.object_kinds.contains(&ObjectKind::Operator));
+    assert!(context.expectations.tokens.contains(&TokenKind::Char('=')));
+    assert!(
+        context
+            .expectations
+            .expression_continuation_tokens
+            .contains(&TokenKind::Char('='))
+    );
+    assert!(
+        !context
+            .expectations
+            .follow_tokens
+            .contains(&TokenKind::Char('='))
+    );
+    assert!(
+        context
+            .expectations
+            .follow_tokens
+            .contains(&TokenKind::Join)
+    );
+    assert!(
+        context
+            .expectations
+            .follow_tokens
+            .contains(&TokenKind::GroupP)
+    );
+
+    let source = "SELECT * FROM public.users JOIN public.orders ON users.id A";
+    let context = collect(source, size(source.len()));
+    assert!(
+        context
+            .syntax_completions()
+            .iter()
+            .any(|completion| completion.label == "AND")
+    );
+}
+
+#[test]
+fn exact_function_decoration_keyword_wins_over_output_alias_ambiguity() {
+    let source = "SELECT row_number() OVER";
+    let context = collect(source, size(source.len()));
+
+    assert!(context.expectations.tokens.contains(&TokenKind::Over));
+    assert!(
+        context
+            .syntax_completions()
+            .iter()
+            .any(|completion| completion.label == "OVER")
     );
 }
 
@@ -291,6 +396,14 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
             "CREATE INDEX i ON app.accounts (lower(".len(),
         ),
         (
+            "CREATE INDEX i ON ONLY app.accounts (lower())",
+            "CREATE INDEX i ON ONLY app.accounts (lower(".len(),
+        ),
+        (
+            "CREATE INDEX i ON ONLY (app.accounts) (lower())",
+            "CREATE INDEX i ON ONLY (app.accounts) (lower(".len(),
+        ),
+        (
             "CREATE STATISTICS s ON (lower()) FROM app.accounts",
             "CREATE STATISTICS s ON (lower(".len(),
         ),
@@ -307,11 +420,28 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
         );
     }
 
+    let source = "CREATE STATISTICS s ON (substring(value FROM start_position)) FROM app.accounts";
+    let point = source.find("value").unwrap();
+    let context = collect(source, size(point));
+    let container = context.intent.container.unwrap();
+    assert_eq!(container.reference.name[0].normalized, "app");
+    assert_eq!(container.reference.name[1].normalized, "accounts");
+
     let source = "CREATE TABLE child (parent_id int REFERENCES parent(id), value int CHECK ())";
     let point = source.rfind("()").unwrap() + 1;
     let context = collect(source, size(point));
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
     assert!(context.intent.container.is_none());
+
+    for source in [
+        "GRANT SELECT () ON ALL TABLES IN SCHEMA public TO role_name",
+        "GRANT SELECT () ON TABLE app.accounts, app.orders TO role_name",
+    ] {
+        let point = source.find("() ON").unwrap() + 1;
+        let context = collect(source, size(point));
+        assert!(context.expectations.slots.contains(&GrammarSlot::Column));
+        assert!(context.intent.container.is_none(), "{source:?}");
+    }
 }
 
 #[test]
@@ -462,7 +592,10 @@ fn handles_unicode_quoted_and_utf8_identifier_prefixes() {
     let point = unicode_escape.find(" FROM").unwrap();
     let context = collect(unicode_escape, size(point));
     assert_eq!(context.intent.qualifier[0].normalized, "ua");
-    assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+    assert_eq!(
+        context.expectations.slots,
+        [GrammarSlot::Column, GrammarSlot::Function]
+    );
     assert_eq!(
         context.scope.local.relations[0]
             .alias
@@ -522,6 +655,66 @@ fn captures_dml_target_and_source_scope() {
             .unwrap()
             .normalized,
         "u"
+    );
+
+    let source =
+        "INSERT INTO app.items VALUES (1) ON CONFLICT (id) DO UPDATE SET value = excluded.";
+    let context = collect(source, size(source.len()));
+    let excluded = &context.scope.local.relations[0];
+    assert_eq!(excluded.alias.as_ref().unwrap().normalized, "excluded");
+    assert_eq!(excluded.name[0].normalized, "app");
+    assert_eq!(excluded.name[1].normalized, "items");
+    assert!(excluded.qualified_only);
+
+    let source =
+        "UPDATE app.items SET value = 1 RETURNING WITH (OLD AS previous, NEW AS current) current.";
+    let context = collect(source, size(source.len()));
+    assert_eq!(
+        context
+            .scope
+            .local
+            .relations
+            .iter()
+            .map(|relation| relation.alias.as_ref().unwrap().normalized.as_str())
+            .collect::<Vec<_>>(),
+        ["previous", "current"]
+    );
+    assert!(
+        context
+            .scope
+            .local
+            .relations
+            .iter()
+            .all(|relation| relation.qualified_only)
+    );
+
+    let source = "DELETE FROM app.items RETURNING old.";
+    let context = collect(source, size(source.len()));
+    assert_eq!(
+        context
+            .scope
+            .local
+            .relations
+            .iter()
+            .map(|relation| relation.alias.as_ref().unwrap().normalized.as_str())
+            .collect::<Vec<_>>(),
+        ["old", "new"]
+    );
+
+    let source = "UPDATE app.items SET value = 1 RETURNING WITH (OLD AS previous) (SELECT previous. FROM audit_log)";
+    let point = source.find("previous.").unwrap() + "previous.".len();
+    let context = collect(source, size(point));
+    assert_eq!(
+        context.scope.local.relations[0].name[0].normalized,
+        "audit_log"
+    );
+    assert_eq!(
+        context.scope.outer[0]
+            .relations
+            .iter()
+            .map(|relation| relation.alias.as_ref().unwrap().normalized.as_str())
+            .collect::<Vec<_>>(),
+        ["previous", "new"]
     );
 }
 
@@ -588,6 +781,49 @@ fn applies_dml_visibility_inside_sources_and_correlated_subqueries() {
         "source"
     );
     assert!(context.scope.outer.is_empty());
+
+    for source in [
+        "UPDATE target_table target SET value = 1 FROM left_source l JOIN right_source r ON target.",
+        "DELETE FROM target_table target USING left_source l JOIN right_source r ON target.",
+    ] {
+        let context = collect(source, size(source.len()));
+        assert!(context.scope.dml_target.is_none(), "{source:?}");
+        assert_eq!(
+            context
+                .scope
+                .local
+                .relations
+                .iter()
+                .map(|relation| relation.alias.as_ref().unwrap().normalized.as_str())
+                .collect::<Vec<_>>(),
+            ["l", "r"],
+            "{source:?}"
+        );
+    }
+
+    for source in [
+        "INSERT INTO target_table SELECT src.id FROM source_table src RETURNING src.",
+        "INSERT INTO target_table SELECT src.id FROM source_table src ON CONFLICT (id) DO UPDATE SET id = src.",
+    ] {
+        let context = collect(source, size(source.len()));
+        assert!(
+            context
+                .scope
+                .local
+                .relations
+                .iter()
+                .all(|relation| relation.qualified_only),
+            "{source:?}"
+        );
+        assert!(
+            context.scope.local.relations.iter().all(|relation| {
+                relation.name.first().map(|part| part.normalized.as_str()) != Some("source_table")
+            }),
+            "{source:?}"
+        );
+        assert!(context.scope.outer.is_empty(), "{source:?}");
+        assert!(context.scope.dml_target.is_some(), "{source:?}");
+    }
 }
 
 #[test]
@@ -632,6 +868,13 @@ fn cte_scope_tracks_recursion_nesting_and_shadowing() {
             .iter()
             .any(|issue| issue.kind == RecoveryKind::ScopeIncomplete)
     );
+
+    let nested_dml = "WITH changed AS (UPDATE hidden AS active SET id = active. RETURNING *) UPDATE visible SET id = 2";
+    let point = nested_dml.find("active.").unwrap() + "active.".len();
+    let context = collect(nested_dml, size(point));
+    let target = context.scope.dml_target.as_ref().unwrap();
+    assert_eq!(target.name[0].normalized, "hidden");
+    assert_eq!(target.alias.as_ref().unwrap().normalized, "active");
 }
 
 #[test]
@@ -751,7 +994,10 @@ fn merge_actions_keep_target_and_source_visible() {
         "source"
     );
     assert_eq!(context.intent.qualifier[0].normalized, "source");
-    assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
+    assert_eq!(
+        context.expectations.slots,
+        [GrammarSlot::Column, GrammarSlot::Function]
+    );
 }
 
 #[test]
@@ -805,6 +1051,38 @@ fn parenthesized_joins_only_hide_relations_when_aliased() {
             .normalized,
         "joined"
     );
+
+    let only = "SELECT target. FROM ONLY (app.accounts) AS target";
+    let context = collect(only, size(only.find(" FROM").unwrap()));
+    let relation = &context.scope.local.relations[0];
+    assert_eq!(relation.kind, pg_completion::RelationKind::Relation);
+    assert_eq!(relation.name[0].normalized, "app");
+    assert_eq!(relation.name[1].normalized, "accounts");
+    assert!(relation.unsupported.is_none());
+
+    for (source, marker) in [
+        (
+            "SELECT * FROM (accounts a JOIN users u ON a.id = u.id) AS joined JOIN later_table later ON true",
+            "a.id",
+        ),
+        (
+            "SELECT * FROM (accounts a JOIN users u USING (id)) AS joined JOIN later_table later ON true",
+            "id)",
+        ),
+    ] {
+        let context = collect(source, size(source.find(marker).unwrap()));
+        assert_eq!(
+            context
+                .scope
+                .local
+                .relations
+                .iter()
+                .map(|relation| relation.alias.as_ref().unwrap().normalized.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "u"],
+            "{source:?}"
+        );
+    }
 }
 
 #[test]

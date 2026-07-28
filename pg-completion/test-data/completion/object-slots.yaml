@@ -20,7 +20,7 @@
 - input: ALTER FOREIGN TABLE |
   want:
     candidates:
-      tokens: [IF]
+      tokens: [IF, ONLY]
       phrases: [IF EXISTS]
       slots: [ForeignTable]
 
@@ -65,7 +65,7 @@
 - input: DROP USER MAPPING FOR |
   want:
     candidates:
-      tokens: [USER]
+      tokens: [CURRENT_ROLE, CURRENT_USER, USER]
       slots: [Role]
 
 - input: DROP USER MAPPING FOR role_name SERVER |

@@ -26,6 +26,7 @@ impl ExprParser {
                     return self.fail("ALL and DISTINCT cannot be used together");
                 }
                 loop {
+                    self.record_completion_tokens(&[TokenKind::Variadic]);
                     if self.at(TokenKind::Variadic) {
                         if agg_all || call.agg_distinct {
                             return self.fail("ALL/DISTINCT cannot be used with VARIADIC");
@@ -133,6 +134,14 @@ impl ExprParser {
         let mut items = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
             let expression = self.parse_expr(0)?;
+            self.record_completion_expression_continuation_tokens(&[
+                TokenKind::Using,
+                TokenKind::Asc,
+                TokenKind::Desc,
+                TokenKind::NullsP,
+                TokenKind::Char(','),
+                stop,
+            ]);
             let mut sortby_dir = SortByDir::Default;
             let mut use_op = Vec::new();
             let mut location = -1;
@@ -147,6 +156,8 @@ impl ExprParser {
                 }
                 TokenKind::Using => {
                     self.advance();
+                    self.record_completion_tokens(&[TokenKind::Op, TokenKind::Operator]);
+                    self.record_completion_slot(completion::GrammarSlot::Operator);
                     sortby_dir = SortByDir::Using;
                     location = self.location() as ParseLoc;
                     if self.at(TokenKind::Operator) {
@@ -211,7 +222,16 @@ impl ExprParser {
     }
 
     pub(super) fn parse_function_decorations(&mut self, call: &mut FuncCall) -> Option<()> {
-        self.record_completion_phrase(&[TokenKind::Within, TokenKind::GroupP]);
+        self.record_completion_expression_continuation_phrase(&[
+            TokenKind::Within,
+            TokenKind::GroupP,
+        ]);
+        self.record_completion_expression_continuation_tokens(&[
+            TokenKind::Filter,
+            TokenKind::IgnoreP,
+            TokenKind::RespectP,
+            TokenKind::Over,
+        ]);
         if self.consume(TokenKind::Within) {
             if !call.agg_order.is_empty() || call.agg_distinct || call.func_variadic {
                 return self.fail("WITHIN GROUP conflicts with function argument modifiers");

@@ -19,7 +19,7 @@ impl Parser {
             let arg = if self.consume(TokenKind::Char('=')) {
                 if let Some(slot) = completion::definition_value_slot(object_type, &name) {
                     self.record_completion_slot(slot);
-                    self.record_completion_slot_before(
+                    self.record_completion_slot_within(
                         slot,
                         &[TokenKind::Char(','), TokenKind::Char(')')],
                     );

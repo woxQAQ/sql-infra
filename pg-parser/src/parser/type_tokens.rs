@@ -1,5 +1,160 @@
 use super::*;
 
+pub(super) fn record_type_name_completion(
+    tokens: &[Token],
+    completion: Option<&completion::SharedCollector>,
+) {
+    record_type_name_completion_impl(tokens, completion, false);
+}
+
+pub(super) fn record_simple_type_name_completion(
+    tokens: &[Token],
+    completion: Option<&completion::SharedCollector>,
+) {
+    record_type_name_completion_impl(tokens, completion, true);
+}
+
+fn record_type_name_completion_impl(
+    tokens: &[Token],
+    completion: Option<&completion::SharedCollector>,
+    simple: bool,
+) {
+    let Some(completion_index) = tokens
+        .iter()
+        .position(|token| token.kind == TokenKind::Completion)
+    else {
+        return;
+    };
+    let Some(completion) = completion else {
+        return;
+    };
+    let prefix = &tokens[..completion_index];
+    let kinds = prefix.iter().map(|token| token.kind).collect::<Vec<_>>();
+    let mut collector = completion.borrow_mut();
+
+    if kinds.is_empty()
+        || kinds.as_slice() == [TokenKind::Setof]
+        || kinds.last() == Some(&TokenKind::Char('.'))
+    {
+        collector.slot(completion::GrammarSlot::Type);
+        return;
+    }
+    if kinds.last() == Some(&TokenKind::Char('%')) {
+        collector.tokens(&[TokenKind::TypeP]);
+        return;
+    }
+    if matches!(kinds.last(), Some(TokenKind::With | TokenKind::Without)) {
+        collector.tokens(&[TokenKind::Time]);
+        return;
+    }
+    if kinds.len() >= 2
+        && kinds[kinds.len() - 2..]
+            .iter()
+            .copied()
+            .eq([TokenKind::With, TokenKind::Time])
+        || kinds.len() >= 2
+            && kinds[kinds.len() - 2..]
+                .iter()
+                .copied()
+                .eq([TokenKind::Without, TokenKind::Time])
+    {
+        collector.tokens(&[TokenKind::Zone]);
+        return;
+    }
+
+    let mut base_end = kinds.len();
+    while base_end > 0 && kinds[base_end - 1] == TokenKind::Char(']') {
+        let Some(open) = kinds[..base_end]
+            .iter()
+            .rposition(|kind| *kind == TokenKind::Char('['))
+        else {
+            break;
+        };
+        base_end = open;
+    }
+    if base_end > 0 && kinds[base_end - 1] == TokenKind::Array {
+        base_end -= 1;
+    }
+    if base_end > 0 && kinds[base_end - 1] == TokenKind::Char(')') {
+        let mut depth = 0usize;
+        let mut modifier_open = None;
+        for index in (0..base_end).rev() {
+            match kinds[index] {
+                TokenKind::Char(')') => depth += 1,
+                TokenKind::Char('(') => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        modifier_open = Some(index);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let Some(open) = modifier_open {
+            base_end = open;
+        }
+    }
+    let base_start = usize::from(kinds.first() == Some(&TokenKind::Setof));
+    let base = &kinds[base_start..base_end];
+
+    match base {
+        [TokenKind::DoubleP] => collector.tokens(&[TokenKind::Precision]),
+        [TokenKind::Bit]
+        | [TokenKind::Character]
+        | [TokenKind::CharP]
+        | [TokenKind::Nchar]
+        | [TokenKind::National, TokenKind::Character]
+        | [TokenKind::National, TokenKind::CharP] => {
+            if simple {
+                collector.tokens(&[TokenKind::Varying]);
+            } else {
+                collector.tokens(&[TokenKind::Varying, TokenKind::Array]);
+            }
+        }
+        [TokenKind::Timestamp] | [TokenKind::Time] => {
+            if simple {
+                collector.tokens(&[TokenKind::With, TokenKind::Without]);
+            } else {
+                collector.tokens(&[TokenKind::With, TokenKind::Without, TokenKind::Array]);
+            }
+        }
+        [TokenKind::Interval] => {
+            collector.tokens(&[
+                TokenKind::YearP,
+                TokenKind::MonthP,
+                TokenKind::DayP,
+                TokenKind::HourP,
+                TokenKind::MinuteP,
+                TokenKind::SecondP,
+            ]);
+            if !simple {
+                collector.tokens(&[TokenKind::Array]);
+            }
+        }
+        [TokenKind::Interval, TokenKind::YearP]
+        | [TokenKind::Interval, TokenKind::DayP]
+        | [TokenKind::Interval, TokenKind::HourP] => {
+            collector.tokens(&[TokenKind::To]);
+            if !simple {
+                collector.tokens(&[TokenKind::Array]);
+            }
+        }
+        [TokenKind::Interval, TokenKind::YearP, TokenKind::To] => {
+            collector.tokens(&[TokenKind::MonthP]);
+        }
+        [TokenKind::Interval, TokenKind::DayP, TokenKind::To] => {
+            collector.tokens(&[TokenKind::HourP, TokenKind::MinuteP, TokenKind::SecondP])
+        }
+        [TokenKind::Interval, TokenKind::HourP, TokenKind::To] => {
+            collector.tokens(&[TokenKind::MinuteP, TokenKind::SecondP]);
+        }
+        [] => collector.slot(completion::GrammarSlot::Type),
+        _ if !simple => collector.tokens(&[TokenKind::Array]),
+        _ => {}
+    }
+}
+
 pub(super) fn tokens_to_type_name(tokens: Vec<Token>) -> Option<TypeName> {
     parse_type_name_tokens(tokens).ok()
 }

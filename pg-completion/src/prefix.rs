@@ -406,7 +406,7 @@ fn lexical_context(source: &str, start: usize, point: usize) -> LexicalContext {
                     context = LexicalContext::DoubleQuote { open: pos };
                     pos += 1;
                 } else if bytes[pos] == b'$' {
-                    if let Some(tag) = lexical::dollar_quote_tag(&bytes[pos..point]) {
+                    if let Some(tag) = lexical::dollar_quote_tag(bytes, pos, point) {
                         pos += tag.len();
                         dollar_tag = Some(tag);
                         context = LexicalContext::DollarQuote;
@@ -617,6 +617,15 @@ mod tests {
         let extracted = extract(source, range(source), text_size(source.len()));
         assert!(extracted.suppress_expectations);
         assert!(extracted.prefix.raw.is_empty());
+    }
+
+    #[test]
+    fn extracts_identifiers_containing_a_dollar_quote_shaped_suffix() {
+        let source = "SELECT name$tag$";
+        let extracted = extract(source, range(source), text_size(source.len()));
+        assert_eq!(extracted.prefix.raw, "name$tag$");
+        assert_eq!(extracted.prefix.normalized, "name$tag$");
+        assert!(!extracted.suppress_expectations);
     }
 
     #[test]

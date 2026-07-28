@@ -1,6 +1,9 @@
 use super::expression::ExprParser;
 use super::*;
 
+const JSON_ABSENT_ON_NULL: &[TokenKind] = &[TokenKind::Absent, TokenKind::On, TokenKind::NullP];
+const JSON_NULL_ON_NULL: &[TokenKind] = &[TokenKind::NullP, TokenKind::On, TokenKind::NullP];
+
 impl ExprParser {
     pub(super) fn parse_json_func(&mut self, token: Token) -> Option<Node> {
         let op = match token.kind {
@@ -119,16 +122,30 @@ impl ExprParser {
     pub(super) fn parse_json_behaviors(&mut self, allow_empty: bool) -> Option<JsonBehaviorPair> {
         let mut on_empty = None;
         let mut on_error = None;
-        while matches!(
-            self.peek_kind(),
-            TokenKind::Default
-                | TokenKind::ErrorP
-                | TokenKind::NullP
-                | TokenKind::TrueP
-                | TokenKind::FalseP
-                | TokenKind::Unknown
-                | TokenKind::EmptyP
-        ) {
+        loop {
+            if on_error.is_none() {
+                self.record_completion_lookahead_tokens(&[
+                    TokenKind::Default,
+                    TokenKind::ErrorP,
+                    TokenKind::NullP,
+                    TokenKind::TrueP,
+                    TokenKind::FalseP,
+                    TokenKind::Unknown,
+                    TokenKind::EmptyP,
+                ]);
+            }
+            if !matches!(
+                self.peek_kind(),
+                TokenKind::Default
+                    | TokenKind::ErrorP
+                    | TokenKind::NullP
+                    | TokenKind::TrueP
+                    | TokenKind::FalseP
+                    | TokenKind::Unknown
+                    | TokenKind::EmptyP
+            ) {
+                break;
+            }
             let behavior = self.parse_json_behavior()?;
             self.expect(TokenKind::On)?;
             if allow_empty && self.consume(TokenKind::EmptyP) {
@@ -182,6 +199,7 @@ impl ExprParser {
             }
             TokenKind::EmptyP => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::ObjectP, TokenKind::Array]);
                 match self.peek_kind() {
                     TokenKind::ObjectP => {
                         self.advance();
@@ -244,12 +262,37 @@ impl ExprParser {
             let mut depth = 0usize;
             while end < self.tokens.len() {
                 let kind = self.tokens[end].kind;
+                if depth == 0 && kind == TokenKind::Completion {
+                    if parse_sort_list_tokens(self.tokens[start..end].to_vec(), None).is_ok()
+                        && let Some(collector) = &self.completion
+                    {
+                        let mut collector = collector.borrow_mut();
+                        collector.follow_tokens(&[
+                            TokenKind::Absent,
+                            TokenKind::NullP,
+                            TokenKind::Returning,
+                            TokenKind::Char(')'),
+                        ]);
+                        collector.follow_phrase(JSON_ABSENT_ON_NULL);
+                        collector.follow_phrase(JSON_NULL_ON_NULL);
+                    }
+                    end += 1;
+                    continue;
+                }
                 if depth == 0
                     && (matches!(
                         kind,
                         TokenKind::Returning | TokenKind::Char(')') | TokenKind::Eof
                     ) || (matches!(kind, TokenKind::Absent | TokenKind::NullP)
-                        && self.tokens.get(end + 1).map(|token| token.kind) == Some(TokenKind::On)))
+                        && (self.tokens.get(end + 1).map(|token| token.kind)
+                            == Some(TokenKind::On)
+                            || (self.tokens.get(end + 1).map(|token| token.kind)
+                                == Some(TokenKind::Completion)
+                                && parse_sort_list_tokens(
+                                    self.tokens[start..end].to_vec(),
+                                    None,
+                                )
+                                .is_ok()))))
                 {
                     break;
                 }

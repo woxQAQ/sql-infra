@@ -133,6 +133,13 @@ impl Parser {
     pub(super) fn parse_fdw_function_options(&mut self) -> PResult<NodeList> {
         let mut func_options = Vec::new();
         while !self.at_statement_end() && !self.at(TokenKind::Options) {
+            self.record_completion_lookahead_tokens(&[
+                TokenKind::Handler,
+                TokenKind::Validator,
+                TokenKind::Connection,
+                TokenKind::No,
+                TokenKind::Options,
+            ]);
             let location = self.location();
             let (name, arg) = match self.peek_kind() {
                 kind @ (TokenKind::Handler | TokenKind::Validator | TokenKind::Connection) => {
@@ -155,6 +162,11 @@ impl Parser {
                 }
                 TokenKind::No => {
                     self.advance();
+                    self.record_completion_tokens(&[
+                        TokenKind::Handler,
+                        TokenKind::Validator,
+                        TokenKind::Connection,
+                    ]);
                     let name = match self.peek_kind() {
                         TokenKind::Handler => "handler",
                         TokenKind::Validator => "validator",

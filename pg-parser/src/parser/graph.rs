@@ -16,6 +16,19 @@ impl Parser {
                 self.peek_kind(),
                 TokenKind::Char(',') | TokenKind::Where | TokenKind::Columns | TokenKind::Eof
             ) {
+                self.record_completion_tokens(&[
+                    TokenKind::Char('('),
+                    TokenKind::Char('<'),
+                    TokenKind::Char('-'),
+                    TokenKind::RightArrow,
+                ]);
+                if !elements.is_empty() {
+                    self.record_completion_follow_tokens(&[
+                        TokenKind::Char(','),
+                        TokenKind::Where,
+                        TokenKind::Columns,
+                    ]);
+                }
                 elements.push(Node::GraphElementPattern(
                     self.parse_graph_element_pattern()?,
                 ));

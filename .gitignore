@@ -1,3 +1,6 @@
 target/
 pg-parser-offical
 omni
+playground/dist/
+playground/node_modules/
+playground/src/generated/

@@ -1,5 +1,49 @@
 use super::*;
 
+const DESCRIBED_OBJECT_STARTS: &[TokenKind] = &[
+    TokenKind::Access,
+    TokenKind::Aggregate,
+    TokenKind::Collation,
+    TokenKind::Column,
+    TokenKind::ConversionP,
+    TokenKind::Database,
+    TokenKind::DomainP,
+    TokenKind::Event,
+    TokenKind::Extension,
+    TokenKind::Foreign,
+    TokenKind::Function,
+    TokenKind::Index,
+    TokenKind::Language,
+    TokenKind::LargeP,
+    TokenKind::Materialized,
+    TokenKind::Procedure,
+    TokenKind::Procedural,
+    TokenKind::Property,
+    TokenKind::Publication,
+    TokenKind::Role,
+    TokenKind::Routine,
+    TokenKind::Schema,
+    TokenKind::Sequence,
+    TokenKind::Server,
+    TokenKind::Statistics,
+    TokenKind::Subscription,
+    TokenKind::Table,
+    TokenKind::Tablespace,
+    TokenKind::TextP,
+    TokenKind::TypeP,
+    TokenKind::View,
+];
+
+const COMMENT_ONLY_OBJECT_STARTS: &[TokenKind] = &[
+    TokenKind::Cast,
+    TokenKind::Constraint,
+    TokenKind::Operator,
+    TokenKind::Policy,
+    TokenKind::Rule,
+    TokenKind::Transform,
+    TokenKind::Trigger,
+];
+
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-comment.html
@@ -134,6 +178,10 @@ impl Parser {
     }
 
     fn parse_described_object(&mut self, security_label: bool) -> PResult<(ObjectType, Node)> {
+        self.record_completion_tokens(DESCRIBED_OBJECT_STARTS);
+        if !security_label {
+            self.record_completion_tokens(COMMENT_ONLY_OBJECT_STARTS);
+        }
         if self.consume(TokenKind::Column) {
             return Ok((
                 ObjectType::Column,
@@ -141,12 +189,16 @@ impl Parser {
             ));
         }
         if self.consume(TokenKind::TypeP) {
-            self.record_completion_slot(completion::GrammarSlot::Type);
-            return Ok((ObjectType::Type, self.parse_type_object_until_is()?));
+            return Ok((
+                ObjectType::Type,
+                self.parse_type_object_until_is(completion::GrammarSlot::Type)?,
+            ));
         }
         if self.consume(TokenKind::DomainP) {
-            self.record_completion_slot(completion::GrammarSlot::Domain);
-            return Ok((ObjectType::Domain, self.parse_type_object_until_is()?));
+            return Ok((
+                ObjectType::Domain,
+                self.parse_type_object_until_is(completion::GrammarSlot::Domain)?,
+            ));
         }
         if self.consume(TokenKind::Aggregate) {
             return Ok((
@@ -189,13 +241,17 @@ impl Parser {
 
         if !security_label {
             if self.consume(TokenKind::Operator) {
+                self.record_completion_tokens(&[TokenKind::Class, TokenKind::Family]);
+                self.record_completion_slot(completion::GrammarSlot::Operator);
                 if self.consume(TokenKind::Class) || self.consume(TokenKind::Family) {
                     let is_family = self.tokens[self.pos - 1].kind == TokenKind::Family;
-                    self.record_completion_slot(if is_family {
+                    let name_slot = if is_family {
                         completion::GrammarSlot::OperatorFamily
                     } else {
                         completion::GrammarSlot::OperatorClass
-                    });
+                    };
+                    self.record_completion_slot(name_slot);
+                    self.record_completion_slot_before(name_slot, &[TokenKind::Using]);
                     let name_tokens = self.take_until_top_level(&[TokenKind::Using]);
                     let names = parse_any_name_tokens(&name_tokens)?;
                     self.expect(TokenKind::Using)?;
@@ -226,8 +282,18 @@ impl Parser {
             if self.consume(TokenKind::Cast) {
                 self.expect(TokenKind::Char('('))?;
                 let source_tokens = self.take_until_top_level(&[TokenKind::As]);
+                if self.at_completion() {
+                    let mut completion_tokens = source_tokens.clone();
+                    self.append_completion_marker(&mut completion_tokens);
+                    record_type_name_completion(&completion_tokens, self.completion.as_ref());
+                }
                 self.expect(TokenKind::As)?;
                 let target_tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
+                if self.at_completion() {
+                    let mut completion_tokens = target_tokens.clone();
+                    self.append_completion_marker(&mut completion_tokens);
+                    record_type_name_completion(&completion_tokens, self.completion.as_ref());
+                }
                 self.expect(TokenKind::Char(')'))?;
                 if !self.at(TokenKind::Is) {
                     return Err(self.error_here("unexpected token after CAST identity"));
@@ -242,6 +308,7 @@ impl Parser {
             }
             if self.consume(TokenKind::Transform) {
                 self.expect(TokenKind::For)?;
+                self.record_completion_slot(completion::GrammarSlot::Type);
                 self.record_completion_slot_before(
                     completion::GrammarSlot::Type,
                     &[TokenKind::Language],
@@ -269,9 +336,10 @@ impl Parser {
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?;
                 self.expect(TokenKind::On)?;
+                self.record_completion_tokens(&[TokenKind::DomainP]);
                 if self.consume(TokenKind::DomainP) {
-                    self.record_completion_slot(completion::GrammarSlot::Domain);
-                    let domain = self.parse_type_object_until_is()?;
+                    let domain =
+                        self.parse_type_object_until_is(completion::GrammarSlot::Domain)?;
                     return Ok((
                         ObjectType::Domconstraint,
                         name_list_node(vec![domain, make_string_node(conname)]),
@@ -325,6 +393,31 @@ impl Parser {
         &mut self,
         security_label: bool,
     ) -> PResult<(ObjectType, DescribedIdentityKind)> {
+        self.record_completion_tokens(&[
+            TokenKind::Table,
+            TokenKind::Sequence,
+            TokenKind::View,
+            TokenKind::Index,
+            TokenKind::Collation,
+            TokenKind::ConversionP,
+            TokenKind::Statistics,
+            TokenKind::Materialized,
+            TokenKind::Foreign,
+            TokenKind::Property,
+            TokenKind::TextP,
+            TokenKind::Access,
+            TokenKind::Event,
+            TokenKind::Extension,
+            TokenKind::Procedural,
+            TokenKind::Language,
+            TokenKind::Publication,
+            TokenKind::Schema,
+            TokenKind::Server,
+            TokenKind::Database,
+            TokenKind::Role,
+            TokenKind::Subscription,
+            TokenKind::Tablespace,
+        ]);
         let any_name = match self.peek_kind() {
             TokenKind::Table => Some(ObjectType::Table),
             TokenKind::Sequence => Some(ObjectType::Sequence),
@@ -344,6 +437,7 @@ impl Parser {
             return Ok((ObjectType::Matview, DescribedIdentityKind::AnyName));
         }
         if self.consume(TokenKind::Foreign) {
+            self.record_completion_tokens(&[TokenKind::DataP, TokenKind::Table]);
             if self.consume(TokenKind::Table) {
                 return Ok((ObjectType::ForeignTable, DescribedIdentityKind::AnyName));
             }
@@ -357,6 +451,12 @@ impl Parser {
         }
         if self.consume(TokenKind::TextP) {
             self.expect(TokenKind::Search)?;
+            self.record_completion_tokens(&[
+                TokenKind::Parser,
+                TokenKind::Dictionary,
+                TokenKind::Template,
+                TokenKind::Configuration,
+            ]);
             let objtype = match self.peek_kind() {
                 TokenKind::Parser => ObjectType::Tsparser,
                 TokenKind::Dictionary => ObjectType::Tsdictionary,
@@ -444,7 +544,9 @@ impl Parser {
         Ok(name_list_node(self.parse_any_name_elements_until_is(slot)?))
     }
 
-    fn parse_type_object_until_is(&mut self) -> PResult<Node> {
+    fn parse_type_object_until_is(&mut self, slot: completion::GrammarSlot) -> PResult<Node> {
+        self.record_completion_slot(slot);
+        self.record_completion_slot_before(slot, &[TokenKind::Is]);
         let tokens = self.take_until_top_level(&[TokenKind::Is]);
         Ok(Node::TypeName(parse_type_name_tokens(tokens)?))
     }

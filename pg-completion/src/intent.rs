@@ -75,12 +75,11 @@ pub(super) fn from_expectations(expectations: &ExpectationSet) -> CompletionInte
                 push_unique(&mut object_kinds, ObjectKind::TextSearchTemplate)
             }
             GrammarSlot::Trigger => push_unique(&mut object_kinds, ObjectKind::Trigger),
-            // This slot only says that the grammar accepts a name. It is also
-            // used for non-Catalog identities such as cursors, prepared
-            // statements, savepoints, and notification channels. Publishing
-            // arbitrary Catalog kinds here would turn missing semantic
-            // classification into misleading adapter queries.
-            GrammarSlot::AnyName => {}
+            // Privileges are adapter-provided syntax names rather than
+            // Catalog objects. AnyName is used for non-Catalog identities
+            // such as cursors, prepared statements, savepoints, and
+            // notification channels. Neither slot creates a Catalog query.
+            GrammarSlot::Privilege | GrammarSlot::Alias | GrammarSlot::AnyName => {}
         }
     }
     CompletionIntent {
@@ -279,7 +278,19 @@ fn create_index_container(
         .skip(index + 1)
         .find(|(_, token)| token.kind == TokenKind::On)
         .map(|(index, _)| index)?;
-    let (name, next) = qualified_name(source, base, tokens, on + 1)?;
+    let mut relation = on + 1;
+    let mut parenthesized = false;
+    if token_kind(tokens, relation) == TokenKind::Only {
+        relation += 1;
+        if token_kind(tokens, relation) == TokenKind::Char('(') {
+            parenthesized = true;
+            relation += 1;
+        }
+    }
+    let (name, next) = qualified_name(source, base, tokens, relation)?;
+    if parenthesized && token_kind(tokens, next) != TokenKind::Char(')') {
+        return None;
+    }
     (tokens[next.saturating_sub(1)].range.end() <= point).then_some(relation_reference(name))
 }
 
@@ -293,11 +304,17 @@ fn create_statistics_container(
     {
         return None;
     }
-    let from = tokens
-        .iter()
-        .enumerate()
-        .find(|(_, token)| token.kind == TokenKind::From && token.range.start() >= point)
-        .map(|(index, _)| index)?;
+    let mut depth = 0usize;
+    let from = tokens.iter().enumerate().find_map(|(index, token)| {
+        if token.kind == TokenKind::Char(')') {
+            depth = depth.saturating_sub(1);
+        }
+        let matches = depth == 0 && token.kind == TokenKind::From && token.range.start() >= point;
+        if token.kind == TokenKind::Char('(') {
+            depth += 1;
+        }
+        matches.then_some(index)
+    })?;
     let (name, _) = qualified_name(source, base, tokens, from + 1)?;
     Some(relation_reference(name))
 }
@@ -320,7 +337,15 @@ fn grant_container(
     if token_kind(tokens, index) == TokenKind::Table {
         index += 1;
     }
-    let (name, _) = qualified_name(source, base, tokens, index)?;
+    let (name, next) = qualified_name(source, base, tokens, index)?;
+    let recipient = if token_kind(tokens, 0) == TokenKind::Grant {
+        TokenKind::To
+    } else {
+        TokenKind::From
+    };
+    if token_kind(tokens, next) != recipient {
+        return None;
+    }
     Some(relation_reference(name))
 }
 
@@ -442,9 +467,8 @@ mod tests {
     #[test]
     fn relation_intent_is_catalog_facing_and_deduplicated() {
         let intent = from_expectations(&ExpectationSet {
-            tokens: Vec::new(),
-            phrases: Vec::new(),
             slots: vec![GrammarSlot::Relation, GrammarSlot::Schema],
+            ..ExpectationSet::default()
         });
         assert_eq!(
             intent
@@ -460,9 +484,8 @@ mod tests {
     #[test]
     fn exact_relation_slots_do_not_depend_on_statement_tokens() {
         let intent = from_expectations(&ExpectationSet {
-            tokens: Vec::new(),
-            phrases: Vec::new(),
             slots: vec![GrammarSlot::Table, GrammarSlot::MaterializedView],
+            ..ExpectationSet::default()
         });
         assert_eq!(
             intent.object_kinds,
@@ -473,9 +496,8 @@ mod tests {
     #[test]
     fn any_name_does_not_invent_catalog_object_kinds() {
         let expectations = ExpectationSet {
-            tokens: Vec::new(),
-            phrases: Vec::new(),
             slots: vec![GrammarSlot::AnyName],
+            ..ExpectationSet::default()
         };
         let intent = from_expectations(&expectations);
         assert!(intent.object_kinds.is_empty());

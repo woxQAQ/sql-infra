@@ -1,5 +1,22 @@
 use super::*;
 
+pub(super) fn tokens_end_at_top_level(tokens: &[Token]) -> bool {
+    let mut depth = 0usize;
+    for token in tokens {
+        match token.kind {
+            TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+            TokenKind::Char(')') | TokenKind::Char(']') => {
+                let Some(next) = depth.checked_sub(1) else {
+                    return false;
+                };
+                depth = next;
+            }
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
 pub(super) fn parse_statement_node_tokens(tokens: Vec<Token>) -> PResult<Node> {
     parse_statement_node_tokens_with_completion(tokens, None)
 }

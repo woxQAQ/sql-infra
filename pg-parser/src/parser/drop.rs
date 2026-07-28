@@ -4,6 +4,7 @@ impl Parser {
     pub(super) fn parse_drop(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Drop)?;
         self.record_completion_tokens(&[
+            TokenKind::Access,
             TokenKind::Database,
             TokenKind::Cast,
             TokenKind::Transform,
@@ -28,8 +29,15 @@ impl Parser {
             TokenKind::Aggregate,
             TokenKind::Collation,
             TokenKind::Extension,
+            TokenKind::Event,
+            TokenKind::Foreign,
+            TokenKind::Language,
             TokenKind::Policy,
+            TokenKind::Property,
             TokenKind::Rule,
+            TokenKind::Server,
+            TokenKind::Statistics,
+            TokenKind::TextP,
             TokenKind::Trigger,
             TokenKind::Publication,
         ]);

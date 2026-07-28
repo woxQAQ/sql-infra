@@ -34,13 +34,20 @@ impl Parser {
     pub(super) fn parse_define_text_search(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TextP)?;
         self.expect(TokenKind::Search)?;
-        let kind = match self.advance().kind {
+        self.record_completion_tokens(&[
+            TokenKind::Parser,
+            TokenKind::Dictionary,
+            TokenKind::Template,
+            TokenKind::Configuration,
+        ]);
+        let kind = match self.peek_kind() {
             TokenKind::Parser => ObjectType::Tsparser,
             TokenKind::Dictionary => ObjectType::Tsdictionary,
             TokenKind::Template => ObjectType::Tstemplate,
             TokenKind::Configuration => ObjectType::Tsconfiguration,
             _ => return Err(self.error_here("invalid TEXT SEARCH object type")),
         };
+        self.advance();
         let name_stops = [TokenKind::Char('('), TokenKind::Char(';'), TokenKind::Eof];
         let slot = completion::object_type_slot(kind);
         self.record_completion_slot(slot);

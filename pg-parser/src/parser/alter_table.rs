@@ -60,10 +60,7 @@ impl Parser {
     pub(super) fn parse_alter_table_after_kind(&mut self, objtype: ObjectType) -> PResult<Node> {
         let missing_ok = self.consume_if_exists()?;
         let slot = completion::object_type_slot(objtype);
-        let relation = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(slot)
-                .ok_or_else(|| self.error_here("ALTER relation requires a relation name"))?,
-        ));
+        let relation = Some(Box::new(self.parse_relation_expr_with_slot(false, slot)?));
         let cmds = self.parse_alter_table_cmds(objtype)?;
         Ok(Node::AlterTableStmt(AlterTableStmt {
             node_tag: NodeTag::AlterTableStmt,
@@ -235,6 +232,13 @@ impl Parser {
 
     fn parse_alter_table_enable_cmd(&mut self) -> PResult<AlterTableCmd> {
         self.expect(TokenKind::EnableP)?;
+        self.record_completion_tokens(&[
+            TokenKind::Always,
+            TokenKind::Replica,
+            TokenKind::Trigger,
+            TokenKind::Rule,
+            TokenKind::Row,
+        ]);
         let qualifier = if self.consume(TokenKind::Always) {
             Some(TokenKind::Always)
         } else if self.consume(TokenKind::Replica) {
@@ -246,6 +250,7 @@ impl Parser {
             node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
+        self.record_completion_tokens(&[TokenKind::Trigger, TokenKind::Rule, TokenKind::Row]);
         match self.peek_kind() {
             TokenKind::Trigger => {
                 self.advance();
@@ -348,6 +353,30 @@ impl Parser {
     }
 
     fn parse_alter_table_cmd(&mut self, objtype: ObjectType) -> PResult<AlterTableCmd> {
+        self.record_completion_tokens(&[
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Alter,
+            TokenKind::Set,
+            TokenKind::Reset,
+            TokenKind::Validate,
+            TokenKind::EnableP,
+            TokenKind::DisableP,
+            TokenKind::Cluster,
+            TokenKind::Replica,
+            TokenKind::Owner,
+            TokenKind::Attach,
+            TokenKind::Detach,
+            TokenKind::Split,
+            TokenKind::Merge,
+            TokenKind::Inherit,
+            TokenKind::No,
+            TokenKind::Of,
+            TokenKind::Not,
+            TokenKind::Force,
+            TokenKind::Options,
+            TokenKind::Rename,
+        ]);
         let mut cmd = AlterTableCmd {
             node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
@@ -376,6 +405,14 @@ impl Parser {
                             TokenKind::Char(';'),
                             TokenKind::Eof,
                         ]) {
+                            self.record_completion_tokens(&[
+                                TokenKind::Deferrable,
+                                TokenKind::Initially,
+                                TokenKind::Enforced,
+                                TokenKind::Not,
+                                TokenKind::No,
+                                TokenKind::Inherit,
+                            ]);
                             match self.peek_kind() {
                                 TokenKind::Deferrable => {
                                     self.advance();
@@ -399,6 +436,10 @@ impl Parser {
                                 }
                                 TokenKind::Not => {
                                     self.advance();
+                                    self.record_completion_tokens(&[
+                                        TokenKind::Deferrable,
+                                        TokenKind::Enforced,
+                                    ]);
                                     match self.peek_kind() {
                                         TokenKind::Deferrable => {
                                             self.advance();
@@ -529,6 +570,25 @@ impl Parser {
                         ..ColumnDef::default()
                     })));
                 } else if saw_set {
+                    self.record_completion_tokens(&[
+                        TokenKind::Default,
+                        TokenKind::Not,
+                        TokenKind::Expression,
+                        TokenKind::Statistics,
+                        TokenKind::Char('('),
+                        TokenKind::Storage,
+                        TokenKind::Compression,
+                        TokenKind::Generated,
+                        TokenKind::Cache,
+                        TokenKind::Cycle,
+                        TokenKind::Increment,
+                        TokenKind::Logged,
+                        TokenKind::Maxvalue,
+                        TokenKind::Minvalue,
+                        TokenKind::No,
+                        TokenKind::Start,
+                        TokenKind::Unlogged,
+                    ]);
                     match self.peek_kind() {
                         TokenKind::Default => {
                             self.advance();
@@ -675,6 +735,13 @@ impl Parser {
                         }
                     }
                 } else {
+                    self.record_completion_tokens(&[
+                        TokenKind::AddP,
+                        TokenKind::Restart,
+                        TokenKind::Reset,
+                        TokenKind::Drop,
+                        TokenKind::Options,
+                    ]);
                     match self.peek_kind() {
                         TokenKind::AddP => {
                             self.advance();
@@ -746,6 +813,12 @@ impl Parser {
                                     "column numbers are only valid with SET STATISTICS",
                                 ));
                             }
+                            self.record_completion_tokens(&[
+                                TokenKind::Default,
+                                TokenKind::Not,
+                                TokenKind::Expression,
+                                TokenKind::IdentityP,
+                            ]);
                             match self.peek_kind() {
                                 TokenKind::Default => {
                                     self.advance();
@@ -819,6 +892,12 @@ impl Parser {
             TokenKind::Replica => {
                 self.advance();
                 self.expect(TokenKind::IdentityP)?;
+                self.record_completion_tokens(&[
+                    TokenKind::Nothing,
+                    TokenKind::Full,
+                    TokenKind::Default,
+                    TokenKind::Using,
+                ]);
                 let (identity_type, name) = match self.peek_kind() {
                     TokenKind::Nothing => {
                         self.advance();
@@ -940,7 +1019,10 @@ impl Parser {
                 )));
             }
         }
-        if !self.at_any(&[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof]) {
+        self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(';')]);
+        if !self.at_completion()
+            && !self.at_any(&[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof])
+        {
             return Err(self.error_here("unexpected token after ALTER TABLE command"));
         }
         Ok(cmd)

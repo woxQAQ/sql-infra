@@ -59,6 +59,12 @@ impl Parser {
                     .ok_or_else(|| self.error_here("expected a database option name"))?
             };
             self.consume(TokenKind::Char('='));
+            match name.as_str() {
+                "owner" => self.record_completion_slot(completion::GrammarSlot::Role),
+                "tablespace" => self.record_completion_slot(completion::GrammarSlot::Tablespace),
+                "template" => self.record_completion_slot(completion::GrammarSlot::Database),
+                _ => {}
+            }
             let arg = if self.consume(TokenKind::Default) {
                 None
             } else if matches!(

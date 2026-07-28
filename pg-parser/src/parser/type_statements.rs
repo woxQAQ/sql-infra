@@ -52,7 +52,7 @@ impl Parser {
         self.record_completion_tokens(&[TokenKind::As, TokenKind::Char('(')]);
         if !self.consume(TokenKind::As) {
             let definition = if self.at(TokenKind::Char('(')) {
-                self.parse_parenthesized_definition()?
+                self.parse_parenthesized_definition_for(Some(ObjectType::Type))?
             } else {
                 Vec::new()
             };
@@ -141,6 +141,14 @@ impl Parser {
         if type_name.is_empty() {
             return Err(self.error_here("ALTER TYPE requires a type name"));
         }
+        self.record_completion_tokens(&[
+            TokenKind::Set,
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Alter,
+            TokenKind::Rename,
+            TokenKind::Owner,
+        ]);
         self.expect(TokenKind::Set)?;
         let options = self.parse_operator_definition_list(ObjectType::Type)?;
         self.expect_statement_end()?;
