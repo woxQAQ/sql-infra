@@ -1,6 +1,6 @@
 use pg_parser::{TextRange, TextSize, Token, TokenValue};
 
-use crate::{RecoveryIssue, RecoveryKind, lexical};
+use crate::{CompletionDiagnostic, CompletionDiagnosticKind, lexical};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum IdentifierQuoting {
@@ -64,24 +64,29 @@ fn add(left: TextSize, right: TextSize) -> TextSize {
 
 pub(super) struct NormalizedPoint {
     pub point: TextSize,
-    pub issues: Vec<RecoveryIssue>,
+    pub diagnostics: Vec<CompletionDiagnostic>,
 }
 
-pub(super) struct ExtractedPrefix {
+pub(super) struct CompletionSite {
     pub prefix: CompletionPrefix,
-    pub range: TextRange,
+    pub replacement_range: TextRange,
     pub qualifier: Vec<NamePart>,
-    pub issues: Vec<RecoveryIssue>,
-    pub suppress_expectations: bool,
+    lexical_context: LexicalContext,
+}
+
+impl CompletionSite {
+    pub(super) fn supports_grammar_completion(&self) -> bool {
+        self.lexical_context.supports_grammar_completion()
+    }
 }
 
 pub(super) fn normalize_point(source: &str, requested: TextSize) -> NormalizedPoint {
     let requested = usize::from(requested);
     let mut point = requested.min(source.len());
-    let mut issues = Vec::new();
+    let mut diagnostics = Vec::new();
     if requested > source.len() {
-        issues.push(RecoveryIssue {
-            kind: RecoveryKind::PointClampedToEof,
+        diagnostics.push(CompletionDiagnostic {
+            kind: CompletionDiagnosticKind::PointClampedToEof,
             range: TextRange::empty(text_size(source.len())),
         });
     }
@@ -90,30 +95,24 @@ pub(super) fn normalize_point(source: &str, requested: TextSize) -> NormalizedPo
         while !source.is_char_boundary(point) {
             point -= 1;
         }
-        issues.push(RecoveryIssue {
-            kind: RecoveryKind::PointMovedToCharBoundary,
+        diagnostics.push(CompletionDiagnostic {
+            kind: CompletionDiagnosticKind::PointMovedToCharBoundary,
             range: TextRange::new(text_size(point), text_size(original)),
         });
     }
     NormalizedPoint {
         point: text_size(point),
-        issues,
+        diagnostics,
     }
 }
 
-pub(super) fn extract(source: &str, statement: TextRange, point: TextSize) -> ExtractedPrefix {
+pub(super) fn analyze(source: &str, statement: TextRange, point: TextSize) -> CompletionSite {
     let point_usize = usize::from(point);
     let statement_start = usize::from(statement.start());
     let statement_end = usize::from(statement.end());
-    let context = lexical_context(source, statement_start, point_usize);
-    let suppressed = matches!(
-        context,
-        LexicalContext::SingleQuote { .. }
-            | LexicalContext::LineComment
-            | LexicalContext::BlockComment
-            | LexicalContext::DollarQuote
-    );
-    let (start, end, quoting, raw, normalized) = match context {
+    let lexical_context = lexical_context(source, statement_start, point_usize);
+    let supports_grammar_completion = lexical_context.supports_grammar_completion();
+    let (start, end, quoting, raw, normalized) = match lexical_context {
         LexicalContext::DoubleQuote { open } => {
             quoted_prefix(source, statement_start, open, point_usize, statement_end)
         }
@@ -146,7 +145,7 @@ pub(super) fn extract(source: &str, statement: TextRange, point: TextSize) -> Ex
                 )
             }
         }
-        _ if suppressed => (
+        _ if !supports_grammar_completion => (
             point_usize,
             point_usize,
             IdentifierQuoting::Unquoted,
@@ -181,21 +180,20 @@ pub(super) fn extract(source: &str, statement: TextRange, point: TextSize) -> Ex
             }
         }
     };
-    let qualifier = if suppressed {
-        Vec::new()
-    } else {
+    let qualifier = if supports_grammar_completion {
         qualifier_before(source, statement_start, start)
+    } else {
+        Vec::new()
     };
-    ExtractedPrefix {
+    CompletionSite {
         prefix: CompletionPrefix {
             raw,
             normalized,
             quoting,
         },
-        range: TextRange::new(text_size(start), text_size(end)),
+        replacement_range: TextRange::new(text_size(start), text_size(end)),
         qualifier,
-        issues: Vec::new(),
-        suppress_expectations: suppressed,
+        lexical_context,
     }
 }
 
@@ -323,6 +321,15 @@ enum LexicalContext {
     LineComment,
     BlockComment,
     DollarQuote,
+}
+
+impl LexicalContext {
+    fn supports_grammar_completion(self) -> bool {
+        !matches!(
+            self,
+            Self::SingleQuote { .. } | Self::LineComment | Self::BlockComment | Self::DollarQuote
+        )
+    }
 }
 
 fn lexical_context(source: &str, start: usize, point: usize) -> LexicalContext {
@@ -546,12 +553,11 @@ mod tests {
     #[test]
     fn separates_qualifier_and_unquoted_prefix() {
         let source = "select db.Schema.Na";
-        let extracted = extract(source, range(source), text_size(source.len()));
-        assert_eq!(extracted.prefix.raw, "Na");
-        assert_eq!(extracted.prefix.normalized, "na");
+        let site = analyze(source, range(source), text_size(source.len()));
+        assert_eq!(site.prefix.raw, "Na");
+        assert_eq!(site.prefix.normalized, "na");
         assert_eq!(
-            extracted
-                .qualifier
+            site.qualifier
                 .iter()
                 .map(|part| part.normalized.as_str())
                 .collect::<Vec<_>>(),
@@ -562,26 +568,29 @@ mod tests {
     #[test]
     fn keeps_quoted_prefix_case() {
         let source = "select s.\"Mixed";
-        let extracted = extract(source, range(source), text_size(source.len()));
-        assert_eq!(extracted.prefix.raw, "Mixed");
-        assert_eq!(extracted.prefix.normalized, "Mixed");
-        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::Quoted);
-        assert_eq!(extracted.qualifier[0].normalized, "s");
+        let site = analyze(source, range(source), text_size(source.len()));
+        assert_eq!(site.prefix.raw, "Mixed");
+        assert_eq!(site.prefix.normalized, "Mixed");
+        assert_eq!(site.prefix.quoting, IdentifierQuoting::Quoted);
+        assert_eq!(site.qualifier[0].normalized, "s");
     }
 
     #[test]
     fn replacement_range_covers_the_identifier_suffix() {
         let source = "select SELect, s.\"Mixed\"";
         let unquoted_point = source.find("SEL").unwrap() + 3;
-        let extracted = extract(source, range(source), text_size(unquoted_point));
-        assert_eq!(extracted.prefix.raw, "SEL");
-        assert_eq!(extracted.range, TextRange::new(text_size(7), text_size(13)));
+        let site = analyze(source, range(source), text_size(unquoted_point));
+        assert_eq!(site.prefix.raw, "SEL");
+        assert_eq!(
+            site.replacement_range,
+            TextRange::new(text_size(7), text_size(13))
+        );
 
         let quoted_point = source.find("Mix").unwrap() + 3;
-        let extracted = extract(source, range(source), text_size(quoted_point));
-        assert_eq!(extracted.prefix.raw, "Mix");
+        let site = analyze(source, range(source), text_size(quoted_point));
+        assert_eq!(site.prefix.raw, "Mix");
         assert_eq!(
-            extracted.range,
+            site.replacement_range,
             TextRange::new(
                 text_size(source.find('"').unwrap()),
                 text_size(source.len())
@@ -590,9 +599,9 @@ mod tests {
 
         let source = "select \"MixedSuffix";
         let point = source.find("Mix").unwrap() + 3;
-        let extracted = extract(source, range(source), text_size(point));
+        let site = analyze(source, range(source), text_size(point));
         assert_eq!(
-            extracted.range,
+            site.replacement_range,
             TextRange::new(
                 text_size(source.find('"').unwrap()),
                 text_size(source.len())
@@ -606,52 +615,52 @@ mod tests {
         let normalized = normalize_point(source, TextSize::new(2));
         assert_eq!(normalized.point, TextSize::ZERO);
         assert_eq!(
-            normalized.issues[0].kind,
-            RecoveryKind::PointMovedToCharBoundary
+            normalized.diagnostics[0].kind,
+            CompletionDiagnosticKind::PointMovedToCharBoundary
         );
     }
 
     #[test]
     fn does_not_treat_quotes_inside_strings_as_identifier_prefixes() {
         let source = "select 'not a \"name";
-        let extracted = extract(source, range(source), text_size(source.len()));
-        assert!(extracted.suppress_expectations);
-        assert!(extracted.prefix.raw.is_empty());
+        let site = analyze(source, range(source), text_size(source.len()));
+        assert!(!site.supports_grammar_completion());
+        assert!(site.prefix.raw.is_empty());
     }
 
     #[test]
     fn extracts_identifiers_containing_a_dollar_quote_shaped_suffix() {
         let source = "SELECT name$tag$";
-        let extracted = extract(source, range(source), text_size(source.len()));
-        assert_eq!(extracted.prefix.raw, "name$tag$");
-        assert_eq!(extracted.prefix.normalized, "name$tag$");
-        assert!(!extracted.suppress_expectations);
+        let site = analyze(source, range(source), text_size(source.len()));
+        assert_eq!(site.prefix.raw, "name$tag$");
+        assert_eq!(site.prefix.normalized, "name$tag$");
+        assert!(site.supports_grammar_completion());
     }
 
     #[test]
     fn unicode_quote_prefix_requires_a_token_boundary() {
         let source = "select fooU&\"Mixed\"";
         let point = source.find("Mix").unwrap() + 3;
-        let extracted = extract(source, range(source), text_size(point));
+        let site = analyze(source, range(source), text_size(point));
         let quote = source.find('"').unwrap();
-        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::Quoted);
-        assert_eq!(extracted.range.start(), text_size(quote));
-        let extracted = extract(source, range(source), text_size(source.len()));
-        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::Quoted);
-        assert_eq!(extracted.range.start(), text_size(quote));
+        assert_eq!(site.prefix.quoting, IdentifierQuoting::Quoted);
+        assert_eq!(site.replacement_range.start(), text_size(quote));
+        let site = analyze(source, range(source), text_size(source.len()));
+        assert_eq!(site.prefix.quoting, IdentifierQuoting::Quoted);
+        assert_eq!(site.replacement_range.start(), text_size(quote));
 
         let source = "select U&\"Mixed\"";
         let point = source.find("Mix").unwrap() + 3;
-        let extracted = extract(source, range(source), text_size(point));
-        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
+        let site = analyze(source, range(source), text_size(point));
+        assert_eq!(site.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
         assert_eq!(
-            extracted.range.start(),
+            site.replacement_range.start(),
             text_size(source.find("U&").unwrap())
         );
-        let extracted = extract(source, range(source), text_size(source.len()));
-        assert_eq!(extracted.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
+        let site = analyze(source, range(source), text_size(source.len()));
+        assert_eq!(site.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
         assert_eq!(
-            extracted.range.start(),
+            site.replacement_range.start(),
             text_size(source.find("U&").unwrap())
         );
     }
@@ -674,8 +683,8 @@ mod tests {
 
         let source = r#"select U&"S\0063hema".U&"M\0069x""#;
         let point = source.find(r"\0069").unwrap() + r"\0069".len();
-        let extracted = extract(source, range(source), text_size(point));
-        assert_eq!(extracted.prefix.normalized, "Mi");
-        assert_eq!(extracted.qualifier[0].normalized, "Schema");
+        let site = analyze(source, range(source), text_size(point));
+        assert_eq!(site.prefix.normalized, "Mi");
+        assert_eq!(site.qualifier[0].normalized, "Schema");
     }
 }

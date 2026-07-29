@@ -87,7 +87,7 @@ export interface ContextDto {
     dmlTarget?: RelationDto;
     mergeSource?: RelationDto;
   };
-  recovery: Array<{
+  diagnostics: Array<{
     kind: string;
     range: SourceRange;
   }>;

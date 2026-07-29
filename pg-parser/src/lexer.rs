@@ -138,9 +138,29 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct CompletionLex {
-    pub tokens: Vec<Token>,
-    pub issues: Vec<LexError>,
+/// Tokens produced for editor input, including any lexical error recovered at
+/// the completion point.
+pub struct CompletionTokenization {
+    tokens: Vec<Token>,
+    recovered_error: Option<LexError>,
+}
+
+impl CompletionTokenization {
+    /// Returns the token stream, including a synthetic `Incomplete` token when
+    /// tokenization recovered at the completion point.
+    pub fn tokens(&self) -> &[Token] {
+        &self.tokens
+    }
+
+    /// Returns the lexical error replaced by an `Incomplete` token, if any.
+    pub fn recovered_error(&self) -> Option<&LexError> {
+        self.recovered_error.as_ref()
+    }
+
+    /// Consumes the result and returns its token stream.
+    pub fn into_tokens(self) -> Vec<Token> {
+        self.tokens
+    }
 }
 
 /// Tokenize editor input without weakening the strict [`lex`] interface.
@@ -149,13 +169,16 @@ pub struct CompletionLex {
 /// reaches `point`, is represented by an `Incomplete` token. A failure wholly
 /// before `point` remains fatal because the parser cannot reliably infer the
 /// grammar state past it.
-pub fn lex_for_completion(input: &str, point: TextSize) -> Result<CompletionLex, LexError> {
+pub fn lex_for_completion(
+    input: &str,
+    point: TextSize,
+) -> Result<CompletionTokenization, LexError> {
     let point = TextSize::try_from(usize::from(point).min(input.len()))
         .expect("completion point was bounded by input length");
     match lex(input) {
-        Ok(tokens) => Ok(CompletionLex {
+        Ok(tokens) => Ok(CompletionTokenization {
             tokens,
-            issues: Vec::new(),
+            recovered_error: None,
         }),
         Err(error) if error.range.end() >= point => {
             let safe_end = usize::from(error.range.start()).min(input.len());
@@ -167,9 +190,9 @@ pub fn lex_for_completion(input: &str, point: TextSize) -> Result<CompletionLex,
                 value: None,
             });
             tokens.push(Token::new(TokenKind::Eof, usize::from(error.range.end())));
-            Ok(CompletionLex {
+            Ok(CompletionTokenization {
                 tokens,
-                issues: vec![error],
+                recovered_error: Some(error),
             })
         }
         Err(error) => Err(error),
@@ -1142,14 +1165,14 @@ mod tests {
     }
 
     #[test]
-    fn completion_lexing_recovers_only_at_or_after_the_point() {
+    fn completion_tokenization_recovers_only_at_or_after_the_point() {
         let sql = "select  from \"unfinished";
         let point = TextSize::new(7);
         let recovered = lex_for_completion(sql, point).unwrap();
-        assert_eq!(recovered.issues.len(), 1);
+        assert!(recovered.recovered_error().is_some());
         assert!(
             recovered
-                .tokens
+                .tokens()
                 .iter()
                 .any(|token| token.kind == TokenKind::Incomplete)
         );

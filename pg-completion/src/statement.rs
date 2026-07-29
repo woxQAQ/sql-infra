@@ -5,7 +5,7 @@ use crate::lexical;
 /// Find the semicolon-delimited statement containing `point`, ignoring
 /// semicolons in quoted strings, quoted identifiers, dollar quotes, and
 /// comments.
-pub(super) fn containing_statement(source: &str, point: TextSize) -> TextRange {
+pub(super) fn range_at(source: &str, point: TextSize) -> TextRange {
     let point = usize::from(point);
     let (mut start, mut end) = statement_bounds(source, point);
 
@@ -134,7 +134,7 @@ mod tests {
     fn ignores_semicolons_in_lexical_containers() {
         let sql = "select ';'; select $$;$$; select \";\"; /* ; */ select 4";
         assert_eq!(
-            containing_statement(sql, text_size(sql.len())),
+            range_at(sql, text_size(sql.len())),
             TextRange::new(text_size(38), text_size(sql.len()))
         );
     }
@@ -143,13 +143,13 @@ mod tests {
     fn follows_escape_strings_and_carriage_return_comments() {
         let sql = "select E'a\\';b'; select 2";
         assert_eq!(
-            containing_statement(sql, text_size(sql.len())),
+            range_at(sql, text_size(sql.len())),
             TextRange::new(text_size(17), text_size(sql.len()))
         );
 
         let sql = "select 1 -- comment\r; select 2";
         assert_eq!(
-            containing_statement(sql, text_size(sql.len())),
+            range_at(sql, text_size(sql.len())),
             TextRange::new(text_size(22), text_size(sql.len()))
         );
     }
@@ -158,7 +158,7 @@ mod tests {
     fn does_not_treat_a_parameter_suffix_as_a_dollar_quote() {
         let sql = "select $1$; select 2";
         assert_eq!(
-            containing_statement(sql, text_size(sql.len())),
+            range_at(sql, text_size(sql.len())),
             TextRange::new(text_size(12), text_size(sql.len()))
         );
     }
@@ -167,7 +167,7 @@ mod tests {
     fn does_not_treat_an_identifier_suffix_as_a_dollar_quote() {
         let sql = "select name$tag$; select 2";
         assert_eq!(
-            containing_statement(sql, text_size(sql.len())),
+            range_at(sql, text_size(sql.len())),
             TextRange::new(text_size(18), text_size(sql.len()))
         );
     }

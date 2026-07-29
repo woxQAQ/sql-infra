@@ -30,14 +30,27 @@ pub struct CompletionContext {
     pub intent: CompletionIntent,
     /// 补全点处语法上可见的名称。
     pub scope: ScopeSnapshot,
-    /// 供诊断和遥测使用的非致命恢复信息。
-    pub recovery: CompletionRecovery,
+    /// 供调用方判断结果完整性并进行遥测的补全诊断。
+    pub diagnostics: Vec<CompletionDiagnostic>,
 }
 
 pub struct CompletionPrefix {
     pub raw: String,
     pub normalized: String,
     pub quoting: IdentifierQuoting,
+}
+
+pub struct CompletionDiagnostic {
+    pub kind: CompletionDiagnosticKind,
+    pub range: TextRange,
+}
+
+pub enum CompletionDiagnosticKind {
+    PointClampedToEof,
+    PointMovedToCharBoundary,
+    TokenizationRecovered,
+    LexErrorBeforePoint,
+    ScopeIncomplete,
 }
 
 pub struct ExpectationSet {
@@ -140,7 +153,7 @@ pub struct NamePart {
 3. `expectations` 记录该位置语法上允许的 Token、固定短语和 `GrammarSlot`，不包含任何 Catalog 对象。Token 是单个终结符；`follow_tokens` 标出会结束当前表达式、进入外层产生式的 Token；短语把 `GROUP BY` 这类固定多词单元整体交给 adapter。adapter 因而无需扫描 SQL：当完整表达式后尚未输入下一个 token 时保持安静，用户开始输入前缀后再发布匹配的表达式延续或 clause transition。
 4. `intent` 将 `GrammarSlot` 转成 adapter 可查询的 `ObjectKind`，通过 `qualifier` 保留当前片段之前的限定名，并在子对象候选中通过 `container` 指明其所属对象。
 5. `scope` 记录当前语法位置可见的关系、CTE、DML 目标和外部查询层级，供 adapter 解析列候选。
-6. `recovery` 记录词法或作用域收集过程中发生的非致命问题；它不会清除已经得到的其他信息。
+6. `diagnostics` 记录位置修正、词法恢复或作用域不完整等问题；它不会清除已经得到的其他信息。
 
 例如，对 `SELECT u.na| FROM users AS u` 调用 `collect` 时，`|` 只表示补全点，不属于输入：
 
@@ -152,7 +165,7 @@ prefix            = { raw: "na", normalized: "na", quoting: Unquoted }
 expectations      = { tokens: [], slots: [Column, Function] }
 intent            = { object_kinds: [Column, Function], qualifier: [u], container: None }
 scope.local       = [users AS u]
-recovery          = []
+diagnostics       = []
 ```
 
 `pg-completion` 到此停止。adapter 再使用 `qualifier = [u]` 在 `scope` 中定位 `users`，查询该关系的列，并用 `prefix = "na"` 过滤结果。`Function` 仍被保留，因为同一个限定符也可能是 schema；只有 Catalog adapter 能消除关系别名与 schema 的命名冲突。Catalog 中是否真的存在 `users`、同名 schema 或匹配的候选，不影响上述上下文的构造。
@@ -230,7 +243,7 @@ pub enum RelationKind {
 pub fn collect_expectations(
     source: &str,
     point: TextSize,
-) -> Result<ParserExpectations, CompletionLexError>;
+) -> Result<ParserExpectations, LexError>;
 
 pub struct ParserExpectations {
     pub tokens: Vec<TokenKind>,
@@ -260,7 +273,7 @@ collector.slot(GrammarSlot::Column);
 
 #### Collect 完整性不变量
 
-所有能够由 `pg-parser` 顶层语句分派入口解析的语句，最终都必须覆盖 collect 模式。`ExpectationSet` 不编码实现进度或恢复状态：有合法语法候选时返回相应 Token 和 slot；当前位置没有后续候选时返回空集合；词法恢复和作用域恢复问题只记录在 `CompletionRecovery`。
+所有能够由 `pg-parser` 顶层语句分派入口解析的语句，最终都必须覆盖 collect 模式。`ExpectationSet` 不编码实现进度或恢复状态：有合法语法候选时返回相应 Token 和 slot；当前位置没有后续候选时返回空集合；位置修正、词法恢复和作用域不完整只记录在 `CompletionContext::diagnostics`。
 
 阶段性交付可以按语句族逐步增加 instrumentation 和场景，但不引入 `Unsupported` 等运行时状态。遗漏由声明式候选基线和语句族覆盖门禁发现，而不是要求 adapter 解释临时状态。覆盖分为两个层级：
 

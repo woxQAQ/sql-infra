@@ -872,7 +872,7 @@ struct ContextView {
     expectations: ExpectationsView,
     intent: IntentView,
     scope: ScopeView,
-    recovery: Vec<RecoveryView>,
+    diagnostics: Vec<DiagnosticView>,
 }
 
 impl ContextView {
@@ -1039,13 +1039,12 @@ impl ContextView {
                     .as_ref()
                     .map(|relation| RelationView::new(source, relation)),
             },
-            recovery: context
-                .recovery
-                .issues
+            diagnostics: context
+                .diagnostics
                 .iter()
-                .map(|issue| RecoveryView {
-                    kind: format!("{:?}", issue.kind),
-                    range: source_range(source, issue.range),
+                .map(|diagnostic| DiagnosticView {
+                    kind: format!("{:?}", diagnostic.kind),
+                    range: source_range(source, diagnostic.range),
                 })
                 .collect(),
         }
@@ -1199,7 +1198,7 @@ struct CteView {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct RecoveryView {
+struct DiagnosticView {
     kind: String,
     range: SourceRangeView,
 }

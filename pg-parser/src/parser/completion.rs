@@ -279,7 +279,7 @@ pub fn collect_expectations(
 ) -> Result<ParserExpectations, crate::lexer::LexError> {
     let point_usize = usize::from(point).min(source.len());
     let point = TextSize::try_from(point_usize).expect("point was bounded by source length");
-    let mut tokens = crate::lexer::lex_for_completion(source, point)?.tokens;
+    let mut tokens = crate::lexer::lex_for_completion(source, point)?.into_tokens();
 
     if let Some(index) = tokens.iter().position(|token| {
         token.kind != TokenKind::Eof

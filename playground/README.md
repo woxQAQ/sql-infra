@@ -37,7 +37,7 @@ the build script automatically retries through `nixpkgs#lld`.
 - Monaco offsets are converted from UTF-16 code units to Rust UTF-8 byte
   offsets. Returned replacement ranges are converted back to UTF-16.
 - Completion runs off the UI thread. The inspector exposes candidates,
-  completion intent, scope, recovery information, and the full wire response.
+  completion intent, scope, diagnostics, and the full wire response.
 
 The Catalog JSON shape is intentionally generic:
 

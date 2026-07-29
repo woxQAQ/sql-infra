@@ -124,12 +124,12 @@ export function usePlayground() {
     const duration = formatDuration(completion.elapsedMs);
     timing.value = `${duration} worker round-trip`;
     sqlMeta.value = `${count} candidate${count === 1 ? "" : "s"}, ${duration}`;
-    const recoveryCount = completion.completion.context.recovery.length;
-    status.value = recoveryCount
+    const diagnosticCount = completion.completion.context.diagnostics.length;
+    status.value = diagnosticCount
       ? {
           state: "warning",
-          label: "Recovered input",
-          detail: `${recoveryCount} parser recovery issue${recoveryCount === 1 ? "" : "s"}`,
+          label: "Completion diagnostics",
+          detail: `${diagnosticCount} completion diagnostic${diagnosticCount === 1 ? "" : "s"}`,
         }
       : { state: "ready", label: "Ready" };
     catalogValid.value = true;

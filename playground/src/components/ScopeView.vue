@@ -30,10 +30,13 @@ function relationName(relation: RelationDto): string {
 
 <template>
   <div class="context-view">
-    <div v-if="context.recovery.length" class="recovery-notice">
-      <strong>Recovered input</strong>
-      <span v-for="issue in context.recovery" :key="`${issue.kind}:${issue.range.utf8.start}`">
-        {{ issue.kind }}, UTF-8 {{ issue.range.utf8.start }}..{{ issue.range.utf8.end }}
+    <div v-if="context.diagnostics.length" class="diagnostics-notice">
+      <strong>Completion diagnostics</strong>
+      <span
+        v-for="diagnostic in context.diagnostics"
+        :key="`${diagnostic.kind}:${diagnostic.range.utf8.start}`"
+      >
+        {{ diagnostic.kind }}, UTF-8 {{ diagnostic.range.utf8.start }}..{{ diagnostic.range.utf8.end }}
       </span>
     </div>
 

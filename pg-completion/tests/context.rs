@@ -1,4 +1,6 @@
-use pg_completion::{GrammarSlot, IdentifierQuoting, ObjectKind, RecoveryKind, collect};
+use pg_completion::{
+    CompletionDiagnosticKind, GrammarSlot, IdentifierQuoting, ObjectKind, collect,
+};
 use pg_parser::{TextRange, TextSize, TokenKind};
 
 fn size(value: usize) -> TextSize {
@@ -70,15 +72,15 @@ fn reports_point_normalization_without_panicking() {
     let context = collect(source, TextSize::new(2));
     assert_eq!(context.point, TextSize::ZERO);
     assert_eq!(
-        context.recovery.issues[0].kind,
-        RecoveryKind::PointMovedToCharBoundary
+        context.diagnostics[0].kind,
+        CompletionDiagnosticKind::PointMovedToCharBoundary
     );
 
     let context = collect(source, TextSize::new(10));
     assert_eq!(context.point, size(source.len()));
     assert_eq!(
-        context.recovery.issues[0].kind,
-        RecoveryKind::PointClampedToEof
+        context.diagnostics[0].kind,
+        CompletionDiagnosticKind::PointClampedToEof
     );
 }
 
@@ -863,10 +865,9 @@ fn cte_scope_tracks_recursion_nesting_and_shadowing() {
     assert_eq!(context.scope.ctes[0].name.normalized, "self_ref");
     assert!(
         context
-            .recovery
-            .issues
+            .diagnostics
             .iter()
-            .any(|issue| issue.kind == RecoveryKind::ScopeIncomplete)
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
     );
 
     let nested_dml = "WITH changed AS (UPDATE hidden AS active SET id = active. RETURNING *) UPDATE visible SET id = 2";
@@ -885,10 +886,9 @@ fn incomplete_derived_tables_keep_lateral_visibility_rules() {
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
     assert!(
         context
-            .recovery
-            .issues
+            .diagnostics
             .iter()
-            .any(|issue| issue.kind == RecoveryKind::ScopeIncomplete)
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
     );
 
     let lateral = "SELECT * FROM accounts a, LATERAL (SELECT a.";
@@ -1242,10 +1242,9 @@ fn recovers_an_unterminated_identifier_as_the_active_prefix() {
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
     assert!(
         context
-            .recovery
-            .issues
+            .diagnostics
             .iter()
-            .any(|issue| issue.kind == RecoveryKind::UnterminatedToken)
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered)
     );
 }
 
@@ -1255,10 +1254,9 @@ fn distinguishes_an_active_unterminated_token_from_an_earlier_lex_error() {
     let context = collect(active, size(active.len()));
     assert!(
         context
-            .recovery
-            .issues
+            .diagnostics
             .iter()
-            .any(|issue| issue.kind == RecoveryKind::UnterminatedToken)
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered)
     );
 
     let before = "SELECT 1e+ FROM users";
@@ -1267,10 +1265,9 @@ fn distinguishes_an_active_unterminated_token_from_an_earlier_lex_error() {
     assert!(context.expectations.slots.is_empty());
     assert!(
         context
-            .recovery
-            .issues
+            .diagnostics
             .iter()
-            .any(|issue| issue.kind == RecoveryKind::LexErrorBeforePoint)
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::LexErrorBeforePoint)
     );
 }
 
@@ -1284,9 +1281,8 @@ fn scope_recovery_does_not_discard_parser_expectations() {
     assert!(context.scope.local.relations.is_empty());
     assert!(
         context
-            .recovery
-            .issues
+            .diagnostics
             .iter()
-            .any(|issue| issue.kind == RecoveryKind::ScopeIncomplete)
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
     );
 }

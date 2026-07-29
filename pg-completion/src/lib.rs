@@ -22,7 +22,7 @@ pub struct CompletionContext {
     pub expectations: ExpectationSet,
     pub intent: CompletionIntent,
     pub scope: ScopeSnapshot,
-    pub recovery: CompletionRecovery,
+    pub diagnostics: Vec<CompletionDiagnostic>,
 }
 
 impl CompletionContext {
@@ -234,22 +234,21 @@ pub struct UnsupportedRelation {
     pub reason: String,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct CompletionRecovery {
-    pub issues: Vec<RecoveryIssue>,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct RecoveryIssue {
-    pub kind: RecoveryKind,
+/// A condition that affected completion collection without preventing a
+/// context from being returned.
+pub struct CompletionDiagnostic {
+    pub kind: CompletionDiagnosticKind,
     pub range: TextRange,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum RecoveryKind {
+/// The kind of adjustment, recovery, or incomplete analysis reported while
+/// collecting completion context.
+pub enum CompletionDiagnosticKind {
     PointClampedToEof,
     PointMovedToCharBoundary,
-    UnterminatedToken,
+    TokenizationRecovered,
     LexErrorBeforePoint,
     ScopeIncomplete,
 }
@@ -259,53 +258,52 @@ pub enum RecoveryKind {
 /// The requested point is clamped and normalized before any slicing occurs.
 pub fn collect(source: &str, point: TextSize) -> CompletionContext {
     let normalized = prefix::normalize_point(source, point);
-    let statement_range = statement::containing_statement(source, normalized.point);
-    let prefix = prefix::extract(source, statement_range, normalized.point);
-    let mut recovery = CompletionRecovery {
-        issues: normalized.issues,
-    };
-    recovery.issues.extend(prefix.issues);
+    let statement_range = statement::range_at(source, normalized.point);
+    let site = prefix::analyze(source, statement_range, normalized.point);
+    let mut diagnostics = normalized.diagnostics;
 
     let statement_start = usize::from(statement_range.start());
-    let statement_source = &source[statement_start..usize::from(statement_range.end())];
-    let relative_collection_point =
-        TextSize::try_from(usize::from(prefix.range.start()).saturating_sub(statement_start))
-            .expect("relative completion point fits TextSize");
-    let completion_lex = pg_parser::lex_for_completion(statement_source, relative_collection_point);
-    match &completion_lex {
-        Ok(output) => {
-            for issue in &output.issues {
-                recovery.issues.push(RecoveryIssue {
-                    kind: RecoveryKind::UnterminatedToken,
-                    range: absolute_lex_range(statement_start, issue.range),
+    let statement_text = &source[statement_start..usize::from(statement_range.end())];
+    let completion_start = TextSize::try_from(
+        usize::from(site.replacement_range.start()).saturating_sub(statement_start),
+    )
+    .expect("completion start fits TextSize");
+    let tokenization_result = pg_parser::lex_for_completion(statement_text, completion_start);
+    match &tokenization_result {
+        Ok(tokenization) => {
+            if let Some(error) = tokenization.recovered_error() {
+                let range = absolute_lex_range(statement_start, error.range);
+                diagnostics.push(CompletionDiagnostic {
+                    kind: CompletionDiagnosticKind::TokenizationRecovered,
+                    range,
+                });
+                diagnostics.push(CompletionDiagnostic {
+                    kind: CompletionDiagnosticKind::ScopeIncomplete,
+                    range,
                 });
             }
-            if !output.issues.is_empty() {
-                recovery.issues.push(RecoveryIssue {
-                    kind: RecoveryKind::ScopeIncomplete,
-                    range: absolute_lex_range(statement_start, output.issues[0].range),
-                });
-            }
-            if let Some(range) = scope::incomplete_range(statement_range.start(), &output.tokens)
-                && !recovery.issues.iter().any(|issue| {
-                    issue.kind == RecoveryKind::ScopeIncomplete && issue.range == range
+            if let Some(range) =
+                scope::incomplete_range(statement_range.start(), tokenization.tokens())
+                && !diagnostics.iter().any(|diagnostic| {
+                    diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete
+                        && diagnostic.range == range
                 })
             {
-                recovery.issues.push(RecoveryIssue {
-                    kind: RecoveryKind::ScopeIncomplete,
+                diagnostics.push(CompletionDiagnostic {
+                    kind: CompletionDiagnosticKind::ScopeIncomplete,
                     range,
                 });
             }
         }
-        Err(error) => recovery.issues.push(RecoveryIssue {
-            kind: RecoveryKind::LexErrorBeforePoint,
+        Err(error) => diagnostics.push(CompletionDiagnostic {
+            kind: CompletionDiagnosticKind::LexErrorBeforePoint,
             range: absolute_lex_range(statement_start, error.range),
         }),
     }
-    let expectation_result = if prefix.suppress_expectations {
-        Ok(pg_parser::ParserExpectations::default())
+    let expectation_result = if site.supports_grammar_completion() {
+        collect_expectations(statement_text, completion_start)
     } else {
-        collect_expectations(statement_source, relative_collection_point)
+        Ok(pg_parser::ParserExpectations::default())
     };
     let mut expectations = match expectation_result {
         Ok(expectations) => ExpectationSet {
@@ -320,41 +318,41 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
         },
         Err(_) => ExpectationSet::default(),
     };
-    filter_token_prefix(&mut expectations, &prefix.prefix);
-    let relative_point = TextSize::try_from(
+    filter_token_prefix(&mut expectations, &site.prefix);
+    let point_in_statement = TextSize::try_from(
         usize::from(normalized.point).saturating_sub(usize::from(statement_range.start())),
     )
-    .expect("relative point fits TextSize");
-    let scope = match &completion_lex {
-        Ok(output) => scope::collect_tokens(
-            statement_source,
+    .expect("point in statement fits TextSize");
+    let scope = match &tokenization_result {
+        Ok(tokenization) => scope::collect_tokens(
+            statement_text,
             statement_range.start(),
-            relative_point,
-            &output.tokens,
+            point_in_statement,
+            tokenization.tokens(),
         ),
         Err(_) => ScopeSnapshot::default(),
     };
     let mut intent = intent::from_expectations(&expectations);
-    intent.qualifier = prefix.qualifier;
-    if let Ok(output) = &completion_lex {
+    intent.qualifier = site.qualifier;
+    if let Ok(tokenization) = &tokenization_result {
         intent::attach_container(
             &mut intent,
-            statement_source,
+            statement_text,
             statement_range.start(),
-            relative_collection_point,
-            &output.tokens,
+            completion_start,
+            tokenization.tokens(),
         );
     }
 
     CompletionContext {
         statement_range,
         point: normalized.point,
-        replacement_range: prefix.range,
-        prefix: prefix.prefix,
+        replacement_range: site.replacement_range,
+        prefix: site.prefix,
         expectations,
         intent,
         scope,
-        recovery,
+        diagnostics,
     }
 }
 
