@@ -988,6 +988,157 @@ struct CteGroup {
     ctes: Vec<CteDefinition>,
 }
 
+/// Cursor for the repeated `name [(columns)] AS ... (body)` entries after
+/// `WITH`. It keeps token advancement and group-depth checks together so the
+/// group loop only has to decide whether another comma-separated CTE follows.
+struct CteCursor<'a> {
+    source: &'a str,
+    base: TextSize,
+    tokens: &'a [Token],
+    depths: &'a [usize],
+    depth: usize,
+    index: usize,
+}
+
+struct ParsedCteBody {
+    start: TextSize,
+    end: TextSize,
+    syntax_end: TextSize,
+}
+
+impl<'a> CteCursor<'a> {
+    fn after_with(
+        source: &'a str,
+        base: TextSize,
+        tokens: &'a [Token],
+        depths: &'a [usize],
+        with_index: usize,
+    ) -> Self {
+        Self {
+            source,
+            base,
+            tokens,
+            depths,
+            depth: depths[with_index],
+            index: with_index + 1,
+        }
+    }
+
+    fn parse_definition(&mut self) -> Option<CteDefinition> {
+        let syntax_start = self.current_start()?;
+        let name = self.parse_name()?;
+        let explicit_columns = self.parse_explicit_columns()?;
+
+        self.expect(TokenKind::As)?;
+        self.consume_materialization_modifier();
+        let body = self.parse_body()?;
+
+        Some(CteDefinition {
+            name,
+            explicit_columns,
+            syntax_range: absolute_range(self.base, syntax_start, body.syntax_end),
+            body_range: absolute_range(self.base, body.start, body.end),
+        })
+    }
+
+    fn parse_name(&mut self) -> Option<NamePart> {
+        if self.depths.get(self.index).copied() != Some(self.depth) {
+            return None;
+        }
+        let name = name_part(self.source, self.base, self.tokens.get(self.index)?)?;
+        self.index += 1;
+        Some(name)
+    }
+
+    fn parse_explicit_columns(&mut self) -> Option<Vec<NamePart>> {
+        if !self.current_is(TokenKind::Char('(')) {
+            return Some(Vec::new());
+        }
+
+        let open = self.index;
+        // Without this close, `AS` cannot be distinguished reliably from more
+        // column-list input, so only an incomplete CTE body is recoverable.
+        let close = matching_close(self.tokens, self.depths, open, self.tokens.len())?;
+        let columns = (open + 1..close)
+            .filter(|index| self.depths[*index] == self.depth + 1)
+            .filter_map(|index| name_part(self.source, self.base, &self.tokens[index]))
+            .collect();
+        self.index = close + 1;
+        Some(columns)
+    }
+
+    fn consume_materialization_modifier(&mut self) {
+        // Preserve permissive recovery by consuming these independently;
+        // syntax diagnostics belong to the parser, not scope collection.
+        self.consume(TokenKind::Not);
+        self.consume(TokenKind::Materialized);
+    }
+
+    fn parse_body(&mut self) -> Option<ParsedCteBody> {
+        if !self.current_is(TokenKind::Char('(')) {
+            return None;
+        }
+
+        let open = self.index;
+        let close = matching_close(self.tokens, self.depths, open, self.tokens.len());
+        // An unterminated body is normal while editing. Treat the remaining
+        // input as its body so visibility can still be computed at the cursor.
+        let end = close.map_or_else(
+            || {
+                self.tokens
+                    .last()
+                    .map_or(self.tokens[open].range.end(), |token| token.range.end())
+            },
+            |close| self.tokens[close].range.start(),
+        );
+        let syntax_end = close.map_or(end, |close| self.tokens[close].range.end());
+        self.index = close.map_or(self.tokens.len(), |close| close + 1);
+
+        Some(ParsedCteBody {
+            start: self.tokens[open].range.end(),
+            end,
+            syntax_end,
+        })
+    }
+
+    fn expect(&mut self, kind: TokenKind) -> Option<()> {
+        self.consume(kind).then_some(())
+    }
+
+    fn consume(&mut self, kind: TokenKind) -> bool {
+        if !self.current_is(kind) {
+            return false;
+        }
+        self.index += 1;
+        true
+    }
+
+    fn current_is(&self, kind: TokenKind) -> bool {
+        self.depths.get(self.index).copied() == Some(self.depth)
+            && self
+                .tokens
+                .get(self.index)
+                .is_some_and(|token| token.kind == kind)
+    }
+
+    fn current_start(&self) -> Option<TextSize> {
+        self.tokens.get(self.index).map(|token| token.range.start())
+    }
+
+    fn container_end(&self) -> TextSize {
+        (self.index..self.tokens.len())
+            .find(|candidate| self.depths[*candidate] < self.depth)
+            .map_or_else(
+                || {
+                    self.tokens
+                        .last()
+                        .map_or(TextSize::ZERO, |token| token.range.end())
+                },
+                |candidate| self.tokens[candidate].range.start(),
+            )
+    }
+}
+
 fn collect_cte_groups(
     source: &str,
     base: TextSize,
@@ -1013,106 +1164,29 @@ fn parse_cte_group(
     depths: &[usize],
     with_index: usize,
 ) -> Option<CteGroup> {
-    let depth = depths[with_index];
-    let mut ctes = Vec::new();
-    let mut index = with_index + 1;
-    let recursive = consume_kind(tokens, &mut index, tokens.len(), TokenKind::Recursive);
-    loop {
-        if depths.get(index).copied() != Some(depth) {
-            return None;
-        }
-        let name = tokens
-            .get(index)
-            .and_then(|token| name_part(source, base, token))?;
-        let syntax_start = tokens[index].range.start();
-        index += 1;
-        let mut columns = Vec::new();
-        if tokens.get(index).map(|token| token.kind) == Some(TokenKind::Char('('))
-            && depths[index] == depth
-        {
-            let close = matching_close(tokens, depths, index, tokens.len())?;
-            index += 1;
-            while index < close {
-                if depths[index] == depth + 1
-                    && let Some(column) = name_part(source, base, &tokens[index])
-                {
-                    columns.push(column);
-                }
-                index += 1;
-            }
-            index = close + 1;
-        }
-        if tokens.get(index).map(|token| token.kind) != Some(TokenKind::As)
-            || depths[index] != depth
-        {
-            return None;
-        }
-        index += 1;
-        if matches!(
-            tokens.get(index).map(|token| token.kind),
-            Some(TokenKind::Not)
-        ) {
-            index += 1;
-        }
-        if matches!(
-            tokens.get(index).map(|token| token.kind),
-            Some(TokenKind::Materialized)
-        ) {
-            index += 1;
-        }
-        if tokens.get(index).map(|token| token.kind) != Some(TokenKind::Char('('))
-            || depths[index] != depth
-        {
-            return None;
-        }
-        let open = index;
-        let close = matching_close(tokens, depths, open, tokens.len());
-        let body_end = close.map_or_else(
-            || {
-                tokens
-                    .last()
-                    .map_or(tokens[open].range.end(), |token| token.range.end())
-            },
-            |close| tokens[close].range.start(),
-        );
-        let syntax_end = close.map_or(body_end, |close| tokens[close].range.end());
-        ctes.push(CteDefinition {
-            name,
-            explicit_columns: columns,
-            syntax_range: absolute_range(base, syntax_start, syntax_end),
-            body_range: absolute_range(base, tokens[open].range.end(), body_end),
-        });
-        let Some(close) = close else {
-            index = tokens.len();
+    let mut cursor = CteCursor::after_with(source, base, tokens, depths, with_index);
+    let recursive = cursor.consume(TokenKind::Recursive);
+    let mut ctes = vec![cursor.parse_definition()?];
+    while cursor.consume(TokenKind::Char(',')) {
+        let definition_start = cursor.index;
+        let Some(cte) = cursor.parse_definition() else {
+            // Keep the valid prefix while the user is typing the next CTE or
+            // recovering from a dangling comma. Parsing a definition advances
+            // incrementally, so restore the cursor before exposing that prefix.
+            cursor.index = definition_start;
             break;
         };
-        index = close + 1;
-        if tokens.get(index).map(|token| token.kind) != Some(TokenKind::Char(','))
-            || depths[index] != depth
-        {
-            break;
-        }
-        index += 1;
+        ctes.push(cte);
     }
-    let main_query_start = tokens.get(index).map_or_else(
-        || tokens[with_index].range.end(),
-        |token| token.range.start(),
-    );
-    let end = (index..tokens.len())
-        .find(|candidate| depths[*candidate] < depth)
-        .map_or_else(
-            || {
-                tokens
-                    .last()
-                    .map_or(TextSize::ZERO, |token| token.range.end())
-            },
-            |candidate| tokens[candidate].range.start(),
-        );
+
+    let main_query_start = cursor
+        .current_start()
+        .unwrap_or_else(|| tokens[with_index].range.end());
     Some(CteGroup {
-        depth,
+        depth: cursor.depth,
         start: add(base, tokens[with_index].range.start()),
         main_query_start: add(base, main_query_start),
-        end: add(base, end),
+        end: add(base, cursor.container_end()),
         recursive,
         ctes,
     })
@@ -1877,6 +1951,63 @@ mod tests {
         let scope = collect(qualified, TextSize::ZERO, point).unwrap();
         assert_eq!(scope.local.relations[0].kind, RelationKind::Relation);
         assert!(scope.local.relations[0].explicit_columns.is_empty());
+    }
+
+    #[test]
+    fn keeps_scope_for_an_unterminated_cte_body() {
+        let sql = "WITH first AS (SELECT 1), second AS (SELECT * FROM first";
+        let point = TextSize::try_from(sql.len()).unwrap();
+        let scope = collect(sql, TextSize::ZERO, point).unwrap();
+
+        assert_eq!(
+            scope
+                .ctes
+                .iter()
+                .map(|cte| cte.name.normalized.as_str())
+                .collect::<Vec<_>>(),
+            ["first"]
+        );
+        assert_eq!(scope.local.relations[0].kind, RelationKind::Cte);
+        assert_eq!(scope.local.relations[0].name[0].normalized, "first");
+    }
+
+    #[test]
+    fn keeps_completed_ctes_after_a_trailing_comma() {
+        let sql = "WITH first AS (SELECT 1),";
+        let point = TextSize::try_from(sql.len()).unwrap();
+        let scope = collect(sql, TextSize::ZERO, point).unwrap();
+
+        assert_eq!(
+            scope
+                .ctes
+                .iter()
+                .map(|cte| cte.name.normalized.as_str())
+                .collect::<Vec<_>>(),
+            ["first"]
+        );
+    }
+
+    #[test]
+    fn resolves_completed_ctes_in_a_main_query_after_a_dangling_comma() {
+        let sql = "WITH first AS (SELECT 1), SELECT marker FROM first";
+        let point = TextSize::try_from(sql.find("marker").unwrap()).unwrap();
+        let scope = collect(sql, TextSize::ZERO, point).unwrap();
+
+        assert_eq!(scope.ctes[0].name.normalized, "first");
+        assert_eq!(scope.local.relations[0].kind, RelationKind::Cte);
+        assert_eq!(scope.local.relations[0].name[0].normalized, "first");
+    }
+
+    #[test]
+    fn parses_cte_materialization_modifiers() {
+        for modifier in ["MATERIALIZED", "NOT MATERIALIZED"] {
+            let sql = format!("WITH first AS {modifier} (SELECT 1) SELECT marker FROM first");
+            let point = TextSize::try_from(sql.find("marker").unwrap()).unwrap();
+            let scope = collect(&sql, TextSize::ZERO, point).unwrap();
+
+            assert_eq!(scope.local.relations[0].kind, RelationKind::Cte);
+            assert_eq!(scope.local.relations[0].name[0].normalized, "first");
+        }
     }
 
     #[test]
