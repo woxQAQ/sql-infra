@@ -55,8 +55,11 @@ pub(super) fn collect_tokens(
         ctes,
         ..ScopeSnapshot::default()
     };
-    if let Some((local_index, local_depth)) = selects.last().copied() {
+    if let Some((&(local_index, local_depth), outer_selects)) = selects.split_last() {
         snapshot.local = query_scope(&input, local_index, local_depth, &snapshot.ctes);
+
+        // Table functions are implicitly LATERAL: while completing inside the
+        // call, only relations introduced before this FROM item are visible.
         apply_table_function_visibility(
             base,
             point,
@@ -66,6 +69,9 @@ pub(super) fn collect_tokens(
             local_depth,
             &mut snapshot.local,
         );
+
+        // In the local query, only relations available at the cursor position
+        // may be referenced from JOIN ON/USING conditions.
         apply_join_condition_visibility(
             &input,
             local_index,
@@ -73,15 +79,32 @@ pub(super) fn collect_tokens(
             point_depth,
             &mut snapshot.local,
         );
-        let mut child = (local_index, local_depth);
-        for (index, depth) in selects[..selects.len() - 1].iter().rev().copied() {
-            let mut outer = query_scope(&input, index, depth, &snapshot.ctes);
-            apply_join_condition_visibility(&input, index, depth, depth, &mut outer);
-            if let Some((open, lateral)) =
-                derived_table_container(tokens, &depths, child.0, index, depth, point)
-            {
-                if lateral {
-                    let boundary = add(base, tokens[open].range.start());
+        let mut inner_select = (local_index, local_depth);
+        for &(outer_index, outer_depth) in outer_selects.iter().rev() {
+            let mut outer = query_scope(&input, outer_index, outer_depth, &snapshot.ctes);
+
+            // The enclosing SELECT may itself be inside a JOIN condition.
+            // Prevent relations introduced by later joins from leaking in.
+            apply_join_condition_visibility(
+                &input,
+                outer_index,
+                outer_depth,
+                outer_depth,
+                &mut outer,
+            );
+
+            // Check whether the inner SELECT is inside a derived table belonging
+            // to this outer SELECT's FROM list.
+            if let Some((open_paren, is_lateral)) = derived_table_container(
+                tokens,
+                &depths,
+                inner_select.0,
+                outer_index,
+                outer_depth,
+                point,
+            ) {
+                if is_lateral {
+                    let boundary = add(base, tokens[open_paren].range.start());
                     outer
                         .relations
                         .retain(|relation| relation.syntax_range.end() <= boundary);
@@ -92,7 +115,7 @@ pub(super) fn collect_tokens(
             if !outer.relations.is_empty() {
                 snapshot.outer.push(outer);
             }
-            child = (index, depth);
+            inner_select = (outer_index, outer_depth);
         }
     }
 
