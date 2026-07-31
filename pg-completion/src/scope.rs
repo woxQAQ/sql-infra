@@ -1220,40 +1220,60 @@ fn visible_ctes_at_point(
     point: TextSize,
     groups: &[CteGroup],
 ) -> Vec<CteDefinition> {
-    let point = add(base, point);
-    let mut enclosing = groups
+    let absolute_point = add(base, point);
+    let mut enclosing_groups = groups
         .iter()
-        .filter(|group| group.start <= point && point <= group.end)
+        .filter(|group| group.start <= absolute_point && absolute_point <= group.end)
         .collect::<Vec<_>>();
-    enclosing.sort_by_key(|group| std::cmp::Reverse(group.depth));
 
-    let mut visible = Vec::<CteDefinition>::new();
-    for group in enclosing {
-        let in_body = group
-            .ctes
-            .iter()
-            .position(|cte| cte.body_range.start() <= point && point <= cte.body_range.end());
-        let count = match in_body {
-            Some(index) if !group.recursive => index,
-            Some(_) => group.ctes.len(),
-            None if point >= group.main_query_start || group.recursive => group.ctes.len(),
-            None => group
-                .ctes
-                .iter()
-                .take_while(|cte| cte.syntax_range.end() <= point)
-                .count(),
-        };
-        for cte in group.ctes.iter().take(count) {
-            if visible
+    // Process nested groups first so an inner CTE shadows an outer CTE
+    // with the same normalized name.
+    enclosing_groups.sort_by_key(|group| std::cmp::Reverse(group.depth));
+
+    let mut visible_ctes = Vec::<CteDefinition>::new();
+    for group in enclosing_groups {
+        let visible_count = visible_cte_count(group, absolute_point);
+
+        for cte in group.ctes.iter().take(visible_count) {
+            if visible_ctes
                 .iter()
                 .any(|existing| existing.name.normalized == cte.name.normalized)
             {
                 continue;
             }
-            visible.push(cte.clone());
+            visible_ctes.push(cte.clone());
         }
     }
-    visible
+    visible_ctes
+}
+
+fn visible_cte_count(group: &CteGroup, point: TextSize) -> usize {
+    // A recursive CTE group exposes every CTE to every CTE body.
+    if group.recursive {
+        return group.ctes.len();
+    }
+
+    // A non-recursive CTE cannot reference itself or later CTEs
+    // while its own body is being parsed.
+    if let Some(active_body_index) = group
+        .ctes
+        .iter()
+        .position(|cte| cte.body_range.start() <= point && point <= cte.body_range.end())
+    {
+        return active_body_index;
+    }
+
+    // Once the main query starts, all CTE definitions are visible.
+    if point >= group.main_query_start {
+        return group.ctes.len();
+    }
+
+    // Before the main query, only already-completed CTE definitions are visible.
+    group
+        .ctes
+        .iter()
+        .take_while(|cte| cte.syntax_range.end() <= point)
+        .count()
 }
 
 fn collect_dml_scope(
