@@ -42,7 +42,7 @@ struct CatalogObject {
 trait Catalog {
     fn objects(&self, kinds: &[ObjectKind], qualifier: &[NamePart]) -> Vec<CatalogObject>;
 
-    fn members(&self, container: &ObjectReference, kinds: &[ObjectKind]) -> Vec<CatalogObject>;
+    fn members(&self, owner: &ObjectReference, kinds: &[ObjectKind]) -> Vec<CatalogObject>;
 
     fn columns(&self, relation: &VisibleRelation) -> Vec<CatalogObject>;
 }
@@ -116,9 +116,9 @@ fn add_scope_items<C: Catalog>(
     if !context.intent.object_kinds.contains(&ObjectKind::Column)
         || context
             .intent
-            .container
+            .membership
             .as_ref()
-            .is_some_and(|container| container.members.contains(&ObjectKind::Column))
+            .is_some_and(|membership| membership.member_kinds.contains(&ObjectKind::Column))
     {
         return;
     }
@@ -170,21 +170,21 @@ fn add_catalog_items<C: Catalog>(
     let mut global_kinds = context.intent.object_kinds.clone();
     global_kinds.retain(|kind| *kind != ObjectKind::Column);
 
-    if let Some(container) = &context.intent.container {
+    if let Some(membership) = &context.intent.membership {
         let member_kinds = global_kinds
             .iter()
             .copied()
-            .filter(|kind| container.members.contains(kind))
+            .filter(|kind| membership.member_kinds.contains(kind))
             .collect::<Vec<_>>();
-        for candidate in catalog.members(&container.reference, &member_kinds) {
-            push_object(context, candidate, "container member", items);
+        for candidate in catalog.members(&membership.owner, &member_kinds) {
+            push_object(context, candidate, "catalog member", items);
         }
-        if container.members.contains(&ObjectKind::Column) {
-            for candidate in catalog.members(&container.reference, &[ObjectKind::Column]) {
-                push_object(context, candidate, "container column", items);
+        if membership.member_kinds.contains(&ObjectKind::Column) {
+            for candidate in catalog.members(&membership.owner, &[ObjectKind::Column]) {
+                push_object(context, candidate, "catalog column", items);
             }
         }
-        global_kinds.retain(|kind| !container.members.contains(kind));
+        global_kinds.retain(|kind| !membership.member_kinds.contains(kind));
     }
 
     for candidate in catalog.objects(&global_kinds, &context.intent.qualifier) {
@@ -317,11 +317,11 @@ impl Catalog for MemoryCatalog {
             .collect()
     }
 
-    fn members(&self, container: &ObjectReference, kinds: &[ObjectKind]) -> Vec<CatalogObject> {
+    fn members(&self, owner: &ObjectReference, kinds: &[ObjectKind]) -> Vec<CatalogObject> {
         if !kinds.contains(&ObjectKind::Column) {
             return Vec::new();
         }
-        let name = normalized_name(&container.name);
+        let name = normalized_name(&owner.name);
         self.relations
             .iter()
             .find(|(relation, _)| relation == &name)
@@ -458,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn container_columns_are_queried_from_the_named_relation() {
+    fn member_columns_are_queried_from_the_named_relation() {
         let source = "CREATE INDEX i ON public.users ()";
         let labels = object_labels(source, source.find("()").unwrap() + 1);
         assert!(labels.contains(&(CompletionItemKind::Object(ObjectKind::Column), "id".into())));

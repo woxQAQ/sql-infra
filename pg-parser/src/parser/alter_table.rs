@@ -60,7 +60,18 @@ impl Parser {
     pub(super) fn parse_alter_table_after_kind(&mut self, objtype: ObjectType) -> PResult<Node> {
         let missing_ok = self.consume_if_exists()?;
         let slot = completion::object_type_slot(objtype);
+        let owner_start = self.pos;
         let relation = Some(Box::new(self.parse_relation_expr_with_slot(false, slot)?));
+        let owner_end = self.pos;
+        self.push_completion_membership_owner_range(
+            &[
+                completion::GrammarSlot::Column,
+                completion::GrammarSlot::Constraint,
+            ],
+            &[objtype],
+            owner_start,
+            owner_end,
+        );
         let cmds = self.parse_alter_table_cmds(objtype)?;
         Ok(Node::AlterTableStmt(AlterTableStmt {
             node_tag: NodeTag::AlterTableStmt,

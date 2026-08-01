@@ -1,451 +1,118 @@
-use pg_parser::{TextSize, Token, TokenKind};
+use pg_parser::{GrammarMembership, TextSize, object_type_slot};
 
 use crate::{
-    CompletionIntent, ExpectationSet, GrammarSlot, ObjectContainer, ObjectKind, ObjectReference,
+    CatalogMembership, CompletionIntent, ExpectationSet, GrammarSlot, ObjectKind, ObjectReference,
     prefix,
 };
 
-pub(super) fn from_expectations(expectations: &ExpectationSet) -> CompletionIntent {
+pub(super) fn from_expectations(
+    expectations: &ExpectationSet,
+    source: &str,
+    base: TextSize,
+) -> CompletionIntent {
     let mut object_kinds = Vec::new();
     for slot in &expectations.slots {
-        match slot {
-            GrammarSlot::Relation => extend_unique(
-                &mut object_kinds,
-                &[
-                    ObjectKind::Table,
-                    ObjectKind::View,
-                    ObjectKind::MaterializedView,
-                    ObjectKind::ForeignTable,
-                    ObjectKind::Sequence,
-                    ObjectKind::Schema,
-                ],
-            ),
-            GrammarSlot::Table => push_unique(&mut object_kinds, ObjectKind::Table),
-            GrammarSlot::View => push_unique(&mut object_kinds, ObjectKind::View),
-            GrammarSlot::MaterializedView => {
-                push_unique(&mut object_kinds, ObjectKind::MaterializedView)
-            }
-            GrammarSlot::ForeignTable => push_unique(&mut object_kinds, ObjectKind::ForeignTable),
-            GrammarSlot::Column => push_unique(&mut object_kinds, ObjectKind::Column),
-            GrammarSlot::Attribute => push_unique(&mut object_kinds, ObjectKind::Attribute),
-            GrammarSlot::Function => push_unique(&mut object_kinds, ObjectKind::Function),
-            GrammarSlot::Procedure => push_unique(&mut object_kinds, ObjectKind::Procedure),
-            GrammarSlot::Routine => push_unique(&mut object_kinds, ObjectKind::Routine),
-            GrammarSlot::Aggregate => push_unique(&mut object_kinds, ObjectKind::Aggregate),
-            GrammarSlot::Type => push_unique(&mut object_kinds, ObjectKind::Type),
-            GrammarSlot::Domain => push_unique(&mut object_kinds, ObjectKind::Domain),
-            GrammarSlot::Schema => push_unique(&mut object_kinds, ObjectKind::Schema),
-            GrammarSlot::Sequence => push_unique(&mut object_kinds, ObjectKind::Sequence),
-            GrammarSlot::Index => push_unique(&mut object_kinds, ObjectKind::Index),
-            GrammarSlot::Constraint => push_unique(&mut object_kinds, ObjectKind::Constraint),
-            GrammarSlot::Collation => push_unique(&mut object_kinds, ObjectKind::Collation),
-            GrammarSlot::Operator => push_unique(&mut object_kinds, ObjectKind::Operator),
-            GrammarSlot::OperatorClass => push_unique(&mut object_kinds, ObjectKind::OperatorClass),
-            GrammarSlot::OperatorFamily => {
-                push_unique(&mut object_kinds, ObjectKind::OperatorFamily)
-            }
-            GrammarSlot::Role => push_unique(&mut object_kinds, ObjectKind::Role),
-            GrammarSlot::Database => push_unique(&mut object_kinds, ObjectKind::Database),
-            GrammarSlot::AccessMethod => push_unique(&mut object_kinds, ObjectKind::AccessMethod),
-            GrammarSlot::Conversion => push_unique(&mut object_kinds, ObjectKind::Conversion),
-            GrammarSlot::EventTrigger => push_unique(&mut object_kinds, ObjectKind::EventTrigger),
-            GrammarSlot::Extension => push_unique(&mut object_kinds, ObjectKind::Extension),
-            GrammarSlot::ForeignDataWrapper => {
-                push_unique(&mut object_kinds, ObjectKind::ForeignDataWrapper)
-            }
-            GrammarSlot::ForeignServer => push_unique(&mut object_kinds, ObjectKind::ForeignServer),
-            GrammarSlot::Language => push_unique(&mut object_kinds, ObjectKind::Language),
-            GrammarSlot::Policy => push_unique(&mut object_kinds, ObjectKind::Policy),
-            GrammarSlot::PropertyGraph => push_unique(&mut object_kinds, ObjectKind::PropertyGraph),
-            GrammarSlot::Publication => push_unique(&mut object_kinds, ObjectKind::Publication),
-            GrammarSlot::Rule => push_unique(&mut object_kinds, ObjectKind::Rule),
-            GrammarSlot::Statistics => push_unique(&mut object_kinds, ObjectKind::Statistics),
-            GrammarSlot::Subscription => push_unique(&mut object_kinds, ObjectKind::Subscription),
-            GrammarSlot::Tablespace => push_unique(&mut object_kinds, ObjectKind::Tablespace),
-            GrammarSlot::TextSearchConfiguration => {
-                push_unique(&mut object_kinds, ObjectKind::TextSearchConfiguration)
-            }
-            GrammarSlot::TextSearchDictionary => {
-                push_unique(&mut object_kinds, ObjectKind::TextSearchDictionary)
-            }
-            GrammarSlot::TextSearchParser => {
-                push_unique(&mut object_kinds, ObjectKind::TextSearchParser)
-            }
-            GrammarSlot::TextSearchTemplate => {
-                push_unique(&mut object_kinds, ObjectKind::TextSearchTemplate)
-            }
-            GrammarSlot::Trigger => push_unique(&mut object_kinds, ObjectKind::Trigger),
-            // Privileges are adapter-provided syntax names rather than
-            // Catalog objects. AnyName is used for non-Catalog identities
-            // such as cursors, prepared statements, savepoints, and
-            // notification channels. Neither slot creates a Catalog query.
-            GrammarSlot::Privilege | GrammarSlot::Alias | GrammarSlot::AnyName => {}
-        }
+        extend_unique(&mut object_kinds, object_kinds_for_slot(*slot));
     }
+    let catalog_membership = expectations
+        .membership
+        .as_ref()
+        .and_then(|grammar_membership| {
+            catalog_membership_from_grammar(grammar_membership, source, base)
+        });
     CompletionIntent {
         object_kinds,
         qualifier: Vec::new(),
-        container: None,
+        membership: catalog_membership,
     }
 }
 
-pub(super) fn attach_container(
-    intent: &mut CompletionIntent,
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) {
-    if !intent.object_kinds.iter().any(|kind| {
-        matches!(
-            kind,
-            ObjectKind::Column
-                | ObjectKind::Attribute
-                | ObjectKind::Constraint
-                | ObjectKind::Trigger
-                | ObjectKind::Policy
-                | ObjectKind::Rule
-        )
-    }) {
-        return;
-    }
-
-    let reference = alter_container(source, base, point, tokens)
-        .or_else(|| copy_container(source, base, point, tokens))
-        .or_else(|| references_container(source, base, point, tokens))
-        .or_else(|| create_trigger_container(source, base, point, tokens))
-        .or_else(|| create_index_container(source, base, point, tokens))
-        .or_else(|| create_statistics_container(source, base, point, tokens))
-        .or_else(|| grant_container(source, base, point, tokens))
-        .or_else(|| vacuum_container(source, base, point, tokens));
-    if let Some(reference) = reference {
-        let members = intent
-            .object_kinds
-            .iter()
-            .copied()
-            .filter(|kind| {
-                matches!(
-                    kind,
-                    ObjectKind::Column
-                        | ObjectKind::Attribute
-                        | ObjectKind::Constraint
-                        | ObjectKind::Trigger
-                        | ObjectKind::Policy
-                        | ObjectKind::Rule
-                )
-            })
-            .collect();
-        intent.container = Some(ObjectContainer { members, reference });
-    }
-}
-
-fn alter_container(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) -> Option<ObjectReference> {
-    if token_kind(tokens, 0) != TokenKind::Alter {
-        return None;
-    }
-    let (object_kinds, mut index) = match token_kind(tokens, 1) {
-        TokenKind::Table => (vec![ObjectKind::Table], 2),
-        TokenKind::View => (vec![ObjectKind::View], 2),
-        TokenKind::Materialized if token_kind(tokens, 2) == TokenKind::View => {
-            (vec![ObjectKind::MaterializedView], 3)
-        }
-        TokenKind::Foreign if token_kind(tokens, 2) == TokenKind::Table => {
-            (vec![ObjectKind::ForeignTable], 3)
-        }
-        TokenKind::DomainP => (vec![ObjectKind::Domain], 2),
-        TokenKind::TypeP => (vec![ObjectKind::Type], 2),
-        _ => return None,
-    };
-    if token_kind(tokens, index) == TokenKind::IfP
-        && token_kind(tokens, index + 1) == TokenKind::Exists
-    {
-        index += 2;
-    }
-    if token_kind(tokens, index) == TokenKind::Only {
-        index += 1;
-    }
-    let (name, next) = qualified_name(source, base, tokens, index)?;
-    (tokens[next.saturating_sub(1)].range.end() <= point)
-        .then_some(ObjectReference { object_kinds, name })
-}
-
-fn copy_container(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) -> Option<ObjectReference> {
-    let mut index = 0;
-    if token_kind(tokens, index) == TokenKind::Binary {
-        index += 1;
-    }
-    if token_kind(tokens, index) != TokenKind::Copy {
-        return None;
-    }
-    index += 1;
-    if token_kind(tokens, index) == TokenKind::Char('(') {
-        return None;
-    }
-    let (name, next) = qualified_name(source, base, tokens, index)?;
-    (tokens[next.saturating_sub(1)].range.end() <= point).then_some(ObjectReference {
-        object_kinds: vec![ObjectKind::Table, ObjectKind::ForeignTable],
-        name,
-    })
-}
-
-fn references_container(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) -> Option<ObjectReference> {
-    if !matches!(token_kind(tokens, 0), TokenKind::Create | TokenKind::Alter) {
-        return None;
-    }
-    let reference = tokens
-        .iter()
-        .enumerate()
-        .take_while(|(_, token)| token.range.start() < point)
-        .filter(|(_, token)| token.kind == TokenKind::References)
-        .map(|(index, _)| index)
-        .last()?;
-    let (name, next) = qualified_name(source, base, tokens, reference + 1)?;
-    if token_kind(tokens, next) != TokenKind::Char('(')
-        || tokens[next].range.end() > point
-        || matching_close(tokens, next).is_some_and(|close| tokens[close].range.start() < point)
-    {
-        return None;
-    }
-    Some(ObjectReference {
-        object_kinds: vec![ObjectKind::Table],
-        name,
-    })
-}
-
-fn create_trigger_container(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) -> Option<ObjectReference> {
-    if token_kind(tokens, 0) != TokenKind::Create {
-        return None;
-    }
-    let trigger = tokens
-        .iter()
-        .position(|token| token.kind == TokenKind::Trigger)?;
-    let on = tokens
-        .iter()
-        .enumerate()
-        .skip(trigger + 1)
-        .find(|(_, token)| token.kind == TokenKind::On)
-        .map(|(index, _)| index)?;
-    let (name, next) = qualified_name(source, base, tokens, on + 1)?;
-    // Column candidates reference the table named after ON from both sides:
-    // `UPDATE OF |` precedes it, `WHEN (...)` follows its complete name.
-    (tokens[on].range.start() >= point || tokens[next.saturating_sub(1)].range.end() <= point)
-        .then_some(ObjectReference {
-            object_kinds: vec![
-                ObjectKind::Table,
-                ObjectKind::View,
-                ObjectKind::ForeignTable,
-            ],
-            name,
-        })
-}
-
-fn create_index_container(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) -> Option<ObjectReference> {
-    if token_kind(tokens, 0) != TokenKind::Create {
-        return None;
-    }
-    let index = usize::from(token_kind(tokens, 1) == TokenKind::Unique) + 1;
-    if token_kind(tokens, index) != TokenKind::Index {
-        return None;
-    }
-    let on = tokens
-        .iter()
-        .enumerate()
-        .skip(index + 1)
-        .find(|(_, token)| token.kind == TokenKind::On)
-        .map(|(index, _)| index)?;
-    let mut relation = on + 1;
-    let mut parenthesized = false;
-    if token_kind(tokens, relation) == TokenKind::Only {
-        relation += 1;
-        if token_kind(tokens, relation) == TokenKind::Char('(') {
-            parenthesized = true;
-            relation += 1;
-        }
-    }
-    let (name, next) = qualified_name(source, base, tokens, relation)?;
-    if parenthesized && token_kind(tokens, next) != TokenKind::Char(')') {
-        return None;
-    }
-    (tokens[next.saturating_sub(1)].range.end() <= point).then_some(relation_reference(name))
-}
-
-fn create_statistics_container(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) -> Option<ObjectReference> {
-    if token_kind(tokens, 0) != TokenKind::Create || token_kind(tokens, 1) != TokenKind::Statistics
-    {
-        return None;
-    }
-    let mut depth = 0usize;
-    let from = tokens.iter().enumerate().find_map(|(index, token)| {
-        if token.kind == TokenKind::Char(')') {
-            depth = depth.saturating_sub(1);
-        }
-        let matches = depth == 0 && token.kind == TokenKind::From && token.range.start() >= point;
-        if token.kind == TokenKind::Char('(') {
-            depth += 1;
-        }
-        matches.then_some(index)
-    })?;
-    let (name, _) = qualified_name(source, base, tokens, from + 1)?;
-    Some(relation_reference(name))
-}
-
-fn grant_container(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) -> Option<ObjectReference> {
-    if !matches!(token_kind(tokens, 0), TokenKind::Grant | TokenKind::Revoke) {
-        return None;
-    }
-    let on = tokens
-        .iter()
-        .enumerate()
-        .find(|(_, token)| token.kind == TokenKind::On && token.range.start() >= point)
-        .map(|(index, _)| index)?;
-    let mut index = on + 1;
-    if token_kind(tokens, index) == TokenKind::Table {
-        index += 1;
-    }
-    let (name, next) = qualified_name(source, base, tokens, index)?;
-    let recipient = if token_kind(tokens, 0) == TokenKind::Grant {
-        TokenKind::To
-    } else {
-        TokenKind::From
-    };
-    if token_kind(tokens, next) != recipient {
-        return None;
-    }
-    Some(relation_reference(name))
-}
-
-fn vacuum_container(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-) -> Option<ObjectReference> {
-    if !matches!(
-        token_kind(tokens, 0),
-        TokenKind::Vacuum | TokenKind::Analyze
-    ) {
-        return None;
-    }
-    let open = tokens
-        .iter()
-        .enumerate()
-        .take_while(|(_, token)| token.range.start() < point)
-        .filter(|(_, token)| token.kind == TokenKind::Char('('))
-        .map(|(index, _)| index)
-        .last()?;
-    let name = qualified_name_before(source, base, tokens, open)?;
-    Some(relation_reference(name))
-}
-
-fn relation_reference(name: Vec<crate::NamePart>) -> ObjectReference {
-    ObjectReference {
-        object_kinds: vec![
+fn object_kinds_for_slot(slot: GrammarSlot) -> &'static [ObjectKind] {
+    match slot {
+        GrammarSlot::Relation => &[
             ObjectKind::Table,
             ObjectKind::View,
             ObjectKind::MaterializedView,
             ObjectKind::ForeignTable,
+            ObjectKind::Sequence,
+            ObjectKind::Schema,
         ],
-        name,
+        GrammarSlot::Table => &[ObjectKind::Table],
+        GrammarSlot::View => &[ObjectKind::View],
+        GrammarSlot::MaterializedView => &[ObjectKind::MaterializedView],
+        GrammarSlot::ForeignTable => &[ObjectKind::ForeignTable],
+        GrammarSlot::Column => &[ObjectKind::Column],
+        GrammarSlot::Attribute => &[ObjectKind::Attribute],
+        GrammarSlot::Function => &[ObjectKind::Function],
+        GrammarSlot::Procedure => &[ObjectKind::Procedure],
+        GrammarSlot::Routine => &[ObjectKind::Routine],
+        GrammarSlot::Aggregate => &[ObjectKind::Aggregate],
+        GrammarSlot::Type => &[ObjectKind::Type],
+        GrammarSlot::Domain => &[ObjectKind::Domain],
+        GrammarSlot::Schema => &[ObjectKind::Schema],
+        GrammarSlot::Sequence => &[ObjectKind::Sequence],
+        GrammarSlot::Index => &[ObjectKind::Index],
+        GrammarSlot::Constraint => &[ObjectKind::Constraint],
+        GrammarSlot::Collation => &[ObjectKind::Collation],
+        GrammarSlot::Operator => &[ObjectKind::Operator],
+        GrammarSlot::OperatorClass => &[ObjectKind::OperatorClass],
+        GrammarSlot::OperatorFamily => &[ObjectKind::OperatorFamily],
+        GrammarSlot::Role => &[ObjectKind::Role],
+        GrammarSlot::Database => &[ObjectKind::Database],
+        GrammarSlot::AccessMethod => &[ObjectKind::AccessMethod],
+        GrammarSlot::Conversion => &[ObjectKind::Conversion],
+        GrammarSlot::EventTrigger => &[ObjectKind::EventTrigger],
+        GrammarSlot::Extension => &[ObjectKind::Extension],
+        GrammarSlot::ForeignDataWrapper => &[ObjectKind::ForeignDataWrapper],
+        GrammarSlot::ForeignServer => &[ObjectKind::ForeignServer],
+        GrammarSlot::Language => &[ObjectKind::Language],
+        GrammarSlot::Policy => &[ObjectKind::Policy],
+        GrammarSlot::PropertyGraph => &[ObjectKind::PropertyGraph],
+        GrammarSlot::Publication => &[ObjectKind::Publication],
+        GrammarSlot::Rule => &[ObjectKind::Rule],
+        GrammarSlot::Statistics => &[ObjectKind::Statistics],
+        GrammarSlot::Subscription => &[ObjectKind::Subscription],
+        GrammarSlot::Tablespace => &[ObjectKind::Tablespace],
+        GrammarSlot::TextSearchConfiguration => &[ObjectKind::TextSearchConfiguration],
+        GrammarSlot::TextSearchDictionary => &[ObjectKind::TextSearchDictionary],
+        GrammarSlot::TextSearchParser => &[ObjectKind::TextSearchParser],
+        GrammarSlot::TextSearchTemplate => &[ObjectKind::TextSearchTemplate],
+        GrammarSlot::Trigger => &[ObjectKind::Trigger],
+        // Privileges are adapter-provided syntax names rather than Catalog
+        // objects. AnyName covers non-Catalog identities such as cursors,
+        // prepared statements, savepoints, and notification channels.
+        GrammarSlot::Privilege | GrammarSlot::Alias | GrammarSlot::AnyName => &[],
     }
 }
 
-fn qualified_name(
+fn catalog_membership_from_grammar(
+    membership: &GrammarMembership,
     source: &str,
     base: TextSize,
-    tokens: &[Token],
-    mut index: usize,
-) -> Option<(Vec<crate::NamePart>, usize)> {
-    let mut name = vec![prefix::name_part_from_token(
-        source,
-        base,
-        tokens.get(index)?,
-    )?];
-    index += 1;
-    while token_kind(tokens, index) == TokenKind::Char('.') {
-        let part = prefix::name_part_from_token(source, base, tokens.get(index + 1)?)?;
-        name.push(part);
-        index += 2;
+) -> Option<CatalogMembership> {
+    let mut member_kinds = Vec::new();
+    for slot in &membership.member_slots {
+        extend_unique(&mut member_kinds, object_kinds_for_slot(*slot));
     }
-    Some((name, index))
-}
-
-fn qualified_name_before(
-    source: &str,
-    base: TextSize,
-    tokens: &[Token],
-    end: usize,
-) -> Option<Vec<crate::NamePart>> {
-    let mut index = end.checked_sub(1)?;
-    let mut name = vec![prefix::name_part_from_token(
-        source,
-        base,
-        tokens.get(index)?,
-    )?];
-    while index >= 2 && token_kind(tokens, index - 1) == TokenKind::Char('.') {
-        index -= 2;
-        name.push(prefix::name_part_from_token(
-            source,
-            base,
-            tokens.get(index)?,
-        )?);
+    let mut object_kinds = Vec::new();
+    for object_type in &membership.owner.object_types {
+        extend_unique(
+            &mut object_kinds,
+            object_kinds_for_slot(object_type_slot(*object_type)),
+        );
     }
-    name.reverse();
-    Some(name)
-}
-
-fn token_kind(tokens: &[Token], index: usize) -> TokenKind {
-    tokens
-        .get(index)
-        .map(|token| token.kind)
-        .unwrap_or(TokenKind::Eof)
-}
-
-fn matching_close(tokens: &[Token], open: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (index, token) in tokens.iter().enumerate().skip(open + 1) {
-        match token.kind {
-            TokenKind::Char('(') => depth += 1,
-            TokenKind::Char(')') if depth == 0 => return Some(index),
-            TokenKind::Char(')') => depth -= 1,
-            _ => {}
-        }
-    }
-    None
+    let name = membership
+        .owner
+        .name
+        .iter()
+        .map(|token| prefix::name_part_from_token(source, base, token))
+        .collect::<Option<Vec<_>>>()?;
+    (!member_kinds.is_empty() && !object_kinds.is_empty() && !name.is_empty()).then_some(
+        CatalogMembership {
+            member_kinds,
+            owner: ObjectReference { object_kinds, name },
+        },
+    )
 }
 
 fn extend_unique(target: &mut Vec<ObjectKind>, values: &[ObjectKind]) {
@@ -466,10 +133,14 @@ mod tests {
 
     #[test]
     fn relation_intent_is_catalog_facing_and_deduplicated() {
-        let intent = from_expectations(&ExpectationSet {
-            slots: vec![GrammarSlot::Relation, GrammarSlot::Schema],
-            ..ExpectationSet::default()
-        });
+        let intent = from_expectations(
+            &ExpectationSet {
+                slots: vec![GrammarSlot::Relation, GrammarSlot::Schema],
+                ..ExpectationSet::default()
+            },
+            "",
+            TextSize::ZERO,
+        );
         assert_eq!(
             intent
                 .object_kinds
@@ -483,10 +154,14 @@ mod tests {
 
     #[test]
     fn exact_relation_slots_do_not_depend_on_statement_tokens() {
-        let intent = from_expectations(&ExpectationSet {
-            slots: vec![GrammarSlot::Table, GrammarSlot::MaterializedView],
-            ..ExpectationSet::default()
-        });
+        let intent = from_expectations(
+            &ExpectationSet {
+                slots: vec![GrammarSlot::Table, GrammarSlot::MaterializedView],
+                ..ExpectationSet::default()
+            },
+            "",
+            TextSize::ZERO,
+        );
         assert_eq!(
             intent.object_kinds,
             [ObjectKind::Table, ObjectKind::MaterializedView]
@@ -499,7 +174,7 @@ mod tests {
             slots: vec![GrammarSlot::AnyName],
             ..ExpectationSet::default()
         };
-        let intent = from_expectations(&expectations);
+        let intent = from_expectations(&expectations, "", TextSize::ZERO);
         assert!(intent.object_kinds.is_empty());
     }
 }

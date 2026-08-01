@@ -819,6 +819,7 @@ impl Parser {
                     if self.consume(TokenKind::Of) {
                         loop {
                             self.record_completion_slot(completion::GrammarSlot::Column);
+                            self.request_completion_membership_recovery();
                             let column = self.consume_col_id().ok_or_else(|| {
                                 self.error_here("UPDATE OF requires a column name")
                             })?;

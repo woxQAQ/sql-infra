@@ -451,9 +451,9 @@ fn add_scope_items(
     if !context.intent.object_kinds.contains(&ObjectKind::Column)
         || context
             .intent
-            .container
+            .membership
             .as_ref()
-            .is_some_and(|container| container.members.contains(&ObjectKind::Column))
+            .is_some_and(|membership| membership.member_kinds.contains(&ObjectKind::Column))
     {
         return;
     }
@@ -574,15 +574,15 @@ fn add_catalog_items(
     let mut global_kinds = context.intent.object_kinds.clone();
     global_kinds.retain(|kind| *kind != ObjectKind::Column);
 
-    if let Some(container) = &context.intent.container {
+    if let Some(membership) = &context.intent.membership {
         let member_kinds = context
             .intent
             .object_kinds
             .iter()
             .copied()
-            .filter(|kind| container.members.contains(kind))
+            .filter(|kind| membership.member_kinds.contains(kind))
             .collect::<Vec<_>>();
-        for (object, member) in catalog.members(&container.reference, &member_kinds) {
+        for (object, member) in catalog.members(&membership.owner, &member_kinds) {
             if !prefix_matches(&context.prefix, &member.name) {
                 continue;
             }
@@ -603,7 +603,7 @@ fn add_catalog_items(
                 editor_kind(member.kind),
                 Some(member.kind),
                 detail,
-                "container",
+                "membership",
                 if member.kind == ObjectKind::Column {
                     0
                 } else {
@@ -613,7 +613,7 @@ fn add_catalog_items(
                 items,
             );
         }
-        global_kinds.retain(|kind| !container.members.contains(kind));
+        global_kinds.retain(|kind| !membership.member_kinds.contains(kind));
     }
 
     for object in catalog.objects(&global_kinds, &context.intent.qualifier) {
@@ -969,29 +969,29 @@ impl ContextView {
                     .iter()
                     .map(|part| NamePartView::new(source, part))
                     .collect(),
-                container: context
-                    .intent
-                    .container
-                    .as_ref()
-                    .map(|container| ContainerView {
-                        members: container
-                            .members
+                membership: context.intent.membership.as_ref().map(|membership| {
+                    CatalogMembershipView {
+                        member_kinds: membership
+                            .member_kinds
                             .iter()
                             .map(|kind| object_kind_name(*kind))
                             .collect(),
-                        object_kinds: container
-                            .reference
-                            .object_kinds
-                            .iter()
-                            .map(|kind| object_kind_name(*kind))
-                            .collect(),
-                        name: container
-                            .reference
-                            .name
-                            .iter()
-                            .map(|part| NamePartView::new(source, part))
-                            .collect(),
-                    }),
+                        owner: ObjectReferenceView {
+                            object_kinds: membership
+                                .owner
+                                .object_kinds
+                                .iter()
+                                .map(|kind| object_kind_name(*kind))
+                                .collect(),
+                            name: membership
+                                .owner
+                                .name
+                                .iter()
+                                .map(|part| NamePartView::new(source, part))
+                                .collect(),
+                        },
+                    }
+                }),
             },
             scope: ScopeView {
                 local: context
@@ -1087,13 +1087,19 @@ struct IntentView {
     object_kinds: Vec<String>,
     qualifier: Vec<NamePartView>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    container: Option<ContainerView>,
+    membership: Option<CatalogMembershipView>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ContainerView {
-    members: Vec<String>,
+struct CatalogMembershipView {
+    member_kinds: Vec<String>,
+    owner: ObjectReferenceView,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ObjectReferenceView {
     object_kinds: Vec<String>,
     name: Vec<NamePartView>,
 }
@@ -1492,7 +1498,7 @@ mod tests {
     }
 
     #[test]
-    fn container_members_come_from_the_named_catalog_object() {
+    fn member_candidates_come_from_the_named_catalog_object() {
         let response = response("CREATE INDEX users_name ON public.users (|)");
         let items = item_tuples(&response);
         assert!(items.contains(&("column", "id")), "{items:?}");

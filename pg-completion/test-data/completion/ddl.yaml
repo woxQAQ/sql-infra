@@ -188,7 +188,7 @@
       tokens: [IF]
       phrases: [IF EXISTS]
       slots: [Constraint]
-    container: Constraint in Table t
+    membership: Constraint in Table t
 
 - input: ALTER TABLE app.users DROP COLUMN |
   want:
@@ -196,7 +196,7 @@
       tokens: [IF]
       phrases: [IF EXISTS]
       slots: [Column]
-    container: Column in Table app.users
+    membership: Column in Table app.users
 
 - input: CREATE TABLE t (c text COLLATE |)
   want:
@@ -399,14 +399,14 @@
     candidates:
       tokens: []
       slots: [Column]
-    container: Column in Table|View|ForeignTable accounts
+    membership: Column in Table|View|ForeignTable accounts
 
 - input: CREATE TRIGGER trg BEFORE UPDATE ON accounts WHEN (|
   want:
     candidates:
       tokens: [(, '*', +, '-', ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
       slots: [Column, Function]
-    container: Column in Table|View|ForeignTable accounts
+    membership: Column in Table|View|ForeignTable accounts
     scope: {}
 
 - input: CREATE TRIGGER trg BEFORE INSERT ON t EXECUTE FUNCTION |

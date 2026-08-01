@@ -173,10 +173,22 @@ impl Parser {
         };
         let (events, columns) = self.parse_trigger_events()?;
         self.expect(TokenKind::On)?;
+        let owner_start = self.pos;
         let relation = Some(Box::new(
             self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CREATE TRIGGER requires a relation"))?,
         ));
+        let owner_end = self.pos;
+        self.push_completion_membership_owner_range(
+            &[completion::GrammarSlot::Column],
+            &[
+                ObjectType::Table,
+                ObjectType::View,
+                ObjectType::ForeignTable,
+            ],
+            owner_start,
+            owner_end,
+        );
         let constrrel = if isconstraint && self.consume(TokenKind::From) {
             Some(Box::new(
                 self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)

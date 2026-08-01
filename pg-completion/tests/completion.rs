@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fs, path::Path};
 
 use pg_completion::{
-    CompletionContext, CteDefinition, GrammarSlot, NamePart, ObjectContainer, ObjectKind,
+    CatalogMembership, CompletionContext, CteDefinition, GrammarSlot, NamePart, ObjectKind,
     RelationKind, ScopeSnapshot, VisibleRelation, collect,
 };
 use pg_parser::{KEYWORDS, TextSize, TokenKind, lex, parse_one};
@@ -28,7 +28,7 @@ struct Want {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     qualifier: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    container: Option<String>,
+    membership: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     scope: Option<ScopeWant>,
 }
@@ -98,15 +98,15 @@ fn completion_candidates() {
                 .iter()
                 .map(|part| part.text.clone())
                 .collect::<Vec<_>>();
-            let actual_container = context.intent.container.as_ref().map(render_container);
+            let actual_membership = context.intent.membership.as_ref().map(render_membership);
             let actual_scope = render_scope(&context.scope);
             if record {
                 case.want.candidates = actual;
                 if case.want.qualifier.is_some() {
                     case.want.qualifier = Some(actual_qualifier);
                 }
-                if case.want.container.is_some() {
-                    case.want.container = actual_container;
+                if case.want.membership.is_some() {
+                    case.want.membership = actual_membership;
                 }
                 if case.want.scope.is_some() {
                     case.want.scope = Some(actual_scope);
@@ -135,15 +135,15 @@ fn completion_candidates() {
                         want
                     ));
                 }
-                if let Some(want) = &case.want.container
-                    && Some(want) != actual_container.as_ref()
+                if let Some(want) = &case.want.membership
+                    && Some(want) != actual_membership.as_ref()
                 {
                     failures.push(format!(
-                        "{} case {}: {}\n  container actual: {:?}\n    want: {:?}",
+                        "{} case {}: {}\n  membership actual: {:?}\n    want: {:?}",
                         file.display(),
                         index,
                         case.input,
-                        actual_container,
+                        actual_membership,
                         want
                     ));
                 }
@@ -583,9 +583,9 @@ fn render_cases(cases: &[Case]) -> String {
             output.push_str("\n    qualifier: ");
             output.push_str(&flow_sequence(qualifier));
         }
-        if let Some(container) = &case.want.container {
-            output.push_str("\n    container: ");
-            output.push_str(&yaml_scalar(container));
+        if let Some(membership) = &case.want.membership {
+            output.push_str("\n    membership: ");
+            output.push_str(&yaml_scalar(membership));
         }
         if let Some(scope) = &case.want.scope {
             output.push_str("\n    scope:");
@@ -743,23 +743,23 @@ fn render_cte(cte: &CteDefinition) -> String {
     rendered
 }
 
-fn render_container(container: &ObjectContainer) -> String {
+fn render_membership(membership: &CatalogMembership) -> String {
     format!(
         "{} in {} {}",
-        container
-            .members
+        membership
+            .member_kinds
             .iter()
             .map(|kind| format!("{kind:?}"))
             .collect::<Vec<_>>()
             .join(", "),
-        container
-            .reference
+        membership
+            .owner
             .object_kinds
             .iter()
             .map(|kind| format!("{kind:?}"))
             .collect::<Vec<_>>()
             .join("|"),
-        dotted(&container.reference.name),
+        dotted(&membership.owner.name),
     )
 }
 

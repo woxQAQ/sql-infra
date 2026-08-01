@@ -108,6 +108,7 @@ pub struct ExpectationSet {
     /// continuation.
     pub phrases: Vec<&'static [TokenKind]>,
     pub slots: Vec<GrammarSlot>,
+    pub membership: Option<pg_parser::GrammarMembership>,
 }
 
 impl ExpectationSet {
@@ -121,13 +122,13 @@ impl ExpectationSet {
 pub struct CompletionIntent {
     pub object_kinds: Vec<ObjectKind>,
     pub qualifier: Vec<NamePart>,
-    pub container: Option<ObjectContainer>,
+    pub membership: Option<CatalogMembership>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ObjectContainer {
-    pub members: Vec<ObjectKind>,
-    pub reference: ObjectReference,
+pub struct CatalogMembership {
+    pub member_kinds: Vec<ObjectKind>,
+    pub owner: ObjectReference,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -315,6 +316,7 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
             follow_tokens: expectations.follow_tokens,
             phrases: expectations.phrases,
             slots: expectations.slots,
+            membership: expectations.membership,
         },
         Err(_) => ExpectationSet::default(),
     };
@@ -332,17 +334,9 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
         ),
         Err(_) => ScopeSnapshot::default(),
     };
-    let mut intent = intent::from_expectations(&expectations);
+    let mut intent =
+        intent::from_expectations(&expectations, statement_text, statement_range.start());
     intent.qualifier = site.qualifier;
-    if let Ok(tokenization) = &tokenization_result {
-        intent::attach_container(
-            &mut intent,
-            statement_text,
-            statement_range.start(),
-            completion_start,
-            tokenization.tokens(),
-        );
-    }
 
     CompletionContext {
         statement_range,

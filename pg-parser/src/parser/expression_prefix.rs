@@ -120,6 +120,9 @@ impl ExprParser {
             }
             self.record_completion_slot(completion::GrammarSlot::Column);
             self.record_completion_slot(completion::GrammarSlot::Function);
+            if let Some(hole) = self.recover_completion_hole() {
+                return token_to_leaf(&hole);
+            }
             return self.fail("completion point at expression start");
         }
         if let Some(constant) = self.try_parse_typed_constant() {

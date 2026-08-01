@@ -287,7 +287,7 @@ fn exact_function_decoration_keyword_wins_over_output_alias_ambiguity() {
 }
 
 #[test]
-fn exposes_catalog_containers_for_nested_object_candidates() {
+fn exposes_membership_for_nested_object_candidates() {
     let cases = [
         (
             "ALTER TABLE app.accounts DROP COLUMN ",
@@ -318,22 +318,22 @@ fn exposes_catalog_containers_for_nested_object_candidates() {
     for (source, slot, kinds, names) in cases {
         let context = collect(source, size(source.len()));
         assert!(context.expectations.slots.contains(&slot), "{source:?}");
-        let container = context
+        let membership = context
             .intent
-            .container
+            .membership
             .as_ref()
-            .unwrap_or_else(|| panic!("missing Catalog container for {source:?}"));
+            .unwrap_or_else(|| panic!("missing membership for {source:?}"));
         let member = match slot {
             GrammarSlot::Column => ObjectKind::Column,
             GrammarSlot::Attribute => ObjectKind::Attribute,
             GrammarSlot::Constraint => ObjectKind::Constraint,
             _ => unreachable!(),
         };
-        assert_eq!(container.members, [member], "{source:?}");
-        assert_eq!(container.reference.object_kinds, kinds, "{source:?}");
+        assert_eq!(membership.member_kinds, [member], "{source:?}");
+        assert_eq!(membership.owner.object_kinds, kinds, "{source:?}");
         assert_eq!(
-            container
-                .reference
+            membership
+                .owner
                 .name
                 .iter()
                 .map(|part| part.normalized.as_str())
@@ -342,15 +342,30 @@ fn exposes_catalog_containers_for_nested_object_candidates() {
             "{source:?}"
         );
     }
+
+    let source =
+        "ALTER TABLE app.child ADD COLUMN parent_id int REFERENCES app.parent(id), DROP COLUMN ";
+    let context = collect(source, size(source.len()));
+    let membership = context.intent.membership.expect("restored ALTER owner");
+    assert_eq!(membership.member_kinds, [ObjectKind::Column]);
+    assert_eq!(
+        membership
+            .owner
+            .name
+            .iter()
+            .map(|part| part.normalized.as_str())
+            .collect::<Vec<_>>(),
+        ["app", "child"]
+    );
 }
 
 #[test]
-fn finds_catalog_containers_on_either_side_of_the_completion_point() {
+fn finds_membership_on_either_side_of_the_completion_point() {
     let source = "COPY app.accounts () FROM STDIN";
     let point = source.find(')').unwrap();
     let context = collect(source, size(point));
     assert_eq!(
-        context.intent.container.unwrap().reference.name[1].normalized,
+        context.intent.membership.unwrap().owner.name[1].normalized,
         "accounts"
     );
 
@@ -359,7 +374,7 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
     let context = collect(source, size(point));
     assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
     assert_eq!(
-        context.intent.container.unwrap().reference.name[1].normalized,
+        context.intent.membership.unwrap().owner.name[1].normalized,
         "parent"
     );
 
@@ -368,7 +383,7 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
     let context = collect(source, size(point));
     assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
     assert_eq!(
-        context.intent.container.unwrap().reference.name[1].normalized,
+        context.intent.membership.unwrap().owner.name[1].normalized,
         "accounts"
     );
 
@@ -376,16 +391,16 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
     let point = source.find("()").unwrap() + 1;
     let context = collect(source, size(point));
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
-    let container = context.intent.container.unwrap();
+    let membership = context.intent.membership.unwrap();
     assert_eq!(
-        container.reference.object_kinds,
+        membership.owner.object_kinds,
         [
             ObjectKind::Table,
             ObjectKind::View,
             ObjectKind::ForeignTable
         ]
     );
-    assert_eq!(container.reference.name[1].normalized, "accounts");
+    assert_eq!(membership.owner.name[1].normalized, "accounts");
 
     for (source, point) in [
         (
@@ -411,13 +426,13 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
         ),
     ] {
         let context = collect(source, size(point));
-        let container = context
+        let membership = context
             .intent
-            .container
-            .unwrap_or_else(|| panic!("missing Catalog container for {source:?}"));
-        assert_eq!(container.members, [ObjectKind::Column], "{source:?}");
+            .membership
+            .unwrap_or_else(|| panic!("missing membership for {source:?}"));
+        assert_eq!(membership.member_kinds, [ObjectKind::Column], "{source:?}");
         assert_eq!(
-            container.reference.name[1].normalized, "accounts",
+            membership.owner.name[1].normalized, "accounts",
             "{source:?}"
         );
     }
@@ -425,15 +440,15 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
     let source = "CREATE STATISTICS s ON (substring(value FROM start_position)) FROM app.accounts";
     let point = source.find("value").unwrap();
     let context = collect(source, size(point));
-    let container = context.intent.container.unwrap();
-    assert_eq!(container.reference.name[0].normalized, "app");
-    assert_eq!(container.reference.name[1].normalized, "accounts");
+    let membership = context.intent.membership.unwrap();
+    assert_eq!(membership.owner.name[0].normalized, "app");
+    assert_eq!(membership.owner.name[1].normalized, "accounts");
 
     let source = "CREATE TABLE child (parent_id int REFERENCES parent(id), value int CHECK ())";
     let point = source.rfind("()").unwrap() + 1;
     let context = collect(source, size(point));
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
-    assert!(context.intent.container.is_none());
+    assert!(context.intent.membership.is_none());
 
     for source in [
         "GRANT SELECT () ON ALL TABLES IN SCHEMA public TO role_name",
@@ -442,7 +457,7 @@ fn finds_catalog_containers_on_either_side_of_the_completion_point() {
         let point = source.find("() ON").unwrap() + 1;
         let context = collect(source, size(point));
         assert!(context.expectations.slots.contains(&GrammarSlot::Column));
-        assert!(context.intent.container.is_none(), "{source:?}");
+        assert!(context.intent.membership.is_none(), "{source:?}");
     }
 }
 

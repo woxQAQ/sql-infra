@@ -12,14 +12,14 @@ pub struct Keyword {
     pub bare_label: BareLabel,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TokenValue {
     Integer(i32),
     String(std::string::String),
     Keyword(&'static str),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
     pub range: TextRange,
@@ -61,6 +61,10 @@ impl Token {
 
     pub(crate) fn synthetic(kind: TokenKind, location: usize) -> Self {
         Self::new(kind, location)
+    }
+
+    pub(crate) fn completion_hole(location: usize) -> Self {
+        Self::string(TokenKind::Ident, location, "__completion_hole__")
     }
 
     pub fn location(&self) -> usize {

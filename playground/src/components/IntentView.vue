@@ -67,12 +67,12 @@ const groups = computed(() => [
       </div>
     </div>
 
-    <section v-if="context.intent.container" class="data-block container-block">
-      <header class="data-heading"><span>Container</span></header>
-      <div class="container-row">
-        <strong>{{ context.intent.container.name.map((part) => part.text).join(".") }}</strong>
-        <span>{{ context.intent.container.objectKinds.join(" / ") }}</span>
-        <small>Members: {{ context.intent.container.members.join(", ") }}</small>
+    <section v-if="context.intent.membership" class="data-block membership-block">
+      <header class="data-heading"><span>Catalog membership</span></header>
+      <div class="membership-row">
+        <strong>{{ context.intent.membership.owner.name.map((part) => part.text).join(".") }}</strong>
+        <span>{{ context.intent.membership.owner.objectKinds.join(" / ") }}</span>
+        <small>Member kinds: {{ context.intent.membership.memberKinds.join(", ") }}</small>
       </div>
     </section>
 

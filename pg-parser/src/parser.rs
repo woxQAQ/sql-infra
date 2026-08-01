@@ -10,7 +10,10 @@ mod alter_identity;
 mod alter_table;
 mod alter_table_partition;
 pub mod completion;
-pub use completion::{GrammarSlot, ParserExpectations, collect_expectations};
+pub use completion::{
+    GrammarMembership, GrammarObjectReference, GrammarSlot, ParserExpectations,
+    collect_expectations, object_type_slot,
+};
 mod constraints;
 mod create;
 mod create_cast_transform;
@@ -206,10 +209,7 @@ type PResult<T> = Result<T, ParserExit>;
 type JsonBehaviorPair = (Option<Box<JsonBehavior>>, Option<Box<JsonBehavior>>);
 
 pub fn parse(sql: &str) -> Result<Vec<RawStmt>, ParseError> {
-    Ok(parse_with_ranges(sql)?
-        .into_iter()
-        .map(|statement| statement.raw)
-        .collect())
+    Parser::new(sql)?.parse()
 }
 
 /// Parse SQL while retaining complete source ranges for tooling.
@@ -222,18 +222,21 @@ pub fn parse_with_ranges(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> 
 }
 
 pub fn parse_one(sql: &str) -> Result<RawStmt, ParseError> {
-    let mut stmts = parse(sql)?;
-    if stmts.len() != 1 {
+    let mut statements = parse(sql)?;
+    if statements.len() != 1 {
+        let unexpected_statement_location = statements
+            .get(1)
+            .map_or(0, |statement| statement.stmt_location as usize);
         return Err(ParseError::syntax(
-            stmts.get(1).map_or(0, |stmt| stmt.stmt_location as usize),
-            format!("expected one statement, found {}", stmts.len()),
+            unexpected_statement_location,
+            format!("expected one statement, found {}", statements.len()),
         ));
     }
-    Ok(stmts.remove(0))
+    Ok(statements.remove(0))
 }
 
-pub fn parse_plpgsql_assignment(sql: &str, nnames: i32) -> Result<RawStmt, ParseError> {
-    plpgsql::parse_assignment(sql, nnames).map_err(ParserExit::into_parse_error)
+pub fn parse_plpgsql_assignment(sql: &str, target_name_count: i32) -> Result<RawStmt, ParseError> {
+    plpgsql::parse_assignment(sql, target_name_count).map_err(ParserExit::into_parse_error)
 }
 
 pub fn parse_plpgsql_expression(sql: &str) -> Result<RawStmt, ParseError> {
@@ -242,6 +245,7 @@ pub fn parse_plpgsql_expression(sql: &str) -> Result<RawStmt, ParseError> {
 
 pub fn parse_type_name(sql: &str) -> Result<TypeName, ParseError> {
     let mut tokens = lex(sql)?;
+    // Fragment parsers receive token lists without the lexer's EOF sentinel.
     tokens.pop();
     parse_type_name_tokens(tokens).map_err(ParserExit::into_parse_error)
 }
@@ -303,80 +307,84 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> Result<Vec<RawStmt>, ParseError> {
-        self.parse_controlled()
+        self.parse_raw_statements()
             .map_err(ParserExit::into_parse_error)
     }
 
-    fn parse_controlled(&mut self) -> PResult<Vec<RawStmt>> {
+    fn parse_raw_statements(&mut self) -> PResult<Vec<RawStmt>> {
         Ok(self
-            .parse_with_ranges_controlled()?
+            .parse_statements_with_ranges()?
             .into_iter()
             .map(|statement| statement.raw)
             .collect())
     }
 
     pub fn parse_with_ranges(&mut self) -> Result<Vec<ParsedStatement>, ParseError> {
-        self.parse_with_ranges_controlled()
+        self.parse_statements_with_ranges()
             .map_err(ParserExit::into_parse_error)
     }
 
-    fn parse_with_ranges_controlled(&mut self) -> PResult<Vec<ParsedStatement>> {
-        let mut stmts = Vec::new();
+    fn parse_statements_with_ranges(&mut self) -> PResult<Vec<ParsedStatement>> {
+        let mut statements = Vec::new();
         while !self.at(TokenKind::Eof) {
             while self.consume(TokenKind::Char(';')) {}
             if self.at(TokenKind::Eof) {
                 break;
             }
 
-            let start = self.location();
-            let stmt = self.parse_statement(None)?;
-            let end = self.location();
+            let statement_start = self.location();
+            let statement = self.parse_statement(None)?;
+            let statement_end = self.location();
             if !self.at_statement_end() {
                 return Err(self.error_here(format!(
                     "expected ';' between statements, found {:?}",
                     self.peek_kind()
                 )));
             }
-            let terminator = if self.at(TokenKind::Char(';')) {
+            let terminator_range = if self.at(TokenKind::Char(';')) {
                 Some(self.advance().range)
             } else {
                 None
             };
-            let syntax = TextRange::new(
-                TextSize::try_from(start).expect("validated parser offset"),
-                TextSize::try_from(end).expect("validated parser offset"),
+            let syntax_range = TextRange::new(
+                TextSize::try_from(statement_start).expect("validated parser offset"),
+                TextSize::try_from(statement_end).expect("validated parser offset"),
             );
-            let raw = RawStmt {
-                node_tag: NodeTag::RawStmt,
-                stmt: Some(Box::new(stmt)),
-                stmt_location: start as ParseLoc,
-                stmt_len: if terminator.is_some() {
-                    end.saturating_sub(start) as ParseLoc
-                } else {
-                    0
-                },
+            // PostgreSQL reports zero length for an unterminated final statement.
+            let raw_statement_length = if terminator_range.is_some() {
+                statement_end.saturating_sub(statement_start) as ParseLoc
+            } else {
+                0
             };
-            stmts.push(ParsedStatement {
-                raw,
-                range: StatementRange { syntax, terminator },
+            let raw_statement = RawStmt {
+                node_tag: NodeTag::RawStmt,
+                stmt: Some(Box::new(statement)),
+                stmt_location: statement_start as ParseLoc,
+                stmt_len: raw_statement_length,
+            };
+            statements.push(ParsedStatement {
+                raw: raw_statement,
+                range: StatementRange {
+                    syntax: syntax_range,
+                    terminator: terminator_range,
+                },
             });
         }
-        Ok(stmts)
+        Ok(statements)
     }
 }
 
 // ── Cursor primitives ─────────────────────────────────────────────────────
 //
 // Low-level lookahead / match / consume primitives for the hand-written
-// recursive-descent parser.  All production rules (parse_statement,
-// parse_create, parse_select, …) read / advance the cursor exclusively
-// through these methods, never touching `pos` directly — this decouples
-// grammar dispatch from cursor bookkeeping.
+// recursive-descent parser. Production rules use these methods for routine
+// lookahead, matching, and consumption. The few productions that inspect or
+// modify `pos` directly do so for bounded lookahead, token-span capture, or an
+// explicit save/restore pair.
 //
 // LL(1)-style predictive recursive descent: usually `peek_kind()` (LA(1))
-// suffices to choose a production branch; a few ambiguous spots use
-// `peek_kind_n` / `has_top_level_token_before` for bounded extra lookahead.
-// No backtracking.
+// suffices to choose a production branch. Ambiguous productions use bounded
+// extra lookahead or keep cursor save/restore operations together.
 //
 // Production code follows these cursor conventions:
 // - `consume` expresses optional syntax, repetition, delimiters, and compact
@@ -388,13 +396,13 @@ impl Parser {
 
 impl Parser {
     /// Consume tokens from the current position until a **top-level** token in
-    /// `stops` is found, cloning all consumed tokens into the returned vec.
+    /// `stop_tokens` is found, cloning all consumed tokens into the returned vec.
     ///
     /// "Top-level" is tracked via bracket depth: a stop token only takes
-    /// effect at `depth == 0`; the same token nested inside `()` / `[]` is
-    /// swallowed.  This allows scooping up an entire SQL fragment for
-    /// downstream processing (fragment parser, deferred function bodies, etc.)
-    /// without knowing the sub-production structure.
+    /// effect when the delimiter depth is zero; the same token nested inside
+    /// `()` / `[]` is swallowed. This allows scooping up an entire SQL fragment
+    /// for downstream processing (fragment parser, deferred function bodies,
+    /// etc.) without knowing the sub-production structure.
     ///
     /// ## Keyword-pair special cases
     ///
@@ -404,58 +412,42 @@ impl Parser {
     /// - `FOR`    following `COLLATION` → `COLLATION FOR`, not a boundary
     /// - `FROM`   following `DISTINCT`  → `DISTINCT FROM`, not a boundary
     /// - `NOT`    following `IS`        → `IS NOT` predicate, not a boundary
-    pub(super) fn take_until_top_level(&mut self, stops: &[TokenKind]) -> Vec<Token> {
-        let mut out = Vec::new();
-        let mut depth = 0usize;
+    pub(super) fn take_until_top_level(&mut self, stop_tokens: &[TokenKind]) -> Vec<Token> {
+        let mut tokens = Vec::new();
+        let mut delimiter_depth = 0usize;
         while !self.at(TokenKind::Eof) {
             if self.at_completion() {
+                if let Some(hole) = self.recover_completion_hole() {
+                    tokens.push(hole);
+                    continue;
+                }
                 break;
             }
-            let kind = self.peek_kind();
-            // Two-word combinations that need the previous token to disambiguate.
-            let within_group = kind == TokenKind::GroupP
-                && out.last().map(|token: &Token| token.kind) == Some(TokenKind::Within);
-            let collation_for = kind == TokenKind::For
-                && out.last().map(|token: &Token| token.kind) == Some(TokenKind::Collation);
-            let distinct_from = kind == TokenKind::From
-                && out.last().map(|token: &Token| token.kind) == Some(TokenKind::Distinct);
-            let is_not_predicate = kind == TokenKind::Not
-                && out.last().map(|token: &Token| token.kind) == Some(TokenKind::Is);
-            // Top-level and a stop word (but not one of the special combos) → stop.
-            if depth == 0
-                && stops.contains(&kind)
-                && !within_group
-                && !collation_for
-                && !distinct_from
-                && !is_not_predicate
-            {
+            let current_kind = self.peek_kind();
+            let previous_kind = tokens.last().map(|token: &Token| token.kind);
+            let continues_keyword_phrase = matches!(
+                (previous_kind, current_kind),
+                (Some(TokenKind::Within), TokenKind::GroupP)
+                    | (Some(TokenKind::Collation), TokenKind::For)
+                    | (Some(TokenKind::Distinct), TokenKind::From)
+                    | (Some(TokenKind::Is), TokenKind::Not)
+            );
+            let at_fragment_boundary = delimiter_depth == 0
+                && stop_tokens.contains(&current_kind)
+                && !continues_keyword_phrase;
+            if at_fragment_boundary {
                 break;
             }
-            // Bracket depth tracking.  Note: if a closing bracket at depth 0 is
-            // itself a stop word, we must break *before* decrementing depth,
-            // otherwise we'd incorrectly swallow it.
-            match kind {
-                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+            match current_kind {
+                TokenKind::Char('(') | TokenKind::Char('[') => delimiter_depth += 1,
                 TokenKind::Char(')') | TokenKind::Char(']') => {
-                    if depth == 0 && stops.contains(&kind) {
-                        break;
-                    }
-                    depth = depth.saturating_sub(1);
+                    delimiter_depth = delimiter_depth.saturating_sub(1);
                 }
                 _ => {}
             }
-            out.push(self.advance().clone());
+            tokens.push(self.advance().clone());
         }
-        out
-    }
-
-    /// Preserve the synthetic completion marker when a deferred fragment is
-    /// handed to another parser. The outer parser keeps its cursor at the
-    /// marker; the nested parser receives a clone and shares the collector.
-    pub(super) fn append_completion_marker(&self, tokens: &mut Vec<Token>) {
-        if self.at_completion() {
-            tokens.push(self.peek().clone());
-        }
+        tokens
     }
 
     /// True if the cursor is at a statement boundary (`;` or EOF).
@@ -499,112 +491,8 @@ impl Parser {
         self.peek_kind() == TokenKind::Completion
     }
 
-    pub(super) fn record_completion_tokens(&self, kinds: &[TokenKind]) {
-        if !self.at_completion() {
-            return;
-        }
-        if let Some(collector) = &self.completion {
-            collector.borrow_mut().tokens(kinds);
-        }
-    }
-
-    pub(super) fn record_completion_lookahead_tokens(&self, kinds: &[TokenKind]) {
-        if !self.at_completion() {
-            return;
-        }
-        if let Some(collector) = &self.completion {
-            collector.borrow_mut().lookahead_tokens(kinds);
-        }
-    }
-
-    pub(super) fn record_completion_follow_tokens(&self, kinds: &[TokenKind]) {
-        if !self.at_completion() {
-            return;
-        }
-        if let Some(collector) = &self.completion {
-            collector.borrow_mut().follow_tokens(kinds);
-        }
-    }
-
-    pub(super) fn record_completion_follow_phrase(&self, phrase: &'static [TokenKind]) {
-        if !self.at_completion() {
-            return;
-        }
-        if let Some(collector) = &self.completion {
-            collector.borrow_mut().follow_phrase(phrase);
-        }
-    }
-
-    pub(super) fn record_completion_slot(&self, slot: completion::GrammarSlot) {
-        if !self.at_completion() {
-            return;
-        }
-        if let Some(collector) = &self.completion {
-            collector.borrow_mut().slot(slot);
-        }
-    }
-
-    pub(super) fn record_completion_phrase(&self, phrase: &'static [TokenKind]) {
-        if !self.at_completion() {
-            return;
-        }
-        if let Some(collector) = &self.completion {
-            collector.borrow_mut().phrase(phrase);
-        }
-    }
-
-    pub(super) fn record_completion_slot_before(
-        &self,
-        slot: completion::GrammarSlot,
-        stops: &[TokenKind],
-    ) {
-        if self.top_level_token_before_completion(stops) != Some(TokenKind::Char('.')) {
-            return;
-        }
-        if let Some(collector) = &self.completion {
-            collector.borrow_mut().slot(slot);
-        }
-    }
-
-    /// Publish a slot when the completion marker is anywhere inside the
-    /// fragment delimited by top-level `stops`, not only at its first token.
-    pub(super) fn record_completion_slot_within(
-        &self,
-        slot: completion::GrammarSlot,
-        stops: &[TokenKind],
-    ) {
-        let follows_fragment_separator = matches!(
-            self.top_level_token_before_completion(stops),
-            Some(TokenKind::Char('.') | TokenKind::Char(',') | TokenKind::Char('('))
-        );
-        if !self.at_completion() && !follows_fragment_separator {
-            return;
-        }
-        if let Some(collector) = &self.completion {
-            collector.borrow_mut().slot(slot);
-        }
-    }
-
-    fn top_level_token_before_completion(&self, stops: &[TokenKind]) -> Option<TokenKind> {
-        let mut depth = 0usize;
-        let mut previous = None;
-        for token in &self.tokens[self.pos..] {
-            match token.kind {
-                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
-                TokenKind::Char(')') | TokenKind::Char(']') => {
-                    depth = depth.saturating_sub(1);
-                }
-                TokenKind::Completion if depth == 0 => return previous,
-                kind if depth == 0 && stops.contains(&kind) => return None,
-                kind if depth == 0 => previous = Some(kind),
-                _ => {}
-            }
-        }
-        None
-    }
-
     /// Read-ahead (non-consuming): does `needle` appear at the **top level**
-    /// before any token in `stops`?
+    /// before any token in `stop_tokens`?
     ///
     /// Uses the same bracket-depth notion as [`take_until_top_level`].
     /// Returns `false` if a stop token appears first, or on EOF.
@@ -612,17 +500,17 @@ impl Parser {
     pub(super) fn has_top_level_token_before(
         &self,
         needle: TokenKind,
-        stops: &[TokenKind],
+        stop_tokens: &[TokenKind],
     ) -> bool {
-        let mut depth = 0usize;
+        let mut delimiter_depth = 0usize;
         for token in &self.tokens[self.pos..] {
             match token.kind {
-                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                TokenKind::Char('(') | TokenKind::Char('[') => delimiter_depth += 1,
                 TokenKind::Char(')') | TokenKind::Char(']') => {
-                    depth = depth.saturating_sub(1);
+                    delimiter_depth = delimiter_depth.saturating_sub(1);
                 }
-                kind if depth == 0 && kind == needle => return true,
-                kind if depth == 0 && stops.contains(&kind) => return false,
+                kind if delimiter_depth == 0 && kind == needle => return true,
+                kind if delimiter_depth == 0 && stop_tokens.contains(&kind) => return false,
                 _ => {}
             }
         }
@@ -753,7 +641,12 @@ impl Parser {
 // (`peek_kind_n`) to disambiguate before committing to a branch.
 
 macro_rules! define_statement_families {
-    ($($family:ident => [$($starter:expr),+ $(,)?]),+ $(,)?) => {
+    ($(
+        $family:ident => {
+            start_tokens: [$($start_token:expr),+ $(,)?],
+            sample_sql: $sample_sql:literal $(,)?
+        }
+    ),+ $(,)?) => {
         #[derive(Clone, Copy, Debug, Eq, PartialEq)]
         enum StatementFamily {
             $($family),+
@@ -764,59 +657,16 @@ macro_rules! define_statement_families {
         ];
 
         impl StatementFamily {
-            fn starters(self) -> &'static [TokenKind] {
+            fn start_tokens(self) -> &'static [TokenKind] {
                 match self {
-                    $(Self::$family => &[$($starter),+]),+
+                    $(Self::$family => &[$($start_token),+]),+
                 }
             }
 
             #[cfg(test)]
-            fn coverage_sample(self) -> &'static str {
+            fn sample_sql(self) -> &'static str {
                 match self {
-                    Self::With => "WITH x AS (SELECT 1) SELECT * FROM x",
-                    Self::Query => "SELECT 1",
-                    Self::Insert => "INSERT INTO t VALUES (1)",
-                    Self::Update => "UPDATE t SET id = 1",
-                    Self::Delete => "DELETE FROM t",
-                    Self::Merge => "MERGE INTO t USING s ON true WHEN MATCHED THEN DO NOTHING",
-                    Self::Create => "CREATE TABLE t (id int)",
-                    Self::Alter => "ALTER TABLE t ADD COLUMN c int",
-                    Self::Drop => "DROP TABLE t",
-                    Self::SetConstraints => "SET CONSTRAINTS ALL DEFERRED",
-                    Self::VariableSet => "SET work_mem = '4MB'",
-                    Self::VariableReset => "RESET work_mem",
-                    Self::VariableShow => "SHOW work_mem",
-                    Self::Transaction => "BEGIN",
-                    Self::PrepareTransaction => "PREPARE TRANSACTION 'tx'",
-                    Self::Prepare => "PREPARE q AS SELECT 1",
-                    Self::Execute => "EXECUTE q",
-                    Self::Deallocate => "DEALLOCATE q",
-                    Self::Declare => "DECLARE c CURSOR FOR SELECT 1",
-                    Self::Close => "CLOSE c",
-                    Self::FetchMove => "FETCH NEXT FROM c",
-                    Self::Copy => "COPY t FROM STDIN",
-                    Self::Vacuum => "ANALYZE t",
-                    Self::Explain => "EXPLAIN SELECT 1",
-                    Self::Call => "CALL f()",
-                    Self::Checkpoint => "CHECKPOINT",
-                    Self::Discard => "DISCARD ALL",
-                    Self::Lock => "LOCK TABLE t",
-                    Self::Listen => "LISTEN channel",
-                    Self::Unlisten => "UNLISTEN *",
-                    Self::Notify => "NOTIFY channel",
-                    Self::Load => "LOAD 'library'",
-                    Self::Refresh => "REFRESH MATERIALIZED VIEW mv",
-                    Self::Reindex => "REINDEX TABLE t",
-                    Self::Repack => "CLUSTER t",
-                    Self::Reassign => "REASSIGN OWNED BY old_role TO new_role",
-                    Self::Truncate => "TRUNCATE TABLE t",
-                    Self::Comment => "COMMENT ON TABLE t IS 'comment'",
-                    Self::SecurityLabel => "SECURITY LABEL ON TABLE t IS 'label'",
-                    Self::Grant => "GRANT SELECT ON TABLE t TO role_name",
-                    Self::Revoke => "REVOKE SELECT ON TABLE t FROM role_name",
-                    Self::Import => "IMPORT FOREIGN SCHEMA s FROM SERVER srv INTO public",
-                    Self::Do => "DO 'BEGIN END'",
-                    Self::Wait => "WAIT FOR LSN '0/0'",
+                    $(Self::$family => $sample_sql),+
                 }
             }
         }
@@ -824,63 +674,200 @@ macro_rules! define_statement_families {
 }
 
 define_statement_families! {
-    With => [TokenKind::With],
-    Query => [TokenKind::Select, TokenKind::Values, TokenKind::Table, TokenKind::Char('(')],
-    Insert => [TokenKind::Insert],
-    Update => [TokenKind::Update],
-    Delete => [TokenKind::DeleteP],
-    Merge => [TokenKind::Merge],
-    Create => [TokenKind::Create],
-    Alter => [TokenKind::Alter],
-    Drop => [TokenKind::Drop],
-    SetConstraints => [TokenKind::Set],
-    VariableSet => [TokenKind::Set],
-    VariableReset => [TokenKind::Reset],
-    VariableShow => [TokenKind::Show],
-    Transaction => [
-        TokenKind::BeginP,
-        TokenKind::Start,
-        TokenKind::Commit,
-        TokenKind::EndP,
-        TokenKind::Rollback,
-        TokenKind::AbortP,
-        TokenKind::Savepoint,
-        TokenKind::Release,
-    ],
-    PrepareTransaction => [TokenKind::Prepare],
-    Prepare => [TokenKind::Prepare],
-    Execute => [TokenKind::Execute],
-    Deallocate => [TokenKind::Deallocate],
-    Declare => [TokenKind::Declare],
-    Close => [TokenKind::Close],
-    FetchMove => [TokenKind::Fetch, TokenKind::Move],
-    Copy => [TokenKind::Copy],
-    Vacuum => [TokenKind::Vacuum, TokenKind::Analyze, TokenKind::Analyse],
-    Explain => [TokenKind::Explain],
-    Call => [TokenKind::Call],
-    Checkpoint => [TokenKind::Checkpoint],
-    Discard => [TokenKind::Discard],
-    Lock => [TokenKind::LockP],
-    Listen => [TokenKind::Listen],
-    Unlisten => [TokenKind::Unlisten],
-    Notify => [TokenKind::Notify],
-    Load => [TokenKind::Load],
-    Refresh => [TokenKind::Refresh],
-    Reindex => [TokenKind::Reindex],
-    Repack => [TokenKind::Cluster, TokenKind::Repack],
-    Reassign => [TokenKind::Reassign],
-    Truncate => [TokenKind::Truncate],
-    Comment => [TokenKind::Comment],
-    SecurityLabel => [TokenKind::Security],
-    Grant => [TokenKind::Grant],
-    Revoke => [TokenKind::Revoke],
-    Import => [TokenKind::ImportP],
-    Do => [TokenKind::Do],
-    Wait => [TokenKind::Wait],
+    With => {
+        start_tokens: [TokenKind::With],
+        sample_sql: "WITH x AS (SELECT 1) SELECT * FROM x",
+    },
+    Query => {
+        start_tokens: [
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::Table,
+            TokenKind::Char('('),
+        ],
+        sample_sql: "SELECT 1",
+    },
+    Insert => {
+        start_tokens: [TokenKind::Insert],
+        sample_sql: "INSERT INTO t VALUES (1)",
+    },
+    Update => {
+        start_tokens: [TokenKind::Update],
+        sample_sql: "UPDATE t SET id = 1",
+    },
+    Delete => {
+        start_tokens: [TokenKind::DeleteP],
+        sample_sql: "DELETE FROM t",
+    },
+    Merge => {
+        start_tokens: [TokenKind::Merge],
+        sample_sql: "MERGE INTO t USING s ON true WHEN MATCHED THEN DO NOTHING",
+    },
+    Create => {
+        start_tokens: [TokenKind::Create],
+        sample_sql: "CREATE TABLE t (id int)",
+    },
+    Alter => {
+        start_tokens: [TokenKind::Alter],
+        sample_sql: "ALTER TABLE t ADD COLUMN c int",
+    },
+    Drop => {
+        start_tokens: [TokenKind::Drop],
+        sample_sql: "DROP TABLE t",
+    },
+    SetConstraints => {
+        start_tokens: [TokenKind::Set],
+        sample_sql: "SET CONSTRAINTS ALL DEFERRED",
+    },
+    VariableSet => {
+        start_tokens: [TokenKind::Set],
+        sample_sql: "SET work_mem = '4MB'",
+    },
+    VariableReset => {
+        start_tokens: [TokenKind::Reset],
+        sample_sql: "RESET work_mem",
+    },
+    VariableShow => {
+        start_tokens: [TokenKind::Show],
+        sample_sql: "SHOW work_mem",
+    },
+    Transaction => {
+        start_tokens: [
+            TokenKind::BeginP,
+            TokenKind::Start,
+            TokenKind::Commit,
+            TokenKind::EndP,
+            TokenKind::Rollback,
+            TokenKind::AbortP,
+            TokenKind::Savepoint,
+            TokenKind::Release,
+        ],
+        sample_sql: "BEGIN",
+    },
+    PrepareTransaction => {
+        start_tokens: [TokenKind::Prepare],
+        sample_sql: "PREPARE TRANSACTION 'tx'",
+    },
+    Prepare => {
+        start_tokens: [TokenKind::Prepare],
+        sample_sql: "PREPARE q AS SELECT 1",
+    },
+    Execute => {
+        start_tokens: [TokenKind::Execute],
+        sample_sql: "EXECUTE q",
+    },
+    Deallocate => {
+        start_tokens: [TokenKind::Deallocate],
+        sample_sql: "DEALLOCATE q",
+    },
+    Declare => {
+        start_tokens: [TokenKind::Declare],
+        sample_sql: "DECLARE c CURSOR FOR SELECT 1",
+    },
+    Close => {
+        start_tokens: [TokenKind::Close],
+        sample_sql: "CLOSE c",
+    },
+    FetchMove => {
+        start_tokens: [TokenKind::Fetch, TokenKind::Move],
+        sample_sql: "FETCH NEXT FROM c",
+    },
+    Copy => {
+        start_tokens: [TokenKind::Copy],
+        sample_sql: "COPY t FROM STDIN",
+    },
+    Vacuum => {
+        start_tokens: [TokenKind::Vacuum, TokenKind::Analyze, TokenKind::Analyse],
+        sample_sql: "ANALYZE t",
+    },
+    Explain => {
+        start_tokens: [TokenKind::Explain],
+        sample_sql: "EXPLAIN SELECT 1",
+    },
+    Call => {
+        start_tokens: [TokenKind::Call],
+        sample_sql: "CALL f()",
+    },
+    Checkpoint => {
+        start_tokens: [TokenKind::Checkpoint],
+        sample_sql: "CHECKPOINT",
+    },
+    Discard => {
+        start_tokens: [TokenKind::Discard],
+        sample_sql: "DISCARD ALL",
+    },
+    Lock => {
+        start_tokens: [TokenKind::LockP],
+        sample_sql: "LOCK TABLE t",
+    },
+    Listen => {
+        start_tokens: [TokenKind::Listen],
+        sample_sql: "LISTEN channel",
+    },
+    Unlisten => {
+        start_tokens: [TokenKind::Unlisten],
+        sample_sql: "UNLISTEN *",
+    },
+    Notify => {
+        start_tokens: [TokenKind::Notify],
+        sample_sql: "NOTIFY channel",
+    },
+    Load => {
+        start_tokens: [TokenKind::Load],
+        sample_sql: "LOAD 'library'",
+    },
+    Refresh => {
+        start_tokens: [TokenKind::Refresh],
+        sample_sql: "REFRESH MATERIALIZED VIEW mv",
+    },
+    Reindex => {
+        start_tokens: [TokenKind::Reindex],
+        sample_sql: "REINDEX TABLE t",
+    },
+    Repack => {
+        start_tokens: [TokenKind::Cluster, TokenKind::Repack],
+        sample_sql: "CLUSTER t",
+    },
+    Reassign => {
+        start_tokens: [TokenKind::Reassign],
+        sample_sql: "REASSIGN OWNED BY old_role TO new_role",
+    },
+    Truncate => {
+        start_tokens: [TokenKind::Truncate],
+        sample_sql: "TRUNCATE TABLE t",
+    },
+    Comment => {
+        start_tokens: [TokenKind::Comment],
+        sample_sql: "COMMENT ON TABLE t IS 'comment'",
+    },
+    SecurityLabel => {
+        start_tokens: [TokenKind::Security],
+        sample_sql: "SECURITY LABEL ON TABLE t IS 'label'",
+    },
+    Grant => {
+        start_tokens: [TokenKind::Grant],
+        sample_sql: "GRANT SELECT ON TABLE t TO role_name",
+    },
+    Revoke => {
+        start_tokens: [TokenKind::Revoke],
+        sample_sql: "REVOKE SELECT ON TABLE t FROM role_name",
+    },
+    Import => {
+        start_tokens: [TokenKind::ImportP],
+        sample_sql: "IMPORT FOREIGN SCHEMA s FROM SERVER srv INTO public",
+    },
+    Do => {
+        start_tokens: [TokenKind::Do],
+        sample_sql: "DO 'BEGIN END'",
+    },
+    Wait => {
+        start_tokens: [TokenKind::Wait],
+        sample_sql: "WAIT FOR LSN '0/0'",
+    },
 }
 
-fn classify_statement(first: TokenKind, second: TokenKind) -> Option<StatementFamily> {
-    Some(match first {
+fn classify_statement(first_kind: TokenKind, second_kind: TokenKind) -> Option<StatementFamily> {
+    Some(match first_kind {
         TokenKind::With => StatementFamily::With,
         TokenKind::Select | TokenKind::Values | TokenKind::Table | TokenKind::Char('(') => {
             StatementFamily::Query
@@ -892,7 +879,7 @@ fn classify_statement(first: TokenKind, second: TokenKind) -> Option<StatementFa
         TokenKind::Create => StatementFamily::Create,
         TokenKind::Alter => StatementFamily::Alter,
         TokenKind::Drop => StatementFamily::Drop,
-        TokenKind::Set if second == TokenKind::Constraints => StatementFamily::SetConstraints,
+        TokenKind::Set if second_kind == TokenKind::Constraints => StatementFamily::SetConstraints,
         TokenKind::Set => StatementFamily::VariableSet,
         TokenKind::Reset => StatementFamily::VariableReset,
         TokenKind::Show => StatementFamily::VariableShow,
@@ -904,7 +891,7 @@ fn classify_statement(first: TokenKind, second: TokenKind) -> Option<StatementFa
         | TokenKind::AbortP
         | TokenKind::Savepoint
         | TokenKind::Release => StatementFamily::Transaction,
-        TokenKind::Prepare if second == TokenKind::Transaction => {
+        TokenKind::Prepare if second_kind == TokenKind::Transaction => {
             StatementFamily::PrepareTransaction
         }
         TokenKind::Prepare => StatementFamily::Prepare,
@@ -944,13 +931,13 @@ impl Parser {
     pub(super) fn parse_statement(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         if self.at_completion() {
             for family in STATEMENT_FAMILIES {
-                self.record_completion_tokens(family.starters());
+                self.record_completion_tokens(family.start_tokens());
             }
             return Err(self.error_here("completion point at statement start"));
         }
-        let first = self.peek_kind();
-        let Some(family) = classify_statement(first, self.peek_kind_n(1)) else {
-            return Err(self.error_here(format!("unexpected token {:?}", first)));
+        let first_kind = self.peek_kind();
+        let Some(family) = classify_statement(first_kind, self.peek_kind_n(1)) else {
+            return Err(self.error_here(format!("unexpected token {:?}", first_kind)));
         };
         match family {
             StatementFamily::With => self.parse_with_statement(),

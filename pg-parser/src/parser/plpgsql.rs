@@ -1,7 +1,7 @@
 use super::*;
 
-pub(super) fn parse_assignment(sql: &str, nnames: i32) -> PResult<RawStmt> {
-    if !(1..=3).contains(&nnames) {
+pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<RawStmt> {
+    if !(1..=3).contains(&target_name_count) {
         return Err(ParseError::syntax_exit(
             0,
             "PL/pgSQL assignment name count must be between 1 and 3",
@@ -34,7 +34,7 @@ pub(super) fn parse_assignment(sql: &str, nnames: i32) -> PResult<RawStmt> {
             node_tag: NodeTag::PlAssignStmt,
             name: Some(name),
             indirection,
-            nnames,
+            nnames: target_name_count,
             val,
             location: location as ParseLoc,
         }))),

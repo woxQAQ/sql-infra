@@ -318,7 +318,7 @@ pub(super) fn parse_statement_list_tokens_with_completion(
         completion,
     };
     Ok(parser
-        .parse_controlled()?
+        .parse_raw_statements()?
         .into_iter()
         .filter_map(|stmt| stmt.stmt.map(|node| *node))
         .collect())

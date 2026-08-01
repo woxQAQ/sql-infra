@@ -26,9 +26,22 @@ impl Parser {
         }
         self.expect(TokenKind::On)?;
         self.record_completion_slot(completion::GrammarSlot::MaterializedView);
+        let owner_start = self.pos;
         let relation = Some(Box::new(
             self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?,
         ));
+        let owner_end = self.pos;
+        self.push_completion_membership_owner_range(
+            &[completion::GrammarSlot::Column],
+            &[
+                ObjectType::Table,
+                ObjectType::View,
+                ObjectType::Matview,
+                ObjectType::ForeignTable,
+            ],
+            owner_start,
+            owner_end,
+        );
         let access_method = if self.consume(TokenKind::Using) {
             self.record_completion_slot(completion::GrammarSlot::AccessMethod);
             Some(

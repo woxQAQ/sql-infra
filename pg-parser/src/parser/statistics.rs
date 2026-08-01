@@ -143,13 +143,27 @@ impl Parser {
         self.expect(TokenKind::On)?;
         let mut stats_tokens =
             self.take_until_top_level(&[TokenKind::From, TokenKind::Char(';'), TokenKind::Eof]);
+        self.request_completion_membership_recovery();
         if tokens_end_at_top_level(&stats_tokens) {
             self.record_completion_tokens(&[TokenKind::From]);
         }
         self.append_completion_marker(&mut stats_tokens);
         let exprs = parse_stats_params_with_completion(stats_tokens, self.completion.clone())?;
         self.expect(TokenKind::From)?;
+        let owner_start = self.pos;
         let relation = self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
+        let owner_end = self.pos;
+        self.push_completion_membership_owner_range(
+            &[completion::GrammarSlot::Column],
+            &[
+                ObjectType::Table,
+                ObjectType::View,
+                ObjectType::Matview,
+                ObjectType::ForeignTable,
+            ],
+            owner_start,
+            owner_end,
+        );
         self.expect_statement_end()?;
         let relations = vec![Node::RangeVar(relation)];
         Ok(Node::CreateStatsStmt(CreateStatsStmt {

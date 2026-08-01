@@ -26,9 +26,11 @@ impl ExprParser {
                 if allow_star {
                     self.record_completion_tokens(&[TokenKind::Char('*')]);
                 }
-                return self.fail("completion point in a qualified name");
-            }
-            if allow_star && self.consume(TokenKind::Char('*')) {
+                let Some(hole) = self.recover_completion_hole() else {
+                    return self.fail("completion point in a qualified name");
+                };
+                fields.push(make_string_node(token_name(&hole)?));
+            } else if allow_star && self.consume(TokenKind::Char('*')) {
                 fields.push(Node::AStar(AStar {
                     node_tag: NodeTag::AStar,
                 }));
@@ -693,6 +695,10 @@ impl ExprParser {
         let mut depth = 0usize;
         while !self.at(TokenKind::Eof) {
             if self.at_completion() {
+                if let Some(hole) = self.recover_completion_hole() {
+                    out.push(hole);
+                    continue;
+                }
                 break;
             }
             let kind = self.peek_kind();
@@ -732,7 +738,9 @@ impl ExprParser {
     ) -> Option<std::string::String> {
         if self.at_completion() {
             self.record_completion_slot(completion::GrammarSlot::AnyName);
-            return None;
+            return self
+                .recover_completion_hole()
+                .and_then(|token| token_name(&token));
         }
         if !self.identifier_in_categories(categories) {
             return None;
@@ -822,6 +830,22 @@ impl ExprParser {
 
     pub(super) fn at_completion(&self) -> bool {
         self.at(TokenKind::Completion)
+    }
+
+    pub(super) fn recover_completion_hole(&mut self) -> Option<Token> {
+        if !self.at_completion() {
+            return None;
+        }
+        let recovered = self
+            .completion
+            .as_ref()
+            .is_some_and(|collector| collector.borrow_mut().recover_hole());
+        if !recovered {
+            return None;
+        }
+        let location = self.peek().location();
+        self.pos += 1;
+        Some(Token::completion_hole(location))
     }
 
     pub(super) fn record_completion_tokens(&self, kinds: &[TokenKind]) {

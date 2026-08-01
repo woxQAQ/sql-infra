@@ -69,10 +69,12 @@ export interface ContextDto {
   intent: {
     objectKinds: string[];
     qualifier: NamePartDto[];
-    container?: {
-      members: string[];
-      objectKinds: string[];
-      name: NamePartDto[];
+    membership?: {
+      memberKinds: string[];
+      owner: {
+        objectKinds: string[];
+        name: NamePartDto[];
+      };
     };
   };
   scope: {

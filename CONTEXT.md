@@ -56,6 +56,10 @@ _避免使用_: 语法候选、语法期望
 由补全点处的语法期望推导出的 SQL 对象类别和部分限定名。
 _避免使用_: 补全上下文、候选类型
 
+**Catalog 成员关系（Catalog membership）**:
+补全点所期待的 Catalog 成员类别与其 owner 对象引用之间的语法关系；它不表示已经完成 Catalog 名称解析。
+_避免使用_: Member-of、成员作用域、对象容器、Catalog 容器
+
 **可见关系（Visible relation）**:
 其列可能在补全点处可见的语法级关系引用，包括基础关系、CTE、子查询、JOIN 和表函数。
 _避免使用_: Catalog 表、RangeVar

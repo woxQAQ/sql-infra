@@ -472,11 +472,19 @@ impl Parser {
         constraint: &mut Constraint,
         allow_period: bool,
     ) -> PResult<()> {
+        let owner_start = self.pos;
         constraint.pktable = Some(Box::new(
             self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("REFERENCES requires a table name"))?,
         ));
+        let owner_end = self.pos;
         if self.consume(TokenKind::Char('(')) {
+            self.push_completion_membership_owner_range(
+                &[completion::GrammarSlot::Column],
+                &[ObjectType::Table],
+                owner_start,
+                owner_end,
+            );
             self.record_completion_slot(completion::GrammarSlot::Column);
             if allow_period {
                 (constraint.pk_attrs, constraint.pk_with_period) =
@@ -485,6 +493,7 @@ impl Parser {
                 constraint.pk_attrs = self.parse_parenthesized_name_list_body()?;
             }
             self.expect(TokenKind::Char(')'))?;
+            self.pop_completion_membership_owner();
         }
         constraint.fk_matchtype = if self.consume(TokenKind::Match) {
             if self.consume(TokenKind::Full) {

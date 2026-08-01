@@ -49,7 +49,7 @@ pub enum GrammarSlot {
     AnyName,
 }
 
-pub(super) const fn object_type_slot(object_type: ObjectType) -> GrammarSlot {
+pub const fn object_type_slot(object_type: ObjectType) -> GrammarSlot {
     match object_type {
         ObjectType::Table => GrammarSlot::Table,
         ObjectType::View => GrammarSlot::View,
@@ -97,6 +97,22 @@ pub(super) const fn object_type_slot(object_type: ObjectType) -> GrammarSlot {
         ObjectType::Transform | ObjectType::UserMapping => GrammarSlot::AnyName,
         _ => GrammarSlot::AnyName,
     }
+}
+
+/// A grammar-level reference to the Catalog object whose members are being
+/// completed. Name tokens retain their source ranges and quoting information
+/// for the completion layer to project without reparsing statement syntax.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GrammarObjectReference {
+    pub object_types: Vec<ObjectType>,
+    pub name: Vec<Token>,
+}
+
+/// The grammar-level membership relation at the completion point.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GrammarMembership {
+    pub member_slots: Vec<GrammarSlot>,
+    pub owner: GrammarObjectReference,
 }
 
 pub(super) fn definition_value_slot(object_type: ObjectType, name: &str) -> Option<GrammarSlot> {
@@ -177,11 +193,16 @@ pub struct ParserExpectations {
     /// continuation.
     pub phrases: Vec<&'static [TokenKind]>,
     pub slots: Vec<GrammarSlot>,
+    pub membership: Option<GrammarMembership>,
 }
 
 #[derive(Debug, Default)]
 pub(super) struct CompletionCollector {
     expectations: ParserExpectations,
+    recover_holes: bool,
+    recovered_holes: usize,
+    membership_owners: Vec<(Vec<GrammarSlot>, GrammarObjectReference)>,
+    needs_membership_recovery: bool,
 }
 
 pub(super) type SharedCollector = std::rc::Rc<std::cell::RefCell<CompletionCollector>>;
@@ -266,6 +287,278 @@ impl CompletionCollector {
         if !self.expectations.slots.contains(&slot) {
             self.expectations.slots.push(slot);
         }
+        if let Some((member_slots, owner)) = self
+            .membership_owners
+            .iter()
+            .rev()
+            .find(|(member_slots, _)| member_slots.contains(&slot))
+            .cloned()
+        {
+            self.attach_membership_owner(member_slots, owner);
+        }
+    }
+
+    pub(super) fn membership(
+        &mut self,
+        member_slots: &[GrammarSlot],
+        owner: GrammarObjectReference,
+    ) {
+        if self.expectations.membership.is_none() {
+            self.expectations.membership = Some(GrammarMembership {
+                member_slots: member_slots.to_vec(),
+                owner,
+            });
+        }
+    }
+
+    pub(super) fn push_membership_owner(
+        &mut self,
+        member_slots: &[GrammarSlot],
+        owner: GrammarObjectReference,
+    ) {
+        self.membership_owners
+            .push((member_slots.to_vec(), owner.clone()));
+        if self.recovered_holes > 0
+            || member_slots
+                .iter()
+                .any(|member| self.expectations.slots.contains(member))
+        {
+            self.attach_membership_owner(member_slots.to_vec(), owner);
+        }
+    }
+
+    pub(super) fn pop_membership_owner(&mut self) {
+        self.membership_owners.pop();
+    }
+
+    pub(super) fn request_membership_recovery(&mut self) {
+        self.needs_membership_recovery = true;
+    }
+
+    pub(super) fn recover_hole(&mut self) -> bool {
+        if !self.recover_holes {
+            return false;
+        }
+        self.recovered_holes += 1;
+        true
+    }
+
+    fn attach_membership_owner(
+        &mut self,
+        member_slots: Vec<GrammarSlot>,
+        owner: GrammarObjectReference,
+    ) {
+        let member_slots = member_slots
+            .into_iter()
+            .filter(|member| self.expectations.slots.contains(member))
+            .collect::<Vec<_>>();
+        if !member_slots.is_empty() {
+            self.membership(&member_slots, owner);
+        }
+    }
+}
+
+// ── Parser completion hooks ───────────────────────────────────────────────
+
+impl Parser {
+    /// Preserve the synthetic completion marker when a deferred fragment is
+    /// handed to another parser. The outer parser keeps its cursor at the
+    /// marker; the nested parser receives a clone and shares the collector.
+    pub(super) fn append_completion_marker(&self, tokens: &mut Vec<Token>) {
+        if self.at_completion() {
+            tokens.push(self.peek().clone());
+        }
+    }
+
+    pub(super) fn record_completion_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_lookahead_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().lookahead_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_follow_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().follow_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_follow_phrase(&self, phrase: &'static [TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().follow_phrase(phrase);
+        }
+    }
+
+    pub(super) fn record_completion_phrase(&self, phrase: &'static [TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().phrase(phrase);
+        }
+    }
+
+    pub(super) fn record_completion_slot(&self, slot: GrammarSlot) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().slot(slot);
+        }
+    }
+
+    pub(super) fn record_completion_slot_before(
+        &self,
+        slot: GrammarSlot,
+        stop_tokens: &[TokenKind],
+    ) {
+        if self.top_level_token_before_completion(stop_tokens) != Some(TokenKind::Char('.')) {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().slot(slot);
+        }
+    }
+
+    /// Publish a slot when the completion marker is anywhere inside the
+    /// fragment delimited by top-level `stop_tokens`, not only at its first token.
+    pub(super) fn record_completion_slot_within(
+        &self,
+        slot: GrammarSlot,
+        stop_tokens: &[TokenKind],
+    ) {
+        let follows_fragment_separator = matches!(
+            self.top_level_token_before_completion(stop_tokens),
+            Some(TokenKind::Char('.') | TokenKind::Char(',') | TokenKind::Char('('))
+        );
+        if !self.at_completion() && !follows_fragment_separator {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().slot(slot);
+        }
+    }
+
+    /// Mark a member position whose owner appears later in the production.
+    /// The completion collector will run a second, hole-recovering parse only
+    /// when the first pass actually reaches this point.
+    pub(super) fn request_completion_membership_recovery(&self) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().request_membership_recovery();
+        }
+    }
+
+    pub(super) fn push_completion_membership_owner_range(
+        &self,
+        member_slots: &[GrammarSlot],
+        object_types: &[ObjectType],
+        start: usize,
+        end: usize,
+    ) {
+        self.push_completion_membership_owner_name(
+            member_slots,
+            object_types,
+            self.completion_name_tokens(start, end),
+        );
+    }
+
+    pub(super) fn push_completion_membership_owner_name(
+        &self,
+        member_slots: &[GrammarSlot],
+        object_types: &[ObjectType],
+        name: Vec<Token>,
+    ) {
+        if name.is_empty() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().push_membership_owner(
+                member_slots,
+                GrammarObjectReference {
+                    object_types: object_types.to_vec(),
+                    name,
+                },
+            );
+        }
+    }
+
+    pub(super) fn pop_completion_membership_owner(&self) {
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().pop_membership_owner();
+        }
+    }
+
+    pub(super) fn recover_completion_hole(&mut self) -> Option<Token> {
+        if !self.at_completion() {
+            return None;
+        }
+        let recovered = self
+            .completion
+            .as_ref()
+            .is_some_and(|collector| collector.borrow_mut().recover_hole());
+        if !recovered {
+            return None;
+        }
+        let location = self.peek().location();
+        self.pos += 1;
+        Some(Token::completion_hole(location))
+    }
+
+    fn completion_name_tokens(&self, start: usize, end: usize) -> Vec<Token> {
+        self.tokens[start..end]
+            .iter()
+            .filter(|token| {
+                !matches!(
+                    token.kind,
+                    TokenKind::Char('.')
+                        | TokenKind::Char('(')
+                        | TokenKind::Char(')')
+                        | TokenKind::Char('*')
+                        | TokenKind::Only
+                )
+            })
+            .cloned()
+            .collect()
+    }
+
+    fn top_level_token_before_completion(&self, stop_tokens: &[TokenKind]) -> Option<TokenKind> {
+        let mut delimiter_depth = 0usize;
+        let mut previous_top_level_kind = None;
+        for token in &self.tokens[self.pos..] {
+            match token.kind {
+                TokenKind::Char('(') | TokenKind::Char('[') => delimiter_depth += 1,
+                TokenKind::Char(')') | TokenKind::Char(']') => {
+                    delimiter_depth = delimiter_depth.saturating_sub(1);
+                }
+                TokenKind::Completion if delimiter_depth == 0 => {
+                    return previous_top_level_kind;
+                }
+                kind if delimiter_depth == 0 && stop_tokens.contains(&kind) => return None,
+                kind if delimiter_depth == 0 => previous_top_level_kind = Some(kind),
+                _ => {}
+            }
+        }
+        None
     }
 }
 
@@ -298,20 +591,56 @@ pub fn collect_expectations(
         Token::synthetic(TokenKind::Completion, point_usize),
     );
 
+    let collector = std::rc::Rc::new(std::cell::RefCell::new(CompletionCollector::default()));
     let mut parser = Parser {
-        tokens,
+        tokens: tokens.clone(),
         pos: 0,
-        completion: Some(std::rc::Rc::new(std::cell::RefCell::new(
-            CompletionCollector::default(),
-        ))),
+        completion: Some(collector.clone()),
     };
-    let _outcome = parser.parse_with_ranges_controlled();
-    let collector = parser
-        .completion
-        .as_ref()
-        .expect("completion parser owns a collector")
-        .borrow();
-    Ok(collector.expectations.clone())
+    let _outcome = parser.parse_statements_with_ranges();
+    let baseline = collector.borrow().expectations.clone();
+    let needs_membership_recovery = collector.borrow().needs_membership_recovery;
+    if baseline.membership.is_some() || !needs_membership_recovery {
+        return Ok(baseline);
+    }
+
+    let mut recovery_tokens = crate::lexer::lex_for_completion(source, point)?.into_tokens();
+    if let Some(index) = recovery_tokens.iter().position(|token| {
+        token.kind != TokenKind::Eof
+            && token.range.start() <= point
+            && (point < token.range.end()
+                || (token.kind == TokenKind::Incomplete && point == token.range.end()))
+            && (token.range.start() < point
+                || matches!(
+                    &token.value,
+                    Some(TokenValue::String(_) | TokenValue::Keyword(_))
+                )
+                || token.kind == TokenKind::Incomplete)
+    }) {
+        recovery_tokens.remove(index);
+    }
+    let recovery_insertion = recovery_tokens
+        .iter()
+        .position(|token| token.range.start() >= point)
+        .unwrap_or_else(|| recovery_tokens.len().saturating_sub(1));
+    recovery_tokens.insert(
+        recovery_insertion,
+        Token::synthetic(TokenKind::Completion, point_usize),
+    );
+
+    let recovery_collector = std::rc::Rc::new(std::cell::RefCell::new(CompletionCollector {
+        expectations: baseline,
+        recover_holes: true,
+        ..CompletionCollector::default()
+    }));
+    let mut recovery_parser = Parser {
+        tokens: recovery_tokens,
+        pos: 0,
+        completion: Some(recovery_collector.clone()),
+    };
+    let _outcome = recovery_parser.parse_statements_with_ranges();
+    let recovered = recovery_collector.borrow().expectations.clone();
+    Ok(recovered)
 }
 
 #[cfg(test)]
@@ -353,7 +682,7 @@ mod tests {
             .collect::<std::collections::HashSet<_>>();
         let expected = STATEMENT_FAMILIES
             .iter()
-            .flat_map(|family| family.starters())
+            .flat_map(|family| family.start_tokens())
             .copied()
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(actual, expected);
@@ -362,7 +691,7 @@ mod tests {
     #[test]
     fn every_statement_family_collects_through_its_complete_sample() {
         for family in STATEMENT_FAMILIES {
-            let source = family.coverage_sample();
+            let source = family.sample_sql();
             let tokens = crate::lex(source).unwrap_or_else(|error| {
                 panic!("invalid completion coverage sample {source:?}: {error}")
             });
@@ -418,6 +747,60 @@ mod tests {
         let sql = "SELECT * FROM public.";
         let candidates = collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
         assert!(candidates.slots.contains(&GrammarSlot::Relation));
+    }
+
+    #[test]
+    fn publishes_membership_before_the_completion_point() {
+        let sql = "ALTER TABLE app.accounts DROP COLUMN ";
+        let expectations =
+            collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+        let membership = expectations.membership.expect("membership");
+        assert_eq!(membership.member_slots, [GrammarSlot::Column]);
+        assert_eq!(membership.owner.object_types, [ObjectType::Table]);
+        assert_eq!(
+            membership
+                .owner
+                .name
+                .iter()
+                .filter_map(token_name)
+                .collect::<Vec<_>>(),
+            ["app", "accounts"]
+        );
+    }
+
+    #[test]
+    fn publishes_membership_after_the_completion_point() {
+        for (sql, point) in [
+            (
+                "GRANT SELECT () ON TABLE app.accounts TO role_name",
+                "GRANT SELECT (".len(),
+            ),
+            (
+                "CREATE TRIGGER tr BEFORE UPDATE OF  ON app.accounts EXECUTE FUNCTION f()",
+                "CREATE TRIGGER tr BEFORE UPDATE OF ".len(),
+            ),
+            (
+                "CREATE STATISTICS s ON (lower()) FROM app.accounts",
+                "CREATE STATISTICS s ON (lower(".len(),
+            ),
+        ] {
+            let expectations =
+                collect_expectations(sql, TextSize::try_from(point).unwrap()).unwrap();
+            let membership = expectations
+                .membership
+                .unwrap_or_else(|| panic!("missing membership for {sql:?}"));
+            assert_eq!(membership.member_slots, [GrammarSlot::Column], "{sql:?}");
+            assert_eq!(
+                membership
+                    .owner
+                    .name
+                    .iter()
+                    .filter_map(token_name)
+                    .collect::<Vec<_>>(),
+                ["app", "accounts"],
+                "{sql:?}"
+            );
+        }
     }
 
     #[test]
@@ -1011,14 +1394,14 @@ mod tests {
     #[test]
     fn every_dispatched_statement_family_has_completion_boundary_coverage() {
         for family in STATEMENT_FAMILIES {
-            let sql = family.coverage_sample();
+            let sql = family.sample_sql();
             let tokens = lex(sql).unwrap_or_else(|error| {
                 panic!("failed to lex {:?} sample {sql:?}: {error}", family)
             });
-            let first = tokens[0].kind;
-            let second = tokens.get(1).map_or(TokenKind::Eof, |token| token.kind);
+            let first_kind = tokens[0].kind;
+            let second_kind = tokens.get(1).map_or(TokenKind::Eof, |token| token.kind);
             assert_eq!(
-                classify_statement(first, second),
+                classify_statement(first_kind, second_kind),
                 Some(*family),
                 "coverage sample does not dispatch to its registered family: {sql:?}"
             );

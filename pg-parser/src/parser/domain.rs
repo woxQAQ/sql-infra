@@ -149,6 +149,7 @@ impl Parser {
     pub(super) fn parse_alter_domain(&mut self) -> PResult<Node> {
         self.expect(TokenKind::DomainP)?;
         self.record_completion_slot(completion::GrammarSlot::Domain);
+        let owner_start = self.pos;
         let type_name = self.parse_name_list_until_keywords(&[
             TokenKind::Set,
             TokenKind::Drop,
@@ -159,6 +160,7 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ]);
+        let owner_end = self.pos;
         let mut stmt = AlterDomainStmt {
             node_tag: NodeTag::AlterDomainStmt,
             type_name,
@@ -167,6 +169,12 @@ impl Parser {
         if stmt.type_name.is_empty() {
             return Err(self.error_here("ALTER DOMAIN requires a domain name"));
         }
+        self.push_completion_membership_owner_range(
+            &[completion::GrammarSlot::Constraint],
+            &[ObjectType::Domain],
+            owner_start,
+            owner_end,
+        );
         self.record_completion_tokens(&[
             TokenKind::Set,
             TokenKind::Drop,

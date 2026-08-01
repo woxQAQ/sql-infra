@@ -122,14 +122,14 @@ pub struct CompletionIntent {
     pub object_kinds: Vec<ObjectKind>,
     /// 当前补全片段之前已经完成的点分名称。
     pub qualifier: Vec<NamePart>,
-    /// 候选属于某个独立出现的 Catalog 对象时，记录该容器的语法 identity。
-    pub container: Option<ObjectContainer>,
+    /// 部分候选是某个独立出现的 Catalog 对象的成员时，记录该关系。
+    pub membership: Option<CatalogMembership>,
 }
 
-pub struct ObjectContainer {
-    /// object_kinds 中受该容器约束的类别。
-    pub members: Vec<ObjectKind>,
-    pub reference: ObjectReference,
+pub struct CatalogMembership {
+    /// object_kinds 中受该成员关系约束的类别。
+    pub member_kinds: Vec<ObjectKind>,
+    pub owner: ObjectReference,
 }
 
 pub struct ObjectReference {
@@ -151,7 +151,7 @@ pub struct NamePart {
 1. `statement_range` 和 `point` 确定本次补全处理哪条语句、在哪个 UTF-8 字节偏移量收集候选。
 2. `replacement_range` 和 `prefix` 描述当前正在输入的标识符片段。`raw` 用于保留用户输入，`normalized` 用于匹配，`quoting` 决定后续插入时采用哪种引用规则。
 3. `expectations` 记录该位置语法上允许的 Token、固定短语和 `GrammarSlot`，不包含任何 Catalog 对象。Token 是单个终结符；`follow_tokens` 标出会结束当前表达式、进入外层产生式的 Token；短语把 `GROUP BY` 这类固定多词单元整体交给 adapter。adapter 因而无需扫描 SQL：当完整表达式后尚未输入下一个 token 时保持安静，用户开始输入前缀后再发布匹配的表达式延续或 clause transition。
-4. `intent` 将 `GrammarSlot` 转成 adapter 可查询的 `ObjectKind`，通过 `qualifier` 保留当前片段之前的限定名，并在子对象候选中通过 `container` 指明其所属对象。
+4. `intent` 将 `GrammarSlot` 转成 adapter 可查询的 `ObjectKind`，通过 `qualifier` 保留当前片段之前的限定名，并在成员候选中通过 `membership` 指明 owner 对象。
 5. `scope` 记录当前语法位置可见的关系、CTE、DML 目标和外部查询层级，供 adapter 解析列候选。
 6. `diagnostics` 记录位置修正、词法恢复或作用域不完整等问题；它不会清除已经得到的其他信息。
 
@@ -163,14 +163,14 @@ point             = 11
 replacement_range = [9, 11)
 prefix            = { raw: "na", normalized: "na", quoting: Unquoted }
 expectations      = { tokens: [], slots: [Column, Function] }
-intent            = { object_kinds: [Column, Function], qualifier: [u], container: None }
+intent            = { object_kinds: [Column, Function], qualifier: [u], membership: None }
 scope.local       = [users AS u]
 diagnostics       = []
 ```
 
 `pg-completion` 到此停止。adapter 再使用 `qualifier = [u]` 在 `scope` 中定位 `users`，查询该关系的列，并用 `prefix = "na"` 过滤结果。`Function` 仍被保留，因为同一个限定符也可能是 schema；只有 Catalog adapter 能消除关系别名与 schema 的命名冲突。Catalog 中是否真的存在 `users`、同名 schema 或匹配的候选，不影响上述上下文的构造。
 
-容器和限定名表达不同的语法关系。例如 `ALTER TABLE app.users DROP COLUMN na|` 的 qualifier 为空、prefix 是 `na`，而 intent 的 container 是 `{ members: [Column], reference: { object_kinds: [Table], name: [app, users] } }`。adapter 因而可以直接查询该表的列，不需要重新解析 `ALTER TABLE`。`COPY table (|)`、外键 `REFERENCES table (|)`、trigger 的 `UPDATE OF | ON table` 以及 type attribute 使用同一个模型；关系语法不能静态缩小到单一 Catalog 类别时，`ObjectReference.object_kinds` 保留所有合法类别。`members` 将容器关系限制在对应候选上，因此同一位置同时允许 `Column` 和 `Function` 时，函数仍按 search path 查询。
+Catalog 成员关系和限定名表达不同的语法关系。例如 `ALTER TABLE app.users DROP COLUMN na|` 的 qualifier 为空、prefix 是 `na`，而 intent 的 membership 是 `{ member_kinds: [Column], owner: { object_kinds: [Table], name: [app, users] } }`。adapter 因而可以直接查询该表的列，不需要重新解析 `ALTER TABLE`。`COPY table (|)`、外键 `REFERENCES table (|)`、trigger 的 `UPDATE OF | ON table` 以及 type attribute 使用同一个模型；关系语法不能静态缩小到单一 Catalog 类别时，`ObjectReference.object_kinds` 保留所有合法类别。`member_kinds` 只约束对应候选，因此同一位置同时允许 `Column` 和 `Function` 时，函数仍按 search path 查询。
 
 `GrammarSlot` 描述语法，由 `pg-parser` 产生；`ObjectKind` 描述 Catalog 意图，由 `pg-completion` 拥有。两者不能合并成一个枚举：`AnyName` 只表示语法接受一个没有稳定 Catalog 类别的名称，`Privilege` 表示可由 adapter 提供标准或扩展权限名，两者都不产生 `ObjectKind`；Catalog 名称使用具体 slot。查询 `FROM` 中的 `Relation` 保留开放的关系类别，DDL 产生式则发布 `Table`、`View`、`MaterializedView` 或 `ForeignTable` 等具体 slot，因此 `pg-completion` 不需要扫描整条语句猜测对象类别。
 
@@ -289,9 +289,9 @@ collector.slot(GrammarSlot::Column);
 1. 归一化编辑器偏移量，并隔离包含补全点的语句。
 2. 提取标识符前缀和替换范围，同时保留引用方式。
 3. 在替换范围起点向 `pg-parser` 请求强类型语法期望。
-4. 扫描当前语句的 Token，为其构造补全意图和作用域。
+4. 将 `GrammarSlot` 和 `GrammarMembership` 投影为补全意图，并扫描当前语句的 Token 构造作用域。
 
-这次扫描不是第二套 SQL 解析器。它只识别补全上下文所需的结构：语句边界、括号、查询层级、`WITH`、集合运算分支、`FROM`/`JOIN`、别名、`LATERAL`、子查询、表函数、`VALUES`、DML 目标，以及由当前 `GrammarSlot` 要求的子对象容器 identity。
+这次作用域扫描不是第二套 SQL 解析器。它只识别关系可见性所需的结构：语句边界、括号、查询层级、`WITH`、集合运算分支、`FROM`/`JOIN`、别名、`LATERAL`、子查询、表函数、`VALUES` 和 DML 目标。Catalog 成员关系直接来自 parser，不由这次扫描猜测。
 
 ### 3. 调用方 adapter：解析元数据
 
@@ -304,7 +304,7 @@ Expression follow    -> 输入前缀后可匹配的外层 clause transition
 短语期望             -> GROUP BY、IF NOT EXISTS 等整体补全项
 Relation 意图        -> Schema/关系候选
 Column 意图 + 作用域 -> 可见关系中的列
-Column/Attribute + container -> 指定表、domain 或 type 中的子对象
+Column/Attribute + membership -> 指定表、domain 或 type 中的成员
 Function 意图        -> search_path 上可见的函数
 Type 意图            -> search_path 上可见的类型
 qualifier + prefix   -> 限定名逐级补全
@@ -346,7 +346,7 @@ pg-completion/
   Cargo.toml
   src/lib.rs                公开 interface 和 re-export
   src/prefix.rs             补全点归一化和替换范围
-  src/intent.rs             GrammarSlot、限定名和容器 identity -> CompletionIntent
+  src/intent.rs             GrammarSlot、GrammarMembership 和限定名 -> CompletionIntent
   src/scope.rs              查询层级和可见关系
   src/statement.rs          活动语句隔离
   tests/completion.rs       声明式场景测试 runner
@@ -423,7 +423,7 @@ pg-completion/
 
 每个用例必须包含 `input` 和 `want.candidates`。`candidates` 执行精确集合比较，空的 `tokens` 和 `slots` 表示该位置没有语法候选。runner 在比较前按稳定规则排序、去重，因此 YAML 不依赖 collector 的遍历顺序。
 
-断言意图和作用域时，用例附加可选字段：`qualifier` 断言当前片段之前的限定名，`container` 断言容器 identity 的规范渲染，`scope` 断言整个作用域快照。`scope` 一旦出现即覆盖全部子字段，省略的子字段断言为空；关系按 SQL 可见性顺序比较，不排序。这些字段缺省时不参与断言，候选覆盖场景因此保持精简，作用域和容器行为由带对应字段的场景显式钉住。
+断言意图和作用域时，用例附加可选字段：`qualifier` 断言当前片段之前的限定名，`membership` 断言 Catalog 成员关系的规范渲染，`scope` 断言整个作用域快照。`scope` 一旦出现即覆盖全部子字段，省略的子字段断言为空；关系按 SQL 可见性顺序比较，不排序。这些字段缺省时不参与断言，候选覆盖场景因此保持精简，作用域和成员关系由带对应字段的场景显式钉住。
 
 最低场景集覆盖：
 

@@ -66,14 +66,23 @@ impl Parser {
             self.expect(TokenKind::Char(')'))?;
             (None, Some(Box::new(query)), Vec::new())
         } else {
+            let owner_start = self.pos;
             let relation = Some(Box::new(
                 self.try_parse_qualified_range_var()
                     .ok_or_else(|| self.error_here("COPY requires a relation or query"))?,
             ));
+            let owner_end = self.pos;
             let attlist = if self.consume(TokenKind::Char('(')) {
+                self.push_completion_membership_owner_range(
+                    &[completion::GrammarSlot::Column],
+                    &[ObjectType::Table, ObjectType::ForeignTable],
+                    owner_start,
+                    owner_end,
+                );
                 self.record_completion_slot(completion::GrammarSlot::Column);
                 let columns = self.parse_parenthesized_name_list_body()?;
                 self.expect(TokenKind::Char(')'))?;
+                self.pop_completion_membership_owner();
                 columns
             } else {
                 Vec::new()
@@ -153,12 +162,26 @@ impl Parser {
         }
         loop {
             self.record_completion_slot(completion::GrammarSlot::MaterializedView);
+            let owner_start = self.pos;
             let relation =
                 self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
+            let owner_end = self.pos;
             let va_cols = if self.consume(TokenKind::Char('(')) {
+                self.push_completion_membership_owner_range(
+                    &[completion::GrammarSlot::Column],
+                    &[
+                        ObjectType::Table,
+                        ObjectType::View,
+                        ObjectType::Matview,
+                        ObjectType::ForeignTable,
+                    ],
+                    owner_start,
+                    owner_end,
+                );
                 self.record_completion_slot(completion::GrammarSlot::Column);
                 let columns = self.parse_parenthesized_name_list_body()?;
                 self.expect(TokenKind::Char(')'))?;
+                self.pop_completion_membership_owner();
                 columns
             } else {
                 Vec::new()

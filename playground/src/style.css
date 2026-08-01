@@ -500,7 +500,7 @@ select:focus-visible {
 }
 
 .metric-item small,
-.container-row small,
+.membership-row small,
 .relation-row small {
   overflow: hidden;
   color: var(--text-dim);
@@ -527,7 +527,7 @@ select:focus-visible {
   font-size: 7px;
 }
 
-.container-row {
+.membership-row {
   display: grid;
   gap: 3px;
   margin: 0 10px 10px;
@@ -535,14 +535,14 @@ select:focus-visible {
   border-left: 2px solid var(--accent);
 }
 
-.container-row strong,
+.membership-row strong,
 .relation-name strong {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 10px;
 }
 
-.container-row > span {
+.membership-row > span {
   color: var(--text-muted);
   font-size: 8px;
 }

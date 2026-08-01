@@ -301,7 +301,9 @@ impl Parser {
     pub(super) fn consume_identifier(&mut self) -> Option<std::string::String> {
         if self.at_completion() {
             self.record_completion_slot(completion::GrammarSlot::AnyName);
-            return None;
+            return self
+                .recover_completion_hole()
+                .and_then(|token| token_name(&token));
         }
         if !matches!(self.peek_kind(), TokenKind::Ident | TokenKind::UIdent) {
             return None;
@@ -341,7 +343,9 @@ impl Parser {
     ) -> Option<std::string::String> {
         if self.at_completion() {
             self.record_completion_slot(completion::GrammarSlot::AnyName);
-            return None;
+            return self
+                .recover_completion_hole()
+                .and_then(|token| token_name(&token));
         }
         let token = self.peek().clone();
         let accepted = matches!(token.kind, TokenKind::Ident | TokenKind::UIdent)

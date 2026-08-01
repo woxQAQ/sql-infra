@@ -743,6 +743,7 @@ impl Parser {
             return Ok(Vec::new());
         }
         self.record_completion_slot(completion::GrammarSlot::Column);
+        self.request_completion_membership_recovery();
         let mut columns = Vec::new();
         loop {
             let column = self
@@ -876,6 +877,7 @@ impl Parser {
         let object_slot = completion::object_type_slot(objtype);
         self.record_completion_slot(object_slot);
         self.record_completion_slot_before(object_slot, &stops);
+        let owner_start = self.pos;
         let objects = match objtype {
             ObjectType::Function | ObjectType::Procedure | ObjectType::Routine => {
                 self.parse_object_with_args_list_until_with_slot(&stops, object_slot)?
@@ -892,6 +894,20 @@ impl Parser {
         };
         if objects.is_empty() {
             return Err(self.error_here("expected at least one privilege target"));
+        }
+        let owner_end = self.pos;
+        if objtype == ObjectType::Table && objects.len() == 1 {
+            self.push_completion_membership_owner_range(
+                &[completion::GrammarSlot::Column],
+                &[
+                    ObjectType::Table,
+                    ObjectType::View,
+                    ObjectType::Matview,
+                    ObjectType::ForeignTable,
+                ],
+                owner_start,
+                owner_end,
+            );
         }
         Ok((GrantTargetType::Object, objtype, objects))
     }

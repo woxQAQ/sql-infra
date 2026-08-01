@@ -249,6 +249,7 @@ impl Parser {
         self.expect(TokenKind::TypeP)?;
         self.record_completion_slot(completion::GrammarSlot::Type);
         let type_location = self.location();
+        let owner_start = self.pos;
         let names = self.parse_name_list_until_keywords(&[
             TokenKind::AddP,
             TokenKind::Drop,
@@ -256,9 +257,16 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ]);
+        let owner_end = self.pos;
         if names.is_empty() {
             return Err(self.error_here("ALTER TYPE requires a composite type name"));
         }
+        self.push_completion_membership_owner_range(
+            &[completion::GrammarSlot::Attribute],
+            &[ObjectType::Type],
+            owner_start,
+            owner_end,
+        );
         let relation = Some(Box::new(range_var_from_parts(
             list_to_names(&names),
             type_location,
