@@ -934,6 +934,34 @@ fn parse_function_alias(
     }
 }
 
+/// INSERT target alias: `AS alias [(cols)]`.
+///
+/// `AS` is mandatory. A bare identifier after the target is the start of
+/// `OVERRIDING` / `VALUES` / `DEFAULT` / `SELECT`, not an alias. Once `AS` is
+/// present the name is required: a missing name fails the whole target parse
+/// (`None`) instead of silently dropping the alias clause.
+///
+/// Tail shape matches [`parse_alias`]: name, then optional column list.
+fn parse_insert_target_alias(
+    source: &str,
+    base: TextSize,
+    tokens: &[Token],
+    mut index: usize,
+    end: usize,
+) -> Option<(Option<NamePart>, Vec<NamePart>, usize)> {
+    if !consume_kind(tokens, &mut index, end, TokenKind::As) {
+        return Some((None, Vec::new(), index));
+    }
+    let alias = name_part_from_token(source, base, tokens.get(index)?)?;
+    index += 1;
+    if index < end && tokens[index].kind == TokenKind::Char('(') {
+        let (columns, next) = parse_parenthesized_column_names(source, base, tokens, index, end);
+        Some((Some(alias), columns, next))
+    } else {
+        Some((Some(alias), Vec::new(), index))
+    }
+}
+
 fn parse_parenthesized_column_names(
     source: &str,
     base: TextSize,
@@ -1807,6 +1835,11 @@ fn deepest_active_join_condition_start(
         .find_map(|depth| active_join_condition_start(input, search_range.clone(), depth))
 }
 
+/// DML target relation: `[ONLY] [(] name [.…] [)] [*] <alias>`.
+///
+/// Alias rules differ by statement:
+/// - `INSERT` → [`parse_insert_target_alias`] (`AS` required)
+/// - `UPDATE` / `DELETE` / `MERGE` → [`parse_alias`] (same as FROM items)
 fn parse_dml_target(
     input: &ScopeInput<'_>,
     mut index: usize,
@@ -1821,35 +1854,24 @@ fn parse_dml_target(
         ..
     } = *input;
     let target_start = index;
+
+    // [ ONLY ] [ ( ] qualified_name [ ) ] [ * ]
     consume_kind(tokens, &mut index, statement_end, TokenKind::Only);
-    let parenthesized_target =
-        consume_kind(tokens, &mut index, statement_end, TokenKind::Char('('));
+    let parenthesized = consume_kind(tokens, &mut index, statement_end, TokenKind::Char('('));
     let (name, after_name) =
         parse_qualified_name(source, base, tokens, index, statement_end, point)?;
     index = after_name;
-    if parenthesized_target {
+    if parenthesized {
         consume_kind(tokens, &mut index, statement_end, TokenKind::Char(')'));
     }
     consume_kind(tokens, &mut index, statement_end, TokenKind::Char('*'));
-    // INSERT requires an explicit `AS` before an alias; other DML statements
-    // accept the same optional-AS form as a FROM item.
+
     let (alias, explicit_columns, next) = if statement_kind == TokenKind::Insert {
-        if consume_kind(tokens, &mut index, statement_end, TokenKind::As) {
-            let alias = name_part_from_token(source, base, tokens.get(index)?)?;
-            index += 1;
-            if index < statement_end && tokens[index].kind == TokenKind::Char('(') {
-                let (columns, next) =
-                    parse_parenthesized_column_names(source, base, tokens, index, statement_end);
-                (Some(alias), columns, next)
-            } else {
-                (Some(alias), Vec::new(), index)
-            }
-        } else {
-            (None, Vec::new(), index)
-        }
+        parse_insert_target_alias(source, base, tokens, index, statement_end)?
     } else {
         parse_alias(source, base, tokens, index, statement_end)
     };
+
     Some((
         VisibleRelation {
             kind: RelationKind::Relation,
