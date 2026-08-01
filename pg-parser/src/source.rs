@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::{Add, Sub};
 
 /// A UTF-8 byte offset into a SQL source string.
 ///
@@ -38,6 +39,30 @@ impl From<TextSize> for usize {
     }
 }
 
+impl Add for TextSize {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Self::new(
+            self.0
+                .checked_add(rhs.0)
+                .expect("text offset overflow"),
+        )
+    }
+}
+
+impl Sub for TextSize {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self {
+        Self::new(
+            self.0
+                .checked_sub(rhs.0)
+                .expect("text offset underflow"),
+        )
+    }
+}
+
 /// A half-open UTF-8 byte range: `[start, end)`.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct TextRange {
@@ -67,7 +92,7 @@ impl TextRange {
     }
 
     pub fn len(self) -> TextSize {
-        TextSize(self.end.0 - self.start.0)
+        self.end - self.start
     }
 
     pub const fn is_empty(self) -> bool {
@@ -76,6 +101,22 @@ impl TextRange {
 
     pub fn contains(self, offset: TextSize) -> bool {
         self.start <= offset && offset < self.end
+    }
+}
+
+impl Add<TextSize> for TextRange {
+    type Output = Self;
+
+    fn add(self, offset: TextSize) -> Self {
+        Self::new(self.start + offset, self.end + offset)
+    }
+}
+
+impl Sub<TextSize> for TextRange {
+    type Output = Self;
+
+    fn sub(self, offset: TextSize) -> Self {
+        Self::new(self.start - offset, self.end - offset)
     }
 }
 
@@ -278,5 +319,25 @@ mod tests {
         let source = SourceText::new("select 中文").unwrap();
         let range = TextRange::new(TextSize::new(7), TextSize::new(13));
         assert_eq!(source.slice(range).unwrap(), "中文");
+    }
+
+    #[test]
+    fn text_size_adds_and_subtracts() {
+        let left = TextSize::new(10);
+        let right = TextSize::new(3);
+        assert_eq!(left + right, TextSize::new(13));
+        assert_eq!(left - right, TextSize::new(7));
+        assert_eq!(TextRange::new(right, left).len(), TextSize::new(7));
+    }
+
+    #[test]
+    fn text_range_shifts_by_offset() {
+        let range = TextRange::new(TextSize::new(3), TextSize::new(10));
+        let base = TextSize::new(100);
+        assert_eq!(range + base, TextRange::new(TextSize::new(103), TextSize::new(110)));
+        assert_eq!(
+            (range + base) - base,
+            range
+        );
     }
 }

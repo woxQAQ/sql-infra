@@ -19,7 +19,7 @@ struct ScopeInput<'a> {
 
 impl ScopeInput<'_> {
     fn absolute_point(self) -> TextSize {
-        add(self.base, self.point)
+        self.base + self.point
     }
 }
 
@@ -74,28 +74,25 @@ pub(super) fn collect_tokens(
     if let Some((&local_select, outer_selects)) = selects.split_last() {
         snapshot.local = query_scope(&input, local_select, &ctes);
 
-        // Table functions are implicitly LATERAL: while completing inside the
-        // call, only relations introduced before this FROM item are visible.
+        // Local FROM visibility is position-sensitive in two ways:
+        //   - table-function args only see preceding FROM items (implicit LATERAL)
+        //   - JOIN ON/USING only sees relations introduced before that condition
         apply_table_function_visibility(&input, local_select, &mut snapshot.local);
-
-        // In the local query, only relations available at the cursor position
-        // may be referenced from JOIN ON/USING conditions.
         apply_join_condition_visibility(&input, local_select, point_depth, &mut snapshot.local);
+
+        // Walk outward. Each enclosing SELECT contributes an outer scope, but a
+        // non-LATERAL derived-table boundary blocks its FROM relations, and a
+        // LATERAL one only keeps relations that precede the derived table.
         let mut inner_select = local_select;
         for &outer_select in outer_selects.iter().rev() {
             let mut outer = query_scope(&input, outer_select, &ctes);
-
-            // The enclosing SELECT may itself be inside a JOIN condition.
-            // Prevent relations introduced by later joins from leaking in.
             apply_join_condition_visibility(&input, outer_select, outer_select.depth, &mut outer);
 
-            // Check whether the inner SELECT is inside a derived table belonging
-            // to this outer SELECT's FROM list.
             if let Some((open_paren, is_lateral)) =
                 derived_table_container(&input, inner_select, outer_select)
             {
                 if is_lateral {
-                    let boundary = add(input.base, input.tokens[open_paren].range.start());
+                    let boundary = input.base + input.tokens[open_paren].range.start();
                     outer
                         .relations
                         .retain(|relation| relation.syntax_range.end() <= boundary);
@@ -126,14 +123,12 @@ pub(super) fn incomplete_range(base: TextSize, tokens: &[Token]) -> Option<TextR
         match token.kind {
             TokenKind::Char('(') => unmatched_opens.push(token.range),
             TokenKind::Char(')') if unmatched_opens.pop().is_none() => {
-                return Some(absolute_range(base, token.range.start(), token.range.end()));
+                return Some(token.range + base);
             }
             _ => {}
         }
     }
-    unmatched_opens
-        .last()
-        .map(|range| absolute_range(base, range.start(), range.end()))
+    unmatched_opens.last().map(|range| *range + base)
 }
 
 /// Clause keywords that end a `FROM` list when they appear at branch depth.
@@ -148,6 +143,23 @@ const FROM_LIST_END: &[TokenKind] = &[
     TokenKind::Fetch,
     TokenKind::For,
     TokenKind::Returning,
+];
+
+/// Set-operation operators that separate SELECT branches at the same depth.
+const SET_OPERATION: &[TokenKind] = &[
+    TokenKind::Union,
+    TokenKind::Intersect,
+    TokenKind::Except,
+];
+
+/// Trailing query-level clauses that sit after a SELECT (or after a
+/// parenthesized SELECT) rather than inside its FROM list.
+const QUERY_SUFFIX: &[TokenKind] = &[
+    TokenKind::Order,
+    TokenKind::Limit,
+    TokenKind::Offset,
+    TokenKind::Fetch,
+    TokenKind::For,
 ];
 
 /// The `FROM` list of one SELECT set-operation branch.
@@ -166,10 +178,7 @@ fn from_segment(tokens: &[Token], depths: &[usize], select: SelectLocation) -> O
         .find(|index| {
             depths[*index] < select.depth
                 || (depths[*index] == select.depth
-                    && matches!(
-                        tokens[*index].kind,
-                        TokenKind::Union | TokenKind::Intersect | TokenKind::Except
-                    ))
+                    && SET_OPERATION.contains(&tokens[*index].kind))
         })
         .unwrap_or(tokens.len());
     let from_keyword = (select.index + 1..branch_end)
@@ -186,11 +195,15 @@ fn from_segment(tokens: &[Token], depths: &[usize], select: SelectLocation) -> O
     })
 }
 
+/// If `child_select` is the body of a derived table / table function belonging
+/// to `outer_select`'s FROM list, return the opening `(` and whether that item
+/// is LATERAL (explicitly or implicitly, as with table functions).
 fn derived_table_container(
     input: &ScopeInput<'_>,
     child_select: SelectLocation,
     outer_select: SelectLocation,
 ) -> Option<(usize, bool)> {
+    // Nearest still-open `(` at the outer SELECT depth that wraps the child.
     let open = (outer_select.index + 1..child_select.index)
         .rev()
         .find(|index| {
@@ -199,32 +212,34 @@ fn derived_table_container(
                 && matching_close(input.tokens, input.depths, *index, input.tokens.len())
                     .is_none_or(|close| input.tokens[close].range.start() >= input.point)
         })?;
+
+    // Must sit inside the outer FROM list, not the SELECT list / WHERE / …
     let segment = from_segment(input.tokens, input.depths, outer_select)?;
-    let from_keyword = segment.from_keyword;
-    if !(from_keyword < open && open < segment.list_end) {
+    if !(segment.from_keyword < open && open < segment.list_end) {
         return None;
     }
-    let preceding_clause = (from_keyword + 1..open).rev().find(|index| {
+
+    // A paren whose nearest FROM-list delimiter is ON/USING is a join-condition
+    // subquery, not a FROM item.
+    let delimiter = (segment.from_keyword + 1..open).rev().find(|index| {
         input.depths[*index] == outer_select.depth
             && matches!(
                 input.tokens[*index].kind,
                 TokenKind::Char(',') | TokenKind::Join | TokenKind::On | TokenKind::Using
             )
     });
-    if preceding_clause
-        .is_some_and(|index| matches!(input.tokens[index].kind, TokenKind::On | TokenKind::Using))
-    {
+    if delimiter.is_some_and(|index| {
+        matches!(input.tokens[index].kind, TokenKind::On | TokenKind::Using)
+    }) {
         return None;
     }
-    let explicit_lateral =
-        open > from_keyword && input.tokens[open - 1].kind == TokenKind::LateralP;
-    let function_call = open > from_keyword
-        && token_can_be_name(&input.tokens[open - 1])
-        && input.tokens[open - 1].kind != TokenKind::From;
-    let rows_from = open >= from_keyword + 2
-        && input.tokens[open - 2].kind == TokenKind::Rows
-        && input.tokens[open - 1].kind == TokenKind::From;
-    let lateral = explicit_lateral || function_call || rows_from;
+
+    // Explicit LATERAL, or the same shapes `is_table_function_open` already
+    // recognizes as implicitly lateral (name(...), ROWS FROM (...)).
+    let explicit_lateral = open > segment.from_keyword
+        && input.tokens[open - 1].kind == TokenKind::LateralP;
+    let lateral = explicit_lateral
+        || is_table_function_open(input.tokens, input.depths, open, outer_select.depth);
     Some((open, lateral))
 }
 
@@ -258,6 +273,10 @@ fn depth_at_point(tokens: &[Token], point: TextSize) -> usize {
     depth
 }
 
+/// SELECT heads that still enclose the point, innermost last after sorting.
+///
+/// Mirrors [`active_dml_statement`]: one candidate per still-open depth, with
+/// a close-paren before the point dropping every candidate nested inside it.
 fn enclosing_selects(input: &ScopeInput<'_>, point_depth: usize) -> Vec<SelectLocation> {
     let tokens = input.tokens;
     let depths = input.depths;
@@ -269,10 +288,9 @@ fn enclosing_selects(input: &ScopeInput<'_>, point_depth: usize) -> Vec<SelectLo
         }
         let depth = depths[index];
         match token.kind {
-            // Depth alone cannot distinguish sibling parenthesized groups: a
-            // close paren strictly before the point ends every group nested
-            // inside it, so the SELECTs recorded there do not enclose the
-            // point even when the point later returns to the same depth.
+            // A close paren ends every group nested inside it. Depth alone
+            // cannot tell sibling groups apart, so drop those candidates even
+            // if the point later returns to the same depth.
             TokenKind::Char(')') if token.range.start() < point => {
                 selects_by_depth.retain(|candidate| candidate.depth <= depth);
             }
@@ -343,46 +361,29 @@ fn point_is_in_set_operation_suffix(
     let has_set_operation = input.tokens.iter().enumerate().any(|(index, token)| {
         token.range.start() < input.point
             && input.depths[index] == select.depth
-            && matches!(
-                token.kind,
-                TokenKind::Union | TokenKind::Intersect | TokenKind::Except
-            )
+            && SET_OPERATION.contains(&token.kind)
     });
+    if !has_set_operation {
+        return false;
+    }
+    // After UNION/INTERSECT/EXCEPT, ORDER BY / LIMIT / … bind to the whole
+    // set operation, not to the last branch's FROM scope.
     let suffix_depth = select.depth.min(point_depth);
-    has_set_operation
-        && (select.index + 1..input.tokens.len()).any(|index| {
-            input.depths[index] == suffix_depth
-                && input.tokens[index].range.start() <= input.point
-                && matches!(
-                    input.tokens[index].kind,
-                    TokenKind::Order
-                        | TokenKind::Limit
-                        | TokenKind::Offset
-                        | TokenKind::Fetch
-                        | TokenKind::For
-                )
-        })
+    (select.index + 1..input.tokens.len()).any(|index| {
+        input.depths[index] == suffix_depth
+            && input.tokens[index].range.start() <= input.point
+            && QUERY_SUFFIX.contains(&input.tokens[index].kind)
+    })
 }
 
+/// `(SELECT …) ORDER BY …` keeps the inner SELECT's scope at the suffix.
 fn wrapped_query_select_before_suffix(input: &ScopeInput<'_>, point_depth: usize) -> Option<usize> {
-    let suffix = input
-        .tokens
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(index, token)| {
-            let is_suffix_keyword = token.range.start() <= input.point
-                && input.depths[index] == point_depth
-                && matches!(
-                    token.kind,
-                    TokenKind::Order
-                        | TokenKind::Limit
-                        | TokenKind::Offset
-                        | TokenKind::Fetch
-                        | TokenKind::For
-                );
-            is_suffix_keyword.then_some(index)
-        })?;
+    let suffix = input.tokens.iter().enumerate().rev().find_map(|(index, token)| {
+        (token.range.start() <= input.point
+            && input.depths[index] == point_depth
+            && QUERY_SUFFIX.contains(&token.kind))
+        .then_some(index)
+    })?;
     let close = suffix.checked_sub(1)?;
     if input.tokens[close].kind != TokenKind::Char(')') || input.depths[close] != point_depth {
         return None;
@@ -424,10 +425,9 @@ fn apply_table_function_visibility(
     let Some(segment) = from_segment(input.tokens, input.depths, select) else {
         return;
     };
-    let from_keyword = segment.from_keyword;
-    // A scalar call in WHERE/GROUP BY/… matches the same name-then-paren
-    // shape, so the search must stop at the end of the FROM list.
-    let Some(open) = (from_keyword + 1..segment.list_end).find(|index| {
+    // Stay inside the FROM list: a scalar call in WHERE/GROUP BY/… has the
+    // same name-then-paren shape but must not trigger this rule.
+    let Some(open) = (segment.from_keyword + 1..segment.list_end).find(|index| {
         input.tokens[*index].kind == TokenKind::Char('(')
             && input.depths[*index] == select.depth
             && input.tokens[*index].range.start() < input.point
@@ -437,7 +437,9 @@ fn apply_table_function_visibility(
     }) else {
         return;
     };
-    let item_start = (from_keyword + 1..open)
+
+    // FROM-item start = just after the nearest `,` / JOIN before the call.
+    let item_start = (segment.from_keyword + 1..open)
         .rev()
         .find(|index| {
             input.depths[*index] == select.depth
@@ -446,19 +448,24 @@ fn apply_table_function_visibility(
                     TokenKind::Char(',') | TokenKind::Join
                 )
         })
-        .map_or(from_keyword + 1, |delimiter| delimiter + 1);
+        .map_or(segment.from_keyword + 1, |delimiter| delimiter + 1);
+
+    // ON/USING between item_start and `(` means this paren is a join condition
+    // expression, not a table-function argument list.
     if (item_start..open).any(|index| {
         input.depths[index] == select.depth
             && matches!(input.tokens[index].kind, TokenKind::On | TokenKind::Using)
     }) {
         return;
     }
-    let boundary = add(input.base, input.tokens[item_start].range.start());
+
+    let boundary = input.base + input.tokens[item_start].range.start();
     scope
         .relations
         .retain(|relation| relation.syntax_range.end() <= boundary);
 }
 
+/// JOIN ON/USING may only reference relations introduced before that clause.
 fn apply_join_condition_visibility(
     input: &ScopeInput<'_>,
     select: SelectLocation,
@@ -475,7 +482,7 @@ fn apply_join_condition_visibility(
     ) else {
         return;
     };
-    let boundary = add(input.base, condition_start);
+    let boundary = input.base + condition_start;
     scope
         .relations
         .retain(|relation| relation.syntax_range.end() <= boundary);
@@ -500,6 +507,12 @@ fn is_table_function_open(tokens: &[Token], depths: &[usize], open: usize, depth
         )
 }
 
+/// Walk one FROM list (or a parenthesized join-group inside it).
+///
+/// `expecting_item` is the only piece of state: `,` / `JOIN` open a slot,
+/// `ON` / `USING` close it. Join-type keywords are skipped. A bare `(join
+/// tree)` without a usable alias is expanded in place so its leaf relations
+/// stay visible while the cursor is inside the group.
 fn parse_from_relations(
     input: &ScopeInput<'_>,
     list_start: usize,
@@ -523,6 +536,8 @@ fn parse_from_relations(
             continue;
         }
         let kind = tokens[index].kind;
+
+        // Slot delimiters.
         if matches!(kind, TokenKind::Char(',') | TokenKind::Join) {
             expecting_item = true;
             index += 1;
@@ -550,6 +565,9 @@ fn parse_from_relations(
             index += 1;
             continue;
         }
+
+        // Parenthesized join group: either one aliased relation, or — when
+        // unaliased / cursor-inside — the flattened inner FROM items.
         if kind == TokenKind::Char('(')
             && let Some(group_close) = matching_close(tokens, depths, index, list_end)
             && !parenthesized_body_is_query(tokens, depths, index, group_close)
@@ -571,6 +589,7 @@ fn parse_from_relations(
                 continue;
             }
         }
+
         if let Some((relation, next_index)) =
             parse_from_item(input, index, list_end, list_depth, ctes)
         {
@@ -613,36 +632,32 @@ fn parse_from_item(
         None
     };
 
+    // ---- parenthesized item: (query) / (VALUES …) / (join tree) ------------
     if only_parenthesis_close.is_none() && tokens[index].kind == TokenKind::Char('(') {
-        // Parenthesized FROM items can be subqueries, VALUES expressions, or
-        // aliased join trees. Keep their common range/alias handling aligned.
         let body_open = index;
         let body_close = matching_close(tokens, depths, index, list_end)?;
-        let is_query_body = parenthesized_body_is_query(tokens, depths, body_open, body_close);
-        let is_values_body = first_parenthesized_body_kind(tokens, depths, body_open, body_close)
-            == Some(TokenKind::Values);
-        let relation_kind = if is_values_body {
-            RelationKind::Values
-        } else if is_query_body {
-            RelationKind::Subquery
-        } else {
-            RelationKind::JoinAlias
+        let body_kind = first_parenthesized_body_kind(tokens, depths, body_open, body_close);
+        let relation_kind = match body_kind {
+            Some(TokenKind::Values) => RelationKind::Values,
+            Some(kind) if is_query_body_kind(kind) => RelationKind::Subquery,
+            _ => RelationKind::JoinAlias,
         };
+        let is_query_body = matches!(
+            relation_kind,
+            RelationKind::Values | RelationKind::Subquery
+        );
+        // Join trees are exposed only through their alias; flag them so callers
+        // can fall back instead of inventing a relation name.
         let unsupported = (!is_query_body).then(|| UnsupportedRelation {
-            range: absolute_range(
-                base,
+            range: TextRange::new(
                 tokens[body_open].range.start(),
                 tokens[body_close].range.end(),
-            ),
+            ) + base,
             reason: "parenthesized table expression is not classified".to_owned(),
         });
         index = body_close + 1;
         let (alias, explicit_columns, next_index) =
             parse_alias(source, base, tokens, index, list_end);
-        let syntax_end = next_index
-            .checked_sub(1)
-            .and_then(|last| tokens.get(last))
-            .map_or(tokens[body_close].range.end(), |token| token.range.end());
         return Some((
             VisibleRelation {
                 kind: relation_kind,
@@ -650,12 +665,16 @@ fn parse_from_item(
                 alias,
                 explicit_columns,
                 qualified_only: false,
-                syntax_range: absolute_range(base, tokens[item_start].range.start(), syntax_end),
-                body_range: Some(absolute_range(
-                    base,
-                    tokens[body_open].range.end(),
-                    tokens[body_close].range.start(),
-                )),
+                syntax_range: TextRange::new(
+                    tokens[item_start].range.start(),
+                    item_syntax_end(tokens, next_index, tokens[body_close].range.end()),
+                ) + base,
+                body_range: Some(
+                    TextRange::new(
+                        tokens[body_open].range.end(),
+                        tokens[body_close].range.start(),
+                    ) + base,
+                ),
                 lateral,
                 unsupported,
             },
@@ -663,12 +682,13 @@ fn parse_from_item(
         ));
     }
 
+    // ---- ROWS FROM (f(), g(), …) [AS alias(cols)] --------------------------
     if tokens[index].kind == TokenKind::Rows
         && tokens.get(index + 1).map(|token| token.kind) == Some(TokenKind::From)
         && tokens.get(index + 2).map(|token| token.kind) == Some(TokenKind::Char('('))
     {
-        // ROWS FROM is one table function whose output columns may come from
-        // either the relation alias or the individual function definitions.
+        // One table function; output columns come from the relation alias or,
+        // failing that, from the individual function column definitions.
         let body_open = index + 2;
         let body_close = matching_close(tokens, depths, body_open, list_end)?;
         index = body_close + 1;
@@ -679,10 +699,6 @@ fn parse_from_item(
             explicit_columns =
                 parse_rows_from_columns(source, base, tokens, depths, body_open, body_close);
         }
-        let syntax_end = next_index
-            .checked_sub(1)
-            .and_then(|last| tokens.get(last))
-            .map_or(tokens[body_close].range.end(), |token| token.range.end());
         return Some((
             VisibleRelation {
                 kind: RelationKind::TableFunction,
@@ -690,12 +706,16 @@ fn parse_from_item(
                 alias,
                 explicit_columns,
                 qualified_only: false,
-                syntax_range: absolute_range(base, tokens[item_start].range.start(), syntax_end),
-                body_range: Some(absolute_range(
-                    base,
-                    tokens[body_open].range.end(),
-                    tokens[body_close].range.start(),
-                )),
+                syntax_range: TextRange::new(
+                    tokens[item_start].range.start(),
+                    item_syntax_end(tokens, next_index, tokens[body_close].range.end()),
+                ) + base,
+                body_range: Some(
+                    TextRange::new(
+                        tokens[body_open].range.end(),
+                        tokens[body_close].range.start(),
+                    ) + base,
+                ),
                 lateral,
                 unsupported: None,
             },
@@ -703,8 +723,8 @@ fn parse_from_item(
         ));
     }
 
-    // Named relations, CTEs, and ordinary table-function calls share the same
-    // qualified-name prefix and differ only after that name has been consumed.
+    // ---- named relation / CTE / ordinary table-function call ---------------
+    // All three share a qualified-name prefix; they diverge only after it.
     let (name, after_name) = parse_qualified_name(source, base, tokens, index, list_end, point)?;
     index = if let Some(close) = only_parenthesis_close {
         if after_name != close {
@@ -723,11 +743,12 @@ fn parse_from_item(
         let body_close = matching_close(tokens, depths, body_open, list_end)?;
         index = body_close + 1;
         consume_with_ordinality(tokens, &mut index, list_end);
-        Some(absolute_range(
-            base,
-            tokens[body_open].range.end(),
-            tokens[body_close].range.start(),
-        ))
+        Some(
+            TextRange::new(
+                tokens[body_open].range.end(),
+                tokens[body_close].range.start(),
+            ) + base,
+        )
     } else {
         None
     };
@@ -754,12 +775,6 @@ fn parse_from_item(
     } else {
         RelationKind::Relation
     };
-    let syntax_end = next_index
-        .checked_sub(1)
-        .and_then(|last| tokens.get(last))
-        .map_or(tokens[after_name - 1].range.end(), |token| {
-            token.range.end()
-        });
     Some((
         VisibleRelation {
             kind: relation_kind,
@@ -767,13 +782,25 @@ fn parse_from_item(
             alias,
             explicit_columns,
             qualified_only: false,
-            syntax_range: absolute_range(base, tokens[item_start].range.start(), syntax_end),
+            syntax_range: TextRange::new(
+                tokens[item_start].range.start(),
+                item_syntax_end(tokens, next_index, tokens[after_name - 1].range.end()),
+            ) + base,
             body_range,
             lateral,
             unsupported: None,
         },
         next_index,
     ))
+}
+
+/// End of a FROM item's syntax range: last consumed token, or `fallback` when
+/// the parser stopped without advancing past the item head.
+fn item_syntax_end(tokens: &[Token], next_index: usize, fallback: TextSize) -> TextSize {
+    next_index
+        .checked_sub(1)
+        .and_then(|last| tokens.get(last))
+        .map_or(fallback, |token| token.range.end())
 }
 
 fn parse_rows_from_columns(
@@ -832,18 +859,26 @@ fn first_parenthesized_body_kind(
     }
 }
 
+fn is_query_body_kind(kind: TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Select | TokenKind::With | TokenKind::Table | TokenKind::Values
+    )
+}
+
 fn parenthesized_body_is_query(
     tokens: &[Token],
     depths: &[usize],
     open: usize,
     close: usize,
 ) -> bool {
-    matches!(
-        first_parenthesized_body_kind(tokens, depths, open, close),
-        Some(TokenKind::Select | TokenKind::With | TokenKind::Table | TokenKind::Values)
-    )
+    first_parenthesized_body_kind(tokens, depths, open, close).is_some_and(is_query_body_kind)
 }
 
+/// `[[AS] alias] [(col, …)]` after a relation / subquery / join tree.
+///
+/// Parallel to [`parse_function_alias`]: optional name, then optional column
+/// list. Relation aliases always require the name before columns.
 fn parse_alias(
     source: &str,
     base: TextSize,
@@ -859,22 +894,19 @@ fn parse_alias(
     } else {
         None
     };
-    let mut columns = Vec::new();
     if alias.is_some() && index < end && tokens[index].kind == TokenKind::Char('(') {
-        index += 1;
-        while index < end && tokens[index].kind != TokenKind::Char(')') {
-            if let Some(column) = name_part_from_token(source, base, &tokens[index]) {
-                columns.push(column);
-            }
-            index += 1;
-        }
-        if index < end {
-            index += 1;
-        }
+        let (columns, next) = parse_parenthesized_column_names(source, base, tokens, index, end);
+        (alias, columns, next)
+    } else {
+        (alias, Vec::new(), index)
     }
-    (alias, columns, index)
 }
 
+/// Function alias forms, including the name-less `AS (col type, …)` shape that
+/// ordinary relation aliases do not allow.
+///
+/// After the optional name-less form is ruled out, the remainder mirrors
+/// [`parse_alias`]: optional name, then optional column list.
 fn parse_function_alias(
     source: &str,
     base: TextSize,
@@ -882,8 +914,6 @@ fn parse_function_alias(
     mut index: usize,
     end: usize,
 ) -> (Option<NamePart>, Vec<NamePart>, usize) {
-    // Unlike a regular relation alias, a function may use `AS (column type, …)`
-    // without providing an alias name.
     let has_as = consume_kind(tokens, &mut index, end, TokenKind::As);
     if has_as && index < end && tokens[index].kind == TokenKind::Char('(') {
         let (columns, next) = parse_parenthesized_column_names(source, base, tokens, index, end);
@@ -1059,8 +1089,8 @@ impl<'a> CteCursor<'a> {
         Some(CteDefinition {
             name,
             explicit_columns,
-            syntax_range: absolute_range(self.base, syntax_start, body.syntax_end),
-            body_range: absolute_range(self.base, body.start, body.end),
+            syntax_range: TextRange::new(syntax_start, body.syntax_end) + self.base,
+            body_range: TextRange::new(body.start, body.end) + self.base,
         })
     }
 
@@ -1196,9 +1226,9 @@ fn parse_cte_group(input: &ScopeInput<'_>, with_index: usize) -> Option<CteGroup
         .unwrap_or_else(|| input.tokens[with_index].range.end());
     Some(CteGroup {
         depth: cursor.depth,
-        start: add(input.base, input.tokens[with_index].range.start()),
-        main_query_start: add(input.base, main_query_start),
-        end: add(input.base, cursor.container_end()),
+        start: input.base + input.tokens[with_index].range.start(),
+        main_query_start: input.base + main_query_start,
+        end: input.base + cursor.container_end(),
         recursive,
         ctes,
     })
@@ -1271,10 +1301,9 @@ fn collect_dml_scope(
         depths,
         ..
     } = *input;
-    // DML keywords also appear at depth 0 as trigger/rule events, privilege
-    // names, and row-lock clauses; only statement heads that can wrap
-    // top-level DML enter this path, and a `FOR [NO KEY] UPDATE` lock clause
-    // never introduces the DML target.
+    // DML keywords also appear as trigger/rule events, privilege names, and
+    // row-lock clauses. Only statement heads that can wrap top-level DML enter
+    // this path (`FOR [NO KEY] UPDATE` never introduces a target).
     if !matches!(
         tokens.first().map(|token| token.kind),
         Some(
@@ -1297,6 +1326,8 @@ fn collect_dml_scope(
     let statement_end = (statement + 1..tokens.len())
         .find(|index| depths[*index] < statement_depth)
         .unwrap_or(tokens.len());
+
+    // 1. Target relation (INSERT/MERGE/DELETE skip the INTO/FROM keyword).
     let target_start = match statement_kind {
         TokenKind::Insert | TokenKind::Merge | TokenKind::DeleteP => statement + 2,
         TokenKind::Update => statement + 1,
@@ -1306,13 +1337,18 @@ fn collect_dml_scope(
     {
         snapshot.dml_target = Some(target);
     }
-    // INSERT source expressions cannot reference their target relation.
+
+    // 2. Statement-specific visibility. Each branch may clear or augment the
+    //    target and/or push source relations into the snapshot.
+
+    // INSERT sources never see the target.
     if statement_kind == TokenKind::Insert
         && point_is_in_insert_source(input, statement, statement_end)
     {
         snapshot.dml_target = None;
     }
-    // MERGE visibility changes between the source, ON, and WHEN clauses.
+
+    // MERGE: target + USING source, with per-clause hiding.
     if statement_kind == TokenKind::Merge
         && let Some(using_keyword) = (statement + 1..statement_end).find(|index| {
             depths[*index] == statement_depth && tokens[*index].kind == TokenKind::Using
@@ -1327,6 +1363,7 @@ fn collect_dml_scope(
         ) {
             snapshot.merge_source = Some(source_relation);
         }
+        // Inside the USING item itself neither side is visible yet.
         let on_keyword = (using_keyword + 1..statement_end).find(|index| {
             depths[*index] == statement_depth && tokens[*index].kind == TokenKind::On
         });
@@ -1341,7 +1378,8 @@ fn collect_dml_scope(
         apply_merge_when_clause_visibility(input, statement, statement_end, snapshot);
     }
 
-    // UPDATE FROM and DELETE USING introduce ordinary FROM-list relations.
+    // UPDATE FROM / DELETE USING: ordinary FROM-list relations with the same
+    // LATERAL and JOIN-condition rules as SELECT.
     let source_clause_kind = match statement_kind {
         TokenKind::Update => Some(TokenKind::From),
         TokenKind::DeleteP => Some(TokenKind::Using),
@@ -1357,10 +1395,15 @@ fn collect_dml_scope(
                 depths[*index] == statement_depth && FROM_LIST_END.contains(&tokens[*index].kind)
             })
             .unwrap_or(statement_end);
-        let source_range_end = token_boundary(tokens, source_list_end);
-        if tokens[source_keyword].range.end() <= point && point <= source_range_end {
+
+        // Completing inside the source list hides the DML target (the target
+        // is not in scope for FROM/USING expressions).
+        let in_source_list = tokens[source_keyword].range.end() <= point
+            && point <= token_boundary(tokens, source_list_end);
+        if in_source_list {
             snapshot.dml_target = None;
         }
+
         let mut relations = parse_from_relations(
             input,
             source_keyword + 1,
@@ -1369,20 +1412,26 @@ fn collect_dml_scope(
             ctes,
         );
         let absolute_point = input.absolute_point();
-        if let Some(active_relation) = relations.iter().position(|relation| {
+        let active_body = relations.iter().position(|relation| {
             relation.body_range.is_some_and(|range| {
                 range.start() <= absolute_point && absolute_point <= range.end()
             })
-        }) {
-            let active_relation_start = relations[active_relation].syntax_range.start();
-            let is_lateral = relations[active_relation].lateral
-                || relations[active_relation].kind == RelationKind::TableFunction;
-            if is_lateral {
-                relations.retain(|relation| relation.syntax_range.end() <= active_relation_start);
+        });
+
+        if let Some(active) = active_body {
+            // Inside a FROM-item body: only LATERAL / table-function bodies may
+            // see preceding source relations. The target stays hidden.
+            snapshot.dml_target = None;
+            let sees_preceding = relations[active].lateral
+                || relations[active].kind == RelationKind::TableFunction;
+            if sees_preceding {
+                let boundary = relations[active].syntax_range.start();
+                relations.retain(|relation| relation.syntax_range.end() <= boundary);
                 add_visible_relations(snapshot, relation_placement, relations);
             }
-            snapshot.dml_target = None;
         } else {
+            // In the source list proper (including JOIN ON/USING): trim to the
+            // active join condition, then publish what remains.
             let max_join_depth = match relation_placement {
                 DmlRelationPlacement::Outer => statement_depth,
                 DmlRelationPlacement::Local => depth_at_point(tokens, point),
@@ -1392,14 +1441,14 @@ fn collect_dml_scope(
                 source_keyword + 1..source_list_end,
                 statement_depth..=max_join_depth,
             ) {
-                let boundary = add(base, condition_start);
+                let boundary = base + condition_start;
                 relations.retain(|relation| relation.syntax_range.end() <= boundary);
             }
             add_visible_relations(snapshot, relation_placement, relations);
         }
     }
 
-    // ON CONFLICT and RETURNING add qualified views of the target.
+    // 3. ON CONFLICT (`excluded`) and RETURNING (`old` / `new`) qualify the target.
     let Some(target) = snapshot.dml_target.clone() else {
         return;
     };
@@ -1534,13 +1583,15 @@ fn synthetic_name(base: TextSize, token: &Token, text: &str) -> NamePart {
         text: text.to_owned(),
         normalized: text.to_owned(),
         quoted: false,
-        range: absolute_range(base, token.range.start(), token.range.end()),
+        range: token.range + base,
     }
 }
 
+/// Innermost DML statement head that still encloses the point.
+///
+/// Same depth-tracking shape as [`enclosing_selects`]: latest head per open
+/// depth, closed sibling groups discarded on `)`.
 fn active_dml_statement(input: &ScopeInput<'_>) -> Option<usize> {
-    // Keep the latest statement head at each still-open nesting depth. Closing
-    // a sibling group removes its candidates before a later group is scanned.
     let mut statement_heads_by_depth = Vec::<usize>::new();
     for (index, token) in input.tokens.iter().enumerate() {
         if token.range.start() > input.point {
@@ -1691,6 +1742,10 @@ fn token_boundary(tokens: &[Token], index: usize) -> TextSize {
 }
 
 /// Start of the ON/USING clause containing the point, if one is active.
+///
+/// ON and USING are handled symmetrically: each computes the clause's end, then
+/// asks whether the point still lies inside it. ON ends at the next same-depth
+/// FROM-list delimiter; USING ends at its closing `)`.
 fn active_join_condition_start(
     input: &ScopeInput<'_>,
     search_range: std::ops::Range<usize>,
@@ -1698,29 +1753,31 @@ fn active_join_condition_start(
 ) -> Option<TextSize> {
     let search_end = search_range.end;
     search_range.rev().find_map(|index| {
-        let at_condition_depth = input.depths[index] == condition_depth;
-        let before_point = input.tokens[index].range.start() <= input.point;
-        if !at_condition_depth || !before_point {
+        if input.depths[index] != condition_depth
+            || input.tokens[index].range.start() > input.point
+        {
             return None;
         }
-        match input.tokens[index].kind {
+        let condition_start = input.tokens[index].range.start();
+        let condition_end = match input.tokens[index].kind {
             TokenKind::On => {
-                let condition_end = (index + 1..search_end)
-                    .find(|candidate| {
-                        input.depths[*candidate] < condition_depth
-                            || (input.depths[*candidate] == condition_depth
-                                && (matches!(
-                                    input.tokens[*candidate].kind,
-                                    TokenKind::Char(',') | TokenKind::Join
-                                ) || FROM_LIST_END.contains(&input.tokens[*candidate].kind)))
-                    })
-                    .map_or_else(
-                        || token_boundary(input.tokens, search_end),
-                        |candidate| input.tokens[candidate].range.start(),
-                    );
-                (input.point <= condition_end).then_some(input.tokens[index].range.start())
+                // ON <expr> ends at the next join/list delimiter (or list end).
+                let end = (index + 1..search_end).find(|candidate| {
+                    input.depths[*candidate] < condition_depth
+                        || (input.depths[*candidate] == condition_depth
+                            && (matches!(
+                                input.tokens[*candidate].kind,
+                                TokenKind::Char(',') | TokenKind::Join
+                            ) || FROM_LIST_END.contains(&input.tokens[*candidate].kind)))
+                });
+                end.map_or_else(
+                    || token_boundary(input.tokens, search_end),
+                    |candidate| input.tokens[candidate].range.start(),
+                )
             }
             TokenKind::Using => {
+                // USING (<cols>) — point must sit inside the parentheses.
+                // An unclosed list is still active (common while typing).
                 let open = index + 1;
                 if open >= search_end
                     || input.depths[open] != condition_depth
@@ -1729,12 +1786,14 @@ fn active_join_condition_start(
                 {
                     return None;
                 }
-                let is_active = matching_close(input.tokens, input.depths, open, search_end)
-                    .is_none_or(|close| input.point <= input.tokens[close].range.start());
-                is_active.then_some(input.tokens[index].range.start())
+                match matching_close(input.tokens, input.depths, open, search_end) {
+                    Some(close) => input.tokens[close].range.start(),
+                    None => return Some(condition_start),
+                }
             }
-            _ => None,
-        }
+            _ => return None,
+        };
+        (input.point <= condition_end).then_some(condition_start)
     })
 }
 
@@ -1772,6 +1831,8 @@ fn parse_dml_target(
         consume_kind(tokens, &mut index, statement_end, TokenKind::Char(')'));
     }
     consume_kind(tokens, &mut index, statement_end, TokenKind::Char('*'));
+    // INSERT requires an explicit `AS` before an alias; other DML statements
+    // accept the same optional-AS form as a FROM item.
     let (alias, explicit_columns, next) = if statement_kind == TokenKind::Insert {
         if consume_kind(tokens, &mut index, statement_end, TokenKind::As) {
             let alias = name_part_from_token(source, base, tokens.get(index)?)?;
@@ -1787,15 +1848,8 @@ fn parse_dml_target(
             (None, Vec::new(), index)
         }
     } else {
-        let (alias, columns, next) = parse_alias(source, base, tokens, index, statement_end);
-        (alias, columns, next)
+        parse_alias(source, base, tokens, index, statement_end)
     };
-    let syntax_end = next
-        .checked_sub(1)
-        .and_then(|last| tokens.get(last))
-        .map_or(tokens[after_name - 1].range.end(), |token| {
-            token.range.end()
-        });
     Some((
         VisibleRelation {
             kind: RelationKind::Relation,
@@ -1803,7 +1857,10 @@ fn parse_dml_target(
             alias,
             explicit_columns,
             qualified_only: false,
-            syntax_range: absolute_range(base, tokens[target_start].range.start(), syntax_end),
+            syntax_range: TextRange::new(
+                tokens[target_start].range.start(),
+                item_syntax_end(tokens, next, tokens[after_name - 1].range.end()),
+            ) + base,
             body_range: None,
             lateral: false,
             unsupported: None,
@@ -1831,18 +1888,6 @@ fn token_can_be_name(token: &Token) -> bool {
     matches!(
         &token.value,
         Some(TokenValue::String(_) | TokenValue::Keyword(_))
-    )
-}
-
-fn absolute_range(base: TextSize, start: TextSize, end: TextSize) -> TextRange {
-    TextRange::new(add(base, start), add(base, end))
-}
-
-fn add(left: TextSize, right: TextSize) -> TextSize {
-    TextSize::new(
-        left.get()
-            .checked_add(right.get())
-            .expect("source range overflow"),
     )
 }
 

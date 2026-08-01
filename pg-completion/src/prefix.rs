@@ -50,16 +50,8 @@ pub(super) fn name_part_from_token(
         },
         text,
         quoted,
-        range: TextRange::new(add(base, token.range.start()), add(base, token.range.end())),
+        range: token.range + base,
     })
-}
-
-fn add(left: TextSize, right: TextSize) -> TextSize {
-    TextSize::new(
-        left.get()
-            .checked_add(right.get())
-            .expect("source range overflow"),
-    )
 }
 
 pub(super) struct NormalizedPoint {
