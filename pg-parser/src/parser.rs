@@ -250,21 +250,6 @@ pub fn parse_type_name(sql: &str) -> Result<TypeName, ParseError> {
     parse_type_name_tokens(tokens).map_err(ParserExit::into_parse_error)
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WithTarget {
-    Select,
-    Insert,
-    Update,
-    Delete,
-    Merge,
-}
-
-#[derive(Clone, Copy)]
-enum DescribedIdentityKind {
-    AnyName,
-    Name,
-}
-
 // ── Parser ────────────────────────────────────────────────────────────────
 
 pub struct Parser {

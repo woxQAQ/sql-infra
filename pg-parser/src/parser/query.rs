@@ -1,5 +1,14 @@
 use super::*;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WithTarget {
+    Select,
+    Insert,
+    Update,
+    Delete,
+    Merge,
+}
+
 impl Parser {
     pub(super) fn parse_with_statement(&mut self) -> PResult<Node> {
         let with = self.parse_with_clause()?;

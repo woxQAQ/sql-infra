@@ -50,6 +50,12 @@ enum DescribedObjectContext {
     SecurityLabel,
 }
 
+#[derive(Clone, Copy)]
+enum DescribedIdentityKind {
+    AnyName,
+    Name,
+}
+
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-comment.html
