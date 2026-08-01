@@ -16,7 +16,7 @@ pub(super) fn range_at(source: &str, point: TextSize) -> TextRange {
         end -= 1;
     }
 
-    TextRange::new(text_size(start), text_size(end))
+    TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end))
 }
 
 fn statement_bounds(source: &str, point: usize) -> (usize, usize) {
@@ -122,10 +122,6 @@ fn statement_bounds(source: &str, point: usize) -> (usize, usize) {
     (start, source.len())
 }
 
-fn text_size(value: usize) -> TextSize {
-    TextSize::try_from(value).expect("source length was represented by TextSize")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,8 +130,8 @@ mod tests {
     fn ignores_semicolons_in_lexical_containers() {
         let sql = "select ';'; select $$;$$; select \";\"; /* ; */ select 4";
         assert_eq!(
-            range_at(sql, text_size(sql.len())),
-            TextRange::new(text_size(38), text_size(sql.len()))
+            range_at(sql, TextSize::from_usize(sql.len())),
+            TextRange::new(TextSize::from_usize(38), TextSize::from_usize(sql.len()))
         );
     }
 
@@ -143,14 +139,14 @@ mod tests {
     fn follows_escape_strings_and_carriage_return_comments() {
         let sql = "select E'a\\';b'; select 2";
         assert_eq!(
-            range_at(sql, text_size(sql.len())),
-            TextRange::new(text_size(17), text_size(sql.len()))
+            range_at(sql, TextSize::from_usize(sql.len())),
+            TextRange::new(TextSize::from_usize(17), TextSize::from_usize(sql.len()))
         );
 
         let sql = "select 1 -- comment\r; select 2";
         assert_eq!(
-            range_at(sql, text_size(sql.len())),
-            TextRange::new(text_size(22), text_size(sql.len()))
+            range_at(sql, TextSize::from_usize(sql.len())),
+            TextRange::new(TextSize::from_usize(22), TextSize::from_usize(sql.len()))
         );
     }
 
@@ -158,8 +154,8 @@ mod tests {
     fn does_not_treat_a_parameter_suffix_as_a_dollar_quote() {
         let sql = "select $1$; select 2";
         assert_eq!(
-            range_at(sql, text_size(sql.len())),
-            TextRange::new(text_size(12), text_size(sql.len()))
+            range_at(sql, TextSize::from_usize(sql.len())),
+            TextRange::new(TextSize::from_usize(12), TextSize::from_usize(sql.len()))
         );
     }
 
@@ -167,8 +163,8 @@ mod tests {
     fn does_not_treat_an_identifier_suffix_as_a_dollar_quote() {
         let sql = "select name$tag$; select 2";
         assert_eq!(
-            range_at(sql, text_size(sql.len())),
-            TextRange::new(text_size(18), text_size(sql.len()))
+            range_at(sql, TextSize::from_usize(sql.len())),
+            TextRange::new(TextSize::from_usize(18), TextSize::from_usize(sql.len()))
         );
     }
 }

@@ -79,7 +79,7 @@ pub(super) fn normalize_point(source: &str, requested: TextSize) -> NormalizedPo
     if requested > source.len() {
         diagnostics.push(CompletionDiagnostic {
             kind: CompletionDiagnosticKind::PointClampedToEof,
-            range: TextRange::empty(text_size(source.len())),
+            range: TextRange::empty(TextSize::from_usize(source.len())),
         });
     }
     if !source.is_char_boundary(point) {
@@ -89,11 +89,11 @@ pub(super) fn normalize_point(source: &str, requested: TextSize) -> NormalizedPo
         }
         diagnostics.push(CompletionDiagnostic {
             kind: CompletionDiagnosticKind::PointMovedToCharBoundary,
-            range: TextRange::new(text_size(point), text_size(original)),
+            range: TextRange::new(TextSize::from_usize(point), TextSize::from_usize(original)),
         });
     }
     NormalizedPoint {
-        point: text_size(point),
+        point: TextSize::from_usize(point),
         diagnostics,
     }
 }
@@ -183,7 +183,7 @@ pub(super) fn analyze(source: &str, statement: TextRange, point: TextSize) -> Co
             normalized,
             quoting,
         },
-        replacement_range: TextRange::new(text_size(start), text_size(end)),
+        replacement_range: TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end)),
         qualifier,
         lexical_context,
     }
@@ -491,7 +491,10 @@ fn name_part_ending_at(source: &str, lower_bound: usize, end: usize) -> Option<(
                         normalized: text.clone(),
                         text,
                         quoted: true,
-                        range: TextRange::new(text_size(start), text_size(end)),
+                        range: TextRange::new(
+                            TextSize::from_usize(start),
+                            TextSize::from_usize(end),
+                        ),
                     },
                     start,
                 ));
@@ -509,7 +512,7 @@ fn name_part_ending_at(source: &str, lower_bound: usize, end: usize) -> Option<(
             normalized: text.to_ascii_lowercase(),
             text,
             quoted: false,
-            range: TextRange::new(text_size(start), text_size(end)),
+            range: TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end)),
         },
         start,
     ))
@@ -530,22 +533,18 @@ fn is_identifier_start(ch: char) -> bool {
     ch == '_' || ch.is_alphabetic() || !ch.is_ascii()
 }
 
-fn text_size(value: usize) -> TextSize {
-    TextSize::try_from(value).expect("source length was represented by TextSize")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn range(source: &str) -> TextRange {
-        TextRange::new(TextSize::ZERO, text_size(source.len()))
+        TextRange::new(TextSize::ZERO, TextSize::from_usize(source.len()))
     }
 
     #[test]
     fn separates_qualifier_and_unquoted_prefix() {
         let source = "select db.Schema.Na";
-        let site = analyze(source, range(source), text_size(source.len()));
+        let site = analyze(source, range(source), TextSize::from_usize(source.len()));
         assert_eq!(site.prefix.raw, "Na");
         assert_eq!(site.prefix.normalized, "na");
         assert_eq!(
@@ -560,7 +559,7 @@ mod tests {
     #[test]
     fn keeps_quoted_prefix_case() {
         let source = "select s.\"Mixed";
-        let site = analyze(source, range(source), text_size(source.len()));
+        let site = analyze(source, range(source), TextSize::from_usize(source.len()));
         assert_eq!(site.prefix.raw, "Mixed");
         assert_eq!(site.prefix.normalized, "Mixed");
         assert_eq!(site.prefix.quoting, IdentifierQuoting::Quoted);
@@ -571,32 +570,32 @@ mod tests {
     fn replacement_range_covers_the_identifier_suffix() {
         let source = "select SELect, s.\"Mixed\"";
         let unquoted_point = source.find("SEL").unwrap() + 3;
-        let site = analyze(source, range(source), text_size(unquoted_point));
+        let site = analyze(source, range(source), TextSize::from_usize(unquoted_point));
         assert_eq!(site.prefix.raw, "SEL");
         assert_eq!(
             site.replacement_range,
-            TextRange::new(text_size(7), text_size(13))
+            TextRange::new(TextSize::from_usize(7), TextSize::from_usize(13))
         );
 
         let quoted_point = source.find("Mix").unwrap() + 3;
-        let site = analyze(source, range(source), text_size(quoted_point));
+        let site = analyze(source, range(source), TextSize::from_usize(quoted_point));
         assert_eq!(site.prefix.raw, "Mix");
         assert_eq!(
             site.replacement_range,
             TextRange::new(
-                text_size(source.find('"').unwrap()),
-                text_size(source.len())
+                TextSize::from_usize(source.find('"').unwrap()),
+                TextSize::from_usize(source.len())
             )
         );
 
         let source = "select \"MixedSuffix";
         let point = source.find("Mix").unwrap() + 3;
-        let site = analyze(source, range(source), text_size(point));
+        let site = analyze(source, range(source), TextSize::from_usize(point));
         assert_eq!(
             site.replacement_range,
             TextRange::new(
-                text_size(source.find('"').unwrap()),
-                text_size(source.len())
+                TextSize::from_usize(source.find('"').unwrap()),
+                TextSize::from_usize(source.len())
             )
         );
     }
@@ -615,7 +614,7 @@ mod tests {
     #[test]
     fn does_not_treat_quotes_inside_strings_as_identifier_prefixes() {
         let source = "select 'not a \"name";
-        let site = analyze(source, range(source), text_size(source.len()));
+        let site = analyze(source, range(source), TextSize::from_usize(source.len()));
         assert!(!site.supports_grammar_completion());
         assert!(site.prefix.raw.is_empty());
     }
@@ -623,7 +622,7 @@ mod tests {
     #[test]
     fn extracts_identifiers_containing_a_dollar_quote_shaped_suffix() {
         let source = "SELECT name$tag$";
-        let site = analyze(source, range(source), text_size(source.len()));
+        let site = analyze(source, range(source), TextSize::from_usize(source.len()));
         assert_eq!(site.prefix.raw, "name$tag$");
         assert_eq!(site.prefix.normalized, "name$tag$");
         assert!(site.supports_grammar_completion());
@@ -633,27 +632,27 @@ mod tests {
     fn unicode_quote_prefix_requires_a_token_boundary() {
         let source = "select fooU&\"Mixed\"";
         let point = source.find("Mix").unwrap() + 3;
-        let site = analyze(source, range(source), text_size(point));
+        let site = analyze(source, range(source), TextSize::from_usize(point));
         let quote = source.find('"').unwrap();
         assert_eq!(site.prefix.quoting, IdentifierQuoting::Quoted);
-        assert_eq!(site.replacement_range.start(), text_size(quote));
-        let site = analyze(source, range(source), text_size(source.len()));
+        assert_eq!(site.replacement_range.start(), TextSize::from_usize(quote));
+        let site = analyze(source, range(source), TextSize::from_usize(source.len()));
         assert_eq!(site.prefix.quoting, IdentifierQuoting::Quoted);
-        assert_eq!(site.replacement_range.start(), text_size(quote));
+        assert_eq!(site.replacement_range.start(), TextSize::from_usize(quote));
 
         let source = "select U&\"Mixed\"";
         let point = source.find("Mix").unwrap() + 3;
-        let site = analyze(source, range(source), text_size(point));
+        let site = analyze(source, range(source), TextSize::from_usize(point));
         assert_eq!(site.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
         assert_eq!(
             site.replacement_range.start(),
-            text_size(source.find("U&").unwrap())
+            TextSize::from_usize(source.find("U&").unwrap())
         );
-        let site = analyze(source, range(source), text_size(source.len()));
+        let site = analyze(source, range(source), TextSize::from_usize(source.len()));
         assert_eq!(site.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
         assert_eq!(
             site.replacement_range.start(),
-            text_size(source.find("U&").unwrap())
+            TextSize::from_usize(source.find("U&").unwrap())
         );
     }
 
@@ -675,7 +674,7 @@ mod tests {
 
         let source = r#"select U&"S\0063hema".U&"M\0069x""#;
         let point = source.find(r"\0069").unwrap() + r"\0069".len();
-        let site = analyze(source, range(source), text_size(point));
+        let site = analyze(source, range(source), TextSize::from_usize(point));
         assert_eq!(site.prefix.normalized, "Mi");
         assert_eq!(site.qualifier[0].normalized, "Schema");
     }

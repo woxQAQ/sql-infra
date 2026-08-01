@@ -17,6 +17,19 @@ impl TextSize {
         Self(value)
     }
 
+    /// Converts a validated byte offset into a text size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` exceeds PostgreSQL's supported text offset range.
+    #[track_caller]
+    pub fn from_usize(value: usize) -> Self {
+        match Self::try_from(value) {
+            Ok(size) => size,
+            Err(_) => panic!("text offset {value} exceeds i32::MAX"),
+        }
+    }
+
     pub const fn get(self) -> u32 {
         self.0
     }
@@ -328,6 +341,21 @@ mod tests {
         assert_eq!(left + right, TextSize::new(13));
         assert_eq!(left - right, TextSize::new(7));
         assert_eq!(TextRange::new(right, left).len(), TextSize::new(7));
+    }
+
+    #[test]
+    fn constructs_text_size_from_usize() {
+        assert_eq!(TextSize::from_usize(42), TextSize::new(42));
+    }
+
+    #[test]
+    fn rejects_usize_outside_supported_range() {
+        assert_eq!(
+            TextSize::try_from(i32::MAX as usize + 1),
+            Err(SourceTooLarge {
+                len: i32::MAX as usize + 1,
+            })
+        );
     }
 
     #[test]

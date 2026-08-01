@@ -4,10 +4,6 @@ use crate::{BareLabel, KEYWORDS, KeywordCategory, TokenKind};
 use crate::{TextRange, TextSize};
 const NAMEDATALEN: usize = 64;
 
-fn text_size(offset: usize) -> TextSize {
-    TextSize::try_from(offset).expect("lexer input length is validated before scanning")
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Keyword {
     pub word: &'static str,
@@ -34,7 +30,7 @@ impl Token {
     fn new(kind: TokenKind, location: usize) -> Self {
         Self {
             kind,
-            range: TextRange::empty(text_size(location)),
+            range: TextRange::empty(TextSize::from_usize(location)),
             value: None,
         }
     }
@@ -42,7 +38,7 @@ impl Token {
     fn string(kind: TokenKind, location: usize, value: impl Into<std::string::String>) -> Self {
         Self {
             kind,
-            range: TextRange::empty(text_size(location)),
+            range: TextRange::empty(TextSize::from_usize(location)),
             value: Some(TokenValue::String(value.into())),
         }
     }
@@ -50,7 +46,7 @@ impl Token {
     fn integer(kind: TokenKind, location: usize, value: i32) -> Self {
         Self {
             kind,
-            range: TextRange::empty(text_size(location)),
+            range: TextRange::empty(TextSize::from_usize(location)),
             value: Some(TokenValue::Integer(value)),
         }
     }
@@ -58,7 +54,7 @@ impl Token {
     fn keyword(kind: TokenKind, location: usize, word: &'static str) -> Self {
         Self {
             kind,
-            range: TextRange::empty(text_size(location)),
+            range: TextRange::empty(TextSize::from_usize(location)),
             value: Some(TokenValue::Keyword(word)),
         }
     }
@@ -76,7 +72,7 @@ impl Token {
     }
 
     fn finish(&mut self, end: usize) {
-        self.range = TextRange::new(self.range.start(), text_size(end));
+        self.range = TextRange::new(self.range.start(), TextSize::from_usize(end));
     }
 }
 
@@ -89,14 +85,14 @@ pub struct LexError {
 impl LexError {
     fn new(location: usize, message: impl Into<std::string::String>) -> Self {
         Self {
-            range: TextRange::empty(text_size(location)),
+            range: TextRange::empty(TextSize::from_usize(location)),
             message: message.into(),
         }
     }
 
     fn ranged(start: usize, end: usize, message: impl Into<std::string::String>) -> Self {
         Self {
-            range: TextRange::new(text_size(start), text_size(end)),
+            range: TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end)),
             message: message.into(),
         }
     }
