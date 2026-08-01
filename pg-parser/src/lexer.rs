@@ -1,7 +1,8 @@
 // Translated by hand from PostgreSQL's src/backend/parser/scan.l semantics.
 // Token names come from gram.y and keyword mappings from parser/kwlist.h.
-use crate::{BareLabel, KEYWORDS, KeywordCategory, TokenKind};
-use crate::{TextRange, TextSize};
+use crate::{BareLabel, KEYWORDS, KeywordCategory, TextRange, TextSize, TokenKind};
+
+/// PostgreSQL's fixed name width, including the terminating NUL byte.
 const NAMEDATALEN: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -114,8 +115,6 @@ impl std::fmt::Display for LexError {
 
 impl std::error::Error for LexError {}
 
-// pub static KEYWORDS: &[Keyword] = &;
-
 pub fn lookup_keyword(word: &str) -> Option<&'static Keyword> {
     let lower = word.to_ascii_lowercase();
     KEYWORDS
@@ -129,17 +128,17 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
     let mut tokens = Vec::new();
     loop {
         let token = lexer.next_token()?;
-        let done = token.kind == TokenKind::Eof;
+        let is_eof = token.kind == TokenKind::Eof;
         tokens.push(token);
-        if done {
+        if is_eof {
             return Ok(tokens);
         }
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
 /// Tokens produced for editor input, including any lexical error recovered at
 /// the completion point.
+#[derive(Clone, Debug, PartialEq)]
 pub struct CompletionTokenization {
     tokens: Vec<Token>,
     recovered_error: Option<LexError>,
@@ -173,16 +172,16 @@ pub fn lex_for_completion(
     input: &str,
     point: TextSize,
 ) -> Result<CompletionTokenization, LexError> {
-    let point = TextSize::try_from(usize::from(point).min(input.len()))
-        .expect("completion point was bounded by input length");
+    let completion_offset = usize::from(point).min(input.len());
     match lex(input) {
         Ok(tokens) => Ok(CompletionTokenization {
             tokens,
             recovered_error: None,
         }),
-        Err(error) if error.range.end() >= point => {
-            let safe_end = usize::from(error.range.start()).min(input.len());
-            let mut tokens = lex(&input[..safe_end])?;
+        Err(error) if usize::from(error.range.end()) >= completion_offset => {
+            let valid_prefix_end = usize::from(error.range.start()).min(input.len());
+            let mut tokens = lex(&input[..valid_prefix_end])?;
+            debug_assert_eq!(tokens.last().map(|token| token.kind), Some(TokenKind::Eof));
             tokens.pop();
             tokens.push(Token {
                 kind: TokenKind::Incomplete,
@@ -216,114 +215,106 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Result<Token, LexError> {
-        let mut token = self.next_token_unranged()?;
+        let mut token = self.scan_token()?;
         token.finish(self.pos);
         Ok(token)
     }
 
-    fn next_token_unranged(&mut self) -> Result<Token, LexError> {
+    fn scan_token(&mut self) -> Result<Token, LexError> {
         self.skip_whitespace_and_comments()?;
-        let location = self.pos;
+        let token_start = self.pos;
         if self.eof() {
-            return Ok(Token::new(TokenKind::Eof, location));
+            return Ok(Token::new(TokenKind::Eof, token_start));
         }
 
         if self.starts_with_ignore_ascii_case("b'") {
             self.pos += 2;
-            return self.scan_bit_or_hex_string(location, b'b', TokenKind::BConst);
+            return self.scan_bit_or_hex_string(token_start, b'b', TokenKind::BConst);
         }
         if self.starts_with_ignore_ascii_case("x'") {
             self.pos += 2;
-            return self.scan_bit_or_hex_string(location, b'x', TokenKind::XConst);
+            return self.scan_bit_or_hex_string(token_start, b'x', TokenKind::XConst);
         }
         if self.starts_with_ignore_ascii_case("n'") {
             self.pos += 1;
-            return Ok(Token::keyword(TokenKind::Nchar, location, "nchar"));
+            return Ok(Token::keyword(TokenKind::Nchar, token_start, "nchar"));
         }
         if self.starts_with_ignore_ascii_case("e'") {
             self.pos += 2;
-            return self.scan_quoted_string(location, StringMode::Extended, TokenKind::SConst);
+            return self.scan_quoted_string(
+                token_start,
+                StringEscapeMode::Backslash,
+                TokenKind::SConst,
+            );
         }
         if self.starts_with_ignore_ascii_case("u&\"") {
             self.pos += 3;
-            return self.scan_quoted_identifier(location, true);
+            return self.scan_quoted_identifier(token_start, TokenKind::UIdent);
         }
         if self.starts_with_ignore_ascii_case("u&'") {
             self.pos += 3;
-            return self.scan_quoted_string(location, StringMode::Unicode, TokenKind::USConst);
+            return self.scan_quoted_string(
+                token_start,
+                StringEscapeMode::Literal,
+                TokenKind::USConst,
+            );
         }
         if self.starts_with_ignore_ascii_case("u&") {
             self.pos += 1;
-            return Ok(Token::string(TokenKind::Ident, location, "u"));
+            return Ok(Token::string(TokenKind::Ident, token_start, "u"));
         }
         if self.peek() == Some(b'\'') {
             self.pos += 1;
-            return self.scan_quoted_string(location, StringMode::Standard, TokenKind::SConst);
+            return self.scan_quoted_string(
+                token_start,
+                StringEscapeMode::Literal,
+                TokenKind::SConst,
+            );
         }
         if self.peek() == Some(b'"') {
             self.pos += 1;
-            return self.scan_quoted_identifier(location, false);
+            return self.scan_quoted_identifier(token_start, TokenKind::Ident);
         }
         if self.peek() == Some(b'$')
-            && let Some(token) = self.try_scan_dollar_or_param(location)?
+            && let Some(token) = self.try_scan_dollar_quote_or_parameter()?
         {
             return Ok(token);
         }
 
-        if self.starts_with("::") {
+        if let Some(kind) = self
+            .bytes
+            .get(self.pos..self.pos + 2)
+            .and_then(two_byte_token_kind)
+        {
             self.pos += 2;
-            return Ok(Token::new(TokenKind::TypeCast, location));
-        }
-        if self.starts_with("..") {
-            self.pos += 2;
-            return Ok(Token::new(TokenKind::DotDot, location));
-        }
-        if self.starts_with(":=") {
-            self.pos += 2;
-            return Ok(Token::new(TokenKind::ColonEquals, location));
-        }
-        if self.starts_with("=>") {
-            self.pos += 2;
-            return Ok(Token::new(TokenKind::EqualsGreater, location));
-        }
-        if self.starts_with("<=") {
-            self.pos += 2;
-            return Ok(Token::new(TokenKind::LessEquals, location));
-        }
-        if self.starts_with(">=") {
-            self.pos += 2;
-            return Ok(Token::new(TokenKind::GreaterEquals, location));
-        }
-        if self.starts_with("<>") || self.starts_with("!=") {
-            self.pos += 2;
-            return Ok(Token::new(TokenKind::NotEquals, location));
-        }
-        if self.starts_with("->") {
-            self.pos += 2;
-            return Ok(Token::new(TokenKind::RightArrow, location));
+            return Ok(Token::new(kind, token_start));
         }
 
         if self.peek().is_some_and(is_dec_digit)
             || (self.peek() == Some(b'.') && self.peek_n(1).is_some_and(is_dec_digit))
         {
-            return self.scan_number(location);
+            return self.scan_number();
         }
 
         if self.peek().is_some_and(is_ident_start) {
-            return Ok(self.scan_identifier_or_keyword(location));
+            return Ok(self.scan_identifier_or_keyword());
         }
 
         if self.peek().is_some_and(is_operator_char) {
-            return self.scan_operator(location);
+            return self.scan_operator();
         }
 
-        if self.peek().is_some_and(is_self_char) {
-            let ch = self.bump_ascii_char().unwrap();
-            return Ok(Token::new(TokenKind::Char(ch), location));
+        if self.peek().is_some_and(is_single_char_token) {
+            let ch = self
+                .bump_ascii_char()
+                .expect("single-character token check guarantees a byte");
+            return Ok(Token::new(TokenKind::Char(ch), token_start));
         }
 
-        let ch = self.bump_char().unwrap_or('\0');
-        Ok(Token::new(TokenKind::Char(ch), location))
+        let ch = self
+            .bump_char()
+            .expect("non-EOF lexer position must start a UTF-8 character");
+        Ok(Token::new(TokenKind::Char(ch), token_start))
     }
 
     fn eof(&self) -> bool {
@@ -362,15 +353,15 @@ impl<'a> Lexer<'a> {
 
     fn error<T>(
         &self,
-        location: usize,
+        range_start: usize,
         message: impl Into<std::string::String>,
     ) -> Result<T, LexError> {
-        Err(LexError::ranged(location, self.pos, message))
+        Err(LexError::ranged(range_start, self.pos, message))
     }
 
     fn skip_whitespace_and_comments(&mut self) -> Result<(), LexError> {
         loop {
-            let start = self.pos;
+            let trivia_start = self.pos;
             while self.peek().is_some_and(is_space) {
                 self.pos += 1;
             }
@@ -388,36 +379,36 @@ impl<'a> Lexer<'a> {
                 self.skip_block_comment()?;
                 continue;
             }
-            if self.pos == start {
+            if self.pos == trivia_start {
                 return Ok(());
             }
         }
     }
 
     fn skip_block_comment(&mut self) -> Result<(), LexError> {
-        let location = self.pos;
+        let comment_start = self.pos;
         self.pos += 2;
-        let mut depth = 0usize;
+        let mut nested_depth = 0usize;
         while !self.eof() {
             if self.starts_with("/*") {
-                depth += 1;
+                nested_depth += 1;
                 self.pos += 2;
             } else if self.starts_with("*/") {
                 self.pos += 2;
-                if depth == 0 {
+                if nested_depth == 0 {
                     return Ok(());
                 }
-                depth -= 1;
+                nested_depth -= 1;
             } else {
                 self.pos += 1;
             }
         }
-        self.error(location, "unterminated /* comment")
+        self.error(comment_start, "unterminated /* comment")
     }
 
     fn scan_bit_or_hex_string(
         &mut self,
-        location: usize,
+        token_start: usize,
         prefix: u8,
         kind: TokenKind,
     ) -> Result<Token, LexError> {
@@ -431,25 +422,25 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
             }
             if self.eof() {
-                let msg = if prefix == b'b' {
+                let message = if prefix == b'b' {
                     "unterminated bit string literal"
                 } else {
                     "unterminated hexadecimal string literal"
                 };
-                return self.error(location, msg);
+                return self.error(token_start, message);
             }
             self.pos += 1;
-            if self.consume_quote_continuation() {
+            if self.try_consume_string_continuation() {
                 continue;
             }
-            return Ok(Token::string(kind, location, string_from_bytes(literal)));
+            return Ok(Token::string(kind, token_start, string_from_bytes(literal)));
         }
     }
 
     fn scan_quoted_string(
         &mut self,
-        location: usize,
-        mode: StringMode,
+        token_start: usize,
+        escape_mode: StringEscapeMode,
         kind: TokenKind,
     ) -> Result<Token, LexError> {
         let mut literal = Vec::new();
@@ -461,100 +452,78 @@ impl<'a> Lexer<'a> {
                     continue;
                 }
                 self.pos += 1;
-                if self.consume_quote_continuation() {
+                if self.try_consume_string_continuation() {
                     continue;
                 }
-                return Ok(Token::string(kind, location, string_from_bytes(literal)));
+                return Ok(Token::string(kind, token_start, string_from_bytes(literal)));
             }
 
-            if mode == StringMode::Extended && b == b'\\' {
+            if escape_mode == StringEscapeMode::Backslash && b == b'\\' {
                 self.pos += 1;
-                self.scan_escape_sequence(location, &mut literal)?;
+                self.scan_escape_sequence(&mut literal)?;
                 continue;
             }
 
             literal.push(b);
             self.pos += 1;
         }
-        self.error(location, "unterminated quoted string")
+        self.error(token_start, "unterminated quoted string")
     }
 
-    fn scan_escape_sequence(
-        &mut self,
-        location: usize,
-        literal: &mut Vec<u8>,
-    ) -> Result<(), LexError> {
-        let Some(next) = self.peek() else {
+    fn scan_escape_sequence(&mut self, literal: &mut Vec<u8>) -> Result<(), LexError> {
+        let Some(escaped) = self.peek() else {
             literal.push(b'\\');
             return Ok(());
         };
 
-        if next == b'u' || next == b'U' {
-            let escape_location = self.pos - 1;
-            let width = if next == b'u' { 4 } else { 8 };
-            self.pos += 1;
-            let first = self.read_fixed_hex_escape(escape_location, width)?;
-            if is_utf16_surrogate_first(first) {
-                if !(self.peek() == Some(b'\\') && matches!(self.peek_n(1), Some(b'u' | b'U'))) {
-                    return self.error(self.pos, "invalid Unicode surrogate pair");
-                }
-                self.pos += 1;
-                let second_width = if self.peek() == Some(b'u') { 4 } else { 8 };
-                self.pos += 1;
-                let second = self.read_fixed_hex_escape(self.pos - 2, second_width)?;
-                if !is_utf16_surrogate_second(second) {
-                    return self.error(self.pos, "invalid Unicode surrogate pair");
-                }
-                let codepoint = 0x10000 + (((first - 0xD800) << 10) | (second - 0xDC00));
-                push_codepoint(literal, codepoint, escape_location, self.pos)?;
-            } else if is_utf16_surrogate_second(first) {
-                return self.error(escape_location, "invalid Unicode surrogate pair");
-            } else {
-                push_codepoint(literal, first, escape_location, self.pos)?;
-            }
-            return Ok(());
+        if matches!(escaped, b'u' | b'U') {
+            return self.scan_unicode_escape(literal);
         }
 
-        if (b'0'..=b'7').contains(&next) {
-            let start = self.pos;
-            let mut end = self.pos;
+        if (b'0'..=b'7').contains(&escaped) {
+            let digits_start = self.pos;
+            let mut digits_end = self.pos;
             for _ in 0..3 {
                 if self
                     .bytes
-                    .get(end)
+                    .get(digits_end)
                     .is_some_and(|b| (b'0'..=b'7').contains(b))
                 {
-                    end += 1;
+                    digits_end += 1;
                 } else {
                     break;
                 }
             }
-            let value = u8::from_str_radix(&self.input[start..end], 8).unwrap();
-            literal.push(value);
-            self.pos = end;
+            let byte = u8::from_str_radix(&self.input[digits_start..digits_end], 8).unwrap();
+            literal.push(byte);
+            self.pos = digits_end;
             return Ok(());
         }
 
-        if next == b'x' {
-            let start = self.pos + 1;
-            let mut end = start;
+        if escaped == b'x' {
+            let digits_start = self.pos + 1;
+            let mut digits_end = digits_start;
             for _ in 0..2 {
-                if self.bytes.get(end).is_some_and(|b| b.is_ascii_hexdigit()) {
-                    end += 1;
+                if self
+                    .bytes
+                    .get(digits_end)
+                    .is_some_and(|b| b.is_ascii_hexdigit())
+                {
+                    digits_end += 1;
                 } else {
                     break;
                 }
             }
-            if end > start {
-                let value = u8::from_str_radix(&self.input[start..end], 16).unwrap();
-                literal.push(value);
-                self.pos = end;
+            if digits_end > digits_start {
+                let byte = u8::from_str_radix(&self.input[digits_start..digits_end], 16).unwrap();
+                literal.push(byte);
+                self.pos = digits_end;
                 return Ok(());
             }
         }
 
         self.pos += 1;
-        literal.push(match next {
+        literal.push(match escaped {
             b'b' => 0x08,
             b'f' => 0x0C,
             b'n' => b'\n',
@@ -563,107 +532,152 @@ impl<'a> Lexer<'a> {
             b'v' => 0x0B,
             other => other,
         });
-        let _ = location;
         Ok(())
     }
 
-    fn read_fixed_hex_escape(&mut self, location: usize, width: usize) -> Result<u32, LexError> {
-        let end = self.pos + width;
-        if end > self.bytes.len() || !self.bytes[self.pos..end].iter().all(u8::is_ascii_hexdigit) {
-            return self.error(location, "invalid Unicode escape");
+    fn scan_unicode_escape(&mut self, literal: &mut Vec<u8>) -> Result<(), LexError> {
+        let escape_start = self.pos - 1;
+        let width = match self.peek() {
+            Some(b'u') => 4,
+            Some(b'U') => 8,
+            _ => unreachable!("Unicode escape scanning starts at 'u' or 'U'"),
+        };
+        self.pos += 1;
+        let first_value = self.read_fixed_hex_escape(escape_start, width)?;
+
+        if is_high_surrogate(first_value) {
+            if !(self.peek() == Some(b'\\') && matches!(self.peek_n(1), Some(b'u' | b'U'))) {
+                return self.error(self.pos, "invalid Unicode surrogate pair");
+            }
+
+            let second_escape_start = self.pos;
+            self.pos += 1;
+            let second_width = if self.peek() == Some(b'u') { 4 } else { 8 };
+            self.pos += 1;
+            let second_value = self.read_fixed_hex_escape(second_escape_start, second_width)?;
+            if !is_low_surrogate(second_value) {
+                return self.error(self.pos, "invalid Unicode surrogate pair");
+            }
+
+            let codepoint = 0x10000 + (((first_value - 0xD800) << 10) | (second_value - 0xDC00));
+            push_codepoint(literal, codepoint, escape_start, self.pos)
+        } else if is_low_surrogate(first_value) {
+            self.error(escape_start, "invalid Unicode surrogate pair")
+        } else {
+            push_codepoint(literal, first_value, escape_start, self.pos)
         }
-        let value = u32::from_str_radix(&self.input[self.pos..end], 16).unwrap();
-        self.pos = end;
-        Ok(value)
     }
 
-    fn consume_quote_continuation(&mut self) -> bool {
-        let after_quote = self.pos;
-        let mut pos = self.pos;
+    fn read_fixed_hex_escape(
+        &mut self,
+        escape_start: usize,
+        width: usize,
+    ) -> Result<u32, LexError> {
+        let digits_end = self.pos + width;
+        if digits_end > self.bytes.len()
+            || !self.bytes[self.pos..digits_end]
+                .iter()
+                .all(u8::is_ascii_hexdigit)
+        {
+            return self.error(escape_start, "invalid Unicode escape");
+        }
+        let escape_value = u32::from_str_radix(&self.input[self.pos..digits_end], 16).unwrap();
+        self.pos = digits_end;
+        Ok(escape_value)
+    }
+
+    fn try_consume_string_continuation(&mut self) -> bool {
+        let mut continuation_end = self.pos;
         let mut saw_newline = false;
         loop {
-            match self.bytes.get(pos).copied() {
+            match self.bytes.get(continuation_end).copied() {
                 Some(b'\n' | b'\r') => {
                     saw_newline = true;
-                    pos += 1;
+                    continuation_end += 1;
                 }
-                Some(b' ' | b'\t' | 0x0C | 0x0B) => pos += 1,
-                Some(b'-') if self.bytes.get(pos + 1) == Some(&b'-') => {
-                    pos += 2;
-                    while let Some(b) = self.bytes.get(pos).copied() {
+                Some(b' ' | b'\t' | 0x0C | 0x0B) => continuation_end += 1,
+                Some(b'-') if self.bytes.get(continuation_end + 1) == Some(&b'-') => {
+                    continuation_end += 2;
+                    while let Some(b) = self.bytes.get(continuation_end).copied() {
                         if b == b'\n' || b == b'\r' {
                             break;
                         }
-                        pos += 1;
+                        continuation_end += 1;
                     }
                 }
                 _ => break,
             }
         }
-        if saw_newline && self.bytes.get(pos) == Some(&b'\'') {
-            self.pos = pos + 1;
-            true
-        } else {
-            self.pos = after_quote;
-            false
+
+        // PostgreSQL concatenates adjacent quoted strings only when the
+        // separating whitespace contains a newline.
+        if !saw_newline || self.bytes.get(continuation_end) != Some(&b'\'') {
+            return false;
         }
+
+        self.pos = continuation_end + 1;
+        true
     }
 
-    fn try_scan_dollar_or_param(&mut self, location: usize) -> Result<Option<Token>, LexError> {
-        if let Some(delim_end) = self.dollar_delimiter_end(self.pos) {
-            let delimiter = &self.input[self.pos..delim_end];
-            self.pos = delim_end;
+    fn try_scan_dollar_quote_or_parameter(&mut self) -> Result<Option<Token>, LexError> {
+        let token_start = self.pos;
+        if let Some(delimiter_end) = self.dollar_quote_delimiter_end(self.pos) {
+            let delimiter = &self.input[self.pos..delimiter_end];
+            self.pos = delimiter_end;
             let content_start = self.pos;
-            if let Some(relative_end) = self.input[self.pos..].find(delimiter) {
-                let content_end = content_start + relative_end;
-                let value = self.input[content_start..content_end].to_owned();
+            if let Some(content_len) = self.input[content_start..].find(delimiter) {
+                let content_end = content_start + content_len;
+                let content = self.input[content_start..content_end].to_owned();
                 self.pos = content_end + delimiter.len();
-                return Ok(Some(Token::string(TokenKind::SConst, location, value)));
+                return Ok(Some(Token::string(TokenKind::SConst, token_start, content)));
             }
-            return self.error(location, "unterminated dollar-quoted string");
-        }
-
-        if self.peek_n(1).is_some_and(is_ident_start) {
-            self.pos += 1;
-            return Ok(Some(Token::new(TokenKind::Char('$'), location)));
+            return self.error(token_start, "unterminated dollar-quoted string");
         }
 
         if self.peek_n(1).is_some_and(is_dec_digit) {
             self.pos += 1;
-            let start = self.pos;
+            let digits_start = self.pos;
             while self.peek().is_some_and(is_dec_digit) {
                 self.pos += 1;
             }
             if self.peek().is_some_and(is_ident_start) {
-                return self.error(location, "trailing junk after parameter");
+                return self.error(token_start, "trailing junk after parameter");
             }
-            let raw = &self.input[start..self.pos];
-            let value = raw
-                .parse::<i32>()
-                .map_err(|_| LexError::ranged(location, self.pos, "parameter number too large"))?;
-            return Ok(Some(Token::integer(TokenKind::Param, location, value)));
+            let digits = &self.input[digits_start..self.pos];
+            let number = digits.parse::<i32>().map_err(|_| {
+                LexError::ranged(token_start, self.pos, "parameter number too large")
+            })?;
+            return Ok(Some(Token::integer(TokenKind::Param, token_start, number)));
         }
 
         Ok(None)
     }
 
-    fn dollar_delimiter_end(&self, start: usize) -> Option<usize> {
-        if self.bytes.get(start) != Some(&b'$') {
+    fn dollar_quote_delimiter_end(&self, delimiter_start: usize) -> Option<usize> {
+        if self.bytes.get(delimiter_start) != Some(&b'$') {
             return None;
         }
-        let mut pos = start + 1;
-        if self.bytes.get(pos) == Some(&b'$') {
-            return Some(pos + 1);
+        let mut delimiter_end = delimiter_start + 1;
+        if self.bytes.get(delimiter_end) == Some(&b'$') {
+            return Some(delimiter_end + 1);
         }
-        if !self.bytes.get(pos).is_some_and(|b| is_dolq_start(*b)) {
+        if !self
+            .bytes
+            .get(delimiter_end)
+            .is_some_and(|b| is_dollar_quote_tag_start(*b))
+        {
             return None;
         }
-        pos += 1;
-        while self.bytes.get(pos).is_some_and(|b| is_dolq_cont(*b)) {
-            pos += 1;
+        delimiter_end += 1;
+        while self
+            .bytes
+            .get(delimiter_end)
+            .is_some_and(|b| is_dollar_quote_tag_continue(*b))
+        {
+            delimiter_end += 1;
         }
-        if self.bytes.get(pos) == Some(&b'$') {
-            Some(pos + 1)
+        if self.bytes.get(delimiter_end) == Some(&b'$') {
+            Some(delimiter_end + 1)
         } else {
             None
         }
@@ -671,8 +685,8 @@ impl<'a> Lexer<'a> {
 
     fn scan_quoted_identifier(
         &mut self,
-        location: usize,
-        unicode: bool,
+        token_start: usize,
+        kind: TokenKind,
     ) -> Result<Token, LexError> {
         let mut literal = Vec::new();
         while let Some(b) = self.peek() {
@@ -684,104 +698,97 @@ impl<'a> Lexer<'a> {
                 }
                 self.pos += 1;
                 if literal.is_empty() {
-                    return self.error(location, "zero-length delimited identifier");
+                    return self.error(token_start, "zero-length delimited identifier");
                 }
-                let ident = truncate_identifier(&string_from_bytes(literal));
-                let kind = if unicode {
-                    TokenKind::UIdent
-                } else {
-                    TokenKind::Ident
-                };
-                return Ok(Token::string(kind, location, ident));
+                let identifier = truncate_identifier(&string_from_bytes(literal));
+                return Ok(Token::string(kind, token_start, identifier));
             }
             literal.push(b);
             self.pos += 1;
         }
-        self.error(location, "unterminated quoted identifier")
+        self.error(token_start, "unterminated quoted identifier")
     }
 
-    fn scan_identifier_or_keyword(&mut self, location: usize) -> Token {
-        let start = self.pos;
+    fn scan_identifier_or_keyword(&mut self) -> Token {
+        let token_start = self.pos;
         self.pos += 1;
         while self.peek().is_some_and(is_ident_cont) {
             self.pos += 1;
         }
-        let raw = &self.input[start..self.pos];
-        if let Some(keyword) = lookup_keyword(raw) {
-            return Token::keyword(keyword.kind, location, keyword.word);
+        let identifier = &self.input[token_start..self.pos];
+        if let Some(keyword) = lookup_keyword(identifier) {
+            return Token::keyword(keyword.kind, token_start, keyword.word);
         }
         Token::string(
             TokenKind::Ident,
-            location,
-            downcase_truncate_identifier(raw),
+            token_start,
+            downcase_truncate_identifier(identifier),
         )
     }
 
-    fn scan_number(&mut self, location: usize) -> Result<Token, LexError> {
-        let start = self.pos;
+    fn scan_number(&mut self) -> Result<Token, LexError> {
+        let token_start = self.pos;
         if self.peek() == Some(b'.') {
             self.pos += 1;
-            self.scan_decinteger_tail();
-            self.scan_exponent(location)?;
-            self.reject_numeric_junk(location)?;
+            self.scan_decimal_digits();
+            self.scan_exponent(token_start)?;
+            self.reject_numeric_junk(token_start)?;
             return Ok(Token::string(
                 TokenKind::FConst,
-                location,
-                &self.input[start..self.pos],
+                token_start,
+                &self.input[token_start..self.pos],
             ));
         }
 
         if self.starts_with_ignore_ascii_case("0x") {
-            return self.scan_prefixed_integer(location, 16, "invalid hexadecimal integer");
+            return self.scan_prefixed_integer(16, "invalid hexadecimal integer");
         }
         if self.starts_with_ignore_ascii_case("0o") {
-            return self.scan_prefixed_integer(location, 8, "invalid octal integer");
+            return self.scan_prefixed_integer(8, "invalid octal integer");
         }
         if self.starts_with_ignore_ascii_case("0b") {
-            return self.scan_prefixed_integer(location, 2, "invalid binary integer");
+            return self.scan_prefixed_integer(2, "invalid binary integer");
         }
 
         self.pos += 1;
-        self.scan_decinteger_tail();
+        self.scan_decimal_digits();
 
         if self.starts_with("..") {
-            return self.integer_or_float(location, start, 10, "");
+            return Ok(self.integer_token(token_start, 10));
         }
 
-        let mut is_float = false;
+        let mut has_decimal_or_exponent = false;
         if self.peek() == Some(b'.') {
-            is_float = true;
+            has_decimal_or_exponent = true;
             self.pos += 1;
             if self.peek().is_some_and(is_dec_digit) {
                 self.pos += 1;
-                self.scan_decinteger_tail();
+                self.scan_decimal_digits();
             }
         }
         if self.peek().is_some_and(|b| b == b'e' || b == b'E') {
-            is_float = true;
-            self.scan_exponent(location)?;
+            has_decimal_or_exponent = true;
+            self.scan_exponent(token_start)?;
         }
-        self.reject_numeric_junk(location)?;
-        if is_float {
+        self.reject_numeric_junk(token_start)?;
+        if has_decimal_or_exponent {
             Ok(Token::string(
                 TokenKind::FConst,
-                location,
-                &self.input[start..self.pos],
+                token_start,
+                &self.input[token_start..self.pos],
             ))
         } else {
-            self.integer_or_float(location, start, 10, "")
+            Ok(self.integer_token(token_start, 10))
         }
     }
 
     fn scan_prefixed_integer(
         &mut self,
-        location: usize,
         radix: u32,
-        fail_message: &'static str,
+        invalid_message: &'static str,
     ) -> Result<Token, LexError> {
-        let start = self.pos;
+        let token_start = self.pos;
         self.pos += 2;
-        let digit_start = self.pos;
         let mut saw_digit = false;
         if self.peek() == Some(b'_') {
             self.pos += 1;
@@ -795,14 +802,14 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
             }
         }
-        if !saw_digit || self.pos == digit_start {
-            return self.error(location, fail_message);
+        if !saw_digit {
+            return self.error(token_start, invalid_message);
         }
-        self.reject_numeric_junk(location)?;
-        self.integer_or_float(location, start, radix, prefix_for_radix(radix))
+        self.reject_numeric_junk(token_start)?;
+        Ok(self.integer_token(token_start, radix))
     }
 
-    fn scan_decinteger_tail(&mut self) {
+    fn scan_decimal_digits(&mut self) {
         loop {
             if self.peek().is_some_and(is_dec_digit) {
                 self.pos += 1;
@@ -814,28 +821,28 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn scan_exponent(&mut self, location: usize) -> Result<(), LexError> {
+    fn scan_exponent(&mut self, token_start: usize) -> Result<(), LexError> {
         if !self.peek().is_some_and(|b| b == b'e' || b == b'E') {
             return Ok(());
         }
-        let save = self.pos;
+        let exponent_start = self.pos;
         self.pos += 1;
         if self.peek().is_some_and(|b| b == b'+' || b == b'-') {
             self.pos += 1;
         }
         if !self.peek().is_some_and(is_dec_digit) {
-            self.pos = save;
-            return self.error(location, "trailing junk after numeric literal");
+            self.pos = exponent_start;
+            return self.error(token_start, "trailing junk after numeric literal");
         }
         self.pos += 1;
-        self.scan_decinteger_tail();
+        self.scan_decimal_digits();
         Ok(())
     }
 
-    fn reject_numeric_junk(&self, location: usize) -> Result<(), LexError> {
+    fn reject_numeric_junk(&self, token_start: usize) -> Result<(), LexError> {
         if self.peek().is_some_and(is_ident_start) {
             return Err(LexError::ranged(
-                location,
+                token_start,
                 self.pos,
                 "trailing junk after numeric literal",
             ));
@@ -843,86 +850,71 @@ impl<'a> Lexer<'a> {
         Ok(())
     }
 
-    fn integer_or_float(
-        &self,
-        location: usize,
-        start: usize,
-        radix: u32,
-        prefix: &str,
-    ) -> Result<Token, LexError> {
-        let raw = &self.input[start..self.pos];
-        let cleaned = raw.replace('_', "");
-        let digits = if radix == 10 {
-            cleaned.as_str()
-        } else {
-            cleaned.get(prefix.len()..).unwrap_or(cleaned.as_str())
-        };
+    fn integer_token(&self, token_start: usize, radix: u32) -> Token {
+        let lexeme = &self.input[token_start..self.pos];
+        let normalized = lexeme.replace('_', "");
+        let prefix_len = prefix_for_radix(radix).len();
+        let digits = &normalized[prefix_len..];
+
         match i32::from_str_radix(digits, radix) {
-            Ok(value) => Ok(Token::integer(TokenKind::IConst, location, value)),
-            Err(_) => Ok(Token::string(TokenKind::FConst, location, raw)),
+            Ok(integer) => Token::integer(TokenKind::IConst, token_start, integer),
+            // PostgreSQL classifies out-of-range integer lexemes as FCONST
+            // rather than rejecting them in the lexer.
+            Err(_) => Token::string(TokenKind::FConst, token_start, lexeme),
         }
     }
 
-    fn scan_operator(&mut self, location: usize) -> Result<Token, LexError> {
-        let start = self.pos;
+    fn scan_operator(&mut self) -> Result<Token, LexError> {
+        let token_start = self.pos;
         while self.peek().is_some_and(is_operator_char) {
+            // Comment openers terminate an operator even when they occur
+            // after one or more operator characters.
             if self.starts_with("/*") || self.starts_with("--") {
                 break;
             }
             self.pos += 1;
         }
-        let mut end = self.pos;
+        let mut operator_end = self.pos;
 
-        if end - start > 1 {
-            let bytes = &self.bytes[start..end];
+        if operator_end - token_start > 1 {
+            let bytes = &self.bytes[token_start..operator_end];
             if matches!(bytes.last(), Some(b'+' | b'-')) {
-                let has_non_sql = bytes[..bytes.len() - 1].iter().any(|b| {
-                    matches!(
-                        b,
-                        b'~' | b'!' | b'@' | b'#' | b'^' | b'&' | b'|' | b'`' | b'?' | b'%'
-                    )
-                });
-                if !has_non_sql {
-                    while end - start > 1 && matches!(self.bytes[end - 1], b'+' | b'-') {
-                        end -= 1;
+                // SQL-compatible operator sequences cannot end in '+' or '-'.
+                // PostgreSQL permits the suffix only when an earlier character
+                // makes the sequence unambiguously a user-defined operator.
+                let allows_trailing_sign = bytes[..bytes.len() - 1]
+                    .iter()
+                    .copied()
+                    .any(is_non_sql_operator_char);
+                if !allows_trailing_sign {
+                    while operator_end - token_start > 1
+                        && matches!(self.bytes[operator_end - 1], b'+' | b'-')
+                    {
+                        operator_end -= 1;
                     }
-                    self.pos = end;
+                    self.pos = operator_end;
                 }
             }
         }
 
-        let op = &self.input[start..end];
-        if op.len() == 1 {
-            let b = op.as_bytes()[0];
-            if is_self_char(b) {
-                return Ok(Token::new(TokenKind::Char(b as char), location));
+        let operator = &self.input[token_start..operator_end];
+        if operator.len() == 1 {
+            let byte = operator.as_bytes()[0];
+            if is_single_char_token(byte) {
+                return Ok(Token::new(TokenKind::Char(byte as char), token_start));
             }
         }
-        if op.len() == 2 {
-            let kind = match op {
-                "=>" => Some(TokenKind::EqualsGreater),
-                ">=" => Some(TokenKind::GreaterEquals),
-                "<=" => Some(TokenKind::LessEquals),
-                "<>" | "!=" => Some(TokenKind::NotEquals),
-                "->" => Some(TokenKind::RightArrow),
-                _ => None,
-            };
-            if let Some(kind) = kind {
-                return Ok(Token::new(kind, location));
-            }
+        if operator.len() >= NAMEDATALEN {
+            return self.error(token_start, "operator too long");
         }
-        if op.len() >= NAMEDATALEN {
-            return self.error(location, "operator too long");
-        }
-        Ok(Token::string(TokenKind::Op, location, op))
+        Ok(Token::string(TokenKind::Op, token_start, operator))
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StringMode {
-    Standard,
-    Extended,
-    Unicode,
+enum StringEscapeMode {
+    Literal,
+    Backslash,
 }
 
 fn is_space(b: u8) -> bool {
@@ -941,15 +933,15 @@ fn is_ident_cont(b: u8) -> bool {
     is_ident_start(b) || b.is_ascii_digit() || b == b'$'
 }
 
-fn is_dolq_start(b: u8) -> bool {
+fn is_dollar_quote_tag_start(b: u8) -> bool {
     is_ident_start(b)
 }
 
-fn is_dolq_cont(b: u8) -> bool {
+fn is_dollar_quote_tag_continue(b: u8) -> bool {
     is_ident_start(b) || b.is_ascii_digit()
 }
 
-fn is_self_char(b: u8) -> bool {
+fn is_single_char_token(b: u8) -> bool {
     matches!(
         b,
         b',' | b'('
@@ -994,6 +986,27 @@ fn is_operator_char(b: u8) -> bool {
     )
 }
 
+fn is_non_sql_operator_char(b: u8) -> bool {
+    matches!(
+        b,
+        b'~' | b'!' | b'@' | b'#' | b'^' | b'&' | b'|' | b'`' | b'?' | b'%'
+    )
+}
+
+fn two_byte_token_kind(bytes: &[u8]) -> Option<TokenKind> {
+    match bytes {
+        b"::" => Some(TokenKind::TypeCast),
+        b".." => Some(TokenKind::DotDot),
+        b":=" => Some(TokenKind::ColonEquals),
+        b"=>" => Some(TokenKind::EqualsGreater),
+        b"<=" => Some(TokenKind::LessEquals),
+        b">=" => Some(TokenKind::GreaterEquals),
+        b"<>" | b"!=" => Some(TokenKind::NotEquals),
+        b"->" => Some(TokenKind::RightArrow),
+        _ => None,
+    }
+}
+
 fn is_digit_for_radix(b: u8, radix: u32) -> bool {
     match radix {
         2 => matches!(b, b'0' | b'1'),
@@ -1008,8 +1021,9 @@ fn prefix_for_radix(radix: u32) -> &'static str {
     match radix {
         2 => "0b",
         8 => "0o",
+        10 => "",
         16 => "0x",
-        _ => "",
+        _ => unreachable!("unsupported integer radix {radix}"),
     }
 }
 
@@ -1036,29 +1050,29 @@ fn string_from_bytes(bytes: Vec<u8>) -> std::string::String {
     }
 }
 
-fn is_utf16_surrogate_first(c: u32) -> bool {
-    (0xD800..=0xDBFF).contains(&c)
+fn is_high_surrogate(value: u32) -> bool {
+    (0xD800..=0xDBFF).contains(&value)
 }
 
-fn is_utf16_surrogate_second(c: u32) -> bool {
-    (0xDC00..=0xDFFF).contains(&c)
+fn is_low_surrogate(value: u32) -> bool {
+    (0xDC00..=0xDFFF).contains(&value)
 }
 
 fn push_codepoint(
     literal: &mut Vec<u8>,
     codepoint: u32,
-    location: usize,
-    end: usize,
+    escape_start: usize,
+    escape_end: usize,
 ) -> Result<(), LexError> {
     let Some(ch) = char::from_u32(codepoint) else {
         return Err(LexError::ranged(
-            location,
-            end,
+            escape_start,
+            escape_end,
             "invalid Unicode escape value",
         ));
     };
-    let mut buf = [0; 4];
-    literal.extend_from_slice(ch.encode_utf8(&mut buf).as_bytes());
+    let mut encoded = [0; 4];
+    literal.extend_from_slice(ch.encode_utf8(&mut encoded).as_bytes());
     Ok(())
 }
 
@@ -1102,12 +1116,31 @@ mod tests {
     }
 
     #[test]
+    fn lexes_extended_string_byte_and_unicode_escapes() {
+        let tokens = lex(r"E'\101\x42\u0043\U00000044\uD83D\uDE00'").unwrap();
+        assert_eq!(tokens[0].value, Some(TokenValue::String("ABCD😀".into())));
+    }
+
+    #[test]
     fn concatenates_adjacent_strings_only_across_newline() {
         let tokens = lex("'a'
 'b'")
         .unwrap();
         assert_eq!(tokens[0].value, Some(TokenValue::String("ab".into())));
         assert_eq!(tokens[1].kind, TokenKind::Eof);
+
+        let tokens = lex("'a' 'b'").unwrap();
+        assert_eq!(tokens[0].value, Some(TokenValue::String("a".into())));
+        assert_eq!(tokens[1].value, Some(TokenValue::String("b".into())));
+    }
+
+    #[test]
+    fn distinguishes_dollar_quotes_parameters_and_bare_dollars() {
+        let tokens = lex("$tag$body$tag$ $42 $foo").unwrap();
+        assert_eq!(tokens[0].value, Some(TokenValue::String("body".into())));
+        assert_eq!(tokens[1].value, Some(TokenValue::Integer(42)));
+        assert_eq!(tokens[2].kind, TokenKind::Char('$'));
+        assert_eq!(tokens[3].value, Some(TokenValue::String("foo".into())));
     }
 
     #[test]
@@ -1124,6 +1157,18 @@ mod tests {
     }
 
     #[test]
+    fn preserves_integer_separators_and_out_of_range_lexemes() {
+        let tokens = lex("1_000 0x_FF 2147483648").unwrap();
+        assert_eq!(tokens[0].value, Some(TokenValue::Integer(1000)));
+        assert_eq!(tokens[1].value, Some(TokenValue::Integer(255)));
+        assert_eq!(tokens[2].kind, TokenKind::FConst);
+        assert_eq!(
+            tokens[2].value,
+            Some(TokenValue::String("2147483648".into()))
+        );
+    }
+
+    #[test]
     fn handles_nested_comments_and_operator_comment_boundaries() {
         assert_eq!(
             kinds("1 /* outer /* inner */ done */ +/*comment*/ 2"),
@@ -1132,6 +1177,25 @@ mod tests {
                 TokenKind::Char('+'),
                 TokenKind::IConst,
                 TokenKind::Eof
+            ]
+        );
+    }
+
+    #[test]
+    fn applies_postgres_trailing_sign_rules_to_operators() {
+        assert_eq!(
+            kinds("a =- b ?- c >=- d"),
+            vec![
+                TokenKind::Ident,
+                TokenKind::Char('='),
+                TokenKind::Char('-'),
+                TokenKind::Ident,
+                TokenKind::Op,
+                TokenKind::Ident,
+                TokenKind::GreaterEquals,
+                TokenKind::Char('-'),
+                TokenKind::Ident,
+                TokenKind::Eof,
             ]
         );
     }
