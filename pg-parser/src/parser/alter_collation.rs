@@ -1,3 +1,5 @@
+//! Parsing for `ALTER COLLATION` refresh-version statements.
+
 use super::*;
 
 impl Parser {

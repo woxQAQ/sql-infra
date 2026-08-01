@@ -1,3 +1,8 @@
+//! Definition-style `CREATE` statements and their option lists.
+//!
+//! PostgreSQL aggregates, operators, types, collations, and text-search objects
+//! reuse `DefElem` shapes but retain object-specific name parsing.
+
 use super::*;
 
 fn operator_name_nodes(tokens: Vec<Token>) -> NodeList {

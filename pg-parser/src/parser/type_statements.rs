@@ -1,3 +1,8 @@
+//! User-defined type and enum alteration statements.
+//!
+//! Base, composite, enum, and range type actions retain their distinct command
+//! payloads while sharing type identities and option shapes.
+
 use super::*;
 
 impl Parser {

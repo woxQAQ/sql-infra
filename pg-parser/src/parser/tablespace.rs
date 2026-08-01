@@ -1,3 +1,8 @@
+//! Tablespace creation, alteration, and removal.
+//!
+//! Owner, location, option, rename, and ownership clauses retain their dedicated
+//! PostgreSQL statement shapes.
+
 use super::*;
 
 impl Parser {

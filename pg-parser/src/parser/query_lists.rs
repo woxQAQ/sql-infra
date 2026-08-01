@@ -1,3 +1,8 @@
+//! Strict query-list parsing for targets, values, grouping, sorting, and expressions.
+//!
+//! List terminators and completion follow tokens are handled together to prevent
+//! callers from silently accepting missing elements.
+
 use super::*;
 
 impl Parser {

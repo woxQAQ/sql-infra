@@ -1,6 +1,9 @@
 //! PostgreSQL completion context collection.
 //!
-//! This crate deliberately stops before catalog resolution and presentation.
+//! [`collect`] isolates the active statement, normalizes the editing point,
+//! recovers lexical context, asks `pg-parser` for grammar expectations, and
+//! derives catalog intent plus visible query scope. The crate deliberately stops
+//! before catalog resolution, ranking, and editor presentation.
 
 mod intent;
 mod lexical;

@@ -1,3 +1,8 @@
+//! Aggregate argument-signature parsing shared by create, alter, and drop forms.
+//!
+//! Both current and legacy PostgreSQL aggregate syntaxes normalize into raw
+//! function-parameter nodes here.
+
 use super::*;
 
 pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<NodeList> {

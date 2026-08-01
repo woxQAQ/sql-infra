@@ -1,3 +1,8 @@
+//! Table columns, typed-table elements, and column qualifiers.
+//!
+//! Column definitions, generated/identity forms, defaults, storage, compression,
+//! and embedded constraints are parsed before `create_table` assembles the table.
+
 use super::*;
 
 impl Parser {

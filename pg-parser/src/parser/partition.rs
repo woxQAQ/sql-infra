@@ -1,3 +1,8 @@
+//! Table partition specifications and partition bounds.
+//!
+//! Range, list, hash, default, and multi-column bound forms are normalized into
+//! PostgreSQL partition AST nodes.
+
 use super::*;
 
 impl Parser {

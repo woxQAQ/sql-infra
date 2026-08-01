@@ -1,5 +1,9 @@
-// Translated by hand from PostgreSQL's src/backend/parser/scan.l semantics.
-// Token names come from gram.y and keyword mappings from parser/kwlist.h.
+//! PostgreSQL-compatible tokenization with byte-accurate ranges.
+//!
+//! Strict lexing reports malformed input immediately; completion lexing may
+//! replace an error at the editing point with an `Incomplete` token. The
+//! implementation follows PostgreSQL `scan.l`, `gram.y`, and `kwlist.h` rules.
+
 use crate::{BareLabel, KEYWORDS, KeywordCategory, TextRange, TextSize, TokenKind};
 
 /// PostgreSQL's fixed name width, including the terminating NUL byte.

@@ -1,3 +1,8 @@
+//! Function, array, and call-like expression parsing.
+//!
+//! Argument lists, aggregate decorations, filters, ordering, and window clauses
+//! are assembled here after a callable name or constructor is recognized.
+
 use super::expression::ExprParser;
 use super::*;
 

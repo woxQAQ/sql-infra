@@ -1,3 +1,8 @@
+//! Shared identity-changing `ALTER` operations across PostgreSQL object kinds.
+//!
+//! Rename, owner, schema, and dependency actions are parsed here together with
+//! capability checks that prevent unsupported object/action combinations.
+
 use super::*;
 
 #[derive(Default)]

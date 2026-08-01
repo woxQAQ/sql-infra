@@ -1,3 +1,8 @@
+//! Row-level security policy creation and alteration.
+//!
+//! Commands, roles, `USING`, and `WITH CHECK` expressions are kept with their
+//! policy-specific defaults and raw locations.
+
 use super::*;
 
 impl Parser {

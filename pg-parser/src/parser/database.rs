@@ -1,3 +1,8 @@
+//! Database and system-configuration DDL parsing.
+//!
+//! This module owns create/alter/drop database forms, database options, and
+//! `ALTER SYSTEM` rather than treating their option grammars as generic DDL.
+
 use super::*;
 
 impl Parser {

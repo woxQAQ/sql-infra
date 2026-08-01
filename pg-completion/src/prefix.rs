@@ -1,3 +1,9 @@
+//! Editing-point normalization, lexical context, and identifier-prefix analysis.
+//!
+//! The module computes replacement ranges, quoting mode, normalized name parts,
+//! qualifiers, and whether parser grammar suggestions are meaningful at the
+//! point. It tolerates incomplete quoted and Unicode identifiers.
+
 use pg_parser::{TextRange, TextSize, Token, TokenValue};
 
 use crate::{CompletionDiagnostic, CompletionDiagnosticKind, lexical};

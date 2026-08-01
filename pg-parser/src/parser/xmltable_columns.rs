@@ -1,3 +1,8 @@
+//! `XMLTABLE` column definitions and option boundaries.
+//!
+//! Ordinality, type, path, default, and nullability clauses are split from their
+//! expression fragments without losing completion context.
+
 use super::*;
 
 pub(super) fn xmltable_column_from_tokens_with_completion(

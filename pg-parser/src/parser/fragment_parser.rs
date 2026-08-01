@@ -1,3 +1,8 @@
+//! Adapters for parsing isolated token fragments with the normal parser.
+//!
+//! Statement, query, type, and expression fragments can optionally share a
+//! completion collector, preserving grammar behavior across deferred parsing.
+
 use super::*;
 
 pub(super) fn tokens_end_at_top_level(tokens: &[Token]) -> bool {

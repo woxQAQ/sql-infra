@@ -1,3 +1,8 @@
+//! Shared object-identity, signature, definition-list, and option-list parsing.
+//!
+//! These helpers retain strict object-specific seams while centralizing balanced
+//! token fragments and recurring PostgreSQL `DefElem` container shapes.
+
 use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

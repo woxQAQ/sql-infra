@@ -1,3 +1,8 @@
+//! PostgreSQL maintenance and operational utility statements.
+//!
+//! `COPY`, vacuuming, locking, notification, refresh, reindex, clustering,
+//! truncation, and related option grammars live here rather than in DDL modules.
+
 use super::*;
 
 const COPY_LEGACY_OPTION_STARTS: &[TokenKind] = &[

@@ -1,3 +1,8 @@
+//! Partition-specific `ALTER TABLE` commands.
+//!
+//! This module owns attach, detach, and partition-bound details that would
+//! otherwise obscure the general `ALTER TABLE` command flow.
+
 use super::*;
 
 impl Parser {

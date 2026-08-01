@@ -1,3 +1,8 @@
+//! Function-parameter token classification and fragment parsing.
+//!
+//! Parameter modes, names, defaults, and type grammars normalize into
+//! `FunctionParameter` nodes for routines and aggregate signatures.
+
 use super::*;
 
 fn function_parameter_mode(kind: TokenKind) -> Option<FunctionParameterMode> {

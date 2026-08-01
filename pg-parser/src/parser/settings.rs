@@ -1,3 +1,8 @@
+//! Session settings and transaction-control statements.
+//!
+//! `SET`, `RESET`, `SHOW`, and transaction modes share value-fragment parsers but
+//! retain statement-specific normalization and completion behavior.
+
 use super::*;
 
 impl Parser {

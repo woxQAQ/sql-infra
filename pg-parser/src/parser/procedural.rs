@@ -1,3 +1,8 @@
+//! Miscellaneous procedural and extension-facing utility statements.
+//!
+//! This module parses `IMPORT FOREIGN SCHEMA`, `DO`, `RETURN`, and `WAIT`, whose
+//! grammars do not belong to the core query or DDL families.
+
 use super::*;
 
 impl Parser {

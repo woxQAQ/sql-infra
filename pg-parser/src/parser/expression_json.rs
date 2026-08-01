@@ -1,3 +1,8 @@
+//! Core SQL/JSON value expressions and constructors.
+//!
+//! JSON formats, output clauses, null handling, uniqueness, object construction,
+//! and array construction are parsed here.
+
 use super::expression::ExprParser;
 use super::*;
 

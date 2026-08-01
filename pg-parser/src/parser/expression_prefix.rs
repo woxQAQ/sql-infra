@@ -1,3 +1,8 @@
+//! Prefix and primary-expression recognition for [`ExprParser`].
+//!
+//! Literals, unary operators, names, parenthesized forms, and constructor starts
+//! enter the precedence parser through this module.
+
 use super::expression::ExprParser;
 use super::*;
 

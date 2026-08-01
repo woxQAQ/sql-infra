@@ -1,3 +1,8 @@
+//! Text-search object definition and alteration.
+//!
+//! Parsers, dictionaries, templates, configurations, mappings, and definition
+//! options share PostgreSQL's text-search identity rules here.
+
 use super::*;
 
 impl Parser {

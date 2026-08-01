@@ -1,3 +1,5 @@
+//! `DELETE` statement parsing, including `WITH`, `USING`, filters, and returning.
+
 use super::*;
 
 impl Parser {

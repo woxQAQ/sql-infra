@@ -1,3 +1,9 @@
+//! Query-expression orchestration for `WITH`, `SELECT`, `VALUES`, and set operations.
+//!
+//! This module makes the major query phases visible—CTEs, primary forms, set
+//! precedence, result clauses, locking, and limits—while delegating list and range
+//! details to focused modules.
+
 use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

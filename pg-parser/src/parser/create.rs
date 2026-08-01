@@ -1,3 +1,8 @@
+//! Top-level `CREATE` dispatch and grammar shared by relation-like objects.
+//!
+//! Detailed object definitions stay in dedicated modules; this module identifies
+//! the statement family and common persistence modifiers.
+
 use super::*;
 
 impl Parser {

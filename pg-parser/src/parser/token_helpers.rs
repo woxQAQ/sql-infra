@@ -1,3 +1,8 @@
+//! Token-to-AST projections and balanced token-list utilities.
+//!
+//! This module centralizes token value interpretation, operator names, definition
+//! elements, top-level splitting/search, and source-like token rendering.
+
 use super::*;
 
 pub(super) fn token_name(token: &Token) -> Option<std::string::String> {

@@ -1,3 +1,8 @@
+//! `INSERT` statement parsing and source normalization.
+//!
+//! Column indirection, overriding, selectable sources, conflict handling, aliases,
+//! and returning clauses are assembled into `InsertStmt`.
+
 use super::*;
 
 impl Parser {

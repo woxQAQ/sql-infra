@@ -1,3 +1,8 @@
+//! Extended-statistics creation and alteration.
+//!
+//! Statistics targets, expression/column elements, kinds, options, and ownership
+//! actions are parsed into their dedicated raw statements.
+
 use super::*;
 
 fn parse_stats_params_with_completion(

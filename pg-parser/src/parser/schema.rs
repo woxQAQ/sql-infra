@@ -1,3 +1,8 @@
+//! Schema creation and schema-contained statement parsing.
+//!
+//! Authorization and nested schema elements are parsed in order so contained
+//! objects retain the grammar accepted inside `CREATE SCHEMA`.
+
 use super::*;
 
 impl Parser {

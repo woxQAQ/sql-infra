@@ -1,3 +1,8 @@
+//! Object and role privilege statements.
+//!
+//! Grant/revoke mode, privilege names, target identity grammars, grantees,
+//! grantors, options, and default-privilege scope are parsed here.
+
 use super::*;
 
 const ACCESS_PRIVILEGE_STARTS: &[TokenKind] = &[

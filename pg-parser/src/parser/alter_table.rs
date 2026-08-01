@@ -1,3 +1,8 @@
+//! General `ALTER TABLE` parsing and `AlterTableCmd` construction.
+//!
+//! Command-family dispatch lives here; partition-specific actions are delegated
+//! to `alter_table_partition` so the common command sequence stays visible.
+
 use super::*;
 
 impl Parser {

@@ -1,3 +1,8 @@
+//! Column, table, index, and foreign-key constraint grammar.
+//!
+//! Constraint attributes and actions are normalized into PostgreSQL raw
+//! constraint nodes while retaining their source locations.
+
 use super::*;
 
 impl Parser {

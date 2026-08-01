@@ -1,3 +1,8 @@
+//! Role lifecycle, ownership, and role-option grammar.
+//!
+//! Create/alter/drop roles, owned-object statements, password and capability
+//! options, and role-scoped setting clauses share this module.
+
 use super::*;
 
 impl Parser {

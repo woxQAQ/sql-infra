@@ -1,3 +1,8 @@
+//! Property-graph DDL.
+//!
+//! Vertex and edge tables, endpoints, keys, labels, and property projections are
+//! parsed together so cross-references remain local to the graph definition.
+
 use super::*;
 
 impl Parser {

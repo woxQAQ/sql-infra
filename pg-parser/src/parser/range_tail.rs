@@ -1,3 +1,8 @@
+//! Tails that extend an initial `FROM` item.
+//!
+//! Join trees and `XMLTABLE` range expressions are parsed here after the base
+//! relation shape has been established by `range`.
+
 use super::*;
 
 impl Parser {

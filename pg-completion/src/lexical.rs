@@ -1,3 +1,9 @@
+//! Shared lexical predicates for incomplete editor input.
+//!
+//! Statement isolation and prefix analysis use these rules without demanding a
+//! fully valid token stream. Dollar tags and identifier characters must stay in
+//! sync with `pg-parser`'s lexer semantics.
+
 pub(super) fn dollar_quote_tag(input: &[u8], start: usize, end: usize) -> Option<Vec<u8>> {
     if start >= end || end > input.len() || (start > 0 && is_identifier_continue(input[start - 1]))
     {

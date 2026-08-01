@@ -1,3 +1,8 @@
+//! PostgreSQL's generic `OPTIONS` grammar for foreign-data objects.
+//!
+//! Create and alter forms differ in permitted actions but share option-name and
+//! value parsing here.
+
 use super::*;
 
 impl Parser {

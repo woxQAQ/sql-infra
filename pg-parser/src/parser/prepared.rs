@@ -1,3 +1,8 @@
+//! Prepared-statement and execution utility grammar.
+//!
+//! `PREPARE`, `EXECUTE`, `DEALLOCATE`, `EXPLAIN`, and `CALL` share preparable
+//! statement and argument fragments while producing distinct raw nodes.
+
 use super::*;
 
 impl Parser {

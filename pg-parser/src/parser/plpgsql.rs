@@ -1,3 +1,8 @@
+//! PL/pgSQL-specific raw parse modes exposed by PostgreSQL's parser.
+//!
+//! Assignment and expression entry points adapt PL/pgSQL fragments into the same
+//! raw statement nodes used by normal SQL parsing.
+
 use super::*;
 
 pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<RawStmt> {

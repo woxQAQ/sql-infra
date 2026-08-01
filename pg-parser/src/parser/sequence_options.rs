@@ -1,3 +1,8 @@
+//! Sequence statements and typed sequence options.
+//!
+//! Creation, alteration, signed numeric values, ownership, restart behavior, and
+//! sequence type constraints normalize into PostgreSQL option nodes.
+
 use super::*;
 
 impl Parser {

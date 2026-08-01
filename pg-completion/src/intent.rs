@@ -1,3 +1,8 @@
+//! Translation from parser grammar slots to catalog-facing completion intent.
+//!
+//! This module maps syntactic object categories and membership owners into the
+//! object kinds a catalog adapter can resolve; it does not perform catalog I/O.
+
 use pg_parser::{GrammarMembership, TextSize, object_type_slot};
 
 use crate::{

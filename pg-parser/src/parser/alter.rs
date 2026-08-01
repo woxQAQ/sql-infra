@@ -1,3 +1,8 @@
+//! Top-level `ALTER` statement dispatch.
+//!
+//! Object-specific grammar remains in neighboring modules; this module selects
+//! the correct parser without weakening each object's syntax requirements.
+
 use super::*;
 
 impl Parser {

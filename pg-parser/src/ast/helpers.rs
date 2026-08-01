@@ -1,3 +1,8 @@
+//! Small constructors and projections for recurring raw-AST shapes.
+//!
+//! Keeping these constructors here centralizes node tags, default fields, and
+//! PostgreSQL name-list conventions used by otherwise unrelated parsers.
+
 use super::*;
 
 pub(crate) fn name_list_node(elements: NodeList) -> Node {

@@ -1,3 +1,8 @@
+//! Function and procedure creation.
+//!
+//! Parameters, result types, transforms, definition options, SQL bodies, and
+//! `BEGIN ATOMIC` statement lists are assembled into routine raw nodes.
+
 use super::*;
 
 impl Parser {

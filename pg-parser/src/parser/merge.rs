@@ -1,3 +1,8 @@
+//! `MERGE` statement parsing.
+//!
+//! Target/source relations, join conditions, aliases, and ordered actions combine
+//! with the shared DML action grammar in `dml_grammar`.
+
 use super::*;
 
 impl Parser {

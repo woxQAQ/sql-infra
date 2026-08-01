@@ -1,3 +1,5 @@
+//! Domain creation, alteration, and domain-constraint parsing.
+
 use super::*;
 
 impl Parser {

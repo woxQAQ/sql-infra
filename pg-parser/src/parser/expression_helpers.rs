@@ -1,3 +1,8 @@
+//! Shared expression AST constructors and token-fragment adapters.
+//!
+//! These helpers centralize operator naming, boolean rewrites, alias splitting,
+//! expression boundaries, and isolated expression entry points.
+
 use super::*;
 
 pub(super) fn is_function_expression_node(node: &Node) -> bool {

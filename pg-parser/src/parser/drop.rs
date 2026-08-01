@@ -1,3 +1,8 @@
+//! Top-level and object-specific `DROP` statement parsing.
+//!
+//! Shared behavior and missing-object options are combined with identity grammars
+//! for functions, operators, mappings, and other special object families.
+
 use super::*;
 
 impl Parser {

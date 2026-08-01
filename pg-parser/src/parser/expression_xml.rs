@@ -1,3 +1,8 @@
+//! SQL/XML expression parsing and raw-node construction.
+//!
+//! XML constructors, parsing, roots, serialization, named arguments, and passing
+//! mechanisms are kept together with their SQL-specific rewrites.
+
 use super::expression::ExprParser;
 use super::*;
 

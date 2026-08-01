@@ -1,3 +1,8 @@
+//! Index declarations and index-element parsing.
+//!
+//! Expressions, columns, collations, operator classes, ordering, null treatment,
+//! and completion-aware element fragments converge here.
+
 use super::*;
 
 impl Parser {

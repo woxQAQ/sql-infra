@@ -1,3 +1,8 @@
+//! SQL cursor statements: `DECLARE`, `CLOSE`, `FETCH`, and `MOVE`.
+//!
+//! Direction and signed-count parsing is kept with the statements that interpret
+//! those values.
+
 use super::*;
 
 impl Parser {

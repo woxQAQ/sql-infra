@@ -1,3 +1,7 @@
+//! Parsing for `CREATE CAST`, `CREATE CONVERSION`, and `CREATE TRANSFORM`.
+//!
+//! These forms share type/function identities but produce distinct raw nodes.
+
 use super::*;
 
 impl Parser {

@@ -1,3 +1,8 @@
+//! Expressions written with dedicated SQL syntax rather than ordinary calls.
+//!
+//! `CASE`, casts, extraction, normalization, trimming, overlays, substrings,
+//! grouping, XML existence, and SQL value functions are normalized here.
+
 use super::expression::ExprParser;
 use super::*;
 

@@ -1,3 +1,9 @@
+//! Precedence-aware expression parsing.
+//!
+//! [`ExprParser`] coordinates expression modes, binary binding powers, nested
+//! queries, and completion provenance; syntax-specific pieces live in sibling
+//! expression modules.
+
 use super::*;
 
 const NEGATED_PREDICATE_TOKENS: &[TokenKind] = &[

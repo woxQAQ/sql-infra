@@ -1,3 +1,8 @@
+//! Window specifications, frame clauses, and row-locking clauses.
+//!
+//! Ordering, partitioning, frame bounds/exclusions, lock strength, targets, and
+//! wait policy are parsed with their query-level source locations.
+
 use super::*;
 
 impl Parser {

@@ -1,3 +1,8 @@
+//! `FROM` items and range-function parsing.
+//!
+//! Relations, subqueries, functions, `ROWS FROM`, aliases, and column definitions
+//! are converted into PostgreSQL range-table nodes before join tails are applied.
+
 use super::*;
 
 impl Parser {

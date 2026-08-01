@@ -1,3 +1,8 @@
+//! Operator class and operator family statement parsing.
+//!
+//! Create, alter, add, and drop item grammars preserve operator/function
+//! signatures, storage types, strategy numbers, and family identities.
+
 use super::*;
 
 impl Parser {

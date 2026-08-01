@@ -1,3 +1,9 @@
+//! Recursive-descent parsing and parser-native completion collection.
+//!
+//! [`Parser`] owns the token cursor and common grammar operations. Private
+//! submodules add concept-focused parsing methods, while public entry points
+//! preserve PostgreSQL raw-tree and source-location semantics.
+
 use crate::ast::*;
 use crate::lexer::{Token, TokenValue, lex, lookup_keyword};
 use crate::{BareLabel, KeywordCategory, TextRange, TextSize, TokenKind};
@@ -480,7 +486,7 @@ impl Parser {
     /// Read-ahead (non-consuming): does `needle` appear at the **top level**
     /// before any token in `stop_tokens`?
     ///
-    /// Uses the same bracket-depth notion as [`take_until_top_level`].
+    /// Uses the same bracket-depth notion as [`Self::take_until_top_level`].
     /// Returns `false` if a stop token appears first, or on EOF.
     /// Useful for aggressive lookahead when dispatching productions.
     pub(super) fn has_top_level_token_before(
@@ -602,7 +608,7 @@ impl Parser {
 
     /// Byte offset of the most recently consumed token.  Useful after
     /// `advance` when you still need the start position of the just-parsed
-    /// node.  Falls back to [`location`] when the cursor hasn't moved yet.
+    /// node. Falls back to [`Self::location`] when the cursor hasn't moved yet.
     pub(super) fn previous_location(&self) -> usize {
         self.tokens
             .get(self.pos.saturating_sub(1))

@@ -1,3 +1,8 @@
+//! Isolation of the semicolon-delimited statement containing the editing point.
+//!
+//! The scanner recognizes strings, identifiers, dollar quotes, and nested
+//! comments so contained semicolons do not split the active statement.
+
 use pg_parser::{TextRange, TextSize};
 
 use crate::lexical;

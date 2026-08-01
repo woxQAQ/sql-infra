@@ -1,3 +1,8 @@
+//! Routine alteration and routine-scoped setting actions.
+//!
+//! Function, procedure, routine, and aggregate identities feed a common action
+//! parser without erasing their distinct object types.
+
 use super::*;
 
 impl Parser {

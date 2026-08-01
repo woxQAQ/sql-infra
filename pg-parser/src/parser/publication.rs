@@ -1,3 +1,8 @@
+//! Logical-replication publication and subscription statements.
+//!
+//! Publication object lists, row filters, column lists, subscription options, and
+//! alter/drop actions retain their PostgreSQL-specific constraints here.
+
 use super::*;
 
 impl Parser {

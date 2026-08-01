@@ -1,3 +1,8 @@
+//! `JSON_TABLE` range-function and column grammar.
+//!
+//! Path specifications, passing values, nested columns, wrappers, quotes, formats,
+//! and per-column behaviors are parsed as one cohesive SQL/JSON construct.
+
 use super::*;
 
 impl Parser {

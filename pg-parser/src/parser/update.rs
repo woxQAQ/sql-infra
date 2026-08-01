@@ -1,3 +1,8 @@
+//! `UPDATE` statement parsing.
+//!
+//! Assignment targets, multi-assignments, source relations, filters, aliases,
+//! row portions, and returning clauses are assembled into `UpdateStmt`.
+
 use super::*;
 
 impl Parser {

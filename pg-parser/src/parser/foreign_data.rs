@@ -1,3 +1,8 @@
+//! Foreign-data wrapper, server, and user-mapping DDL.
+//!
+//! Handler functions, validators, generic options, authorization, and mapping
+//! identities are parsed into their dedicated PostgreSQL raw nodes.
+
 use super::*;
 
 impl Parser {

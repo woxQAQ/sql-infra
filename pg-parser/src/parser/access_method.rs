@@ -1,3 +1,8 @@
+//! Parsing for `CREATE ACCESS METHOD` statements.
+//!
+//! This module validates access-method type and handler clauses before building
+//! the PostgreSQL `CreateAmStmt` shape.
+
 use super::*;
 
 impl Parser {

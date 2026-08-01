@@ -1,3 +1,8 @@
+//! Type-name parsing from isolated token fragments.
+//!
+//! Built-in and qualified names, modifiers, arrays, intervals, `%TYPE`, function
+//! type restrictions, and completion slots normalize into `TypeName` nodes.
+
 use super::*;
 
 pub(super) fn record_type_name_completion(

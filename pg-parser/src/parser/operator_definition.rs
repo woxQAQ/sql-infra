@@ -1,3 +1,8 @@
+//! Operator definition options and `ALTER OPERATOR` parsing.
+//!
+//! Operator-specific procedure, selectivity, join, commutator, negator, and
+//! property clauses become typed raw definition elements here.
+
 use super::*;
 
 impl Parser {

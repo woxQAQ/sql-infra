@@ -1,3 +1,8 @@
+//! `CREATE TABLE` and `CREATE TABLE AS` orchestration.
+//!
+//! Relation options, table elements, query sources, persistence, and `WITH DATA`
+//! suffixes are assembled here from focused helper modules.
+
 use super::*;
 
 impl Parser {

@@ -1,3 +1,8 @@
+//! Trigger and event-trigger statement parsing.
+//!
+//! Regular, constraint, transition-table, and event triggers share their
+//! high-level construction here while preserving kind-specific clauses.
+
 use super::*;
 
 #[derive(Clone, Copy, Eq, PartialEq)]

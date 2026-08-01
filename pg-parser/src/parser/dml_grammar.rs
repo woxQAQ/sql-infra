@@ -1,3 +1,8 @@
+//! Grammar shared by data-modification statements.
+//!
+//! Filters, assignments, `RETURNING`, conflict handling, row portions, and merge
+//! actions live here so `INSERT`, `UPDATE`, `DELETE`, and `MERGE` stay focused.
+
 use super::*;
 
 impl Parser {

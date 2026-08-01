@@ -1,3 +1,8 @@
+//! Query-rewrite statements and transformations.
+//!
+//! Rules, views, recursive-view rewrites, check options, and nested statement
+//! action lists are normalized into PostgreSQL raw nodes here.
+
 use super::*;
 
 impl Parser {

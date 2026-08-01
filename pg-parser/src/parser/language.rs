@@ -1,3 +1,8 @@
+//! Procedural-language creation statements.
+//!
+//! Handler, inline-handler, validator, trust, and replacement clauses are mapped
+//! into PostgreSQL's language statement shape.
+
 use super::*;
 
 impl Parser {

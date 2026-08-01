@@ -1,3 +1,8 @@
+//! Extension creation, alteration, update, and membership parsing.
+//!
+//! Extension member identities reuse the object-specific identity parsers used by
+//! regular DDL instead of accepting arbitrary token text.
+
 use super::*;
 
 impl Parser {

@@ -1,3 +1,8 @@
+//! Parsing for `COMMENT` and `SECURITY LABEL` object descriptions.
+//!
+//! The module selects the identity grammar required by each describable object
+//! kind before consuming the shared `IS` payload.
+
 use super::*;
 
 const DESCRIBED_OBJECT_STARTS: &[TokenKind] = &[

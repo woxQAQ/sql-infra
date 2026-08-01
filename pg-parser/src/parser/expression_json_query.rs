@@ -1,3 +1,8 @@
+//! SQL/JSON query functions, behaviors, wrappers, passing clauses, and aggregates.
+//!
+//! This module owns the clause-rich JSON forms that operate on paths or aggregate
+//! rows, complementing the value constructors in `expression_json`.
+
 use super::expression::ExprParser;
 use super::*;
 

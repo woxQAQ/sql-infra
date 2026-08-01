@@ -1,5 +1,8 @@
-// This module mirrors PostgreSQL raw parse tree semantics with idiomatic Rust names.
-// Source of truth: pg-parser-offical/src/include/nodes/*.h, not gram.y output.
+//! PostgreSQL raw parse-tree types expressed with idiomatic Rust names.
+//!
+//! The source of truth is PostgreSQL's `src/include/nodes/*.h`, not the grammar
+//! output. Parser modules construct these types directly, so their field defaults
+//! and node tags are part of the parser's compatibility contract.
 
 mod enums;
 mod helpers;

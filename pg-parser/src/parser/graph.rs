@@ -1,3 +1,8 @@
+//! SQL property-graph query expressions.
+//!
+//! `GRAPH_TABLE`, element patterns, label expressions, endpoints, and pattern
+//! quantifiers are parsed into PostgreSQL graph nodes.
+
 use super::*;
 
 impl Parser {

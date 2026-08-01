@@ -1,3 +1,8 @@
+//! UTF-8 source offsets, half-open ranges, slicing, and line/column mapping.
+//!
+//! Offsets are byte-based and limited to PostgreSQL's signed 32-bit parse
+//! locations. [`SourceText`] validates boundaries before exposing source slices.
+
 use std::fmt;
 use std::ops::{Add, Sub};
 

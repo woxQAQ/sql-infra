@@ -1,3 +1,9 @@
+//! Best-effort relation and CTE visibility from the active token stream.
+//!
+//! Scope collection is position-sensitive: it models nested queries, joins,
+//! lateral/table-function visibility, set operations, CTE ordering, and DML
+//! targets without requiring a complete AST or catalog access.
+
 use pg_parser::{TextRange, TextSize, Token, TokenKind, TokenValue};
 
 use crate::{

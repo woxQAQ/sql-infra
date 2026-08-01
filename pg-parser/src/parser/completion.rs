@@ -1,3 +1,9 @@
+//! Parser-native grammar expectation collection at an editing point.
+//!
+//! A synthetic completion marker runs through the normal grammar. The collector
+//! records tokens, phrases, catalog slots, membership, and provenance without
+//! changing strict parsing behavior.
+
 use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
