@@ -8,12 +8,31 @@ use crate::{
     VisibleRelation, prefix::name_part_from_token,
 };
 
+#[derive(Clone, Copy)]
 struct ScopeInput<'a> {
     source: &'a str,
     base: TextSize,
     point: TextSize,
     tokens: &'a [Token],
     depths: &'a [usize],
+}
+
+impl ScopeInput<'_> {
+    fn absolute_point(self) -> TextSize {
+        add(self.base, self.point)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SelectLocation {
+    index: usize,
+    depth: usize,
+}
+
+#[derive(Clone, Copy)]
+enum DmlRelationPlacement {
+    Local,
+    Outer,
 }
 
 #[cfg(test)]
@@ -38,11 +57,6 @@ pub(super) fn collect_tokens(
         tokens
     };
     let depths = token_depths(tokens);
-    let point_depth = depth_at_point(tokens, point);
-    let mut selects = enclosing_selects(tokens, &depths, point, point_depth);
-    remove_completed_insert_source_selects(tokens, &depths, point, &mut selects);
-    let cte_groups = collect_cte_groups(source, base, tokens, &depths);
-    let ctes = visible_ctes_at_point(base, point, &cte_groups);
     let input = ScopeInput {
         source,
         base,
@@ -50,61 +64,38 @@ pub(super) fn collect_tokens(
         tokens,
         depths: &depths,
     };
+    let point_depth = depth_at_point(input.tokens, input.point);
+    let mut selects = enclosing_selects(&input, point_depth);
+    remove_completed_insert_source_selects(&input, &mut selects);
+    let cte_groups = collect_cte_groups(&input);
+    let ctes = visible_ctes_at_point(input.absolute_point(), &cte_groups);
 
-    let mut snapshot = ScopeSnapshot {
-        ctes,
-        ..ScopeSnapshot::default()
-    };
-    if let Some((&(local_index, local_depth), outer_selects)) = selects.split_last() {
-        snapshot.local = query_scope(&input, local_index, local_depth, &snapshot.ctes);
+    let mut snapshot = ScopeSnapshot::default();
+    if let Some((&local_select, outer_selects)) = selects.split_last() {
+        snapshot.local = query_scope(&input, local_select, &ctes);
 
         // Table functions are implicitly LATERAL: while completing inside the
         // call, only relations introduced before this FROM item are visible.
-        apply_table_function_visibility(
-            base,
-            point,
-            tokens,
-            &depths,
-            local_index,
-            local_depth,
-            &mut snapshot.local,
-        );
+        apply_table_function_visibility(&input, local_select, &mut snapshot.local);
 
         // In the local query, only relations available at the cursor position
         // may be referenced from JOIN ON/USING conditions.
-        apply_join_condition_visibility(
-            &input,
-            local_index,
-            local_depth,
-            point_depth,
-            &mut snapshot.local,
-        );
-        let mut inner_select = (local_index, local_depth);
-        for &(outer_index, outer_depth) in outer_selects.iter().rev() {
-            let mut outer = query_scope(&input, outer_index, outer_depth, &snapshot.ctes);
+        apply_join_condition_visibility(&input, local_select, point_depth, &mut snapshot.local);
+        let mut inner_select = local_select;
+        for &outer_select in outer_selects.iter().rev() {
+            let mut outer = query_scope(&input, outer_select, &ctes);
 
             // The enclosing SELECT may itself be inside a JOIN condition.
             // Prevent relations introduced by later joins from leaking in.
-            apply_join_condition_visibility(
-                &input,
-                outer_index,
-                outer_depth,
-                outer_depth,
-                &mut outer,
-            );
+            apply_join_condition_visibility(&input, outer_select, outer_select.depth, &mut outer);
 
             // Check whether the inner SELECT is inside a derived table belonging
             // to this outer SELECT's FROM list.
-            if let Some((open_paren, is_lateral)) = derived_table_container(
-                tokens,
-                &depths,
-                inner_select.0,
-                outer_index,
-                outer_depth,
-                point,
-            ) {
+            if let Some((open_paren, is_lateral)) =
+                derived_table_container(&input, inner_select, outer_select)
+            {
                 if is_lateral {
-                    let boundary = add(base, tokens[open_paren].range.start());
+                    let boundary = add(input.base, input.tokens[open_paren].range.start());
                     outer
                         .relations
                         .retain(|relation| relation.syntax_range.end() <= boundary);
@@ -115,27 +106,32 @@ pub(super) fn collect_tokens(
             if !outer.relations.is_empty() {
                 snapshot.outer.push(outer);
             }
-            inner_select = (outer_index, outer_depth);
+            inner_select = outer_select;
         }
     }
 
-    let ctes = snapshot.ctes.clone();
-    collect_dml_scope(&input, point, &ctes, !selects.is_empty(), &mut snapshot);
+    let dml_relation_placement = if selects.is_empty() {
+        DmlRelationPlacement::Local
+    } else {
+        DmlRelationPlacement::Outer
+    };
+    collect_dml_scope(&input, &ctes, dml_relation_placement, &mut snapshot);
+    snapshot.ctes = ctes;
     snapshot
 }
 
 pub(super) fn incomplete_range(base: TextSize, tokens: &[Token]) -> Option<TextRange> {
-    let mut opens = Vec::new();
+    let mut unmatched_opens = Vec::new();
     for token in tokens {
         match token.kind {
-            TokenKind::Char('(') => opens.push(token.range),
-            TokenKind::Char(')') if opens.pop().is_none() => {
+            TokenKind::Char('(') => unmatched_opens.push(token.range),
+            TokenKind::Char(')') if unmatched_opens.pop().is_none() => {
                 return Some(absolute_range(base, token.range.start(), token.range.end()));
             }
             _ => {}
         }
     }
-    opens
+    unmatched_opens
         .last()
         .map(|range| absolute_range(base, range.start(), range.end()))
 }
@@ -157,7 +153,7 @@ const FROM_LIST_END: &[TokenKind] = &[
 /// The `FROM` list of one SELECT set-operation branch.
 struct FromSegment {
     /// Index of the `FROM` token.
-    from: usize,
+    from_keyword: usize,
     /// First same-depth [`FROM_LIST_END`] keyword after the list, else the
     /// branch end.
     list_end: usize,
@@ -165,72 +161,69 @@ struct FromSegment {
     branch_end: usize,
 }
 
-fn from_segment(
-    tokens: &[Token],
-    depths: &[usize],
-    select_index: usize,
-    depth: usize,
-) -> Option<FromSegment> {
-    let branch_end = (select_index + 1..tokens.len())
+fn from_segment(tokens: &[Token], depths: &[usize], select: SelectLocation) -> Option<FromSegment> {
+    let branch_end = (select.index + 1..tokens.len())
         .find(|index| {
-            depths[*index] < depth
-                || (depths[*index] == depth
+            depths[*index] < select.depth
+                || (depths[*index] == select.depth
                     && matches!(
                         tokens[*index].kind,
                         TokenKind::Union | TokenKind::Intersect | TokenKind::Except
                     ))
         })
         .unwrap_or(tokens.len());
-    let from = (select_index + 1..branch_end)
-        .find(|index| depths[*index] == depth && tokens[*index].kind == TokenKind::From)?;
-    let list_end = (from + 1..branch_end)
-        .find(|index| depths[*index] == depth && FROM_LIST_END.contains(&tokens[*index].kind))
+    let from_keyword = (select.index + 1..branch_end)
+        .find(|index| depths[*index] == select.depth && tokens[*index].kind == TokenKind::From)?;
+    let list_end = (from_keyword + 1..branch_end)
+        .find(|index| {
+            depths[*index] == select.depth && FROM_LIST_END.contains(&tokens[*index].kind)
+        })
         .unwrap_or(branch_end);
     Some(FromSegment {
-        from,
+        from_keyword,
         list_end,
         branch_end,
     })
 }
 
 fn derived_table_container(
-    tokens: &[Token],
-    depths: &[usize],
-    child_select: usize,
-    outer_select: usize,
-    outer_depth: usize,
-    point: TextSize,
+    input: &ScopeInput<'_>,
+    child_select: SelectLocation,
+    outer_select: SelectLocation,
 ) -> Option<(usize, bool)> {
-    let open = (outer_select + 1..child_select).rev().find(|index| {
-        tokens[*index].kind == TokenKind::Char('(')
-            && depths[*index] == outer_depth
-            && matching_close(tokens, depths, *index, tokens.len())
-                .is_none_or(|close| tokens[close].range.start() >= point)
-    })?;
-    let segment = from_segment(tokens, depths, outer_select, outer_depth)?;
-    let from = segment.from;
-    if !(from < open && open < segment.list_end) {
+    let open = (outer_select.index + 1..child_select.index)
+        .rev()
+        .find(|index| {
+            input.tokens[*index].kind == TokenKind::Char('(')
+                && input.depths[*index] == outer_select.depth
+                && matching_close(input.tokens, input.depths, *index, input.tokens.len())
+                    .is_none_or(|close| input.tokens[close].range.start() >= input.point)
+        })?;
+    let segment = from_segment(input.tokens, input.depths, outer_select)?;
+    let from_keyword = segment.from_keyword;
+    if !(from_keyword < open && open < segment.list_end) {
         return None;
     }
-    let preceding_clause = (from + 1..open).rev().find(|index| {
-        depths[*index] == outer_depth
+    let preceding_clause = (from_keyword + 1..open).rev().find(|index| {
+        input.depths[*index] == outer_select.depth
             && matches!(
-                tokens[*index].kind,
+                input.tokens[*index].kind,
                 TokenKind::Char(',') | TokenKind::Join | TokenKind::On | TokenKind::Using
             )
     });
     if preceding_clause
-        .is_some_and(|index| matches!(tokens[index].kind, TokenKind::On | TokenKind::Using))
+        .is_some_and(|index| matches!(input.tokens[index].kind, TokenKind::On | TokenKind::Using))
     {
         return None;
     }
-    let explicit_lateral = open > from && tokens[open - 1].kind == TokenKind::LateralP;
-    let function_call = open > from
-        && token_name(&tokens[open - 1]).is_some()
-        && tokens[open - 1].kind != TokenKind::From;
-    let rows_from = open >= from + 2
-        && tokens[open - 2].kind == TokenKind::Rows
-        && tokens[open - 1].kind == TokenKind::From;
+    let explicit_lateral =
+        open > from_keyword && input.tokens[open - 1].kind == TokenKind::LateralP;
+    let function_call = open > from_keyword
+        && token_can_be_name(&input.tokens[open - 1])
+        && input.tokens[open - 1].kind != TokenKind::From;
+    let rows_from = open >= from_keyword + 2
+        && input.tokens[open - 2].kind == TokenKind::Rows
+        && input.tokens[open - 1].kind == TokenKind::From;
     let lateral = explicit_lateral || function_call || rows_from;
     Some((open, lateral))
 }
@@ -265,13 +258,11 @@ fn depth_at_point(tokens: &[Token], point: TextSize) -> usize {
     depth
 }
 
-fn enclosing_selects(
-    tokens: &[Token],
-    depths: &[usize],
-    point: TextSize,
-    point_depth: usize,
-) -> Vec<(usize, usize)> {
-    let mut by_depth = Vec::<(usize, usize)>::new();
+fn enclosing_selects(input: &ScopeInput<'_>, point_depth: usize) -> Vec<SelectLocation> {
+    let tokens = input.tokens;
+    let depths = input.depths;
+    let point = input.point;
+    let mut selects_by_depth = Vec::<SelectLocation>::new();
     for (index, token) in tokens.iter().enumerate() {
         if token.range.start() > point {
             break;
@@ -283,87 +274,87 @@ fn enclosing_selects(
             // inside it, so the SELECTs recorded there do not enclose the
             // point even when the point later returns to the same depth.
             TokenKind::Char(')') if token.range.start() < point => {
-                by_depth.retain(|(_, candidate)| *candidate <= depth);
+                selects_by_depth.retain(|candidate| candidate.depth <= depth);
             }
             TokenKind::Select if depth <= point_depth => {
-                if let Some(existing) = by_depth
+                if let Some(existing) = selects_by_depth
                     .iter_mut()
-                    .find(|(_, candidate)| *candidate == depth)
+                    .find(|candidate| candidate.depth == depth)
                 {
-                    *existing = (index, depth);
+                    *existing = SelectLocation { index, depth };
                 } else {
-                    by_depth.push((index, depth));
+                    selects_by_depth.push(SelectLocation { index, depth });
                 }
             }
             _ => {}
         }
     }
-    if by_depth.is_empty()
-        && let Some(select) = wrapped_query_select_before_suffix(tokens, depths, point, point_depth)
+    if selects_by_depth.is_empty()
+        && let Some(select) = wrapped_query_select_before_suffix(input, point_depth)
     {
-        by_depth.push((select, depths[select]));
+        selects_by_depth.push(SelectLocation {
+            index: select,
+            depth: depths[select],
+        });
     }
-    by_depth.retain(|(select, depth)| {
-        !point_is_in_set_operation_suffix(tokens, depths, *select, *depth, point, point_depth)
-    });
-    by_depth.sort_by_key(|(_, depth)| *depth);
-    by_depth
+    selects_by_depth
+        .retain(|select| !point_is_in_set_operation_suffix(input, *select, point_depth));
+    selects_by_depth.sort_by_key(|select| select.depth);
+    selects_by_depth
 }
 
 fn remove_completed_insert_source_selects(
-    tokens: &[Token],
-    depths: &[usize],
-    point: TextSize,
-    selects: &mut Vec<(usize, usize)>,
+    input: &ScopeInput<'_>,
+    selects: &mut Vec<SelectLocation>,
 ) {
-    for (insert, token) in tokens.iter().enumerate() {
+    for (insert, token) in input.tokens.iter().enumerate() {
         if token.kind != TokenKind::Insert
-            || token.range.start() > point
-            || tokens.get(insert + 1).map(|token| token.kind) != Some(TokenKind::Into)
+            || token.range.start() > input.point
+            || input.tokens.get(insert + 1).map(|token| token.kind) != Some(TokenKind::Into)
         {
             continue;
         }
-        let depth = depths[insert];
-        let boundary = (insert + 2..tokens.len()).find(|index| {
-            depths[*index] == depth
-                && (tokens[*index].kind == TokenKind::Returning
-                    || (tokens[*index].kind == TokenKind::On
-                        && tokens.get(*index + 1).map(|token| token.kind)
+        let statement_depth = input.depths[insert];
+        let source_end_keyword = (insert + 2..input.tokens.len()).find(|index| {
+            input.depths[*index] == statement_depth
+                && (input.tokens[*index].kind == TokenKind::Returning
+                    || (input.tokens[*index].kind == TokenKind::On
+                        && input.tokens.get(*index + 1).map(|token| token.kind)
                             == Some(TokenKind::Conflict)))
         });
-        let Some(boundary) = boundary.filter(|boundary| tokens[*boundary].range.start() < point)
+        let Some(source_end_keyword) = source_end_keyword
+            .filter(|boundary| input.tokens[*boundary].range.start() < input.point)
         else {
             continue;
         };
-        selects.retain(|(select, select_depth)| {
-            !(*select > insert && *select < boundary && *select_depth >= depth)
+        selects.retain(|select| {
+            !(select.index > insert
+                && select.index < source_end_keyword
+                && select.depth >= statement_depth)
         });
     }
 }
 
 fn point_is_in_set_operation_suffix(
-    tokens: &[Token],
-    depths: &[usize],
-    select: usize,
-    depth: usize,
-    point: TextSize,
+    input: &ScopeInput<'_>,
+    select: SelectLocation,
     point_depth: usize,
 ) -> bool {
-    let has_set_operation = tokens.iter().enumerate().any(|(index, token)| {
-        token.range.start() < point
-            && depths[index] == depth
+    let has_set_operation = input.tokens.iter().enumerate().any(|(index, token)| {
+        token.range.start() < input.point
+            && input.depths[index] == select.depth
             && matches!(
                 token.kind,
                 TokenKind::Union | TokenKind::Intersect | TokenKind::Except
             )
     });
-    let suffix_depth = depth.min(point_depth);
+    let suffix_depth = select.depth.min(point_depth);
     has_set_operation
-        && (select + 1..tokens.len()).any(|index| {
-            depths[index] == suffix_depth
-                && tokens[index].range.start() <= point
+        && (select.index + 1..input.tokens.len()).any(|index| {
+            input.depths[index] == suffix_depth
+                && input.tokens[index].range.start() <= input.point
                 && matches!(
-                    tokens[index].kind,
+                    input.tokens[index].kind,
                     TokenKind::Order
                         | TokenKind::Limit
                         | TokenKind::Offset
@@ -373,91 +364,96 @@ fn point_is_in_set_operation_suffix(
         })
 }
 
-fn wrapped_query_select_before_suffix(
-    tokens: &[Token],
-    depths: &[usize],
-    point: TextSize,
-    point_depth: usize,
-) -> Option<usize> {
-    let suffix = tokens.iter().enumerate().rev().find_map(|(index, token)| {
-        (token.range.start() <= point
-            && depths[index] == point_depth
-            && matches!(
-                token.kind,
-                TokenKind::Order
-                    | TokenKind::Limit
-                    | TokenKind::Offset
-                    | TokenKind::Fetch
-                    | TokenKind::For
-            ))
-        .then_some(index)
-    })?;
+fn wrapped_query_select_before_suffix(input: &ScopeInput<'_>, point_depth: usize) -> Option<usize> {
+    let suffix = input
+        .tokens
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, token)| {
+            let is_suffix_keyword = token.range.start() <= input.point
+                && input.depths[index] == point_depth
+                && matches!(
+                    token.kind,
+                    TokenKind::Order
+                        | TokenKind::Limit
+                        | TokenKind::Offset
+                        | TokenKind::Fetch
+                        | TokenKind::For
+                );
+            is_suffix_keyword.then_some(index)
+        })?;
     let close = suffix.checked_sub(1)?;
-    if tokens[close].kind != TokenKind::Char(')') || depths[close] != point_depth {
+    if input.tokens[close].kind != TokenKind::Char(')') || input.depths[close] != point_depth {
         return None;
     }
     let open = (0..close).rev().find(|index| {
-        tokens[*index].kind == TokenKind::Char('(')
-            && depths[*index] == point_depth
-            && matching_close(tokens, depths, *index, close + 1) == Some(close)
+        input.tokens[*index].kind == TokenKind::Char('(')
+            && input.depths[*index] == point_depth
+            && matching_close(input.tokens, input.depths, *index, close + 1) == Some(close)
     })?;
-    (open + 1..close)
-        .rev()
-        .find(|index| tokens[*index].kind == TokenKind::Select && depths[*index] > point_depth)
+    (open + 1..close).rev().find(|index| {
+        input.tokens[*index].kind == TokenKind::Select && input.depths[*index] > point_depth
+    })
 }
 
 fn query_scope(
     input: &ScopeInput<'_>,
-    select_index: usize,
-    depth: usize,
+    select: SelectLocation,
     ctes: &[CteDefinition],
 ) -> QueryScope {
-    let Some(segment) = from_segment(input.tokens, input.depths, select_index, depth) else {
+    let Some(segment) = from_segment(input.tokens, input.depths, select) else {
         return QueryScope::default();
     };
     QueryScope {
-        relations: parse_from_relations(input, segment.from + 1, segment.list_end, depth, ctes),
+        relations: parse_from_relations(
+            input,
+            segment.from_keyword + 1,
+            segment.list_end,
+            select.depth,
+            ctes,
+        ),
     }
 }
 
 fn apply_table_function_visibility(
-    base: TextSize,
-    point: TextSize,
-    tokens: &[Token],
-    depths: &[usize],
-    select_index: usize,
-    depth: usize,
+    input: &ScopeInput<'_>,
+    select: SelectLocation,
     scope: &mut QueryScope,
 ) {
-    let Some(segment) = from_segment(tokens, depths, select_index, depth) else {
+    let Some(segment) = from_segment(input.tokens, input.depths, select) else {
         return;
     };
-    let from = segment.from;
+    let from_keyword = segment.from_keyword;
     // A scalar call in WHERE/GROUP BY/… matches the same name-then-paren
     // shape, so the search must stop at the end of the FROM list.
-    let Some(open) = (from + 1..segment.list_end).find(|index| {
-        tokens[*index].kind == TokenKind::Char('(')
-            && depths[*index] == depth
-            && tokens[*index].range.start() < point
-            && matching_close(tokens, depths, *index, segment.list_end)
-                .is_some_and(|close| tokens[close].range.end() >= point)
-            && table_function_open(tokens, depths, *index, depth)
+    let Some(open) = (from_keyword + 1..segment.list_end).find(|index| {
+        input.tokens[*index].kind == TokenKind::Char('(')
+            && input.depths[*index] == select.depth
+            && input.tokens[*index].range.start() < input.point
+            && matching_close(input.tokens, input.depths, *index, segment.list_end)
+                .is_some_and(|close| input.tokens[close].range.end() >= input.point)
+            && is_table_function_open(input.tokens, input.depths, *index, select.depth)
     }) else {
         return;
     };
-    let item_start = (from + 1..open)
+    let item_start = (from_keyword + 1..open)
         .rev()
         .find(|index| {
-            depths[*index] == depth
-                && matches!(tokens[*index].kind, TokenKind::Char(',') | TokenKind::Join)
+            input.depths[*index] == select.depth
+                && matches!(
+                    input.tokens[*index].kind,
+                    TokenKind::Char(',') | TokenKind::Join
+                )
         })
-        .map_or(from + 1, |delimiter| delimiter + 1);
+        .map_or(from_keyword + 1, |delimiter| delimiter + 1);
     if (item_start..open).any(|index| {
-        depths[index] == depth && matches!(tokens[index].kind, TokenKind::On | TokenKind::Using)
+        input.depths[index] == select.depth
+            && matches!(input.tokens[index].kind, TokenKind::On | TokenKind::Using)
     }) {
         return;
     }
-    let boundary = add(base, tokens[item_start].range.start());
+    let boundary = add(input.base, input.tokens[item_start].range.start());
     scope
         .relations
         .retain(|relation| relation.syntax_range.end() <= boundary);
@@ -465,32 +461,27 @@ fn apply_table_function_visibility(
 
 fn apply_join_condition_visibility(
     input: &ScopeInput<'_>,
-    select_index: usize,
-    depth: usize,
+    select: SelectLocation,
     max_depth: usize,
     scope: &mut QueryScope,
 ) {
-    let Some(segment) = from_segment(input.tokens, input.depths, select_index, depth) else {
+    let Some(segment) = from_segment(input.tokens, input.depths, select) else {
         return;
     };
-    let Some(on) = deepest_join_condition_boundary(
-        input.tokens,
-        input.depths,
-        segment.from + 1,
-        segment.branch_end,
-        depth,
-        max_depth,
-        input.point,
+    let Some(condition_start) = deepest_active_join_condition_start(
+        input,
+        segment.from_keyword + 1..segment.branch_end,
+        select.depth..=max_depth,
     ) else {
         return;
     };
-    let boundary = add(input.base, on);
+    let boundary = add(input.base, condition_start);
     scope
         .relations
         .retain(|relation| relation.syntax_range.end() <= boundary);
 }
 
-fn table_function_open(tokens: &[Token], depths: &[usize], open: usize, depth: usize) -> bool {
+fn is_table_function_open(tokens: &[Token], depths: &[usize], open: usize, depth: usize) -> bool {
     let Some(previous) = open.checked_sub(1) else {
         return false;
     };
@@ -498,11 +489,11 @@ fn table_function_open(tokens: &[Token], depths: &[usize], open: usize, depth: u
         return false;
     }
     if tokens[previous].kind == TokenKind::From {
-        return previous
-            .checked_sub(1)
-            .is_some_and(|rows| depths[rows] == depth && tokens[rows].kind == TokenKind::Rows);
+        return previous.checked_sub(1).is_some_and(|rows_keyword| {
+            depths[rows_keyword] == depth && tokens[rows_keyword].kind == TokenKind::Rows
+        });
     }
-    token_name(&tokens[previous]).is_some()
+    token_can_be_name(&tokens[previous])
         && !matches!(
             tokens[previous].kind,
             TokenKind::Join | TokenKind::LateralP | TokenKind::Only
@@ -511,9 +502,9 @@ fn table_function_open(tokens: &[Token], depths: &[usize], open: usize, depth: u
 
 fn parse_from_relations(
     input: &ScopeInput<'_>,
-    start: usize,
-    end: usize,
-    depth: usize,
+    list_start: usize,
+    list_end: usize,
+    list_depth: usize,
     ctes: &[CteDefinition],
 ) -> Vec<VisibleRelation> {
     let ScopeInput {
@@ -522,18 +513,18 @@ fn parse_from_relations(
         point,
         tokens,
         depths,
-    } = input;
+    } = *input;
     let mut relations = Vec::new();
-    let mut index = start;
-    let mut expects_item = true;
-    while index < end {
-        if depths[index] != depth {
+    let mut index = list_start;
+    let mut expecting_item = true;
+    while index < list_end {
+        if depths[index] != list_depth {
             index += 1;
             continue;
         }
         let kind = tokens[index].kind;
         if matches!(kind, TokenKind::Char(',') | TokenKind::Join) {
-            expects_item = true;
+            expecting_item = true;
             index += 1;
             continue;
         }
@@ -551,38 +542,41 @@ fn parse_from_relations(
             continue;
         }
         if matches!(kind, TokenKind::On | TokenKind::Using) {
-            expects_item = false;
+            expecting_item = false;
             index += 1;
             continue;
         }
-        if !expects_item {
+        if !expecting_item {
             index += 1;
             continue;
         }
         if kind == TokenKind::Char('(')
-            && let Some(close) = matching_close(tokens, depths, index, end)
-            && !parenthesized_body_is_query(tokens, depths, index, close)
+            && let Some(group_close) = matching_close(tokens, depths, index, list_end)
+            && !parenthesized_body_is_query(tokens, depths, index, group_close)
         {
-            let (alias, _, next) = parse_alias(source, *base, tokens, close + 1, end);
-            let point_in_body =
-                tokens[index].range.end() <= *point && *point <= tokens[close].range.start();
-            if alias.is_none() || point_in_body {
+            let (alias, _, next_index) =
+                parse_alias(source, base, tokens, group_close + 1, list_end);
+            let point_in_group =
+                tokens[index].range.end() <= point && point <= tokens[group_close].range.start();
+            if alias.is_none() || point_in_group {
                 relations.extend(parse_from_relations(
                     input,
                     index + 1,
-                    close,
-                    depth + 1,
+                    group_close,
+                    list_depth + 1,
                     ctes,
                 ));
-                index = next;
-                expects_item = false;
+                index = next_index;
+                expecting_item = false;
                 continue;
             }
         }
-        if let Some((relation, next)) = parse_from_item(input, index, end, depth, ctes) {
+        if let Some((relation, next_index)) =
+            parse_from_item(input, index, list_end, list_depth, ctes)
+        {
             relations.push(relation);
-            index = next;
-            expects_item = false;
+            index = next_index;
+            expecting_item = false;
         } else {
             index += 1;
         }
@@ -593,8 +587,8 @@ fn parse_from_relations(
 fn parse_from_item(
     input: &ScopeInput<'_>,
     mut index: usize,
-    end: usize,
-    depth: usize,
+    list_end: usize,
+    item_depth: usize,
     ctes: &[CteDefinition],
 ) -> Option<(VisibleRelation, usize)> {
     let ScopeInput {
@@ -603,65 +597,69 @@ fn parse_from_item(
         point,
         tokens,
         depths,
-    } = input;
-    let base = *base;
-    let start = index;
-    let lateral = consume_kind(tokens, &mut index, end, TokenKind::LateralP);
-    let only = consume_kind(tokens, &mut index, end, TokenKind::Only);
-    if index >= end {
+    } = *input;
+    let item_start = index;
+    let lateral = consume_kind(tokens, &mut index, list_end, TokenKind::LateralP);
+    let has_only = consume_kind(tokens, &mut index, list_end, TokenKind::Only);
+    if index >= list_end {
         return None;
     }
 
-    let parenthesized_relation_close = if only && tokens[index].kind == TokenKind::Char('(') {
-        let close = matching_close(tokens, depths, index, end)?;
+    let only_parenthesis_close = if has_only && tokens[index].kind == TokenKind::Char('(') {
+        let close = matching_close(tokens, depths, index, list_end)?;
         index += 1;
         Some(close)
     } else {
         None
     };
 
-    if parenthesized_relation_close.is_none() && tokens[index].kind == TokenKind::Char('(') {
-        let open = index;
-        let close = matching_close(tokens, depths, index, end)?;
-        let query_body = parenthesized_body_is_query(tokens, depths, open, close);
-        let values_body =
-            first_parenthesized_body_kind(tokens, depths, open, close) == Some(TokenKind::Values);
-        index = close + 1;
-        let (alias, explicit_columns, next) = parse_alias(source, base, tokens, index, end);
-        let syntax_end = next
+    if only_parenthesis_close.is_none() && tokens[index].kind == TokenKind::Char('(') {
+        // Parenthesized FROM items can be subqueries, VALUES expressions, or
+        // aliased join trees. Keep their common range/alias handling aligned.
+        let body_open = index;
+        let body_close = matching_close(tokens, depths, index, list_end)?;
+        let is_query_body = parenthesized_body_is_query(tokens, depths, body_open, body_close);
+        let is_values_body = first_parenthesized_body_kind(tokens, depths, body_open, body_close)
+            == Some(TokenKind::Values);
+        let relation_kind = if is_values_body {
+            RelationKind::Values
+        } else if is_query_body {
+            RelationKind::Subquery
+        } else {
+            RelationKind::JoinAlias
+        };
+        let unsupported = (!is_query_body).then(|| UnsupportedRelation {
+            range: absolute_range(
+                base,
+                tokens[body_open].range.start(),
+                tokens[body_close].range.end(),
+            ),
+            reason: "parenthesized table expression is not classified".to_owned(),
+        });
+        index = body_close + 1;
+        let (alias, explicit_columns, next_index) =
+            parse_alias(source, base, tokens, index, list_end);
+        let syntax_end = next_index
             .checked_sub(1)
             .and_then(|last| tokens.get(last))
-            .map_or(tokens[close].range.end(), |token| token.range.end());
+            .map_or(tokens[body_close].range.end(), |token| token.range.end());
         return Some((
             VisibleRelation {
-                kind: if values_body {
-                    RelationKind::Values
-                } else if query_body {
-                    RelationKind::Subquery
-                } else {
-                    RelationKind::JoinAlias
-                },
+                kind: relation_kind,
                 name: Vec::new(),
                 alias,
                 explicit_columns,
                 qualified_only: false,
-                syntax_range: absolute_range(base, tokens[start].range.start(), syntax_end),
+                syntax_range: absolute_range(base, tokens[item_start].range.start(), syntax_end),
                 body_range: Some(absolute_range(
                     base,
-                    tokens[open].range.end(),
-                    tokens[close].range.start(),
+                    tokens[body_open].range.end(),
+                    tokens[body_close].range.start(),
                 )),
                 lateral,
-                unsupported: (!query_body).then(|| UnsupportedRelation {
-                    range: absolute_range(
-                        base,
-                        tokens[open].range.start(),
-                        tokens[close].range.end(),
-                    ),
-                    reason: "parenthesized table expression is not classified".to_owned(),
-                }),
+                unsupported,
             },
-            next,
+            next_index,
         ));
     }
 
@@ -669,19 +667,22 @@ fn parse_from_item(
         && tokens.get(index + 1).map(|token| token.kind) == Some(TokenKind::From)
         && tokens.get(index + 2).map(|token| token.kind) == Some(TokenKind::Char('('))
     {
-        let open = index + 2;
-        let close = matching_close(tokens, depths, open, end)?;
-        index = close + 1;
-        consume_with_ordinality(tokens, &mut index, end);
-        let (alias, mut explicit_columns, next) =
-            parse_function_alias(source, base, tokens, index, end);
+        // ROWS FROM is one table function whose output columns may come from
+        // either the relation alias or the individual function definitions.
+        let body_open = index + 2;
+        let body_close = matching_close(tokens, depths, body_open, list_end)?;
+        index = body_close + 1;
+        consume_with_ordinality(tokens, &mut index, list_end);
+        let (alias, mut explicit_columns, next_index) =
+            parse_function_alias(source, base, tokens, index, list_end);
         if explicit_columns.is_empty() {
-            explicit_columns = parse_rows_from_columns(source, base, tokens, depths, open, close);
+            explicit_columns =
+                parse_rows_from_columns(source, base, tokens, depths, body_open, body_close);
         }
-        let syntax_end = next
+        let syntax_end = next_index
             .checked_sub(1)
             .and_then(|last| tokens.get(last))
-            .map_or(tokens[close].range.end(), |token| token.range.end());
+            .map_or(tokens[body_close].range.end(), |token| token.range.end());
         return Some((
             VisibleRelation {
                 kind: RelationKind::TableFunction,
@@ -689,21 +690,23 @@ fn parse_from_item(
                 alias,
                 explicit_columns,
                 qualified_only: false,
-                syntax_range: absolute_range(base, tokens[start].range.start(), syntax_end),
+                syntax_range: absolute_range(base, tokens[item_start].range.start(), syntax_end),
                 body_range: Some(absolute_range(
                     base,
-                    tokens[open].range.end(),
-                    tokens[close].range.start(),
+                    tokens[body_open].range.end(),
+                    tokens[body_close].range.start(),
                 )),
                 lateral,
                 unsupported: None,
             },
-            next,
+            next_index,
         ));
     }
 
-    let (name, after_name) = parse_qualified_name(source, base, tokens, index, end, *point)?;
-    index = if let Some(close) = parenthesized_relation_close {
+    // Named relations, CTEs, and ordinary table-function calls share the same
+    // qualified-name prefix and differ only after that name has been consumed.
+    let (name, after_name) = parse_qualified_name(source, base, tokens, index, list_end, point)?;
+    index = if let Some(close) = only_parenthesis_close {
         if after_name != close {
             return None;
         }
@@ -711,40 +714,47 @@ fn parse_from_item(
     } else {
         after_name
     };
-    let function = parenthesized_relation_close.is_none()
-        && index < end
-        && depths[index] == depth
+    let is_table_function = only_parenthesis_close.is_none()
+        && index < list_end
+        && depths[index] == item_depth
         && tokens[index].kind == TokenKind::Char('(');
-    let body_range = if function {
-        let open = index;
-        let close = matching_close(tokens, depths, open, end)?;
-        index = close + 1;
-        consume_with_ordinality(tokens, &mut index, end);
+    let body_range = if is_table_function {
+        let body_open = index;
+        let body_close = matching_close(tokens, depths, body_open, list_end)?;
+        index = body_close + 1;
+        consume_with_ordinality(tokens, &mut index, list_end);
         Some(absolute_range(
             base,
-            tokens[open].range.end(),
-            tokens[close].range.start(),
+            tokens[body_open].range.end(),
+            tokens[body_close].range.start(),
         ))
     } else {
         None
     };
-    let (alias, mut explicit_columns, next) = if function {
-        parse_function_alias(source, base, tokens, index, end)
+    let (alias, mut explicit_columns, next_index) = if is_table_function {
+        parse_function_alias(source, base, tokens, index, list_end)
     } else {
-        parse_alias(source, base, tokens, index, end)
+        parse_alias(source, base, tokens, index, list_end)
     };
-    let cte = match name.as_slice() {
+    let cte_definition = match name.as_slice() {
         [part] => ctes
             .iter()
             .find(|cte| cte.name.normalized == part.normalized),
         _ => None,
     };
     if explicit_columns.is_empty()
-        && let Some(cte) = cte
+        && let Some(cte) = cte_definition
     {
         explicit_columns = cte.explicit_columns.clone();
     }
-    let syntax_end = next
+    let relation_kind = if is_table_function {
+        RelationKind::TableFunction
+    } else if cte_definition.is_some() {
+        RelationKind::Cte
+    } else {
+        RelationKind::Relation
+    };
+    let syntax_end = next_index
         .checked_sub(1)
         .and_then(|last| tokens.get(last))
         .map_or(tokens[after_name - 1].range.end(), |token| {
@@ -752,23 +762,17 @@ fn parse_from_item(
         });
     Some((
         VisibleRelation {
-            kind: if function {
-                RelationKind::TableFunction
-            } else if cte.is_some() {
-                RelationKind::Cte
-            } else {
-                RelationKind::Relation
-            },
+            kind: relation_kind,
             name,
             alias,
             explicit_columns,
             qualified_only: false,
-            syntax_range: absolute_range(base, tokens[start].range.start(), syntax_end),
+            syntax_range: absolute_range(base, tokens[item_start].range.start(), syntax_end),
             body_range,
             lateral,
             unsupported: None,
         },
-        next,
+        next_index,
     ))
 }
 
@@ -813,18 +817,18 @@ fn first_parenthesized_body_kind(
     outer_close: usize,
 ) -> Option<TokenKind> {
     loop {
-        let first = open + 1;
-        if first >= outer_close {
+        let first_token = open + 1;
+        if first_token >= outer_close {
             return None;
         }
-        if tokens[first].kind != TokenKind::Char('(') {
-            return Some(tokens[first].kind);
+        if tokens[first_token].kind != TokenKind::Char('(') {
+            return Some(tokens[first_token].kind);
         }
-        let close = matching_close(tokens, depths, first, outer_close)?;
+        let close = matching_close(tokens, depths, first_token, outer_close)?;
         if close + 1 != outer_close {
-            return Some(tokens[first].kind);
+            return Some(tokens[first_token].kind);
         }
-        open = first;
+        open = first_token;
     }
 }
 
@@ -849,7 +853,7 @@ fn parse_alias(
 ) -> (Option<NamePart>, Vec<NamePart>, usize) {
     consume_kind(tokens, &mut index, end, TokenKind::As);
     let alias = if index < end && token_is_alias(&tokens[index]) {
-        let alias = name_part(source, base, &tokens[index]);
+        let alias = name_part_from_token(source, base, &tokens[index]);
         index += 1;
         alias
     } else {
@@ -859,7 +863,7 @@ fn parse_alias(
     if alias.is_some() && index < end && tokens[index].kind == TokenKind::Char('(') {
         index += 1;
         while index < end && tokens[index].kind != TokenKind::Char(')') {
-            if let Some(column) = name_part(source, base, &tokens[index]) {
+            if let Some(column) = name_part_from_token(source, base, &tokens[index]) {
                 columns.push(column);
             }
             index += 1;
@@ -878,13 +882,15 @@ fn parse_function_alias(
     mut index: usize,
     end: usize,
 ) -> (Option<NamePart>, Vec<NamePart>, usize) {
+    // Unlike a regular relation alias, a function may use `AS (column type, …)`
+    // without providing an alias name.
     let has_as = consume_kind(tokens, &mut index, end, TokenKind::As);
     if has_as && index < end && tokens[index].kind == TokenKind::Char('(') {
         let (columns, next) = parse_parenthesized_column_names(source, base, tokens, index, end);
         return (None, columns, next);
     }
     let alias = if index < end && token_is_alias(&tokens[index]) {
-        let alias = name_part(source, base, &tokens[index]);
+        let alias = name_part_from_token(source, base, &tokens[index]);
         index += 1;
         alias
     } else {
@@ -916,7 +922,7 @@ fn parse_parenthesized_column_names(
             TokenKind::Char(')') => depth = depth.saturating_sub(1),
             TokenKind::Char(',') if depth == 0 => at_column_start = true,
             _ if depth == 0 && at_column_start => {
-                if let Some(column) = name_part(source, base, &tokens[index]) {
+                if let Some(column) = name_part_from_token(source, base, &tokens[index]) {
                     columns.push(column);
                     at_column_start = false;
                 }
@@ -929,7 +935,7 @@ fn parse_parenthesized_column_names(
 }
 
 fn token_is_alias(token: &Token) -> bool {
-    token_name(token).is_some()
+    token_can_be_name(token)
         && !matches!(
             token.kind,
             TokenKind::On
@@ -980,10 +986,10 @@ fn parse_qualified_name(
     point: TextSize,
 ) -> Option<(Vec<NamePart>, usize)> {
     let mut parts = Vec::new();
-    parts.push(name_part(source, base, tokens.get(index)?)?);
+    parts.push(name_part_from_token(source, base, tokens.get(index)?)?);
     index += 1;
     while index + 1 < end && tokens[index].kind == TokenKind::Char('.') && parts.len() < 3 {
-        let Some(part) = name_part(source, base, &tokens[index + 1]) else {
+        let Some(part) = name_part_from_token(source, base, &tokens[index + 1]) else {
             break;
         };
         parts.push(part);
@@ -1030,19 +1036,13 @@ struct ParsedCteBody {
 }
 
 impl<'a> CteCursor<'a> {
-    fn after_with(
-        source: &'a str,
-        base: TextSize,
-        tokens: &'a [Token],
-        depths: &'a [usize],
-        with_index: usize,
-    ) -> Self {
+    fn after_with(input: ScopeInput<'a>, with_index: usize) -> Self {
         Self {
-            source,
-            base,
-            tokens,
-            depths,
-            depth: depths[with_index],
+            source: input.source,
+            base: input.base,
+            tokens: input.tokens,
+            depths: input.depths,
+            depth: input.depths[with_index],
             index: with_index + 1,
         }
     }
@@ -1068,7 +1068,7 @@ impl<'a> CteCursor<'a> {
         if self.depths.get(self.index).copied() != Some(self.depth) {
             return None;
         }
-        let name = name_part(self.source, self.base, self.tokens.get(self.index)?)?;
+        let name = name_part_from_token(self.source, self.base, self.tokens.get(self.index)?)?;
         self.index += 1;
         Some(name)
     }
@@ -1084,7 +1084,7 @@ impl<'a> CteCursor<'a> {
         let close = matching_close(self.tokens, self.depths, open, self.tokens.len())?;
         let columns = (open + 1..close)
             .filter(|index| self.depths[*index] == self.depth + 1)
-            .filter_map(|index| name_part(self.source, self.base, &self.tokens[index]))
+            .filter_map(|index| name_part_from_token(self.source, self.base, &self.tokens[index]))
             .collect();
         self.index = close + 1;
         Some(columns)
@@ -1162,32 +1162,21 @@ impl<'a> CteCursor<'a> {
     }
 }
 
-fn collect_cte_groups(
-    source: &str,
-    base: TextSize,
-    tokens: &[Token],
-    depths: &[usize],
-) -> Vec<CteGroup> {
+fn collect_cte_groups(input: &ScopeInput<'_>) -> Vec<CteGroup> {
     let mut groups = Vec::new();
-    for with_index in 0..tokens.len() {
-        if tokens[with_index].kind != TokenKind::With {
+    for with_index in 0..input.tokens.len() {
+        if input.tokens[with_index].kind != TokenKind::With {
             continue;
         }
-        if let Some(group) = parse_cte_group(source, base, tokens, depths, with_index) {
+        if let Some(group) = parse_cte_group(input, with_index) {
             groups.push(group);
         }
     }
     groups
 }
 
-fn parse_cte_group(
-    source: &str,
-    base: TextSize,
-    tokens: &[Token],
-    depths: &[usize],
-    with_index: usize,
-) -> Option<CteGroup> {
-    let mut cursor = CteCursor::after_with(source, base, tokens, depths, with_index);
+fn parse_cte_group(input: &ScopeInput<'_>, with_index: usize) -> Option<CteGroup> {
+    let mut cursor = CteCursor::after_with(*input, with_index);
     let recursive = cursor.consume(TokenKind::Recursive);
     let mut ctes = vec![cursor.parse_definition()?];
     while cursor.consume(TokenKind::Char(',')) {
@@ -1204,23 +1193,18 @@ fn parse_cte_group(
 
     let main_query_start = cursor
         .current_start()
-        .unwrap_or_else(|| tokens[with_index].range.end());
+        .unwrap_or_else(|| input.tokens[with_index].range.end());
     Some(CteGroup {
         depth: cursor.depth,
-        start: add(base, tokens[with_index].range.start()),
-        main_query_start: add(base, main_query_start),
-        end: add(base, cursor.container_end()),
+        start: add(input.base, input.tokens[with_index].range.start()),
+        main_query_start: add(input.base, main_query_start),
+        end: add(input.base, cursor.container_end()),
         recursive,
         ctes,
     })
 }
 
-fn visible_ctes_at_point(
-    base: TextSize,
-    point: TextSize,
-    groups: &[CteGroup],
-) -> Vec<CteDefinition> {
-    let absolute_point = add(base, point);
+fn visible_ctes_at_point(absolute_point: TextSize, groups: &[CteGroup]) -> Vec<CteDefinition> {
     let mut enclosing_groups = groups
         .iter()
         .filter(|group| group.start <= absolute_point && absolute_point <= group.end)
@@ -1247,7 +1231,7 @@ fn visible_ctes_at_point(
     visible_ctes
 }
 
-fn visible_cte_count(group: &CteGroup, point: TextSize) -> usize {
+fn visible_cte_count(group: &CteGroup, absolute_point: TextSize) -> usize {
     // A recursive CTE group exposes every CTE to every CTE body.
     if group.recursive {
         return group.ctes.len();
@@ -1255,16 +1239,14 @@ fn visible_cte_count(group: &CteGroup, point: TextSize) -> usize {
 
     // A non-recursive CTE cannot reference itself or later CTEs
     // while its own body is being parsed.
-    if let Some(active_body_index) = group
-        .ctes
-        .iter()
-        .position(|cte| cte.body_range.start() <= point && point <= cte.body_range.end())
-    {
+    if let Some(active_body_index) = group.ctes.iter().position(|cte| {
+        cte.body_range.start() <= absolute_point && absolute_point <= cte.body_range.end()
+    }) {
         return active_body_index;
     }
 
     // Once the main query starts, all CTE definitions are visible.
-    if point >= group.main_query_start {
+    if absolute_point >= group.main_query_start {
         return group.ctes.len();
     }
 
@@ -1272,25 +1254,23 @@ fn visible_cte_count(group: &CteGroup, point: TextSize) -> usize {
     group
         .ctes
         .iter()
-        .take_while(|cte| cte.syntax_range.end() <= point)
+        .take_while(|cte| cte.syntax_range.end() <= absolute_point)
         .count()
 }
 
 fn collect_dml_scope(
     input: &ScopeInput<'_>,
-    point: TextSize,
     ctes: &[CteDefinition],
-    inside_select: bool,
+    relation_placement: DmlRelationPlacement,
     snapshot: &mut ScopeSnapshot,
 ) {
     let ScopeInput {
-        source,
         base,
+        point,
         tokens,
         depths,
         ..
-    } = input;
-    let base = *base;
+    } = *input;
     // DML keywords also appear at depth 0 as trigger/rule events, privilege
     // names, and row-lock clauses; only statement heads that can wrap
     // top-level DML enter this path, and a `FOR [NO KEY] UPDATE` lock clause
@@ -1309,152 +1289,138 @@ fn collect_dml_scope(
     ) {
         return;
     }
-    let Some(first) = active_dml_statement(tokens, depths, point) else {
+    let Some(statement) = active_dml_statement(input) else {
         return;
     };
-    let statement_end = (first + 1..tokens.len())
-        .find(|index| depths[*index] < depths[first])
+    let statement_kind = tokens[statement].kind;
+    let statement_depth = depths[statement];
+    let statement_end = (statement + 1..tokens.len())
+        .find(|index| depths[*index] < statement_depth)
         .unwrap_or(tokens.len());
-    let target_start = match tokens[first].kind {
-        TokenKind::Insert | TokenKind::Merge => first + 2,
-        TokenKind::DeleteP => first + 2,
-        TokenKind::Update => first + 1,
+    let target_start = match statement_kind {
+        TokenKind::Insert | TokenKind::Merge | TokenKind::DeleteP => statement + 2,
+        TokenKind::Update => statement + 1,
         _ => return,
     };
-    if let Some((target, _)) = parse_dml_target(
-        source,
-        base,
-        tokens,
-        target_start,
-        statement_end,
-        tokens[first].kind,
-        point,
-    ) {
+    if let Some((target, _)) = parse_dml_target(input, target_start, statement_end, statement_kind)
+    {
         snapshot.dml_target = Some(target);
     }
-    if tokens[first].kind == TokenKind::Insert
-        && point_is_in_insert_source(point, tokens, depths, first, statement_end)
+    // INSERT source expressions cannot reference their target relation.
+    if statement_kind == TokenKind::Insert
+        && point_is_in_insert_source(input, statement, statement_end)
     {
         snapshot.dml_target = None;
     }
-    if tokens[first].kind == TokenKind::Merge
-        && let Some(using) = (first + 1..statement_end).find(|index| {
-            depths[*index] == depths[first] && tokens[*index].kind == TokenKind::Using
+    // MERGE visibility changes between the source, ON, and WHEN clauses.
+    if statement_kind == TokenKind::Merge
+        && let Some(using_keyword) = (statement + 1..statement_end).find(|index| {
+            depths[*index] == statement_depth && tokens[*index].kind == TokenKind::Using
         })
     {
-        if let Some((source_relation, _)) =
-            parse_from_item(input, using + 1, statement_end, depths[first], ctes)
-        {
+        if let Some((source_relation, _)) = parse_from_item(
+            input,
+            using_keyword + 1,
+            statement_end,
+            statement_depth,
+            ctes,
+        ) {
             snapshot.merge_source = Some(source_relation);
         }
-        let on = (using + 1..statement_end)
-            .find(|index| depths[*index] == depths[first] && tokens[*index].kind == TokenKind::On);
-        let source_end = on.map_or_else(
-            || statement_end_location(tokens, statement_end),
+        let on_keyword = (using_keyword + 1..statement_end).find(|index| {
+            depths[*index] == statement_depth && tokens[*index].kind == TokenKind::On
+        });
+        let source_range_end = on_keyword.map_or_else(
+            || token_boundary(tokens, statement_end),
             |index| tokens[index].range.start(),
         );
-        if tokens[using].range.end() <= point && point <= source_end {
+        if tokens[using_keyword].range.end() <= point && point <= source_range_end {
             snapshot.dml_target = None;
             snapshot.merge_source = None;
         }
-        apply_merge_when_visibility(point, tokens, depths, first, statement_end, snapshot);
+        apply_merge_when_clause_visibility(input, statement, statement_end, snapshot);
     }
 
-    let source_keyword = match tokens[first].kind {
+    // UPDATE FROM and DELETE USING introduce ordinary FROM-list relations.
+    let source_clause_kind = match statement_kind {
         TokenKind::Update => Some(TokenKind::From),
         TokenKind::DeleteP => Some(TokenKind::Using),
         _ => None,
     };
-    if let Some(source_keyword) = source_keyword
-        && let Some(source_start) = (first + 1..statement_end)
-            .find(|index| depths[*index] == depths[first] && tokens[*index].kind == source_keyword)
+    if let Some(source_clause_kind) = source_clause_kind
+        && let Some(source_keyword) = (statement + 1..statement_end).find(|index| {
+            depths[*index] == statement_depth && tokens[*index].kind == source_clause_kind
+        })
     {
-        let source_end = (source_start + 1..statement_end)
+        let source_list_end = (source_keyword + 1..statement_end)
             .find(|index| {
-                depths[*index] == depths[first] && FROM_LIST_END.contains(&tokens[*index].kind)
+                depths[*index] == statement_depth && FROM_LIST_END.contains(&tokens[*index].kind)
             })
             .unwrap_or(statement_end);
-        let source_end_location = tokens.get(source_end).map_or_else(
-            || {
-                tokens
-                    .last()
-                    .map_or(TextSize::ZERO, |token| token.range.end())
-            },
-            |token| token.range.start(),
-        );
-        if tokens[source_start].range.end() <= point && point <= source_end_location {
+        let source_range_end = token_boundary(tokens, source_list_end);
+        if tokens[source_keyword].range.end() <= point && point <= source_range_end {
             snapshot.dml_target = None;
         }
-        let mut relations =
-            parse_from_relations(input, source_start + 1, source_end, depths[first], ctes);
-        if let Some(active) = relations.iter().position(|relation| {
+        let mut relations = parse_from_relations(
+            input,
+            source_keyword + 1,
+            source_list_end,
+            statement_depth,
+            ctes,
+        );
+        let absolute_point = input.absolute_point();
+        if let Some(active_relation) = relations.iter().position(|relation| {
             relation.body_range.is_some_and(|range| {
-                range.start() <= add(base, point) && add(base, point) <= range.end()
+                range.start() <= absolute_point && absolute_point <= range.end()
             })
         }) {
-            let active_start = relations[active].syntax_range.start();
-            let implicitly_lateral = relations[active].kind == RelationKind::TableFunction;
-            if relations[active].lateral || implicitly_lateral {
-                relations.retain(|relation| relation.syntax_range.end() <= active_start);
-                if !relations.is_empty() {
-                    if inside_select {
-                        snapshot.outer.push(QueryScope { relations });
-                    } else {
-                        snapshot.local.relations.extend(relations);
-                    }
-                }
+            let active_relation_start = relations[active_relation].syntax_range.start();
+            let is_lateral = relations[active_relation].lateral
+                || relations[active_relation].kind == RelationKind::TableFunction;
+            if is_lateral {
+                relations.retain(|relation| relation.syntax_range.end() <= active_relation_start);
+                add_visible_relations(snapshot, relation_placement, relations);
             }
             snapshot.dml_target = None;
         } else {
-            let max_join_depth = if inside_select {
-                depths[first]
-            } else {
-                depth_at_point(tokens, point)
+            let max_join_depth = match relation_placement {
+                DmlRelationPlacement::Outer => statement_depth,
+                DmlRelationPlacement::Local => depth_at_point(tokens, point),
             };
-            if let Some(on) = deepest_join_condition_boundary(
-                tokens,
-                depths,
-                source_start + 1,
-                source_end,
-                depths[first],
-                max_join_depth,
-                point,
+            if let Some(condition_start) = deepest_active_join_condition_start(
+                input,
+                source_keyword + 1..source_list_end,
+                statement_depth..=max_join_depth,
             ) {
-                let boundary = add(base, on);
+                let boundary = add(base, condition_start);
                 relations.retain(|relation| relation.syntax_range.end() <= boundary);
             }
-            if inside_select {
-                if !relations.is_empty() {
-                    snapshot.outer.push(QueryScope { relations });
-                }
-            } else {
-                snapshot.local.relations.extend(relations);
-            }
+            add_visible_relations(snapshot, relation_placement, relations);
         }
     }
 
+    // ON CONFLICT and RETURNING add qualified views of the target.
     let Some(target) = snapshot.dml_target.clone() else {
         return;
     };
-    if let Some(excluded) = insert_excluded_relation(input, first, statement_end, &target) {
-        add_qualified_relations(snapshot, inside_select, vec![excluded]);
+    if let Some(excluded) = insert_excluded_relation(input, statement, statement_end, &target) {
+        add_visible_relations(snapshot, relation_placement, vec![excluded]);
     }
-    let returning = returning_relations(input, first, statement_end, &target);
-    add_qualified_relations(snapshot, inside_select, returning);
+    let returning = returning_relations(input, statement, statement_end, &target);
+    add_visible_relations(snapshot, relation_placement, returning);
 }
 
-fn add_qualified_relations(
+fn add_visible_relations(
     snapshot: &mut ScopeSnapshot,
-    inside_select: bool,
+    placement: DmlRelationPlacement,
     relations: Vec<VisibleRelation>,
 ) {
     if relations.is_empty() {
         return;
     }
-    if inside_select {
-        snapshot.outer.push(QueryScope { relations });
-    } else {
-        snapshot.local.relations.extend(relations);
+    match placement {
+        DmlRelationPlacement::Local => snapshot.local.relations.extend(relations),
+        DmlRelationPlacement::Outer => snapshot.outer.push(QueryScope { relations }),
     }
 }
 
@@ -1467,29 +1433,31 @@ fn insert_excluded_relation(
     if input.tokens[insert].kind != TokenKind::Insert {
         return None;
     }
-    let depth = input.depths[insert];
-    let conflict = (insert + 1..statement_end).find(|index| {
-        input.depths[*index] == depth
+    let statement_depth = input.depths[insert];
+    let conflict_keyword = (insert + 1..statement_end).find(|index| {
+        input.depths[*index] == statement_depth
             && input.tokens[*index].kind == TokenKind::On
             && input.tokens.get(*index + 1).map(|token| token.kind) == Some(TokenKind::Conflict)
     })?;
-    let update = (conflict + 2..statement_end).find(|index| {
-        input.depths[*index] == depth
+    let update_keyword = (conflict_keyword + 2..statement_end).find(|index| {
+        input.depths[*index] == statement_depth
             && input.tokens[*index].kind == TokenKind::Do
             && input.tokens.get(*index + 1).map(|token| token.kind) == Some(TokenKind::Update)
     })? + 1;
-    if input.tokens[update].range.end() > input.point {
+    if input.tokens[update_keyword].range.end() > input.point {
         return None;
     }
-    let returning = (update + 1..statement_end).find(|index| {
-        input.depths[*index] == depth && input.tokens[*index].kind == TokenKind::Returning
+    let returning_keyword = (update_keyword + 1..statement_end).find(|index| {
+        input.depths[*index] == statement_depth && input.tokens[*index].kind == TokenKind::Returning
     });
-    if returning.is_some_and(|returning| input.tokens[returning].range.start() <= input.point) {
+    if returning_keyword
+        .is_some_and(|returning| input.tokens[returning].range.start() <= input.point)
+    {
         return None;
     }
     Some(qualified_target_relation(
         target,
-        synthetic_name(input.base, &input.tokens[conflict], "excluded"),
+        synthetic_name(input.base, &input.tokens[conflict_keyword], "excluded"),
     ))
 }
 
@@ -1499,23 +1467,23 @@ fn returning_relations(
     statement_end: usize,
     target: &VisibleRelation,
 ) -> Vec<VisibleRelation> {
-    let depth = input.depths[statement];
-    let Some(returning) = (statement + 1..statement_end).find(|index| {
-        input.depths[*index] == depth && input.tokens[*index].kind == TokenKind::Returning
+    let statement_depth = input.depths[statement];
+    let Some(returning_keyword) = (statement + 1..statement_end).find(|index| {
+        input.depths[*index] == statement_depth && input.tokens[*index].kind == TokenKind::Returning
     }) else {
         return Vec::new();
     };
-    if input.tokens[returning].range.end() > input.point {
+    if input.tokens[returning_keyword].range.end() > input.point {
         return Vec::new();
     }
 
-    let mut old = synthetic_name(input.base, &input.tokens[returning], "old");
-    let mut new = synthetic_name(input.base, &input.tokens[returning], "new");
-    let with = returning + 1;
-    if input.tokens.get(with).map(|token| token.kind) == Some(TokenKind::With) {
-        let open = with + 1;
+    let mut old_name = synthetic_name(input.base, &input.tokens[returning_keyword], "old");
+    let mut new_name = synthetic_name(input.base, &input.tokens[returning_keyword], "new");
+    let with_keyword = returning_keyword + 1;
+    if input.tokens.get(with_keyword).map(|token| token.kind) == Some(TokenKind::With) {
+        let open = with_keyword + 1;
         if input.tokens.get(open).map(|token| token.kind) != Some(TokenKind::Char('('))
-            || input.depths[open] != depth
+            || input.depths[open] != statement_depth
         {
             return Vec::new();
         }
@@ -1527,18 +1495,18 @@ fn returning_relations(
         }
         let mut index = open + 1;
         while index < close {
-            if input.depths[index] == depth + 1
+            if input.depths[index] == statement_depth + 1
                 && matches!(input.tokens[index].kind, TokenKind::Old | TokenKind::New)
                 && input.tokens.get(index + 1).map(|token| token.kind) == Some(TokenKind::As)
                 && let Some(alias) = input
                     .tokens
                     .get(index + 2)
-                    .and_then(|token| name_part(input.source, input.base, token))
+                    .and_then(|token| name_part_from_token(input.source, input.base, token))
             {
                 if input.tokens[index].kind == TokenKind::Old {
-                    old = alias;
+                    old_name = alias;
                 } else {
-                    new = alias;
+                    new_name = alias;
                 }
                 index += 3;
             } else {
@@ -1548,16 +1516,16 @@ fn returning_relations(
     }
 
     vec![
-        qualified_target_relation(target, old),
-        qualified_target_relation(target, new),
+        qualified_target_relation(target, old_name),
+        qualified_target_relation(target, new_name),
     ]
 }
 
 fn qualified_target_relation(target: &VisibleRelation, alias: NamePart) -> VisibleRelation {
     let mut relation = target.clone();
-    relation.alias = Some(alias.clone());
-    relation.qualified_only = true;
     relation.syntax_range = alias.range;
+    relation.alias = Some(alias);
+    relation.qualified_only = true;
     relation
 }
 
@@ -1570,28 +1538,33 @@ fn synthetic_name(base: TextSize, token: &Token, text: &str) -> NamePart {
     }
 }
 
-fn active_dml_statement(tokens: &[Token], depths: &[usize], point: TextSize) -> Option<usize> {
-    let mut active = Vec::<usize>::new();
-    for (index, token) in tokens.iter().enumerate() {
-        if token.range.start() > point {
+fn active_dml_statement(input: &ScopeInput<'_>) -> Option<usize> {
+    // Keep the latest statement head at each still-open nesting depth. Closing
+    // a sibling group removes its candidates before a later group is scanned.
+    let mut statement_heads_by_depth = Vec::<usize>::new();
+    for (index, token) in input.tokens.iter().enumerate() {
+        if token.range.start() > input.point {
             break;
         }
-        if token.kind == TokenKind::Char(')') && token.range.start() < point {
-            active.retain(|candidate| depths[*candidate] <= depths[index]);
+        if token.kind == TokenKind::Char(')') && token.range.start() < input.point {
+            statement_heads_by_depth
+                .retain(|candidate| input.depths[*candidate] <= input.depths[index]);
         }
-        if !is_dml_statement_head(tokens, index) {
+        if !is_dml_statement_head(input.tokens, index) {
             continue;
         }
-        if let Some(candidate) = active
+        if let Some(candidate) = statement_heads_by_depth
             .iter_mut()
-            .find(|candidate| depths[**candidate] == depths[index])
+            .find(|candidate| input.depths[**candidate] == input.depths[index])
         {
             *candidate = index;
         } else {
-            active.push(index);
+            statement_heads_by_depth.push(index);
         }
     }
-    active.into_iter().max_by_key(|index| depths[*index])
+    statement_heads_by_depth
+        .into_iter()
+        .max_by_key(|index| input.depths[*index])
 }
 
 fn is_dml_statement_head(tokens: &[Token], index: usize) -> bool {
@@ -1603,6 +1576,7 @@ fn is_dml_statement_head(tokens: &[Token], index: usize) -> bool {
             tokens.get(index + 1).map(|token| token.kind) == Some(TokenKind::From)
         }
         TokenKind::Update => {
+            // UPDATE is also a row-lock or MERGE/ON CONFLICT action keyword.
             !index.checked_sub(1).is_some_and(|previous| {
                 matches!(
                     tokens[previous].kind,
@@ -1610,61 +1584,61 @@ fn is_dml_statement_head(tokens: &[Token], index: usize) -> bool {
                 )
             }) && tokens
                 .get(index + 1)
-                .is_some_and(|next| next.kind == TokenKind::Only || token_name(next).is_some())
+                .is_some_and(|next| next.kind == TokenKind::Only || token_can_be_name(next))
         }
         _ => false,
     }
 }
 
-fn apply_merge_when_visibility(
-    point: TextSize,
-    tokens: &[Token],
-    depths: &[usize],
+fn apply_merge_when_clause_visibility(
+    input: &ScopeInput<'_>,
     merge: usize,
-    end: usize,
+    statement_end: usize,
     snapshot: &mut ScopeSnapshot,
 ) {
-    let depth = depths[merge];
+    let statement_depth = input.depths[merge];
     let mut case_depth = 0usize;
-    let mut active_when = None;
-    let mut clause_end = None;
-    for index in merge + 1..end {
-        if depths[index] != depth {
+    let mut active_when_keyword = None;
+    let mut active_clause_end = None;
+    for index in merge + 1..statement_end {
+        if input.depths[index] != statement_depth {
             continue;
         }
-        match tokens[index].kind {
+        match input.tokens[index].kind {
             TokenKind::Case => case_depth += 1,
             TokenKind::EndP if case_depth > 0 => case_depth -= 1,
             TokenKind::When if case_depth == 0 => {
-                if tokens[index].range.start() <= point {
-                    active_when = Some(index);
-                } else if active_when.is_some() {
-                    clause_end = Some(tokens[index].range.start());
+                if input.tokens[index].range.start() <= input.point {
+                    active_when_keyword = Some(index);
+                } else if active_when_keyword.is_some() {
+                    active_clause_end = Some(input.tokens[index].range.start());
                     break;
                 }
             }
-            TokenKind::Returning if case_depth == 0 && active_when.is_some() => {
-                clause_end = Some(tokens[index].range.start());
+            TokenKind::Returning if case_depth == 0 && active_when_keyword.is_some() => {
+                active_clause_end = Some(input.tokens[index].range.start());
                 break;
             }
             _ => {}
         }
     }
-    let Some(when) = active_when else {
+    let Some(when_keyword) = active_when_keyword else {
         return;
     };
-    if clause_end.is_some_and(|end| point >= end)
-        || tokens.get(when + 1).map(|token| token.kind) != Some(TokenKind::Not)
-        || tokens.get(when + 2).map(|token| token.kind) != Some(TokenKind::Matched)
+    if active_clause_end.is_some_and(|end| input.point >= end)
+        || input.tokens.get(when_keyword + 1).map(|token| token.kind) != Some(TokenKind::Not)
+        || input.tokens.get(when_keyword + 2).map(|token| token.kind) != Some(TokenKind::Matched)
     {
         return;
     }
 
     match (
-        tokens.get(when + 3).map(|token| token.kind),
-        tokens.get(when + 4).map(|token| token.kind),
+        input.tokens.get(when_keyword + 3).map(|token| token.kind),
+        input.tokens.get(when_keyword + 4).map(|token| token.kind),
     ) {
+        // NOT MATCHED BY SOURCE has a target row but no source row.
         (Some(TokenKind::By), Some(TokenKind::Source)) => snapshot.merge_source = None,
+        // NOT MATCHED [BY TARGET] has a source row but no target row.
         (Some(TokenKind::By), Some(TokenKind::Target))
         | (Some(TokenKind::And | TokenKind::Then), _) => {
             snapshot.dml_target = None;
@@ -1673,18 +1647,12 @@ fn apply_merge_when_visibility(
     }
 }
 
-fn point_is_in_insert_source(
-    point: TextSize,
-    tokens: &[Token],
-    depths: &[usize],
-    insert: usize,
-    statement_end: usize,
-) -> bool {
-    let depth = depths[insert];
-    let source = (insert + 1..statement_end).find(|index| {
-        depths[*index] >= depth
+fn point_is_in_insert_source(input: &ScopeInput<'_>, insert: usize, statement_end: usize) -> bool {
+    let statement_depth = input.depths[insert];
+    let Some(source_start) = (insert + 1..statement_end).find(|index| {
+        input.depths[*index] >= statement_depth
             && matches!(
-                tokens[*index].kind,
+                input.tokens[*index].kind,
                 TokenKind::Values
                     | TokenKind::Select
                     | TokenKind::With
@@ -1692,27 +1660,27 @@ fn point_is_in_insert_source(
                     | TokenKind::Execute
                     | TokenKind::Default
             )
-    });
-    let Some(source) = source else {
+    }) else {
         return false;
     };
-    let end = (source + 1..statement_end)
+    let source_end = (source_start + 1..statement_end)
         .find(|index| {
-            depths[*index] == depth
-                && (tokens[*index].kind == TokenKind::Returning
-                    || (tokens[*index].kind == TokenKind::On
-                        && tokens.get(*index + 1).map(|token| token.kind)
+            input.depths[*index] == statement_depth
+                && (input.tokens[*index].kind == TokenKind::Returning
+                    || (input.tokens[*index].kind == TokenKind::On
+                        && input.tokens.get(*index + 1).map(|token| token.kind)
                             == Some(TokenKind::Conflict)))
         })
         .map_or_else(
-            || statement_end_location(tokens, statement_end),
-            |index| tokens[index].range.start(),
+            || token_boundary(input.tokens, statement_end),
+            |index| input.tokens[index].range.start(),
         );
-    tokens[source].range.start() <= point && point <= end
+    input.tokens[source_start].range.start() <= input.point && input.point <= source_end
 }
 
-fn statement_end_location(tokens: &[Token], statement_end: usize) -> TextSize {
-    tokens.get(statement_end).map_or_else(
+/// Start of `tokens[index]`, or the end of the token stream when `index == len`.
+fn token_boundary(tokens: &[Token], index: usize) -> TextSize {
+    tokens.get(index).map_or_else(
         || {
             tokens
                 .last()
@@ -1722,96 +1690,95 @@ fn statement_end_location(tokens: &[Token], statement_end: usize) -> TextSize {
     )
 }
 
-fn join_condition_boundary(
-    tokens: &[Token],
-    depths: &[usize],
-    start: usize,
-    end: usize,
-    depth: usize,
-    point: TextSize,
+/// Start of the ON/USING clause containing the point, if one is active.
+fn active_join_condition_start(
+    input: &ScopeInput<'_>,
+    search_range: std::ops::Range<usize>,
+    condition_depth: usize,
 ) -> Option<TextSize> {
-    (start..end).rev().find_map(|index| {
-        if depths[index] != depth || tokens[index].range.start() > point {
+    let search_end = search_range.end;
+    search_range.rev().find_map(|index| {
+        let at_condition_depth = input.depths[index] == condition_depth;
+        let before_point = input.tokens[index].range.start() <= input.point;
+        if !at_condition_depth || !before_point {
             return None;
         }
-        match tokens[index].kind {
+        match input.tokens[index].kind {
             TokenKind::On => {
-                let condition_end = (index + 1..end)
+                let condition_end = (index + 1..search_end)
                     .find(|candidate| {
-                        depths[*candidate] < depth
-                            || (depths[*candidate] == depth
+                        input.depths[*candidate] < condition_depth
+                            || (input.depths[*candidate] == condition_depth
                                 && (matches!(
-                                    tokens[*candidate].kind,
+                                    input.tokens[*candidate].kind,
                                     TokenKind::Char(',') | TokenKind::Join
-                                ) || FROM_LIST_END.contains(&tokens[*candidate].kind)))
+                                ) || FROM_LIST_END.contains(&input.tokens[*candidate].kind)))
                     })
                     .map_or_else(
-                        || {
-                            tokens
-                                .last()
-                                .map_or(TextSize::ZERO, |token| token.range.end())
-                        },
-                        |candidate| tokens[candidate].range.start(),
+                        || token_boundary(input.tokens, search_end),
+                        |candidate| input.tokens[candidate].range.start(),
                     );
-                (point <= condition_end).then_some(tokens[index].range.start())
+                (input.point <= condition_end).then_some(input.tokens[index].range.start())
             }
             TokenKind::Using => {
                 let open = index + 1;
-                if open >= end
-                    || depths[open] != depth
-                    || tokens[open].kind != TokenKind::Char('(')
-                    || point < tokens[open].range.end()
+                if open >= search_end
+                    || input.depths[open] != condition_depth
+                    || input.tokens[open].kind != TokenKind::Char('(')
+                    || input.point < input.tokens[open].range.end()
                 {
                     return None;
                 }
-                let active = matching_close(tokens, depths, open, end)
-                    .is_none_or(|close| point <= tokens[close].range.start());
-                active.then_some(tokens[index].range.start())
+                let is_active = matching_close(input.tokens, input.depths, open, search_end)
+                    .is_none_or(|close| input.point <= input.tokens[close].range.start());
+                is_active.then_some(input.tokens[index].range.start())
             }
             _ => None,
         }
     })
 }
 
-fn deepest_join_condition_boundary(
-    tokens: &[Token],
-    depths: &[usize],
-    start: usize,
-    end: usize,
-    min_depth: usize,
-    max_depth: usize,
-    point: TextSize,
+fn deepest_active_join_condition_start(
+    input: &ScopeInput<'_>,
+    search_range: std::ops::Range<usize>,
+    depth_range: std::ops::RangeInclusive<usize>,
 ) -> Option<TextSize> {
-    (min_depth..=max_depth)
+    depth_range
         .rev()
-        .find_map(|depth| join_condition_boundary(tokens, depths, start, end, depth, point))
+        .find_map(|depth| active_join_condition_start(input, search_range.clone(), depth))
 }
 
 fn parse_dml_target(
-    source: &str,
-    base: TextSize,
-    tokens: &[Token],
+    input: &ScopeInput<'_>,
     mut index: usize,
-    end: usize,
+    statement_end: usize,
     statement_kind: TokenKind,
-    point: TextSize,
 ) -> Option<(VisibleRelation, usize)> {
-    let start = index;
-    consume_kind(tokens, &mut index, end, TokenKind::Only);
-    let parenthesized = consume_kind(tokens, &mut index, end, TokenKind::Char('('));
-    let (name, after_name) = parse_qualified_name(source, base, tokens, index, end, point)?;
+    let ScopeInput {
+        source,
+        base,
+        point,
+        tokens,
+        ..
+    } = *input;
+    let target_start = index;
+    consume_kind(tokens, &mut index, statement_end, TokenKind::Only);
+    let parenthesized_target =
+        consume_kind(tokens, &mut index, statement_end, TokenKind::Char('('));
+    let (name, after_name) =
+        parse_qualified_name(source, base, tokens, index, statement_end, point)?;
     index = after_name;
-    if parenthesized {
-        consume_kind(tokens, &mut index, end, TokenKind::Char(')'));
+    if parenthesized_target {
+        consume_kind(tokens, &mut index, statement_end, TokenKind::Char(')'));
     }
-    consume_kind(tokens, &mut index, end, TokenKind::Char('*'));
+    consume_kind(tokens, &mut index, statement_end, TokenKind::Char('*'));
     let (alias, explicit_columns, next) = if statement_kind == TokenKind::Insert {
-        if consume_kind(tokens, &mut index, end, TokenKind::As) {
-            let alias = name_part(source, base, tokens.get(index)?)?;
+        if consume_kind(tokens, &mut index, statement_end, TokenKind::As) {
+            let alias = name_part_from_token(source, base, tokens.get(index)?)?;
             index += 1;
-            if index < end && tokens[index].kind == TokenKind::Char('(') {
+            if index < statement_end && tokens[index].kind == TokenKind::Char('(') {
                 let (columns, next) =
-                    parse_parenthesized_column_names(source, base, tokens, index, end);
+                    parse_parenthesized_column_names(source, base, tokens, index, statement_end);
                 (Some(alias), columns, next)
             } else {
                 (Some(alias), Vec::new(), index)
@@ -1820,7 +1787,7 @@ fn parse_dml_target(
             (None, Vec::new(), index)
         }
     } else {
-        let (alias, columns, next) = parse_alias(source, base, tokens, index, end);
+        let (alias, columns, next) = parse_alias(source, base, tokens, index, statement_end);
         (alias, columns, next)
     };
     let syntax_end = next
@@ -1836,7 +1803,7 @@ fn parse_dml_target(
             alias,
             explicit_columns,
             qualified_only: false,
-            syntax_range: absolute_range(base, tokens[start].range.start(), syntax_end),
+            syntax_range: absolute_range(base, tokens[target_start].range.start(), syntax_end),
             body_range: None,
             lateral: false,
             unsupported: None,
@@ -1860,16 +1827,11 @@ fn consume_kind(tokens: &[Token], index: &mut usize, end: usize, kind: TokenKind
     }
 }
 
-fn name_part(source: &str, base: TextSize, token: &Token) -> Option<NamePart> {
-    name_part_from_token(source, base, token)
-}
-
-fn token_name(token: &Token) -> Option<String> {
-    match &token.value {
-        Some(TokenValue::String(value)) => Some(value.clone()),
-        Some(TokenValue::Keyword(value)) => Some((*value).to_owned()),
-        _ => None,
-    }
+fn token_can_be_name(token: &Token) -> bool {
+    matches!(
+        &token.value,
+        Some(TokenValue::String(_) | TokenValue::Keyword(_))
+    )
 }
 
 fn absolute_range(base: TextSize, start: TextSize, end: TextSize) -> TextRange {
