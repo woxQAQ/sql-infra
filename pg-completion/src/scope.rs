@@ -1,8 +1,5 @@
 use pg_parser::{TextRange, TextSize, Token, TokenKind, TokenValue};
 
-#[cfg(test)]
-use pg_parser::{LexError, lex};
-
 use crate::{
     CteDefinition, NamePart, QueryScope, RelationKind, ScopeSnapshot, UnsupportedRelation,
     VisibleRelation, prefix::name_part_from_token,
@@ -33,16 +30,6 @@ struct SelectLocation {
 enum DmlRelationPlacement {
     Local,
     Outer,
-}
-
-#[cfg(test)]
-pub(super) fn collect(
-    source: &str,
-    base: TextSize,
-    point: TextSize,
-) -> Result<ScopeSnapshot, LexError> {
-    let tokens = lex(source)?;
-    Ok(collect_tokens(source, base, point, &tokens))
 }
 
 pub(super) fn collect_tokens(
@@ -1915,7 +1902,18 @@ fn token_can_be_name(token: &Token) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use pg_parser::{LexError, lex};
+
     use super::*;
+
+    fn collect(
+        source: &str,
+        base: TextSize,
+        point: TextSize,
+    ) -> Result<ScopeSnapshot, LexError> {
+        let tokens = lex(source)?;
+        Ok(collect_tokens(source, base, point, &tokens))
+    }
 
     #[test]
     fn collects_local_and_outer_query_relations() {
