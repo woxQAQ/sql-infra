@@ -163,8 +163,7 @@ impl Parser {
         loop {
             self.record_completion_slot(completion::GrammarSlot::MaterializedView);
             let owner_start = self.pos;
-            let relation =
-                self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
+            let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
             let owner_end = self.pos;
             let va_cols = if self.consume(TokenKind::Char('(')) {
                 self.push_completion_membership_owner_range(
@@ -478,8 +477,7 @@ impl Parser {
         self.consume(TokenKind::Table);
         let mut relations = Vec::new();
         loop {
-            let relation =
-                self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
+            let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
             relations.push(Node::RangeVar(relation));
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -778,8 +776,7 @@ impl Parser {
             self.expect_statement_end()?;
             (None, true, None)
         } else {
-            let relation =
-                self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
+            let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
             let va_cols = if self.consume(TokenKind::Char('(')) {
                 self.record_completion_slot(completion::GrammarSlot::Column);
                 let columns = self.parse_parenthesized_name_list_body()?;
@@ -832,7 +829,7 @@ impl Parser {
             }));
         }
 
-        let save = self.pos;
+        let cluster_target_start = self.pos;
         self.record_completion_slot(completion::GrammarSlot::Index);
         if let Some(indexname) = self.consume_col_id()
             && self.consume(TokenKind::On)
@@ -853,7 +850,7 @@ impl Parser {
                 params,
             }));
         }
-        self.pos = save;
+        self.pos = cluster_target_start;
 
         let relation = self
             .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
@@ -892,8 +889,7 @@ impl Parser {
         self.consume(TokenKind::Table);
         let mut relations = Vec::new();
         loop {
-            let relation =
-                self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
+            let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
             relations.push(Node::RangeVar(relation));
             if !self.consume(TokenKind::Char(',')) {
                 break;

@@ -33,12 +33,7 @@ impl ExprParser {
                         })
                     } else {
                         let name = self
-                            .consume_identifier_in_categories(&[
-                                KeywordCategory::Unreserved,
-                                KeywordCategory::ColName,
-                                KeywordCategory::TypeFuncName,
-                                KeywordCategory::Reserved,
-                            ])
+                            .consume_column_label()
                             .or_else(|| self.fail("expected a field name after '.'"))?;
                         make_string_node(name)
                     };

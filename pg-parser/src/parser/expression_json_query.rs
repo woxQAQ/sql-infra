@@ -55,19 +55,14 @@ impl ExprParser {
         }
         let mut arguments = Vec::new();
         loop {
-            let val = self.parse_json_value_expr()?;
+            let value = self.parse_json_value_expr()?;
             self.expect(TokenKind::As)?;
             let name = self
-                .consume_identifier_in_categories(&[
-                    KeywordCategory::Unreserved,
-                    KeywordCategory::ColName,
-                    KeywordCategory::TypeFuncName,
-                    KeywordCategory::Reserved,
-                ])
+                .consume_column_label()
                 .or_else(|| self.fail("JSON PASSING requires a column label after AS"))?;
             arguments.push(Node::JsonArgument(JsonArgument {
                 node_tag: NodeTag::JsonArgument,
-                val: Some(Box::new(val)),
+                val: Some(Box::new(value)),
                 name: Some(name),
             }));
             if !self.consume(TokenKind::Char(',')) {
@@ -119,7 +114,10 @@ impl ExprParser {
         }
     }
 
-    pub(super) fn parse_json_behaviors(&mut self, allow_empty: bool) -> Option<JsonBehaviorPair> {
+    pub(super) fn parse_json_behaviors(
+        &mut self,
+        allow_on_empty: bool,
+    ) -> Option<JsonBehaviorPair> {
         let mut on_empty = None;
         let mut on_error = None;
         loop {
@@ -148,7 +146,7 @@ impl ExprParser {
             }
             let behavior = self.parse_json_behavior()?;
             self.expect(TokenKind::On)?;
-            if allow_empty && self.consume(TokenKind::EmptyP) {
+            if allow_on_empty && self.consume(TokenKind::EmptyP) {
                 if on_error.is_some() {
                     return self.fail("JSON ON EMPTY must precede ON ERROR");
                 }
@@ -306,12 +304,7 @@ impl ExprParser {
             match parse_sort_list_tokens(self.tokens[start..end].to_vec(), self.completion.clone())
             {
                 Ok(items) => agg_order = items,
-                Err(error) => {
-                    if self.error.is_none() {
-                        self.error = Some(error);
-                    }
-                    return None;
-                }
+                Err(error) => return self.fail_with(error),
             }
             self.pos = end;
         }

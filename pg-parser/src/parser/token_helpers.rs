@@ -332,9 +332,9 @@ pub(super) fn tokens_to_text(tokens: &[Token]) -> std::string::String {
     tokens.iter().map(token_text).collect::<Vec<_>>().join(" ")
 }
 pub(super) fn extend_stops(stops: &[TokenKind], extra: TokenKind) -> Vec<TokenKind> {
-    let mut out = stops.to_vec();
-    if !out.contains(&extra) {
-        out.push(extra);
+    let mut extended_stops = stops.to_vec();
+    if !extended_stops.contains(&extra) {
+        extended_stops.push(extra);
     }
-    out
+    extended_stops
 }

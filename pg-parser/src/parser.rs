@@ -332,6 +332,7 @@ impl Parser {
                 break;
             }
 
+            self.clear_completion_membership_owners();
             let statement_start = self.location();
             let statement = self.parse_statement(None)?;
             let statement_end = self.location();
@@ -980,8 +981,8 @@ impl Parser {
             StatementFamily::Truncate => self.parse_truncate(),
             StatementFamily::Comment => self.parse_comment(),
             StatementFamily::SecurityLabel => self.parse_security_label(),
-            StatementFamily::Grant => self.parse_grant(true),
-            StatementFamily::Revoke => self.parse_grant(false),
+            StatementFamily::Grant => self.parse_grant(privileges::GrantKind::Grant),
+            StatementFamily::Revoke => self.parse_grant(privileges::GrantKind::Revoke),
             StatementFamily::Import => self.parse_import_foreign_schema(),
             StatementFamily::Do => self.parse_do(),
             StatementFamily::Wait => self.parse_wait(),

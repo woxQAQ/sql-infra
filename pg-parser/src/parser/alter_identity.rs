@@ -233,7 +233,7 @@ impl Parser {
         };
         if relation_object_type(object_type) {
             let relation = if matches!(object_type, ObjectType::Table | ObjectType::ForeignTable) {
-                self.parse_relation_expr(false)?
+                self.parse_relation_expr()?
             } else {
                 self.try_parse_qualified_range_var()
                     .ok_or_else(|| self.error_here("ALTER object requires a relation name"))?

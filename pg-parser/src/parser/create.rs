@@ -128,7 +128,7 @@ impl Parser {
                     self.parse_create_fdw()?
                 }
             }
-            TokenKind::Unique | TokenKind::Index => self.parse_index(false)?,
+            TokenKind::Unique | TokenKind::Index => self.parse_index()?,
             TokenKind::Schema => self.parse_create_schema()?,
             TokenKind::Database => self.parse_createdb()?,
             TokenKind::Recursive => {
@@ -156,10 +156,12 @@ impl Parser {
             TokenKind::Publication => self.parse_create_publication()?,
             TokenKind::Subscription => self.parse_create_subscription()?,
             TokenKind::Policy => self.parse_create_policy()?,
-            TokenKind::Trigger => self.parse_create_trigger(replace, false)?,
+            TokenKind::Trigger => {
+                self.parse_create_trigger(replace, create_trigger::TriggerKind::Regular)?
+            }
             TokenKind::Constraint => {
                 self.advance();
-                self.parse_create_trigger(replace, true)?
+                self.parse_create_trigger(replace, create_trigger::TriggerKind::Constraint)?
             }
             TokenKind::Event => {
                 self.advance();

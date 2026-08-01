@@ -71,7 +71,7 @@ impl Parser {
     // Source: https://www.postgresql.org/docs/18/sql-createconversion.html
     // CREATE [ DEFAULT ] CONVERSION name
     //     FOR source_encoding TO dest_encoding FROM function_name
-    pub(super) fn parse_create_conversion(&mut self, def: bool) -> PResult<Node> {
+    pub(super) fn parse_create_conversion(&mut self, is_default: bool) -> PResult<Node> {
         self.expect(TokenKind::ConversionP)?;
         let name_stops = [TokenKind::For, TokenKind::Char(';'), TokenKind::Eof];
         self.record_completion_slot(completion::GrammarSlot::Conversion);
@@ -100,7 +100,7 @@ impl Parser {
             for_encoding_name,
             to_encoding_name,
             func_name,
-            def,
+            def: is_default,
         }))
     }
 

@@ -10,8 +10,8 @@ impl Parser {
     //     [ WITH ( storage_parameter [= value] [, ... ] ) ]
     //     [ TABLESPACE tablespace_name ]
     //     [ WHERE predicate ]
-    pub(super) fn parse_index(&mut self, unique_seen: bool) -> PResult<Node> {
-        let unique = unique_seen || self.consume(TokenKind::Unique);
+    pub(super) fn parse_index(&mut self) -> PResult<Node> {
+        let unique = self.consume(TokenKind::Unique);
         self.expect(TokenKind::Index)?;
         let concurrent = self.consume(TokenKind::Concurrently);
         let if_not_exists = self.consume_if_not_exists()?;
@@ -28,7 +28,7 @@ impl Parser {
         self.record_completion_slot(completion::GrammarSlot::MaterializedView);
         let owner_start = self.pos;
         let relation = Some(Box::new(
-            self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?,
+            self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?,
         ));
         let owner_end = self.pos;
         self.push_completion_membership_owner_range(

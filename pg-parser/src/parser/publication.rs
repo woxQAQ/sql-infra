@@ -342,7 +342,6 @@ impl Parser {
                                 self.consume(TokenKind::Table);
                                 let table_location = self.location();
                                 let relation = self.parse_relation_expr_with_slot(
-                                    false,
                                     completion::GrammarSlot::Table,
                                 )?;
                                 tables.push(Node::PublicationObjSpec(PublicationObjSpec {
@@ -451,7 +450,7 @@ impl Parser {
                         continue;
                     }
                     let relation =
-                        self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
+                        self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
                     let columns = self.parse_optional_column_name_list()?;
                     let where_clause = if self.consume(TokenKind::Where) {
                         self.expect(TokenKind::Char('('))?;

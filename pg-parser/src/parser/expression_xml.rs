@@ -27,31 +27,7 @@ impl ExprParser {
                 }
             }
             TokenKind::Xmlelement => {
-                self.expect(TokenKind::NameP)?;
-                expr.name = Some(
-                    self.consume_identifier_in_categories(&[
-                        KeywordCategory::Unreserved,
-                        KeywordCategory::ColName,
-                        KeywordCategory::TypeFuncName,
-                        KeywordCategory::Reserved,
-                    ])
-                    .or_else(|| self.fail("XMLELEMENT NAME requires a column label"))?,
-                );
-                if self.consume(TokenKind::Char(',')) {
-                    if self.consume(TokenKind::Xmlattributes) {
-                        self.expect(TokenKind::Char('('))?;
-                        expr.named_args = self.parse_xml_labeled_expr_list(TokenKind::Char(')'))?;
-                        if expr.named_args.is_empty() {
-                            return self.fail("XMLATTRIBUTES requires at least one expression");
-                        }
-                        self.expect(TokenKind::Char(')'))?;
-                        if self.consume(TokenKind::Char(',')) {
-                            expr.args = self.parse_expr_list_until(TokenKind::Char(')'))?;
-                        }
-                    } else {
-                        expr.args = self.parse_expr_list_until(TokenKind::Char(')'))?;
-                    }
-                }
+                self.parse_xmlelement_arguments(&mut expr)?;
             }
             TokenKind::Xmlforest => {
                 expr.named_args = self.parse_xml_labeled_expr_list(TokenKind::Char(')'))?;
@@ -60,79 +36,111 @@ impl ExprParser {
                 }
             }
             TokenKind::Xmlparse => {
-                expr.xmloption = if self.consume(TokenKind::DocumentP) {
-                    XmlOptionType::Document
-                } else {
-                    self.expect(TokenKind::ContentP)?;
-                    XmlOptionType::Content
-                };
-                let value = self.parse_expr(0)?;
-                let preserve = if self.consume(TokenKind::Preserve) {
-                    self.expect(TokenKind::WhitespaceP)?;
-                    true
-                } else if self.consume(TokenKind::StripP) {
-                    self.expect(TokenKind::WhitespaceP)?;
-                    false
-                } else {
-                    false
-                };
-                expr.args = vec![
-                    value,
-                    Node::AConst(AConst {
-                        node_tag: NodeTag::AConst,
-                        val: ValUnion::Boolean(Boolean::new(preserve)),
-                        location: -1,
-                        ..AConst::default()
-                    }),
-                ];
+                self.parse_xmlparse_arguments(&mut expr)?;
             }
             TokenKind::Xmlpi => {
                 self.expect(TokenKind::NameP)?;
                 expr.name = Some(
-                    self.consume_identifier_in_categories(&[
-                        KeywordCategory::Unreserved,
-                        KeywordCategory::ColName,
-                        KeywordCategory::TypeFuncName,
-                        KeywordCategory::Reserved,
-                    ])
-                    .or_else(|| self.fail("XMLPI NAME requires a column label"))?,
+                    self.consume_column_label()
+                        .or_else(|| self.fail("XMLPI NAME requires a column label"))?,
                 );
                 if self.consume(TokenKind::Char(',')) {
                     expr.args.push(self.parse_expr(0)?);
                 }
             }
             TokenKind::Xmlroot => {
-                expr.args.push(self.parse_expr(0)?);
-                self.expect(TokenKind::Char(','))?;
-                self.expect(TokenKind::VersionP)?;
-                if self.consume(TokenKind::No) {
-                    self.expect(TokenKind::ValueP)?;
-                    expr.args.push(Node::AConst(AConst::null(-1)));
-                } else {
-                    expr.args.push(self.parse_expr(0)?);
-                }
-                let standalone = if self.consume(TokenKind::Char(',')) {
-                    self.expect(TokenKind::StandaloneP)?;
-                    if self.consume(TokenKind::YesP) {
-                        0
-                    } else {
-                        self.expect(TokenKind::No)?;
-                        if self.consume(TokenKind::ValueP) {
-                            2
-                        } else {
-                            1
-                        }
-                    }
-                } else {
-                    3
-                };
-                expr.args
-                    .push(Node::AConst(AConst::integer(standalone, -1)));
+                self.parse_xmlroot_arguments(&mut expr)?;
             }
             _ => return None,
         }
         self.expect(TokenKind::Char(')'))?;
         Some(Node::XmlExpr(expr))
+    }
+
+    fn parse_xmlelement_arguments(&mut self, expr: &mut XmlExpr) -> Option<()> {
+        self.expect(TokenKind::NameP)?;
+        expr.name = Some(
+            self.consume_column_label()
+                .or_else(|| self.fail("XMLELEMENT NAME requires a column label"))?,
+        );
+        if !self.consume(TokenKind::Char(',')) {
+            return Some(());
+        }
+        if !self.consume(TokenKind::Xmlattributes) {
+            expr.args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+            return Some(());
+        }
+
+        self.expect(TokenKind::Char('('))?;
+        expr.named_args = self.parse_xml_labeled_expr_list(TokenKind::Char(')'))?;
+        if expr.named_args.is_empty() {
+            return self.fail("XMLATTRIBUTES requires at least one expression");
+        }
+        self.expect(TokenKind::Char(')'))?;
+        if self.consume(TokenKind::Char(',')) {
+            expr.args = self.parse_expr_list_until(TokenKind::Char(')'))?;
+        }
+        Some(())
+    }
+
+    fn parse_xmlparse_arguments(&mut self, expr: &mut XmlExpr) -> Option<()> {
+        expr.xmloption = if self.consume(TokenKind::DocumentP) {
+            XmlOptionType::Document
+        } else {
+            self.expect(TokenKind::ContentP)?;
+            XmlOptionType::Content
+        };
+        let value = self.parse_expr(0)?;
+        let preserve_whitespace = if self.consume(TokenKind::Preserve) {
+            self.expect(TokenKind::WhitespaceP)?;
+            true
+        } else if self.consume(TokenKind::StripP) {
+            self.expect(TokenKind::WhitespaceP)?;
+            false
+        } else {
+            false
+        };
+        expr.args = vec![
+            value,
+            Node::AConst(AConst {
+                node_tag: NodeTag::AConst,
+                val: ValUnion::Boolean(Boolean::new(preserve_whitespace)),
+                location: -1,
+                ..AConst::default()
+            }),
+        ];
+        Some(())
+    }
+
+    fn parse_xmlroot_arguments(&mut self, expr: &mut XmlExpr) -> Option<()> {
+        expr.args.push(self.parse_expr(0)?);
+        self.expect(TokenKind::Char(','))?;
+        self.expect(TokenKind::VersionP)?;
+        if self.consume(TokenKind::No) {
+            self.expect(TokenKind::ValueP)?;
+            expr.args.push(Node::AConst(AConst::null(-1)));
+        } else {
+            expr.args.push(self.parse_expr(0)?);
+        }
+
+        let standalone = if self.consume(TokenKind::Char(',')) {
+            self.expect(TokenKind::StandaloneP)?;
+            if self.consume(TokenKind::YesP) {
+                0
+            } else {
+                self.expect(TokenKind::No)?;
+                if self.consume(TokenKind::ValueP) {
+                    2
+                } else {
+                    1
+                }
+            }
+        } else {
+            3
+        };
+        expr.args
+            .push(Node::AConst(AConst::integer(standalone, -1)));
+        Some(())
     }
 
     pub(super) fn parse_xml_labeled_expr_list(&mut self, stop: TokenKind) -> Option<NodeList> {
@@ -142,13 +150,8 @@ impl ExprParser {
             let value = self.parse_expr(0)?;
             let name = if self.consume(TokenKind::As) {
                 Some(
-                    self.consume_identifier_in_categories(&[
-                        KeywordCategory::Unreserved,
-                        KeywordCategory::ColName,
-                        KeywordCategory::TypeFuncName,
-                        KeywordCategory::Reserved,
-                    ])
-                    .or_else(|| self.fail("XML alias requires a column label"))?,
+                    self.consume_column_label()
+                        .or_else(|| self.fail("XML alias requires a column label"))?,
                 )
             } else {
                 None
@@ -203,12 +206,7 @@ impl ExprParser {
             Err(_) if completing_type => {
                 return self.fail("completion point in XMLSERIALIZE type");
             }
-            Err(error) => {
-                if self.error.is_none() {
-                    self.error = Some(error);
-                }
-                return None;
-            }
+            Err(error) => return self.fail_with(error),
         };
         if self.at_completion() {
             self.record_completion_lookahead_tokens(&[TokenKind::Indent, TokenKind::No]);

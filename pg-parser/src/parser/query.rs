@@ -345,7 +345,7 @@ impl Parser {
             }
             TokenKind::Table => {
                 self.advance();
-                let range = self.parse_relation_expr(false)?;
+                let range = self.parse_relation_expr()?;
                 stmt.target_list.push(Node::ResTarget(ResTarget {
                     node_tag: NodeTag::ResTarget,
                     val: Some(Box::new(Node::ColumnRef(ColumnRef {

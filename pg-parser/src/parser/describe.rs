@@ -44,6 +44,12 @@ const COMMENT_ONLY_OBJECT_STARTS: &[TokenKind] = &[
     TokenKind::Trigger,
 ];
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum DescribedObjectContext {
+    Comment,
+    SecurityLabel,
+}
+
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-comment.html
@@ -102,7 +108,7 @@ impl Parser {
     pub(super) fn parse_comment(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Comment)?;
         self.expect(TokenKind::On)?;
-        let (objtype, object) = self.parse_described_object(false)?;
+        let (objtype, object) = self.parse_described_object(DescribedObjectContext::Comment)?;
         self.expect(TokenKind::Is)?;
         let comment = if self.consume(TokenKind::NullP) {
             None
@@ -161,7 +167,8 @@ impl Parser {
             None
         };
         self.expect(TokenKind::On)?;
-        let (objtype, object) = self.parse_described_object(true)?;
+        let (objtype, object) =
+            self.parse_described_object(DescribedObjectContext::SecurityLabel)?;
         self.expect(TokenKind::Is)?;
         let label = if self.consume(TokenKind::NullP) {
             None
@@ -177,9 +184,12 @@ impl Parser {
         }))
     }
 
-    fn parse_described_object(&mut self, security_label: bool) -> PResult<(ObjectType, Node)> {
+    fn parse_described_object(
+        &mut self,
+        context: DescribedObjectContext,
+    ) -> PResult<(ObjectType, Node)> {
         self.record_completion_tokens(DESCRIBED_OBJECT_STARTS);
-        if !security_label {
+        if context == DescribedObjectContext::Comment {
             self.record_completion_tokens(COMMENT_ONLY_OBJECT_STARTS);
         }
         if self.consume(TokenKind::Column) {
@@ -239,7 +249,7 @@ impl Parser {
             return Ok((ObjectType::Largeobject, value));
         }
 
-        if !security_label {
+        if context == DescribedObjectContext::Comment {
             if self.consume(TokenKind::Operator) {
                 self.record_completion_tokens(&[TokenKind::Class, TokenKind::Family]);
                 self.record_completion_slot(completion::GrammarSlot::Operator);
@@ -371,7 +381,7 @@ impl Parser {
             }
         }
 
-        let (objtype, identity_kind) = self.parse_simple_described_object_type(security_label)?;
+        let (objtype, identity_kind) = self.parse_simple_described_object_type(context)?;
         let slot = completion::object_type_slot(objtype);
         let object = match identity_kind {
             DescribedIdentityKind::AnyName => self.parse_any_name_object_until_is(slot)?,
@@ -391,7 +401,7 @@ impl Parser {
 
     fn parse_simple_described_object_type(
         &mut self,
-        security_label: bool,
+        context: DescribedObjectContext,
     ) -> PResult<(ObjectType, DescribedIdentityKind)> {
         self.record_completion_tokens(&[
             TokenKind::Table,
@@ -520,11 +530,13 @@ impl Parser {
                 ObjectType::Tablespace
             }
             _ => {
-                return Err(self.error_here(if security_label {
-                    "unsupported SECURITY LABEL object type"
-                } else {
-                    "unsupported COMMENT object type"
-                }));
+                return Err(
+                    self.error_here(if context == DescribedObjectContext::SecurityLabel {
+                        "unsupported SECURITY LABEL object type"
+                    } else {
+                        "unsupported COMMENT object type"
+                    }),
+                );
             }
         };
         Ok((objtype, DescribedIdentityKind::Name))

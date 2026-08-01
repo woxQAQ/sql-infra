@@ -36,6 +36,25 @@ const PRIVILEGE_TARGET_STARTS: &[TokenKind] = &[
     TokenKind::LargeP,
 ];
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum GrantKind {
+    Grant,
+    Revoke,
+}
+
+impl GrantKind {
+    fn is_grant(self) -> bool {
+        self == Self::Grant
+    }
+
+    fn grantee_separator(self) -> TokenKind {
+        match self {
+            Self::Grant => TokenKind::To,
+            Self::Revoke => TokenKind::From,
+        }
+    }
+}
+
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html
@@ -496,13 +515,13 @@ impl Parser {
     //   | CURRENT_ROLE
     //   | CURRENT_USER
     //   | SESSION_USER
-    pub(super) fn parse_grant(&mut self, is_grant: bool) -> PResult<Node> {
+    pub(super) fn parse_grant(&mut self, kind: GrantKind) -> PResult<Node> {
         self.advance();
         self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
         self.record_completion_slot(completion::GrammarSlot::Privilege);
         self.record_completion_slot(completion::GrammarSlot::Role);
         let mut revoke_grant_option = false;
-        if !is_grant && self.consume(TokenKind::Grant) {
+        if kind == GrantKind::Revoke && self.consume(TokenKind::Grant) {
             self.expect(TokenKind::Option)?;
             self.expect(TokenKind::For)?;
             revoke_grant_option = true;
@@ -512,22 +531,18 @@ impl Parser {
             TokenKind::On,
             &[TokenKind::To, TokenKind::From, TokenKind::Eof],
         ) {
-            return self.parse_object_grant(is_grant, revoke_grant_option);
+            return self.parse_object_grant(kind, revoke_grant_option);
         }
-        self.parse_role_grant(is_grant)
+        self.parse_role_grant(kind)
     }
 
-    fn parse_object_grant(&mut self, is_grant: bool, revoke_grant_option: bool) -> PResult<Node> {
+    fn parse_object_grant(&mut self, kind: GrantKind, revoke_grant_option: bool) -> PResult<Node> {
         self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
         self.record_completion_slot(completion::GrammarSlot::Privilege);
         let privileges = self.parse_access_privileges()?;
         self.expect(TokenKind::On)?;
         let (targtype, objtype, objects) = self.parse_privilege_target()?;
-        self.expect(if is_grant {
-            TokenKind::To
-        } else {
-            TokenKind::From
-        })?;
+        self.expect(kind.grantee_separator())?;
         let grantees = self.parse_role_specs_until(
             &[
                 TokenKind::With,
@@ -539,7 +554,7 @@ impl Parser {
             ],
             true,
         )?;
-        let grant_option = if is_grant && self.consume(TokenKind::With) {
+        let grant_option = if kind.is_grant() && self.consume(TokenKind::With) {
             self.expect(TokenKind::Grant)?;
             self.expect(TokenKind::Option)?;
             true
@@ -555,14 +570,14 @@ impl Parser {
         } else {
             None
         };
-        let behavior = if is_grant {
+        let behavior = if kind.is_grant() {
             DropBehavior::Restrict
         } else {
             self.parse_drop_behavior()
         };
         Ok(Node::GrantStmt(GrantStmt {
             node_tag: NodeTag::GrantStmt,
-            is_grant,
+            is_grant: kind.is_grant(),
             targtype,
             objtype,
             objects,
@@ -574,14 +589,14 @@ impl Parser {
         }))
     }
 
-    fn parse_role_grant(&mut self, is_grant: bool) -> PResult<Node> {
-        let mut opt = Vec::new();
-        if !is_grant && self.peek_kind_n(1) == TokenKind::Completion {
+    fn parse_role_grant(&mut self, kind: GrantKind) -> PResult<Node> {
+        let mut role_options = Vec::new();
+        if kind == GrantKind::Revoke && self.peek_kind_n(1) == TokenKind::Completion {
             self.advance();
             self.record_completion_tokens(&[TokenKind::Option, TokenKind::On, TokenKind::From]);
             return Err(self.error_here("expected a REVOKE continuation"));
         }
-        if !is_grant
+        if kind == GrantKind::Revoke
             && self.peek_kind_n(1) == TokenKind::Option
             && matches!(self.peek_kind_n(2), TokenKind::For | TokenKind::Completion)
         {
@@ -591,17 +606,13 @@ impl Parser {
                 .ok_or_else(|| self.error_here("expected a role option name"))?;
             self.expect(TokenKind::Option)?;
             self.expect(TokenKind::For)?;
-            opt.push(make_def_elem(
+            role_options.push(make_def_elem(
                 &name,
                 Some(Node::Boolean(Boolean::new(false))),
                 location,
             ));
         }
-        let separator = if is_grant {
-            TokenKind::To
-        } else {
-            TokenKind::From
-        };
+        let separator = kind.grantee_separator();
         if self.peek_kind() == TokenKind::All && !self.top_level_contains(TokenKind::Completion) {
             return Err(self.error_here("GRANT/REVOKE ROLE requires an explicit role list"));
         }
@@ -620,7 +631,7 @@ impl Parser {
             ],
             false,
         )?;
-        if is_grant && self.consume(TokenKind::With) {
+        if kind.is_grant() && self.consume(TokenKind::With) {
             loop {
                 let location = self.location();
                 let name = self
@@ -633,7 +644,7 @@ impl Parser {
                 } else {
                     return Err(self.error_here("expected OPTION, TRUE, or FALSE"));
                 };
-                opt.push(make_def_elem(
+                role_options.push(make_def_elem(
                     &name,
                     Some(Node::Boolean(Boolean::new(value))),
                     location,
@@ -652,7 +663,7 @@ impl Parser {
         } else {
             None
         };
-        let behavior = if is_grant {
+        let behavior = if kind.is_grant() {
             DropBehavior::Restrict
         } else {
             self.parse_drop_behavior()
@@ -661,8 +672,8 @@ impl Parser {
             node_tag: NodeTag::GrantRoleStmt,
             granted_roles,
             grantee_roles,
-            is_grant,
-            opt,
+            is_grant: kind.is_grant(),
+            opt: role_options,
             grantor,
             behavior,
         }))

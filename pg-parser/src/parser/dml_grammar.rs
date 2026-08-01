@@ -295,13 +295,13 @@ impl Parser {
                     .ok_or_else(|| self.error_here("expected an assignment target"))?;
                 let indirection = self.parse_assignment_indirection()?;
                 self.expect(TokenKind::Char('='))?;
-                let val =
+                let assignment_value =
                     self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
                 targets.push(Node::ResTarget(ResTarget {
                     node_tag: NodeTag::ResTarget,
                     name: Some(name),
                     indirection,
-                    val: Some(val),
+                    val: Some(assignment_value),
                     location: location as ParseLoc,
                 }));
             }

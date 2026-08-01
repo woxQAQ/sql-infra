@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum TriggerKind {
+    Regular,
+    Constraint,
+}
+
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createeventtrigger.html
@@ -130,10 +136,11 @@ impl Parser {
     pub(super) fn parse_create_trigger(
         &mut self,
         replace: bool,
-        isconstraint: bool,
+        kind: TriggerKind,
     ) -> PResult<Node> {
+        let is_constraint = kind == TriggerKind::Constraint;
         self.expect(TokenKind::Trigger)?;
-        if isconstraint && replace {
+        if is_constraint && replace {
             return Err(self.error_here("OR REPLACE is not supported for constraint triggers"));
         }
         self.record_completion_slot(completion::GrammarSlot::Trigger);
@@ -141,7 +148,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE TRIGGER requires a name"))?,
         );
-        let timing = if isconstraint {
+        let timing = if is_constraint {
             self.expect(TokenKind::After)?;
             0
         } else {
@@ -189,7 +196,7 @@ impl Parser {
             owner_start,
             owner_end,
         );
-        let constrrel = if isconstraint && self.consume(TokenKind::From) {
+        let constrrel = if is_constraint && self.consume(TokenKind::From) {
             Some(Box::new(
                 self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("FROM requires a relation"))?,
@@ -198,7 +205,7 @@ impl Parser {
             None
         };
         let mut transition_rels = Vec::new();
-        if !isconstraint && self.consume(TokenKind::Referencing) {
+        if !is_constraint && self.consume(TokenKind::Referencing) {
             let transition_start = self.location();
             loop {
                 self.record_completion_lookahead_tokens(&[TokenKind::Old, TokenKind::New]);
@@ -236,7 +243,7 @@ impl Parser {
         }
         let mut deferrable = false;
         let mut initdeferred = false;
-        if isconstraint {
+        if is_constraint {
             let mut saw_deferrable = None;
             let mut saw_initially = None;
             loop {
@@ -308,7 +315,7 @@ impl Parser {
                 false
             }
         } else {
-            if isconstraint {
+            if is_constraint {
                 return Err(self.error_here("constraint trigger requires FOR EACH ROW"));
             }
             false
@@ -365,7 +372,7 @@ impl Parser {
         Ok(Node::CreateTrigStmt(CreateTrigStmt {
             node_tag: NodeTag::CreateTrigStmt,
             replace,
-            isconstraint,
+            isconstraint: is_constraint,
             trigname,
             relation,
             funcname,

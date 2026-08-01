@@ -786,7 +786,7 @@ impl Parser {
     pub(super) fn parse_relation_name_list_body(&mut self) -> PResult<NodeList> {
         let mut relations = Vec::new();
         loop {
-            let relation = self.parse_relation_expr(false)?;
+            let relation = self.parse_relation_expr()?;
             relations.push(Node::RangeVar(relation));
             if !self.consume(TokenKind::Char(',')) {
                 break;

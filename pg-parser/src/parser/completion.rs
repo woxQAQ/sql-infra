@@ -94,8 +94,15 @@ pub const fn object_type_slot(object_type: ObjectType) -> GrammarSlot {
         ObjectType::Tsparser => GrammarSlot::TextSearchParser,
         ObjectType::Tstemplate => GrammarSlot::TextSearchTemplate,
         ObjectType::Trigger => GrammarSlot::Trigger,
-        ObjectType::Transform | ObjectType::UserMapping => GrammarSlot::AnyName,
-        _ => GrammarSlot::AnyName,
+        ObjectType::Amop
+        | ObjectType::Amproc
+        | ObjectType::Cast
+        | ObjectType::Default
+        | ObjectType::Defacl
+        | ObjectType::Largeobject
+        | ObjectType::ParameterAcl
+        | ObjectType::Transform
+        | ObjectType::UserMapping => GrammarSlot::AnyName,
     }
 }
 
@@ -206,6 +213,40 @@ pub(super) struct CompletionCollector {
 }
 
 pub(super) type SharedCollector = std::rc::Rc<std::cell::RefCell<CompletionCollector>>;
+
+#[derive(Clone, Copy)]
+enum CompletionPass {
+    Initial,
+    MembershipRecovery,
+}
+
+impl CompletionPass {
+    fn removes_token_at_point(self, token: &Token, point: TextSize) -> bool {
+        let intersects_point = token.kind != TokenKind::Eof
+            && token.range.start() <= point
+            && (point < token.range.end()
+                || (token.kind == TokenKind::Incomplete && point == token.range.end()));
+        if !intersects_point {
+            return false;
+        }
+
+        match self {
+            Self::Initial => true,
+            // The recovery pass must keep complete punctuation and numeric
+            // tokens that start at the point: they belong to the owner syntax
+            // to the right of the recovered name hole. Names and incomplete
+            // tokens are still editor prefixes and therefore get replaced.
+            Self::MembershipRecovery => {
+                token.range.start() < point
+                    || matches!(
+                        &token.value,
+                        Some(TokenValue::String(_) | TokenValue::Keyword(_))
+                    )
+                    || token.kind == TokenKind::Incomplete
+            }
+        }
+    }
+}
 
 impl CompletionCollector {
     pub(super) fn tokens(&mut self, kinds: &[TokenKind]) {
@@ -331,6 +372,10 @@ impl CompletionCollector {
         self.membership_owners.pop();
     }
 
+    fn clear_membership_owners(&mut self) {
+        self.membership_owners.clear();
+    }
+
     pub(super) fn request_membership_recovery(&mut self) {
         self.needs_membership_recovery = true;
     }
@@ -358,9 +403,41 @@ impl CompletionCollector {
     }
 }
 
+fn tokens_with_completion_marker(
+    source: &str,
+    point: TextSize,
+    pass: CompletionPass,
+) -> Result<Vec<Token>, crate::lexer::LexError> {
+    let mut tokens = crate::lexer::lex_for_completion(source, point)?.into_tokens();
+    if let Some(index) = tokens
+        .iter()
+        .position(|token| pass.removes_token_at_point(token, point))
+    {
+        tokens.remove(index);
+    }
+
+    let insertion = tokens
+        .iter()
+        .position(|token| token.range.start() >= point)
+        .unwrap_or_else(|| tokens.len().saturating_sub(1));
+    tokens.insert(
+        insertion,
+        Token::synthetic(TokenKind::Completion, usize::from(point)),
+    );
+    Ok(tokens)
+}
+
 // ── Parser completion hooks ───────────────────────────────────────────────
 
 impl Parser {
+    /// Statement-scoped membership owners intentionally remain active through
+    /// the rest of their statement. Starting a new statement ends that scope.
+    pub(super) fn clear_completion_membership_owners(&self) {
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().clear_membership_owners();
+        }
+    }
+
     /// Preserve the synthetic completion marker when a deferred fragment is
     /// handed to another parser. The outer parser keeps its cursor at the
     /// marker; the nested parser receives a clone and shares the collector.
@@ -572,24 +649,7 @@ pub fn collect_expectations(
 ) -> Result<ParserExpectations, crate::lexer::LexError> {
     let point_usize = usize::from(point).min(source.len());
     let point = TextSize::try_from(point_usize).expect("point was bounded by source length");
-    let mut tokens = crate::lexer::lex_for_completion(source, point)?.into_tokens();
-
-    if let Some(index) = tokens.iter().position(|token| {
-        token.kind != TokenKind::Eof
-            && token.range.start() <= point
-            && (point < token.range.end()
-                || (token.kind == TokenKind::Incomplete && point == token.range.end()))
-    }) {
-        tokens.remove(index);
-    }
-    let insertion = tokens
-        .iter()
-        .position(|token| token.range.start() >= point)
-        .unwrap_or_else(|| tokens.len().saturating_sub(1));
-    tokens.insert(
-        insertion,
-        Token::synthetic(TokenKind::Completion, point_usize),
-    );
+    let tokens = tokens_with_completion_marker(source, point, CompletionPass::Initial)?;
 
     let collector = std::rc::Rc::new(std::cell::RefCell::new(CompletionCollector::default()));
     let mut parser = Parser {
@@ -604,29 +664,8 @@ pub fn collect_expectations(
         return Ok(baseline);
     }
 
-    let mut recovery_tokens = crate::lexer::lex_for_completion(source, point)?.into_tokens();
-    if let Some(index) = recovery_tokens.iter().position(|token| {
-        token.kind != TokenKind::Eof
-            && token.range.start() <= point
-            && (point < token.range.end()
-                || (token.kind == TokenKind::Incomplete && point == token.range.end()))
-            && (token.range.start() < point
-                || matches!(
-                    &token.value,
-                    Some(TokenValue::String(_) | TokenValue::Keyword(_))
-                )
-                || token.kind == TokenKind::Incomplete)
-    }) {
-        recovery_tokens.remove(index);
-    }
-    let recovery_insertion = recovery_tokens
-        .iter()
-        .position(|token| token.range.start() >= point)
-        .unwrap_or_else(|| recovery_tokens.len().saturating_sub(1));
-    recovery_tokens.insert(
-        recovery_insertion,
-        Token::synthetic(TokenKind::Completion, point_usize),
-    );
+    let recovery_tokens =
+        tokens_with_completion_marker(source, point, CompletionPass::MembershipRecovery)?;
 
     let recovery_collector = std::rc::Rc::new(std::cell::RefCell::new(CompletionCollector {
         expectations: baseline,
@@ -801,6 +840,16 @@ mod tests {
                 "{sql:?}"
             );
         }
+    }
+
+    #[test]
+    fn membership_owner_does_not_leak_across_statements() {
+        let sql = "CREATE INDEX i ON app.accounts (id); SELECT ";
+        let expectations =
+            collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+
+        assert!(expectations.slots.contains(&GrammarSlot::Column));
+        assert_eq!(expectations.membership, None);
     }
 
     #[test]

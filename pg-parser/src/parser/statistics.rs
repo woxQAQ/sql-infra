@@ -151,7 +151,7 @@ impl Parser {
         let exprs = parse_stats_params_with_completion(stats_tokens, self.completion.clone())?;
         self.expect(TokenKind::From)?;
         let owner_start = self.pos;
-        let relation = self.parse_relation_expr_with_slot(false, completion::GrammarSlot::Table)?;
+        let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
         let owner_end = self.pos;
         self.push_completion_membership_owner_range(
             &[completion::GrammarSlot::Column],

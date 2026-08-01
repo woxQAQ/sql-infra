@@ -68,7 +68,7 @@ impl Parser {
                 false,
             );
             self.append_completion_marker(&mut expr_tokens);
-            let val = match parse_expression_tokens_with_completion(
+            let target_value = match parse_expression_tokens_with_completion(
                 expr_tokens,
                 self.completion.clone(),
             )? {
@@ -77,12 +77,12 @@ impl Parser {
                     fields: vec![Node::AStar(star)],
                     location: location as ParseLoc,
                 }),
-                val => val,
+                expression => expression,
             };
             items.push(Node::ResTarget(ResTarget {
                 node_tag: NodeTag::ResTarget,
                 name,
-                val: Some(Box::new(val)),
+                val: Some(Box::new(target_value)),
                 location: location as ParseLoc,
                 ..ResTarget::default()
             }));

@@ -1,4 +1,4 @@
-use super::expression::ExprParser;
+use super::expression::{ExprParser, PREDICATE_BINDING_POWER};
 use super::*;
 
 impl ExprParser {
@@ -347,12 +347,7 @@ impl ExprParser {
         self.expect(TokenKind::Char(')'))?;
         match parse_operator_name_tokens(tokens, location) {
             Ok(name) => Some(name),
-            Err(error) => {
-                if self.error.is_none() {
-                    self.error = Some(error);
-                }
-                None
-            }
+            Err(error) => self.fail_with(error),
         }
     }
 
@@ -439,6 +434,39 @@ impl ExprParser {
             })),
             location,
         ))
+    }
+
+    pub(super) fn parse_overlaps(
+        &mut self,
+        lhs: Node,
+        restricted: bool,
+        location: usize,
+    ) -> Option<Node> {
+        let Node::RowExpr(left_row) = lhs else {
+            return self.fail("left side of OVERLAPS must be a two-element row");
+        };
+        if left_row.args.len() != 2 {
+            return self.fail("left side of OVERLAPS must have two elements");
+        }
+
+        let rhs = self.parse_expr_mode(PREDICATE_BINDING_POWER + 1, restricted)?;
+        let Node::RowExpr(right_row) = rhs else {
+            return self.fail("right side of OVERLAPS must be a two-element row");
+        };
+        if right_row.args.len() != 2 {
+            return self.fail("right side of OVERLAPS must have two elements");
+        }
+
+        let mut args = left_row.args;
+        args.extend(right_row.args);
+        Some(Node::FuncCall(FuncCall {
+            node_tag: NodeTag::FuncCall,
+            funcname: system_type_names("overlaps"),
+            args,
+            funcformat: CoercionForm::SqlSyntax,
+            location: location as ParseLoc,
+            ..FuncCall::default()
+        }))
     }
 
     pub(super) fn parse_is_expr(
@@ -671,32 +699,37 @@ impl ExprParser {
                 break;
             }
             if self.at(stop) || self.at(TokenKind::Eof) {
-                if self.error.is_none() {
-                    self.error = Some(ParseError::ranged(
-                        self.peek().range,
-                        "expected an expression after ','",
-                    ));
-                }
-                return None;
+                return self.fail_with(ParseError::ranged(
+                    self.peek().range,
+                    "expected an expression after ','",
+                ));
             }
         }
         Some(items)
     }
 
     pub(super) fn fail<T>(&mut self, message: impl Into<std::string::String>) -> Option<T> {
+        if self.error.is_some() {
+            return None;
+        }
+        let error = self.error_here(message);
+        self.fail_with(error)
+    }
+
+    pub(super) fn fail_with<T>(&mut self, error: ParserExit) -> Option<T> {
         if self.error.is_none() {
-            self.error = Some(self.error_here(message));
+            self.error = Some(error);
         }
         None
     }
 
     pub(super) fn take_until_balanced(&mut self, stop: TokenKind) -> Vec<Token> {
-        let mut out = Vec::new();
+        let mut tokens = Vec::new();
         let mut depth = 0usize;
         while !self.at(TokenKind::Eof) {
             if self.at_completion() {
                 if let Some(hole) = self.recover_completion_hole() {
-                    out.push(hole);
+                    tokens.push(hole);
                     continue;
                 }
                 break;
@@ -710,9 +743,9 @@ impl ExprParser {
                 TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
                 _ => {}
             }
-            out.push(self.advance().clone());
+            tokens.push(self.advance().clone());
         }
-        out
+        tokens
     }
 
     pub(super) fn starts_statement(&self) -> bool {
@@ -749,6 +782,15 @@ impl ExprParser {
         token_name(&token)
     }
 
+    pub(super) fn consume_column_label(&mut self) -> Option<std::string::String> {
+        self.consume_identifier_in_categories(&[
+            KeywordCategory::Unreserved,
+            KeywordCategory::ColName,
+            KeywordCategory::TypeFuncName,
+            KeywordCategory::Reserved,
+        ])
+    }
+
     pub(super) fn at(&self, kind: TokenKind) -> bool {
         self.peek_kind() == kind
     }
@@ -783,10 +825,8 @@ impl ExprParser {
     pub(super) fn expect(&mut self, kind: TokenKind) -> Option<Token> {
         if self.at_completion() {
             self.record_completion_tokens(&[kind]);
-            if self.error.is_none() {
-                self.error = Some(self.error_here(format!("expected {kind:?}")));
-            }
-            return None;
+            let error = self.error_here(format!("expected {kind:?}"));
+            return self.fail_with(error);
         }
         if self.at(kind) {
             Some(self.advance().clone())

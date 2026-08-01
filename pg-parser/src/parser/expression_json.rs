@@ -199,7 +199,7 @@ impl ExprParser {
         }
     }
 
-    pub(super) fn parse_json_null_clause(&mut self, array_default: bool) -> Option<bool> {
+    pub(super) fn parse_json_null_clause(&mut self, default_absent_on_null: bool) -> Option<bool> {
         if self.consume(TokenKind::Absent) {
             self.expect(TokenKind::On)?;
             self.expect(TokenKind::NullP)?;
@@ -209,7 +209,7 @@ impl ExprParser {
             self.expect(TokenKind::NullP)?;
             Some(false)
         } else {
-            Some(array_default)
+            Some(default_absent_on_null)
         }
     }
 
@@ -292,12 +292,7 @@ impl ExprParser {
                     self.completion.clone(),
                 ) {
                     Ok(query) => query,
-                    Err(error) => {
-                        if self.error.is_none() {
-                            self.error = Some(error);
-                        }
-                        return None;
-                    }
+                    Err(error) => return self.fail_with(error),
                 }
             } else {
                 self.parse_nested_select(tokens[..suffix_start].to_vec())?

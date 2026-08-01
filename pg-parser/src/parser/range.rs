@@ -66,109 +66,11 @@ impl Parser {
             if lateral {
                 return Err(self.error_here("LATERAL requires a function or subquery"));
             }
-            Node::RangeVar(self.parse_relation_expr(true)?)
-        } else if self.consume(TokenKind::Char('(')) {
-            let mut inner = self.take_until_top_level(&[TokenKind::Char(')')]);
-            self.record_completion_tokens(&[TokenKind::Char(')')]);
-            if self.at_completion() {
-                if inner.is_empty() {
-                    self.record_completion_tokens(&[
-                        TokenKind::With,
-                        TokenKind::Select,
-                        TokenKind::Values,
-                        TokenKind::Table,
-                        TokenKind::Char('('),
-                        TokenKind::LateralP,
-                        TokenKind::Only,
-                        TokenKind::Rows,
-                        TokenKind::Xmltable,
-                        TokenKind::JsonTable,
-                        TokenKind::GraphTable,
-                    ]);
-                    self.record_completion_slot(completion::GrammarSlot::Relation);
-                    self.record_completion_slot(completion::GrammarSlot::Function);
-                    return Err(self.error_here("completion point in parenthesized FROM item"));
-                }
-                self.append_completion_marker(&mut inner);
-                if matches!(
-                    inner.first().map(|token| token.kind),
-                    Some(
-                        TokenKind::With | TokenKind::Select | TokenKind::Values | TokenKind::Table
-                    )
-                ) {
-                    let _ = parse_select_statement_tokens_with_completion(
-                        inner,
-                        self.completion.clone(),
-                    )?;
-                } else {
-                    let location = inner.last().map_or(self.location(), Token::end_location);
-                    inner.push(Token::synthetic(TokenKind::Eof, location));
-                    let mut nested = Parser {
-                        tokens: inner,
-                        pos: 0,
-                        completion: self.completion.clone(),
-                    };
-                    let _ = nested.parse_from_item(&[TokenKind::Eof])?;
-                }
-                return Err(self.error_here("completion point in parenthesized FROM item"));
-            }
-            self.expect(TokenKind::Char(')'))?;
-            if matches!(
-                inner.first().map(|token| token.kind),
-                Some(TokenKind::With | TokenKind::Select | TokenKind::Values | TokenKind::Table)
-            ) {
-                let subquery = parse_select_statement_tokens(inner)?;
-                Node::RangeSubselect(RangeSubselect {
-                    node_tag: NodeTag::RangeSubselect,
-                    lateral,
-                    subquery: Some(Box::new(subquery)),
-                    alias: self.parse_optional_alias_clause()?,
-                })
-            } else {
-                let item_location = inner
-                    .first()
-                    .map_or(self.location(), |token| token.location());
-                let location = inner.last().map_or(self.location(), Token::end_location);
-                let mut tokens = inner;
-                tokens.push(Token::synthetic(TokenKind::Eof, location));
-                let mut nested = Parser {
-                    tokens,
-                    pos: 0,
-                    completion: None,
-                };
-                let mut item = nested.parse_from_item(&[TokenKind::Eof])?;
-                if !nested.at(TokenKind::Eof) {
-                    return Err(ParseError::syntax_exit(
-                        nested.location(),
-                        "unexpected token in parenthesized FROM item",
-                    ));
-                }
-                if !matches!(item, Node::JoinExpr(_) | Node::RangeSubselect(_)) {
-                    return Err(ParseError::syntax_exit(
-                        item_location,
-                        "parenthesized FROM item must be a joined table or subquery",
-                    ));
-                }
-                if lateral {
-                    match &mut item {
-                        Node::RangeSubselect(range) => range.lateral = true,
-                        Node::JoinExpr(_) => {
-                            return Err(self.error_here("LATERAL requires a function or subquery"));
-                        }
-                        _ => unreachable!("parenthesized FROM item shape was checked above"),
-                    }
-                }
-                if let Some(alias) = self.parse_optional_alias_clause()? {
-                    match &mut item {
-                        Node::JoinExpr(join) => join.alias = Some(alias),
-                        Node::RangeSubselect(range) => range.alias = Some(alias),
-                        _ => unreachable!("parenthesized FROM item shape was checked above"),
-                    }
-                }
-                item
-            }
+            Node::RangeVar(self.parse_relation_expr_with_alias()?)
+        } else if self.at(TokenKind::Char('(')) {
+            self.parse_parenthesized_from_item(lateral)?
         } else {
-            let save = self.pos;
+            let name_start = self.pos;
             let mut name_stops = vec![
                 TokenKind::Char('('),
                 TokenKind::As,
@@ -198,8 +100,8 @@ impl Parser {
                 self.record_completion_tokens(&[TokenKind::Char('(')]);
             }
             let looks_like_function_name = self.at(TokenKind::Char('(')) && can_be_function_name;
+            self.pos = name_start;
             if looks_like_function_name {
-                self.pos = save;
                 let function = self.parse_function_expression()?;
                 let ordinality = if self.consume(TokenKind::With) {
                     self.expect(TokenKind::Ordinality)?;
@@ -218,11 +120,10 @@ impl Parser {
                     ..RangeFunction::default()
                 })
             } else {
-                self.pos = save;
                 if lateral {
                     return Err(self.error_here("LATERAL requires a function or subquery"));
                 }
-                Node::RangeVar(self.parse_relation_expr(true)?)
+                Node::RangeVar(self.parse_relation_expr_with_alias()?)
             }
         };
         if self.consume(TokenKind::Tablesample) {
@@ -287,6 +188,110 @@ impl Parser {
             }
         }
         Ok(base)
+    }
+
+    fn parse_parenthesized_from_item(&mut self, lateral: bool) -> PResult<Node> {
+        self.expect(TokenKind::Char('('))?;
+        let mut inner_tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
+        self.record_completion_tokens(&[TokenKind::Char(')')]);
+
+        if self.at_completion() && inner_tokens.is_empty() {
+            self.record_completion_tokens(&[
+                TokenKind::With,
+                TokenKind::Select,
+                TokenKind::Values,
+                TokenKind::Table,
+                TokenKind::Char('('),
+                TokenKind::LateralP,
+                TokenKind::Only,
+                TokenKind::Rows,
+                TokenKind::Xmltable,
+                TokenKind::JsonTable,
+                TokenKind::GraphTable,
+            ]);
+            self.record_completion_slot(completion::GrammarSlot::Relation);
+            self.record_completion_slot(completion::GrammarSlot::Function);
+            return Err(self.error_here("completion point in parenthesized FROM item"));
+        }
+
+        let starts_subquery = inner_tokens
+            .first()
+            .is_some_and(|token| completion::SUBQUERY_START_TOKENS.contains(&token.kind));
+        if self.at_completion() {
+            self.append_completion_marker(&mut inner_tokens);
+            if starts_subquery {
+                let _ = parse_select_statement_tokens_with_completion(
+                    inner_tokens,
+                    self.completion.clone(),
+                )?;
+            } else {
+                let end_location = inner_tokens
+                    .last()
+                    .map_or(self.location(), Token::end_location);
+                inner_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
+                let mut nested = Parser {
+                    tokens: inner_tokens,
+                    pos: 0,
+                    completion: self.completion.clone(),
+                };
+                let _ = nested.parse_from_item(&[TokenKind::Eof])?;
+            }
+            return Err(self.error_here("completion point in parenthesized FROM item"));
+        }
+
+        self.expect(TokenKind::Char(')'))?;
+        if starts_subquery {
+            let subquery = parse_select_statement_tokens(inner_tokens)?;
+            return Ok(Node::RangeSubselect(RangeSubselect {
+                node_tag: NodeTag::RangeSubselect,
+                lateral,
+                subquery: Some(Box::new(subquery)),
+                alias: self.parse_optional_alias_clause()?,
+            }));
+        }
+
+        let item_location = inner_tokens
+            .first()
+            .map_or(self.location(), |token| token.location());
+        let end_location = inner_tokens
+            .last()
+            .map_or(self.location(), Token::end_location);
+        inner_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
+        let mut nested = Parser {
+            tokens: inner_tokens,
+            pos: 0,
+            completion: None,
+        };
+        let mut item = nested.parse_from_item(&[TokenKind::Eof])?;
+        if !nested.at(TokenKind::Eof) {
+            return Err(ParseError::syntax_exit(
+                nested.location(),
+                "unexpected token in parenthesized FROM item",
+            ));
+        }
+        if !matches!(item, Node::JoinExpr(_) | Node::RangeSubselect(_)) {
+            return Err(ParseError::syntax_exit(
+                item_location,
+                "parenthesized FROM item must be a joined table or subquery",
+            ));
+        }
+        if lateral {
+            match &mut item {
+                Node::RangeSubselect(range) => range.lateral = true,
+                Node::JoinExpr(_) => {
+                    return Err(self.error_here("LATERAL requires a function or subquery"));
+                }
+                _ => unreachable!("parenthesized FROM item shape was checked above"),
+            }
+        }
+        if let Some(alias) = self.parse_optional_alias_clause()? {
+            match &mut item {
+                Node::JoinExpr(join) => join.alias = Some(alias),
+                Node::RangeSubselect(range) => range.alias = Some(alias),
+                _ => unreachable!("parenthesized FROM item shape was checked above"),
+            }
+        }
+        Ok(item)
     }
 
     pub(super) fn parse_rows_from(&mut self, lateral: bool) -> PResult<RangeFunction> {
@@ -373,7 +378,7 @@ impl Parser {
             return Ok((Some(alias), Vec::new()));
         }
 
-        let save = self.pos;
+        let alias_suffix_start = self.pos;
         self.advance();
         let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
         let chunks = split_top_level_commas(inner);
@@ -395,7 +400,7 @@ impl Parser {
             // closing parenthesis, or type token resolves the branch.
             self.record_completion_slot(completion::GrammarSlot::Type);
         }
-        self.pos = save;
+        self.pos = alias_suffix_start;
         let is_alias_column_list = !chunks.is_empty()
             && chunks.iter().all(|chunk| {
                 chunk.len() == 1

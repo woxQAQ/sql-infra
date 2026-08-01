@@ -26,7 +26,7 @@ pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<Raw
         parser.expect(TokenKind::Char('='))?;
     }
 
-    let val = Some(Box::new(parse_expression_select(&mut parser)?));
+    let assignment_value = Some(Box::new(parse_expression_select(&mut parser)?));
 
     Ok(RawStmt {
         node_tag: NodeTag::RawStmt,
@@ -35,7 +35,7 @@ pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<Raw
             name: Some(name),
             indirection,
             nnames: target_name_count,
-            val,
+            val: assignment_value,
             location: location as ParseLoc,
         }))),
         stmt_location: location as ParseLoc,

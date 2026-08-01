@@ -8,6 +8,65 @@ const NEGATED_PREDICATE_TOKENS: &[TokenKind] = &[
     TokenKind::Between,
 ];
 
+const OR_BINDING_POWER: u8 = 10;
+const AND_BINDING_POWER: u8 = 20;
+const IS_BINDING_POWER: u8 = 25;
+const COMPARISON_BINDING_POWER: u8 = 30;
+pub(super) const PREDICATE_BINDING_POWER: u8 = 35;
+const GENERIC_OPERATOR_BINDING_POWER: u8 = 40;
+const ADDITIVE_BINDING_POWER: u8 = 45;
+const MULTIPLICATIVE_BINDING_POWER: u8 = 50;
+const EXPONENTIATION_BINDING_POWER: u8 = 55;
+const AT_TIME_ZONE_BINDING_POWER: u8 = 60;
+const POSTFIX_NULL_TEST_BINDING_POWER: u8 = 70;
+const TYPE_CAST_BINDING_POWER: u8 = 80;
+const INDIRECTION_BINDING_POWER: u8 = 90;
+
+#[derive(Default)]
+struct InfixChainState {
+    saw_is_predicate: bool,
+    saw_comparison: bool,
+    saw_special_predicate: bool,
+}
+
+#[derive(Clone, Copy)]
+struct FixedBinaryOperator {
+    name: &'static str,
+    binding_power: u8,
+    is_comparison: bool,
+}
+
+impl FixedBinaryOperator {
+    fn for_token(kind: TokenKind) -> Option<Self> {
+        if let Some(name) = comparison_operator(kind) {
+            return Some(Self {
+                name,
+                binding_power: COMPARISON_BINDING_POWER,
+                is_comparison: true,
+            });
+        }
+        if let Some(name) = additive_operator(kind) {
+            return Some(Self {
+                name,
+                binding_power: ADDITIVE_BINDING_POWER,
+                is_comparison: false,
+            });
+        }
+        if let Some(name) = multiplicative_operator(kind) {
+            return Some(Self {
+                name,
+                binding_power: MULTIPLICATIVE_BINDING_POWER,
+                is_comparison: false,
+            });
+        }
+        (kind == TokenKind::Char('^')).then_some(Self {
+            name: "^",
+            binding_power: EXPONENTIATION_BINDING_POWER,
+            is_comparison: false,
+        })
+    }
+}
+
 pub(super) struct ExprParser {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
@@ -70,12 +129,7 @@ impl ExprParser {
         }
         match parse_select_statement_tokens_with_completion(tokens, self.completion.clone()) {
             Ok(node) => Some(node),
-            Err(error) => {
-                if self.error.is_none() {
-                    self.error = Some(error);
-                }
-                None
-            }
+            Err(error) => self.fail_with(error),
         }
     }
 
@@ -90,14 +144,12 @@ impl ExprParser {
     pub(super) fn parse_expr_mode(&mut self, min_bp: u8, restricted: bool) -> Option<Node> {
         let expression_start = self.location();
         let mut lhs = self.parse_prefix(restricted)?;
-        let mut saw_is_predicate = false;
-        let mut saw_comparison = false;
-        let mut saw_special_predicate = false;
+        let mut chain = InfixChainState::default();
 
         loop {
             if !restricted
-                && min_bp <= 35
-                && !saw_special_predicate
+                && min_bp <= PREDICATE_BINDING_POWER
+                && !chain.saw_special_predicate
                 && self.at(TokenKind::Not)
                 && self.peek_kind_n(1) == TokenKind::Completion
             {
@@ -106,25 +158,41 @@ impl ExprParser {
                 return self.fail("NOT requires IN, LIKE, ILIKE, SIMILAR, or BETWEEN");
             }
             if self.at_completion() {
-                self.record_completion_infix(
-                    min_bp,
-                    restricted,
-                    saw_is_predicate,
-                    saw_comparison,
-                    saw_special_predicate,
-                );
+                self.record_completion_infix(min_bp, restricted, &chain);
                 break;
             }
+
+            if let Some(operator) = FixedBinaryOperator::for_token(self.peek_kind()) {
+                if operator.binding_power < min_bp {
+                    break;
+                }
+                if operator.is_comparison {
+                    if chain.saw_comparison {
+                        return self.fail("cannot chain comparison operators");
+                    }
+                    chain.saw_comparison = true;
+                }
+                let location = self.advance().location();
+                lhs = self.parse_binary_operator_rhs(
+                    lhs,
+                    vec![make_string_node(operator.name)],
+                    operator.binding_power + 1,
+                    restricted,
+                    location,
+                )?;
+                continue;
+            }
+
             lhs = match self.peek_kind() {
                 TokenKind::Char('[') => {
-                    if 90 < min_bp {
+                    if INDIRECTION_BINDING_POWER < min_bp {
                         break;
                     }
                     let index = self.parse_indirection_index()?;
                     append_indirection(lhs, index)
                 }
                 TokenKind::Char('.') => {
-                    if 90 < min_bp {
+                    if INDIRECTION_BINDING_POWER < min_bp {
                         break;
                     }
                     self.advance();
@@ -134,19 +202,14 @@ impl ExprParser {
                         })
                     } else {
                         let name = self
-                            .consume_identifier_in_categories(&[
-                                KeywordCategory::Unreserved,
-                                KeywordCategory::ColName,
-                                KeywordCategory::TypeFuncName,
-                                KeywordCategory::Reserved,
-                            ])
+                            .consume_column_label()
                             .or_else(|| self.fail("expected a field name after '.'"))?;
                         make_string_node(name)
                     };
                     append_indirection(lhs, item)
                 }
                 TokenKind::TypeCast => {
-                    if 80 < min_bp {
+                    if TYPE_CAST_BINDING_POWER < min_bp {
                         break;
                     }
                     let location = self.advance().location();
@@ -159,7 +222,7 @@ impl ExprParser {
                     })
                 }
                 TokenKind::Collate => {
-                    if restricted || 80 < min_bp {
+                    if restricted || TYPE_CAST_BINDING_POWER < min_bp {
                         break;
                     }
                     let location = self.advance().location();
@@ -175,40 +238,32 @@ impl ExprParser {
                         location: location as ParseLoc,
                     })
                 }
-                TokenKind::Isnull => {
-                    if restricted || 70 < min_bp {
+                kind @ (TokenKind::Isnull | TokenKind::Notnull) => {
+                    if restricted || POSTFIX_NULL_TEST_BINDING_POWER < min_bp {
                         break;
                     }
                     let location = self.advance().location();
                     Node::NullTest(NullTest {
                         xpr: Expr::new(NodeTag::NullTest),
                         arg: Some(Box::new(lhs)),
-                        nulltesttype: NullTestType::Null,
-                        location: location as ParseLoc,
-                        ..NullTest::default()
-                    })
-                }
-                TokenKind::Notnull => {
-                    if restricted || 70 < min_bp {
-                        break;
-                    }
-                    let location = self.advance().location();
-                    Node::NullTest(NullTest {
-                        xpr: Expr::new(NodeTag::NullTest),
-                        arg: Some(Box::new(lhs)),
-                        nulltesttype: NullTestType::NotNull,
+                        nulltesttype: if kind == TokenKind::Isnull {
+                            NullTestType::Null
+                        } else {
+                            NullTestType::NotNull
+                        },
                         location: location as ParseLoc,
                         ..NullTest::default()
                     })
                 }
                 TokenKind::At => {
-                    if restricted || 60 < min_bp {
+                    if restricted || AT_TIME_ZONE_BINDING_POWER < min_bp {
                         break;
                     }
                     let location = self.advance().location();
                     let (args, call_location) = if self.consume(TokenKind::Time) {
                         self.expect(TokenKind::Zone)?;
-                        let zone = self.parse_expr_mode(61, restricted)?;
+                        let zone =
+                            self.parse_expr_mode(AT_TIME_ZONE_BINDING_POWER + 1, restricted)?;
                         (vec![zone, lhs], location as ParseLoc)
                     } else {
                         self.expect(TokenKind::Local)?;
@@ -224,228 +279,97 @@ impl ExprParser {
                     })
                 }
                 TokenKind::Or => {
-                    if restricted || 10 < min_bp {
+                    if restricted || OR_BINDING_POWER < min_bp {
                         break;
                     }
                     let location = self.advance().location();
-                    let rhs = self.parse_expr_mode(11, restricted)?;
+                    let rhs = self.parse_expr_mode(OR_BINDING_POWER + 1, restricted)?;
                     make_bool_expr(BoolExprType::OrExpr, lhs, rhs, location)
                 }
                 TokenKind::And => {
-                    if restricted || 20 < min_bp {
+                    if restricted || AND_BINDING_POWER < min_bp {
                         break;
                     }
                     let location = self.advance().location();
-                    let rhs = self.parse_expr_mode(21, restricted)?;
+                    let rhs = self.parse_expr_mode(AND_BINDING_POWER + 1, restricted)?;
                     make_bool_expr(BoolExprType::AndExpr, lhs, rhs, location)
                 }
                 TokenKind::Not if NEGATED_PREDICATE_TOKENS.contains(&self.peek_kind_n(1)) => {
-                    if restricted || 35 < min_bp {
+                    if restricted || PREDICATE_BINDING_POWER < min_bp {
                         break;
                     }
-                    if saw_special_predicate {
+                    if chain.saw_special_predicate {
                         return self.fail("cannot chain non-associative predicates");
                     }
-                    saw_special_predicate = true;
+                    chain.saw_special_predicate = true;
                     let location = self.advance().location();
                     let op = self.advance().kind;
                     self.parse_special_infix(lhs, op, true, location)?
                 }
-                TokenKind::InP | TokenKind::Like | TokenKind::Ilike | TokenKind::Similar => {
-                    if restricted || 35 < min_bp {
+                TokenKind::InP
+                | TokenKind::Like
+                | TokenKind::Ilike
+                | TokenKind::Similar
+                | TokenKind::Between => {
+                    if restricted || PREDICATE_BINDING_POWER < min_bp {
                         break;
                     }
-                    if saw_special_predicate {
+                    if chain.saw_special_predicate {
                         return self.fail("cannot chain non-associative predicates");
                     }
-                    saw_special_predicate = true;
+                    chain.saw_special_predicate = true;
                     let token = self.advance().clone();
                     self.parse_special_infix(lhs, token.kind, false, token.location())?
                 }
-                TokenKind::Between => {
-                    if restricted || 35 < min_bp {
-                        break;
-                    }
-                    if saw_special_predicate {
-                        return self.fail("cannot chain non-associative predicates");
-                    }
-                    saw_special_predicate = true;
-                    let location = self.advance().location();
-                    self.parse_between(lhs, false, location)?
-                }
                 TokenKind::Is => {
-                    if 25 < min_bp {
+                    if IS_BINDING_POWER < min_bp {
                         break;
                     }
-                    if saw_is_predicate {
+                    if chain.saw_is_predicate {
                         return self.fail("cannot chain IS predicates");
                     }
-                    saw_is_predicate = true;
+                    chain.saw_is_predicate = true;
                     let location = self.advance().location();
                     self.parse_is_expr(lhs, location, expression_start, restricted)?
                 }
                 TokenKind::Overlaps => {
-                    if restricted || 35 < min_bp {
+                    if restricted || PREDICATE_BINDING_POWER < min_bp {
                         break;
                     }
-                    if saw_special_predicate {
+                    if chain.saw_special_predicate {
                         return self.fail("cannot chain non-associative predicates");
                     }
-                    saw_special_predicate = true;
+                    chain.saw_special_predicate = true;
                     let location = self.advance().location();
-                    let Node::RowExpr(left_row) = lhs else {
-                        return self.fail("left side of OVERLAPS must be a two-element row");
-                    };
-                    if left_row.args.len() != 2 {
-                        return self.fail("left side of OVERLAPS must have two elements");
-                    }
-                    let rhs = self.parse_expr_mode(36, restricted)?;
-                    let Node::RowExpr(right_row) = rhs else {
-                        return self.fail("right side of OVERLAPS must be a two-element row");
-                    };
-                    if right_row.args.len() != 2 {
-                        return self.fail("right side of OVERLAPS must have two elements");
-                    }
-                    let mut args = left_row.args;
-                    args.extend(right_row.args);
-                    Node::FuncCall(FuncCall {
-                        node_tag: NodeTag::FuncCall,
-                        funcname: system_type_names("overlaps"),
-                        args,
-                        funcformat: CoercionForm::SqlSyntax,
-                        location: location as ParseLoc,
-                        ..FuncCall::default()
-                    })
+                    self.parse_overlaps(lhs, restricted, location)?
                 }
-                kind if comparison_operator(kind).is_some() => {
-                    if 30 < min_bp {
-                        break;
-                    }
-                    if saw_comparison {
-                        return self.fail("cannot chain comparison operators");
-                    }
-                    saw_comparison = true;
-                    let token = self.advance().clone();
-                    let operator = comparison_operator(token.kind).unwrap_or("=");
-                    if !restricted && self.quantified_sub_link_type().is_some() {
-                        self.parse_quantified_comparison(lhs, operator, token.location())?
-                    } else {
-                        let rhs = self.parse_expr_mode(31, restricted)?;
-                        make_aexpr(
-                            AExprKind::Op,
-                            vec![operator],
-                            Some(lhs),
-                            Some(rhs),
-                            token.location(),
-                        )
-                    }
-                }
-                kind if additive_operator(kind).is_some() => {
-                    if 45 < min_bp {
-                        break;
-                    }
-                    let token = self.advance().clone();
-                    let operator = additive_operator(token.kind).unwrap_or("+");
-                    if !restricted && self.quantified_sub_link_type().is_some() {
-                        self.parse_quantified_comparison(lhs, operator, token.location())?
-                    } else {
-                        let rhs = self.parse_expr_mode(46, restricted)?;
-                        make_aexpr(
-                            AExprKind::Op,
-                            vec![operator],
-                            Some(lhs),
-                            Some(rhs),
-                            token.location(),
-                        )
-                    }
-                }
-                kind if multiplicative_operator(kind).is_some() => {
-                    if 50 < min_bp {
-                        break;
-                    }
-                    let token = self.advance().clone();
-                    let operator = multiplicative_operator(token.kind).unwrap_or("*");
-                    if !restricted && self.quantified_sub_link_type().is_some() {
-                        self.parse_quantified_comparison(lhs, operator, token.location())?
-                    } else {
-                        let rhs = self.parse_expr_mode(51, restricted)?;
-                        make_aexpr(
-                            AExprKind::Op,
-                            vec![operator],
-                            Some(lhs),
-                            Some(rhs),
-                            token.location(),
-                        )
-                    }
-                }
-                TokenKind::Char('^') => {
-                    if 55 < min_bp {
-                        break;
-                    }
-                    let token = self.advance().clone();
-                    if !restricted && self.quantified_sub_link_type().is_some() {
-                        self.parse_quantified_comparison(lhs, "^", token.location())?
-                    } else {
-                        let rhs = self.parse_expr_mode(56, restricted)?;
-                        make_aexpr(
-                            AExprKind::Op,
-                            vec!["^"],
-                            Some(lhs),
-                            Some(rhs),
-                            token.location(),
-                        )
-                    }
-                }
-                TokenKind::RightArrow | TokenKind::Char('|') => {
-                    if 40 < min_bp {
-                        break;
-                    }
-                    let token = self.advance().clone();
-                    let operator = token_text(&token);
-                    if !restricted && self.quantified_sub_link_type().is_some() {
-                        self.parse_quantified_comparison(lhs, &operator, token.location())?
-                    } else {
-                        let rhs = self.parse_expr_mode(41, restricted)?;
-                        make_aexpr(
-                            AExprKind::Op,
-                            vec![operator],
-                            Some(lhs),
-                            Some(rhs),
-                            token.location(),
-                        )
-                    }
-                }
-                TokenKind::Op => {
-                    if 40 < min_bp {
+                TokenKind::RightArrow | TokenKind::Char('|') | TokenKind::Op => {
+                    if GENERIC_OPERATOR_BINDING_POWER < min_bp {
                         break;
                     }
                     let token = self.advance().clone();
                     let operator = token_name(&token).unwrap_or_else(|| token_text(&token));
-                    if !restricted && self.quantified_sub_link_type().is_some() {
-                        self.parse_quantified_comparison(lhs, &operator, token.location())?
-                    } else {
-                        let rhs = self.parse_expr_mode(41, restricted)?;
-                        make_aexpr(
-                            AExprKind::Op,
-                            vec![operator],
-                            Some(lhs),
-                            Some(rhs),
-                            token.location(),
-                        )
-                    }
+                    self.parse_binary_operator_rhs(
+                        lhs,
+                        vec![make_string_node(operator)],
+                        GENERIC_OPERATOR_BINDING_POWER + 1,
+                        restricted,
+                        token.location(),
+                    )?
                 }
                 TokenKind::Operator => {
-                    if 40 < min_bp {
+                    if GENERIC_OPERATOR_BINDING_POWER < min_bp {
                         break;
                     }
                     let location = self.location();
                     let name = self.parse_explicit_operator_name()?;
-                    if !restricted && self.quantified_sub_link_type().is_some() {
-                        self.parse_quantified_comparison_with_name(lhs, name, location)?
-                    } else {
-                        let rhs = self.parse_expr_mode(41, restricted)?;
-                        make_aexpr_with_name(AExprKind::Op, name, Some(lhs), Some(rhs), location)
-                    }
+                    self.parse_binary_operator_rhs(
+                        lhs,
+                        name,
+                        GENERIC_OPERATOR_BINDING_POWER + 1,
+                        restricted,
+                        location,
+                    )?
                 }
                 _ => break,
             };
@@ -454,52 +378,45 @@ impl ExprParser {
         Some(lhs)
     }
 
-    fn record_completion_infix(
-        &self,
-        min_bp: u8,
-        restricted: bool,
-        saw_is_predicate: bool,
-        saw_comparison: bool,
-        saw_special_predicate: bool,
-    ) {
-        if min_bp <= 90 {
+    fn record_completion_infix(&self, min_bp: u8, restricted: bool, chain: &InfixChainState) {
+        if min_bp <= INDIRECTION_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Char('['),
                 TokenKind::Char('.'),
             ]);
         }
-        if min_bp <= 80 {
+        if min_bp <= TYPE_CAST_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[TokenKind::TypeCast]);
             if !restricted {
                 self.record_completion_expression_continuation_tokens(&[TokenKind::Collate]);
             }
         }
-        if !restricted && min_bp <= 70 {
+        if !restricted && min_bp <= POSTFIX_NULL_TEST_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Isnull,
                 TokenKind::Notnull,
             ]);
         }
-        if !restricted && min_bp <= 60 {
+        if !restricted && min_bp <= AT_TIME_ZONE_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[TokenKind::At]);
         }
-        if min_bp <= 55 {
+        if min_bp <= EXPONENTIATION_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[TokenKind::Char('^')]);
         }
-        if min_bp <= 50 {
+        if min_bp <= MULTIPLICATIVE_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Char('*'),
                 TokenKind::Char('/'),
                 TokenKind::Char('%'),
             ]);
         }
-        if min_bp <= 45 {
+        if min_bp <= ADDITIVE_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Char('+'),
                 TokenKind::Char('-'),
             ]);
         }
-        if min_bp <= 40 {
+        if min_bp <= GENERIC_OPERATOR_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::RightArrow,
                 TokenKind::Char('|'),
@@ -507,14 +424,14 @@ impl ExprParser {
                 TokenKind::Operator,
             ]);
         }
-        if !restricted && min_bp <= 35 && !saw_special_predicate {
+        if !restricted && min_bp <= PREDICATE_BINDING_POWER && !chain.saw_special_predicate {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Not,
                 TokenKind::Overlaps,
             ]);
             self.record_completion_expression_continuation_tokens(NEGATED_PREDICATE_TOKENS);
         }
-        if min_bp <= 30 && !saw_comparison {
+        if min_bp <= COMPARISON_BINDING_POWER && !chain.saw_comparison {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Char('='),
                 TokenKind::Char('<'),
@@ -524,14 +441,36 @@ impl ExprParser {
                 TokenKind::NotEquals,
             ]);
         }
-        if min_bp <= 25 && !saw_is_predicate {
+        if min_bp <= IS_BINDING_POWER && !chain.saw_is_predicate {
             self.record_completion_expression_continuation_tokens(&[TokenKind::Is]);
         }
-        if !restricted && min_bp <= 20 {
+        if !restricted && min_bp <= AND_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[TokenKind::And]);
         }
-        if !restricted && min_bp <= 10 {
+        if !restricted && min_bp <= OR_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[TokenKind::Or]);
+        }
+    }
+
+    fn parse_binary_operator_rhs(
+        &mut self,
+        lhs: Node,
+        operator_name: NodeList,
+        right_binding_power: u8,
+        restricted: bool,
+        location: usize,
+    ) -> Option<Node> {
+        if !restricted && self.quantified_sub_link_type().is_some() {
+            self.parse_quantified_comparison_with_name(lhs, operator_name, location)
+        } else {
+            let rhs = self.parse_expr_mode(right_binding_power, restricted)?;
+            Some(make_aexpr_with_name(
+                AExprKind::Op,
+                operator_name,
+                Some(lhs),
+                Some(rhs),
+                location,
+            ))
         }
     }
 }

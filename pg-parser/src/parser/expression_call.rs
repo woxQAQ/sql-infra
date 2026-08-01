@@ -276,12 +276,7 @@ impl ExprParser {
                     self.expect(TokenKind::Char(')'))?;
                     Some(Some(Box::new(window)))
                 }
-                Err(error) => {
-                    if self.error.is_none() {
-                        self.error = Some(error);
-                    }
-                    None
-                }
+                Err(error) => self.fail_with(error),
             }
         } else {
             let name_location = self.location();

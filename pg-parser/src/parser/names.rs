@@ -129,11 +129,22 @@ impl Parser {
         Ok(Some(range))
     }
 
-    pub(super) fn parse_relation_expr(&mut self, allow_alias: bool) -> PResult<RangeVar> {
-        self.parse_relation_expr_with_slot(allow_alias, completion::GrammarSlot::Relation)
+    pub(super) fn parse_relation_expr(&mut self) -> PResult<RangeVar> {
+        self.parse_relation_expr_with_alias_and_slot(false, completion::GrammarSlot::Relation)
+    }
+
+    pub(super) fn parse_relation_expr_with_alias(&mut self) -> PResult<RangeVar> {
+        self.parse_relation_expr_with_alias_and_slot(true, completion::GrammarSlot::Relation)
     }
 
     pub(super) fn parse_relation_expr_with_slot(
+        &mut self,
+        slot: completion::GrammarSlot,
+    ) -> PResult<RangeVar> {
+        self.parse_relation_expr_with_alias_and_slot(false, slot)
+    }
+
+    fn parse_relation_expr_with_alias_and_slot(
         &mut self,
         allow_alias: bool,
         slot: completion::GrammarSlot,
@@ -224,7 +235,7 @@ impl Parser {
         };
         parts.push(first);
         while self.at(TokenKind::Char('.')) {
-            let dot_pos = self.pos;
+            let separator_position = self.pos;
             self.advance();
             if self.at(TokenKind::Char('*')) {
                 break;
@@ -232,7 +243,7 @@ impl Parser {
             if let Some(name) = self.consume_col_label() {
                 parts.push(name);
             } else {
-                self.pos = dot_pos;
+                self.pos = separator_position;
                 break;
             }
         }
@@ -253,9 +264,11 @@ impl Parser {
             return parts;
         };
         parts.push(first);
-        while self.consume(TokenKind::Char('.')) {
+        while self.at(TokenKind::Char('.')) {
+            let separator_position = self.pos;
+            self.advance();
             let Some(name) = self.consume_col_label() else {
-                self.pos = self.pos.saturating_sub(1);
+                self.pos = separator_position;
                 break;
             };
             parts.push(name);
@@ -272,18 +285,20 @@ impl Parser {
             return parts;
         };
         parts.push(first);
-        while parts.len() < 3 && self.consume(TokenKind::Char('.')) {
+        while parts.len() < 3 && self.at(TokenKind::Char('.')) {
+            let separator_position = self.pos;
+            self.advance();
             if self.at(TokenKind::Char('*')) {
-                self.pos = self.pos.saturating_sub(1);
+                self.pos = separator_position;
                 break;
             }
             if self.at_completion() {
                 self.record_completion_slot(slot);
-                self.pos = self.pos.saturating_sub(1);
+                self.pos = separator_position;
                 break;
             }
             let Some(name) = self.consume_col_label() else {
-                self.pos = self.pos.saturating_sub(1);
+                self.pos = separator_position;
                 break;
             };
             parts.push(name);
@@ -399,12 +414,12 @@ impl Parser {
             TokenKind::TypeP,
             TokenKind::View,
         ]);
-        let start = self.pos;
+        let object_type_start = self.pos;
         let ty = match self.peek_kind() {
             TokenKind::Event => {
                 self.advance();
                 if !self.consume(TokenKind::Trigger) {
-                    self.pos = start;
+                    self.pos = object_type_start;
                     return None;
                 }
                 return Some(ObjectType::EventTrigger);
@@ -412,7 +427,7 @@ impl Parser {
             TokenKind::Property => {
                 self.advance();
                 if !self.consume(TokenKind::Graph) {
-                    self.pos = start;
+                    self.pos = object_type_start;
                     return None;
                 }
                 return Some(ObjectType::Propgraph);
@@ -420,7 +435,7 @@ impl Parser {
             TokenKind::TextP => {
                 self.advance();
                 if !self.consume(TokenKind::Search) {
-                    self.pos = start;
+                    self.pos = object_type_start;
                     return None;
                 }
                 self.record_completion_lookahead_tokens(&[
@@ -435,7 +450,7 @@ impl Parser {
                     TokenKind::Template => ObjectType::Tstemplate,
                     TokenKind::Configuration => ObjectType::Tsconfiguration,
                     _ => {
-                        self.pos = start;
+                        self.pos = object_type_start;
                         return None;
                     }
                 };
@@ -445,7 +460,7 @@ impl Parser {
             TokenKind::Procedural => {
                 self.advance();
                 if !self.consume(TokenKind::Language) {
-                    self.pos = start;
+                    self.pos = object_type_start;
                     return None;
                 }
                 return Some(ObjectType::Language);
@@ -453,7 +468,7 @@ impl Parser {
             TokenKind::Access => {
                 self.advance();
                 if !self.consume(TokenKind::Method) {
-                    self.pos = start;
+                    self.pos = object_type_start;
                     return None;
                 }
                 ObjectType::AccessMethod
@@ -491,19 +506,19 @@ impl Parser {
                     ObjectType::ForeignTable
                 } else if self.consume(TokenKind::DataP) {
                     if !self.consume(TokenKind::Wrapper) {
-                        self.pos = start;
+                        self.pos = object_type_start;
                         return None;
                     }
                     ObjectType::Fdw
                 } else {
-                    self.pos = start;
+                    self.pos = object_type_start;
                     return None;
                 }
             }
             TokenKind::Materialized => {
                 self.advance();
                 if !self.consume(TokenKind::View) {
-                    self.pos = start;
+                    self.pos = object_type_start;
                     return None;
                 }
                 ObjectType::Matview
@@ -572,7 +587,7 @@ impl Parser {
     ) -> Option<RoleSpec> {
         self.record_completion_slot(slot);
         self.record_completion_lookahead_tokens(suggested_specials);
-        let start = self.pos;
+        let role_start = self.pos;
         let location = self.location();
         let roletype = match self.peek_kind() {
             TokenKind::CurrentRole => {
@@ -604,22 +619,21 @@ impl Parser {
             }
             _ => RoleSpecType::Cstring,
         };
-        self.consume_non_reserved_word().and_then(|rolename| {
-            if rolename == "none" {
-                self.pos = start;
-                return None;
-            }
-            let roletype = if rolename == "public" {
-                RoleSpecType::Public
-            } else {
-                roletype
-            };
-            Some(RoleSpec {
-                node_tag: NodeTag::RoleSpec,
-                roletype,
-                rolename: (roletype == RoleSpecType::Cstring).then_some(rolename),
-                location: location as ParseLoc,
-            })
+        let rolename = self.consume_non_reserved_word()?;
+        if rolename == "none" {
+            self.pos = role_start;
+            return None;
+        }
+        let roletype = if rolename == "public" {
+            RoleSpecType::Public
+        } else {
+            roletype
+        };
+        Some(RoleSpec {
+            node_tag: NodeTag::RoleSpec,
+            roletype,
+            rolename: (roletype == RoleSpecType::Cstring).then_some(rolename),
+            location: location as ParseLoc,
         })
     }
 
@@ -787,11 +801,11 @@ impl Parser {
 
     pub(super) fn consume_setting_name(&mut self) -> Option<std::string::String> {
         self.record_completion_slot(completion::GrammarSlot::AnyName);
-        let start = self.pos;
+        let setting_start = self.pos;
         let mut parts = vec![self.consume_col_id()?];
         while self.consume(TokenKind::Char('.')) {
             let Some(part) = self.consume_col_id() else {
-                self.pos = start;
+                self.pos = setting_start;
                 return None;
             };
             parts.push(part);
