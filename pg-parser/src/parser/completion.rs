@@ -6,55 +6,109 @@
 
 use super::*;
 
+/// A named identifier or Catalog-object position accepted by the grammar.
+///
+/// Slots describe syntax only: they do not assert that an object exists, is
+/// visible, or has already been resolved in a Catalog. More than one slot can
+/// be valid at the same completion point.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GrammarSlot {
+    /// A relation-like object accepted by a general relation production.
     Relation,
+    /// A table name.
     Table,
+    /// A view name.
     View,
+    /// A materialized-view name.
     MaterializedView,
+    /// A foreign-table name.
     ForeignTable,
+    /// A column name.
     Column,
+    /// An attribute of a composite type.
     Attribute,
+    /// A function name.
     Function,
+    /// A procedure name.
     Procedure,
+    /// A routine name where either a function or procedure is accepted.
     Routine,
+    /// An aggregate name.
     Aggregate,
+    /// A data-type name.
     Type,
+    /// A domain name.
     Domain,
+    /// A schema name.
     Schema,
+    /// A sequence name.
     Sequence,
+    /// An index name.
     Index,
+    /// A table or domain constraint name.
     Constraint,
+    /// A collation name.
     Collation,
+    /// An operator name.
     Operator,
+    /// An operator-class name.
     OperatorClass,
+    /// An operator-family name.
     OperatorFamily,
+    /// A role or user name.
     Role,
+    /// A database name.
     Database,
+    /// An index or table access-method name.
     AccessMethod,
+    /// A character-set conversion name.
     Conversion,
+    /// An event-trigger name.
     EventTrigger,
+    /// An extension name.
     Extension,
+    /// A foreign-data-wrapper name.
     ForeignDataWrapper,
+    /// A foreign-server name.
     ForeignServer,
+    /// A procedural-language name.
     Language,
+    /// A row-level security policy name.
     Policy,
+    /// A property-graph name.
     PropertyGraph,
+    /// A publication name.
     Publication,
+    /// A rewrite-rule name.
     Rule,
+    /// An extended-statistics object name.
     Statistics,
+    /// A subscription name.
     Subscription,
+    /// A tablespace name.
     Tablespace,
+    /// A text-search configuration name.
     TextSearchConfiguration,
+    /// A text-search dictionary name.
     TextSearchDictionary,
+    /// A text-search parser name.
     TextSearchParser,
+    /// A text-search template name.
     TextSearchTemplate,
+    /// A data-change trigger name.
     Trigger,
+    /// A privilege keyword or adapter-provided privilege name.
     Privilege,
+    /// A SQL alias introduced by the statement being edited.
     Alias,
+    /// A name whose more specific object category is not encoded by the grammar.
     AnyName,
 }
 
+/// Maps a PostgreSQL AST object category to its closest grammar slot.
+///
+/// Object categories that share a completion namespace collapse to one slot.
+/// Categories without a more specific slot map to [`GrammarSlot::AnyName`].
 pub const fn object_type_slot(object_type: ObjectType) -> GrammarSlot {
     match object_type {
         ObjectType::Table => GrammarSlot::Table,
@@ -117,14 +171,24 @@ pub const fn object_type_slot(object_type: ObjectType) -> GrammarSlot {
 /// for the completion layer to project without reparsing statement syntax.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GrammarObjectReference {
+    /// The syntactically possible object categories for the unresolved owner.
     pub object_types: Vec<ObjectType>,
+    /// Name-component tokens in source order, with separating punctuation
+    /// omitted. Their source ranges preserve the original spelling and quoting.
     pub name: Vec<Token>,
 }
 
-/// The grammar-level membership relation at the completion point.
+/// A grammar-level member/owner relation at the completion point.
+///
+/// For example, completing a column in `GRANT SELECT (col) ON table` produces
+/// a column member slot owned by the unresolved `table` reference. This value
+/// records only that syntactic relationship; it does not perform name or
+/// Catalog resolution.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GrammarMembership {
+    /// Member categories accepted at the completion point.
     pub member_slots: Vec<GrammarSlot>,
+    /// The unresolved object whose members are being completed.
     pub owner: GrammarObjectReference,
 }
 
@@ -183,18 +247,32 @@ pub(super) const SUBQUERY_START_TOKENS: &[TokenKind] = &[
     TokenKind::Table,
 ];
 
+/// Grammar expectations collected at one completion point.
+///
+/// `tokens` is the union of the five token-provenance collections. Provenance
+/// collections may overlap, and every collection preserves first-observed
+/// grammar order while suppressing duplicates. Named positions are reported
+/// separately through `slots` because they require an adapter or Catalog to
+/// turn them into concrete completion items.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ParserExpectations {
+    /// All concrete token kinds accepted at the completion point.
+    ///
+    /// This can include punctuation and operators as well as keywords. Parser
+    /// sentinels, end of input, and statement-separating semicolons are omitted.
     pub tokens: Vec<TokenKind>,
-    /// Tokens introduced directly by the active grammar production.
+    /// Tokens introduced directly by the active grammar production. This is a
+    /// subset of [`Self::tokens`].
     pub direct_tokens: Vec<TokenKind>,
     /// Keyword alternatives observed through parser lookahead predicates.
     /// These are syntactically reachable but are not eager editor items until
-    /// the user starts typing a prefix.
+    /// the user starts typing a prefix. This is a subset of [`Self::tokens`].
     pub lookahead_tokens: Vec<TokenKind>,
-    /// Tokens that can start the active expression.
+    /// Tokens that can start the active expression. This is a subset of
+    /// [`Self::tokens`].
     pub expression_start_tokens: Vec<TokenKind>,
-    /// Tokens that extend the already parsed expression.
+    /// Tokens that extend the already parsed expression. This is a subset of
+    /// [`Self::tokens`].
     pub expression_continuation_tokens: Vec<TokenKind>,
     /// Tokens that end the active expression and continue in its enclosing
     /// production. This is a subset of `tokens`; the remaining tokens extend
@@ -205,7 +283,15 @@ pub struct ParserExpectations {
     /// in `tokens`; a phrase does not claim the head has no other
     /// continuation.
     pub phrases: Vec<&'static [TokenKind]>,
+    /// Named grammar positions accepted at the completion point.
+    ///
+    /// Specific slots supersede [`GrammarSlot::AnyName`] when both are
+    /// discovered.
     pub slots: Vec<GrammarSlot>,
+    /// The syntactic owner of a member slot, when the grammar identifies one.
+    ///
+    /// This may be `None` even when `slots` contains a member category: not
+    /// every production names or successfully parses an owner.
     pub membership: Option<GrammarMembership>,
 }
 
@@ -645,10 +731,24 @@ impl Parser {
     }
 }
 
-/// Collect grammar candidates at a UTF-8 byte offset.
+/// Collects parser-native grammar expectations at a UTF-8 byte offset.
 ///
 /// A token intersecting the point is treated as the editor prefix and removed
-/// from the parser input. Callers normally pass the replacement-range start.
+/// from the parser input before a synthetic completion marker is parsed.
+/// Callers normally pass the start of the editor's replacement range rather
+/// than the visual caret position so a partially typed identifier or keyword
+/// does not affect the surrounding grammar.
+///
+/// `point` is clamped to `source.len()`. Callers should normalize it to a UTF-8
+/// character boundary before calling this function. Syntax errors at or after
+/// the marker can still yield partial expectations; only unrecoverable lexical
+/// errors are returned.
+///
+/// # Errors
+///
+/// Returns [`crate::lexer::LexError`] when malformed input wholly before the
+/// completion point prevents reliable parsing, or when the source is too large
+/// for [`TextSize`].
 pub fn collect_expectations(
     source: &str,
     point: TextSize,
