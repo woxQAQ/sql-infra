@@ -1,26 +1,22 @@
 use pg_completion::{
-    CompletionDiagnosticKind, GrammarSlot, IdentifierQuoting, ObjectKind, collect,
+    collect, CompletionDiagnosticKind, GrammarSlot, IdentifierQuoting, ObjectKind,
 };
 use pg_parser::{TextRange, TextSize, TokenKind};
-
-fn size(value: usize) -> TextSize {
-    TextSize::try_from(value).unwrap()
-}
 
 #[test]
 fn isolates_the_statement_and_extracts_the_prefix() {
     let source = "select broken;  SELECT db.Users.Na FROM db.Users";
     let point = source.find("Na").unwrap() + 2;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
 
     assert_eq!(
         context.statement_range,
-        TextRange::new(size(16), size(source.len()))
+        TextRange::new(TextSize::from_usize(16), TextSize::from_usize(source.len()))
     );
-    assert_eq!(context.point, size(point));
+    assert_eq!(context.point, TextSize::from_usize(point));
     assert_eq!(
         context.replacement_range,
-        TextRange::new(size(point - 2), size(point))
+        TextRange::new(TextSize::from_usize(point - 2), TextSize::from_usize(point))
     );
     assert_eq!(context.prefix.raw, "Na");
     assert_eq!(context.prefix.normalized, "na");
@@ -47,20 +43,20 @@ fn keeps_a_point_in_leading_statement_trivia() {
 fn isolates_empty_and_lexically_contained_statement_boundaries() {
     let source = "SELECT 1; ; SELECT 2";
     let empty_terminator = source.find("; ;").unwrap() + 2;
-    let context = collect(source, size(empty_terminator));
+    let context = collect(source, TextSize::from_usize(empty_terminator));
     assert_eq!(
         context.statement_range,
-        TextRange::empty(size(empty_terminator))
+        TextRange::empty(TextSize::from_usize(empty_terminator))
     );
     assert!(context.expectations.tokens.contains(&TokenKind::Select));
 
     let source = "SELECT ';' /* ; */; SELECT 2";
     let point = source.find("/* ; */").unwrap() + 3;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(context.statement_range.start(), TextSize::ZERO);
     assert_eq!(
         context.statement_range.end(),
-        size(source.find("; SELECT 2").unwrap())
+        TextSize::from_usize(source.find("; SELECT 2").unwrap())
     );
     assert!(context.expectations.tokens.is_empty());
     assert!(context.expectations.slots.is_empty());
@@ -77,7 +73,7 @@ fn reports_point_normalization_without_panicking() {
     );
 
     let context = collect(source, TextSize::new(10));
-    assert_eq!(context.point, size(source.len()));
+    assert_eq!(context.point, TextSize::from_usize(source.len()));
     assert_eq!(
         context.diagnostics[0].kind,
         CompletionDiagnosticKind::PointClampedToEof
@@ -87,7 +83,7 @@ fn reports_point_normalization_without_panicking() {
 #[test]
 fn combines_parser_candidates_intent_and_forward_scope() {
     let source = "SELECT  FROM users AS u";
-    let context = collect(source, size(7));
+    let context = collect(source, TextSize::from_usize(7));
 
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
     assert!(context.expectations.slots.contains(&GrammarSlot::Function));
@@ -106,12 +102,12 @@ fn combines_parser_candidates_intent_and_forward_scope() {
 
 #[test]
 fn filters_keywords_by_prefix_and_resolves_relation_qualifiers() {
-    let context = collect("SEL", size(3));
+    let context = collect("SEL", TextSize::from_usize(3));
     assert_eq!(context.expectations.tokens, [TokenKind::Select]);
 
     let source = "SELECT u. FROM users AS u";
     let point = source.find(" FROM").unwrap();
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(
         context.expectations.slots,
         [GrammarSlot::Column, GrammarSlot::Function]
@@ -119,21 +115,21 @@ fn filters_keywords_by_prefix_and_resolves_relation_qualifiers() {
     assert_eq!(context.intent.qualifier[0].normalized, "u");
 
     let source = "SELECT accounts. FROM accounts AS a";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert_eq!(
         context.expectations.slots,
         [GrammarSlot::Column, GrammarSlot::Function]
     );
 
     let source = "WITH c AS (SELECT 1) SELECT c.";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     assert_eq!(
         context.expectations.slots,
         [GrammarSlot::Column, GrammarSlot::Function]
     );
 
     let source = "WITH c AS (SELECT 1) SELECT c. FROM c";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert_eq!(
         context.expectations.slots,
         [GrammarSlot::Column, GrammarSlot::Function]
@@ -143,7 +139,7 @@ fn filters_keywords_by_prefix_and_resolves_relation_qualifiers() {
 #[test]
 fn resolves_qualifiers_in_a_parenthesized_query_suffix() {
     let source = "(SELECT * FROM users AS u) ORDER BY u.";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
 
     assert_eq!(
         context.expectations.slots,
@@ -166,7 +162,7 @@ fn set_operation_suffix_does_not_expose_a_branch_relation() {
         "SELECT a FROM left_table UNION SELECT b FROM right_table ORDER BY ",
         "(SELECT a FROM left_table UNION SELECT b FROM right_table) ORDER BY ",
     ] {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert!(context.scope.local.relations.is_empty(), "{source:?}");
         assert!(context.scope.outer.is_empty(), "{source:?}");
     }
@@ -175,7 +171,7 @@ fn set_operation_suffix_does_not_expose_a_branch_relation() {
 #[test]
 fn filters_phrases_by_their_head_token_prefix() {
     let source = "SELECT * FROM t GRO";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     assert_eq!(context.expectations.tokens, [TokenKind::GroupP]);
     assert_eq!(
         context.expectations.phrases,
@@ -183,7 +179,7 @@ fn filters_phrases_by_their_head_token_prefix() {
     );
 
     let source = "SELECT * FROM t ORD";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     assert_eq!(
         context.expectations.phrases,
         [&[TokenKind::Order, TokenKind::By][..]]
@@ -196,7 +192,7 @@ fn relation_alias_prefix_does_not_offer_clause_keywords() {
         "SELECT * FROM public.orders o",
         "SELECT * FROM public.orders AS o",
     ] {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert!(
             context.expectations.tokens.is_empty(),
             "{source}: {context:?}"
@@ -208,7 +204,7 @@ fn relation_alias_prefix_does_not_offer_clause_keywords() {
     }
 
     let keyword = "SELECT * FROM public.orders ORDER";
-    let context = collect(keyword, size(keyword.len()));
+    let context = collect(keyword, TextSize::from_usize(keyword.len()));
     assert_eq!(context.expectations.tokens, [TokenKind::Order]);
     assert_eq!(
         context.expectations.phrases,
@@ -223,7 +219,7 @@ fn join_prefix_after_relation_alias_offers_join() {
         "SELECT * FROM public.orders AS o j",
         "SELECT * FROM accounts a JOIN public.orders AS o ON true j",
     ] {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert_eq!(context.expectations.tokens, [TokenKind::Join], "{source}");
     }
 }
@@ -231,59 +227,47 @@ fn join_prefix_after_relation_alias_offers_join() {
 #[test]
 fn preserves_expression_follow_provenance_for_callers() {
     let source = "SELECT * FROM public.users JOIN public.orders ON users.id ";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
 
     assert!(context.syntax_completions().is_empty());
     assert!(!context.expectations.slots.contains(&GrammarSlot::Operator));
     assert!(!context.intent.object_kinds.contains(&ObjectKind::Operator));
     assert!(context.expectations.tokens.contains(&TokenKind::Char('=')));
-    assert!(
-        context
-            .expectations
-            .expression_continuation_tokens
-            .contains(&TokenKind::Char('='))
-    );
-    assert!(
-        !context
-            .expectations
-            .follow_tokens
-            .contains(&TokenKind::Char('='))
-    );
-    assert!(
-        context
-            .expectations
-            .follow_tokens
-            .contains(&TokenKind::Join)
-    );
-    assert!(
-        context
-            .expectations
-            .follow_tokens
-            .contains(&TokenKind::GroupP)
-    );
+    assert!(context
+        .expectations
+        .expression_continuation_tokens
+        .contains(&TokenKind::Char('=')));
+    assert!(!context
+        .expectations
+        .follow_tokens
+        .contains(&TokenKind::Char('=')));
+    assert!(context
+        .expectations
+        .follow_tokens
+        .contains(&TokenKind::Join));
+    assert!(context
+        .expectations
+        .follow_tokens
+        .contains(&TokenKind::GroupP));
 
     let source = "SELECT * FROM public.users JOIN public.orders ON users.id A";
-    let context = collect(source, size(source.len()));
-    assert!(
-        context
-            .syntax_completions()
-            .iter()
-            .any(|completion| completion.label == "AND")
-    );
+    let context = collect(source, TextSize::from_usize(source.len()));
+    assert!(context
+        .syntax_completions()
+        .iter()
+        .any(|completion| completion.label == "AND"));
 }
 
 #[test]
 fn exact_function_decoration_keyword_wins_over_output_alias_ambiguity() {
     let source = "SELECT row_number() OVER";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
 
     assert!(context.expectations.tokens.contains(&TokenKind::Over));
-    assert!(
-        context
-            .syntax_completions()
-            .iter()
-            .any(|completion| completion.label == "OVER")
-    );
+    assert!(context
+        .syntax_completions()
+        .iter()
+        .any(|completion| completion.label == "OVER"));
 }
 
 #[test]
@@ -316,7 +300,7 @@ fn exposes_membership_for_nested_object_candidates() {
     ];
 
     for (source, slot, kinds, names) in cases {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert!(context.expectations.slots.contains(&slot), "{source:?}");
         let membership = context
             .intent
@@ -345,7 +329,7 @@ fn exposes_membership_for_nested_object_candidates() {
 
     let source =
         "ALTER TABLE app.child ADD COLUMN parent_id int REFERENCES app.parent(id), DROP COLUMN ";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     let membership = context.intent.membership.expect("restored ALTER owner");
     assert_eq!(membership.member_kinds, [ObjectKind::Column]);
     assert_eq!(
@@ -363,7 +347,7 @@ fn exposes_membership_for_nested_object_candidates() {
 fn finds_membership_on_either_side_of_the_completion_point() {
     let source = "COPY app.accounts () FROM STDIN";
     let point = source.find(')').unwrap();
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(
         context.intent.membership.unwrap().owner.name[1].normalized,
         "accounts"
@@ -371,7 +355,7 @@ fn finds_membership_on_either_side_of_the_completion_point() {
 
     let source = "CREATE TABLE child (parent_id int REFERENCES app.parent ())";
     let point = source.rfind(')').unwrap() - 1;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
     assert_eq!(
         context.intent.membership.unwrap().owner.name[1].normalized,
@@ -380,7 +364,7 @@ fn finds_membership_on_either_side_of_the_completion_point() {
 
     let source = "CREATE TRIGGER tr BEFORE UPDATE OF  ON app.accounts EXECUTE FUNCTION f()";
     let point = source.find("  ON").unwrap() + 1;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(context.expectations.slots, [GrammarSlot::Column]);
     assert_eq!(
         context.intent.membership.unwrap().owner.name[1].normalized,
@@ -389,7 +373,7 @@ fn finds_membership_on_either_side_of_the_completion_point() {
 
     let source = "CREATE TRIGGER tr BEFORE UPDATE ON app.accounts WHEN () EXECUTE FUNCTION f()";
     let point = source.find("()").unwrap() + 1;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
     let membership = context.intent.membership.unwrap();
     assert_eq!(
@@ -425,7 +409,7 @@ fn finds_membership_on_either_side_of_the_completion_point() {
             "CREATE STATISTICS s ON (lower(".len(),
         ),
     ] {
-        let context = collect(source, size(point));
+        let context = collect(source, TextSize::from_usize(point));
         let membership = context
             .intent
             .membership
@@ -439,14 +423,14 @@ fn finds_membership_on_either_side_of_the_completion_point() {
 
     let source = "CREATE STATISTICS s ON (substring(value FROM start_position)) FROM app.accounts";
     let point = source.find("value").unwrap();
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     let membership = context.intent.membership.unwrap();
     assert_eq!(membership.owner.name[0].normalized, "app");
     assert_eq!(membership.owner.name[1].normalized, "accounts");
 
     let source = "CREATE TABLE child (parent_id int REFERENCES parent(id), value int CHECK ())";
     let point = source.rfind("()").unwrap() + 1;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
     assert!(context.intent.membership.is_none());
 
@@ -455,7 +439,7 @@ fn finds_membership_on_either_side_of_the_completion_point() {
         "GRANT SELECT () ON TABLE app.accounts, app.orders TO role_name",
     ] {
         let point = source.find("() ON").unwrap() + 1;
-        let context = collect(source, size(point));
+        let context = collect(source, TextSize::from_usize(point));
         assert!(context.expectations.slots.contains(&GrammarSlot::Column));
         assert!(context.intent.membership.is_none(), "{source:?}");
     }
@@ -464,7 +448,7 @@ fn finds_membership_on_either_side_of_the_completion_point() {
 #[test]
 fn generic_names_do_not_masquerade_as_catalog_objects() {
     for source in ["DECLARE ", "PREPARE ", "SAVEPOINT ", "LISTEN "] {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert_eq!(context.expectations.slots, [GrammarSlot::AnyName]);
         assert!(context.intent.object_kinds.is_empty(), "{source:?}");
     }
@@ -516,7 +500,7 @@ fn catalog_name_slots_produce_exact_object_intent() {
         ),
         ("CALL ", GrammarSlot::Procedure, ObjectKind::Procedure),
     ] {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert!(context.expectations.slots.contains(&slot), "{source:?}");
         assert_eq!(context.intent.object_kinds, [kind], "{source:?}");
     }
@@ -524,18 +508,18 @@ fn catalog_name_slots_produce_exact_object_intent() {
 
 #[test]
 fn relation_intent_comes_from_the_active_production() {
-    let ddl = collect("ALTER TABLE ", size("ALTER TABLE ".len()));
+    let ddl = collect("ALTER TABLE ", TextSize::from_usize("ALTER TABLE ".len()));
     assert_eq!(ddl.expectations.slots, [GrammarSlot::Table]);
     assert_eq!(ddl.intent.object_kinds, [ObjectKind::Table]);
 
     for source in ["INSERT INTO ", "UPDATE ", "DELETE FROM ", "MERGE INTO "] {
-        let dml = collect(source, size(source.len()));
+        let dml = collect(source, TextSize::from_usize(source.len()));
         assert_eq!(dml.expectations.slots, [GrammarSlot::Table], "{source:?}");
         assert_eq!(dml.intent.object_kinds, [ObjectKind::Table], "{source:?}");
     }
 
     let source = "CREATE TABLE target AS SELECT * FROM ";
-    let query = collect(source, size(source.len()));
+    let query = collect(source, TextSize::from_usize(source.len()));
     assert_eq!(
         query.expectations.slots,
         [GrammarSlot::Relation, GrammarSlot::Function]
@@ -555,20 +539,23 @@ fn relation_intent_comes_from_the_active_production() {
 #[test]
 fn replaces_the_whole_identifier_when_the_point_is_inside_it() {
     let source = "SELECT";
-    let context = collect(source, size(3));
+    let context = collect(source, TextSize::from_usize(3));
     assert_eq!(context.prefix.raw, "SEL");
-    assert_eq!(context.replacement_range, TextRange::new(size(0), size(6)));
+    assert_eq!(
+        context.replacement_range,
+        TextRange::new(TextSize::from_usize(0), TextSize::from_usize(6))
+    );
     assert_eq!(context.expectations.tokens, [TokenKind::Select]);
 
     let source = "SELECT \"Mixed\" FROM t";
     let point = source.find("Mix").unwrap() + 3;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(context.prefix.raw, "Mix");
     assert_eq!(
         context.replacement_range,
         TextRange::new(
-            size(source.find('"').unwrap()),
-            size(source.find(" FROM").unwrap())
+            TextSize::from_usize(source.find('"').unwrap()),
+            TextSize::from_usize(source.find(" FROM").unwrap())
         )
     );
 }
@@ -577,7 +564,7 @@ fn replaces_the_whole_identifier_when_the_point_is_inside_it() {
 fn handles_unicode_quoted_and_utf8_identifier_prefixes() {
     let source = "SELECT U&\"Schema\".U&\"Mixed\" FROM t";
     let point = source.find("Mix").unwrap() + 3;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(context.prefix.raw, "Mix");
     assert_eq!(context.prefix.normalized, "Mix");
     assert_eq!(context.prefix.quoting, IdentifierQuoting::UnicodeQuoted);
@@ -586,28 +573,31 @@ fn handles_unicode_quoted_and_utf8_identifier_prefixes() {
     assert_eq!(
         context.replacement_range,
         TextRange::new(
-            size(source.find("U&\"Mixed\"").unwrap()),
-            size(source.find(" FROM").unwrap())
+            TextSize::from_usize(source.find("U&\"Mixed\"").unwrap()),
+            TextSize::from_usize(source.find(" FROM").unwrap())
         )
     );
 
     let complete = "SELECT \"Mixed\"";
-    let context = collect(complete, size(complete.len()));
+    let context = collect(complete, TextSize::from_usize(complete.len()));
     assert_eq!(context.prefix.raw, "Mixed");
     assert_eq!(context.prefix.quoting, IdentifierQuoting::Quoted);
     assert_eq!(
         context.replacement_range,
-        TextRange::new(size(7), size(complete.len()))
+        TextRange::new(
+            TextSize::from_usize(7),
+            TextSize::from_usize(complete.len())
+        )
     );
 
     let escaped = "SELECT \"A\"\"B\"";
-    let context = collect(escaped, size(escaped.len()));
+    let context = collect(escaped, TextSize::from_usize(escaped.len()));
     assert_eq!(context.prefix.raw, "A\"\"B");
     assert_eq!(context.prefix.normalized, "A\"B");
 
     let unicode_escape = r#"SELECT U&"u\0061". FROM users AS U&"u\0061""#;
     let point = unicode_escape.find(" FROM").unwrap();
-    let context = collect(unicode_escape, size(point));
+    let context = collect(unicode_escape, TextSize::from_usize(point));
     assert_eq!(context.intent.qualifier[0].normalized, "ua");
     assert_eq!(
         context.expectations.slots,
@@ -624,22 +614,22 @@ fn handles_unicode_quoted_and_utf8_identifier_prefixes() {
 
     let utf8 = "SELECT 名称后缀";
     let point = utf8.find('名').unwrap() + '名'.len_utf8();
-    let context = collect(utf8, size(point));
+    let context = collect(utf8, TextSize::from_usize(point));
     assert_eq!(context.prefix.raw, "名");
     assert_eq!(
         context.replacement_range,
-        TextRange::new(size(7), size(utf8.len()))
+        TextRange::new(TextSize::from_usize(7), TextSize::from_usize(utf8.len()))
     );
 }
 
 #[test]
 fn numeric_literals_are_not_identifier_prefixes() {
     let source = "SELECT 1";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     assert!(context.prefix.raw.is_empty());
     assert_eq!(
         context.replacement_range,
-        TextRange::empty(size(source.len()))
+        TextRange::empty(TextSize::from_usize(source.len()))
     );
     assert!(
         context.expectations.tokens.contains(&TokenKind::From),
@@ -651,7 +641,7 @@ fn numeric_literals_are_not_identifier_prefixes() {
 #[test]
 fn captures_dml_target_and_source_scope() {
     let source = "UPDATE accounts a SET name = u.name FROM users u WHERE ";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
 
     assert_eq!(
         context
@@ -676,7 +666,7 @@ fn captures_dml_target_and_source_scope() {
 
     let source =
         "INSERT INTO app.items VALUES (1) ON CONFLICT (id) DO UPDATE SET value = excluded.";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     let excluded = &context.scope.local.relations[0];
     assert_eq!(excluded.alias.as_ref().unwrap().normalized, "excluded");
     assert_eq!(excluded.name[0].normalized, "app");
@@ -685,7 +675,7 @@ fn captures_dml_target_and_source_scope() {
 
     let source =
         "UPDATE app.items SET value = 1 RETURNING WITH (OLD AS previous, NEW AS current) current.";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     assert_eq!(
         context
             .scope
@@ -696,17 +686,15 @@ fn captures_dml_target_and_source_scope() {
             .collect::<Vec<_>>(),
         ["previous", "current"]
     );
-    assert!(
-        context
-            .scope
-            .local
-            .relations
-            .iter()
-            .all(|relation| relation.qualified_only)
-    );
+    assert!(context
+        .scope
+        .local
+        .relations
+        .iter()
+        .all(|relation| relation.qualified_only));
 
     let source = "DELETE FROM app.items RETURNING old.";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     assert_eq!(
         context
             .scope
@@ -720,7 +708,7 @@ fn captures_dml_target_and_source_scope() {
 
     let source = "UPDATE app.items SET value = 1 RETURNING WITH (OLD AS previous) (SELECT previous. FROM audit_log)";
     let point = source.find("previous.").unwrap() + "previous.".len();
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(
         context.scope.local.relations[0].name[0].normalized,
         "audit_log"
@@ -742,13 +730,16 @@ fn applies_dml_visibility_inside_sources_and_correlated_subqueries() {
         "INSERT INTO target_table VALUES (target_table.)",
         "MERGE INTO target_table target USING (SELECT target.) source ON true WHEN MATCHED THEN DO NOTHING",
     ] {
-        let context = collect(source, size(source.find('.').unwrap() + 1));
+        let context = collect(source, TextSize::from_usize(source.find('.').unwrap() + 1));
         assert!(context.scope.dml_target.is_none(), "{source:?}");
         assert!(context.scope.merge_source.is_none(), "{source:?}");
     }
 
     let source = "UPDATE target_table target SET value = (SELECT target.) FROM source_table source";
-    let context = collect(source, size(source.find("target.)").unwrap() + 7));
+    let context = collect(
+        source,
+        TextSize::from_usize(source.find("target.)").unwrap() + 7),
+    );
     assert_eq!(
         context
             .scope
@@ -770,12 +761,18 @@ fn applies_dml_visibility_inside_sources_and_correlated_subqueries() {
     );
 
     let source = "UPDATE target_table target SET value = 1 FROM source_table source, (SELECT target.) derived";
-    let context = collect(source, size(source.find("target.)").unwrap() + 7));
+    let context = collect(
+        source,
+        TextSize::from_usize(source.find("target.)").unwrap() + 7),
+    );
     assert!(context.scope.dml_target.is_none());
     assert!(context.scope.outer.is_empty());
 
     let source = "UPDATE target_table target SET value = 1 FROM source_table source, LATERAL (SELECT source.) derived";
-    let context = collect(source, size(source.find("source.)").unwrap() + 7));
+    let context = collect(
+        source,
+        TextSize::from_usize(source.find("source.)").unwrap() + 7),
+    );
     assert!(context.scope.dml_target.is_none());
     assert_eq!(
         context.scope.outer[0].relations[0]
@@ -787,7 +784,10 @@ fn applies_dml_visibility_inside_sources_and_correlated_subqueries() {
     );
 
     let source = "UPDATE target_table target SET value = 1 FROM source_table source, lookup(source.) derived";
-    let context = collect(source, size(source.find("source.)").unwrap() + 7));
+    let context = collect(
+        source,
+        TextSize::from_usize(source.find("source.)").unwrap() + 7),
+    );
     assert!(context.scope.dml_target.is_none());
     assert_eq!(
         context.scope.local.relations[0]
@@ -803,7 +803,7 @@ fn applies_dml_visibility_inside_sources_and_correlated_subqueries() {
         "UPDATE target_table target SET value = 1 FROM left_source l JOIN right_source r ON target.",
         "DELETE FROM target_table target USING left_source l JOIN right_source r ON target.",
     ] {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert!(context.scope.dml_target.is_none(), "{source:?}");
         assert_eq!(
             context
@@ -822,7 +822,7 @@ fn applies_dml_visibility_inside_sources_and_correlated_subqueries() {
         "INSERT INTO target_table SELECT src.id FROM source_table src RETURNING src.",
         "INSERT INTO target_table SELECT src.id FROM source_table src ON CONFLICT (id) DO UPDATE SET id = src.",
     ] {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert!(
             context
                 .scope
@@ -847,7 +847,7 @@ fn applies_dml_visibility_inside_sources_and_correlated_subqueries() {
 fn cte_scope_tracks_recursion_nesting_and_shadowing() {
     let recursive = "WITH RECURSIVE first AS (SELECT  FROM later), later AS (SELECT 1) SELECT 1";
     let point = recursive.find(" FROM later").unwrap();
-    let context = collect(recursive, size(point));
+    let context = collect(recursive, TextSize::from_usize(point));
     assert_eq!(
         context
             .scope
@@ -860,7 +860,7 @@ fn cte_scope_tracks_recursion_nesting_and_shadowing() {
 
     let nested = "WITH shared AS (SELECT 1) SELECT * FROM (WITH shared AS (SELECT 2), inner_cte AS (SELECT 3) SELECT  FROM shared) q";
     let point = nested.rfind(" FROM shared").unwrap();
-    let context = collect(nested, size(point));
+    let context = collect(nested, TextSize::from_usize(point));
     assert_eq!(
         context
             .scope
@@ -876,18 +876,16 @@ fn cte_scope_tracks_recursion_nesting_and_shadowing() {
     );
 
     let incomplete = "WITH RECURSIVE self_ref AS (SELECT self_ref.";
-    let context = collect(incomplete, size(incomplete.len()));
+    let context = collect(incomplete, TextSize::from_usize(incomplete.len()));
     assert_eq!(context.scope.ctes[0].name.normalized, "self_ref");
-    assert!(
-        context
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
-    );
+    assert!(context
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete));
 
     let nested_dml = "WITH changed AS (UPDATE hidden AS active SET id = active. RETURNING *) UPDATE visible SET id = 2";
     let point = nested_dml.find("active.").unwrap() + "active.".len();
-    let context = collect(nested_dml, size(point));
+    let context = collect(nested_dml, TextSize::from_usize(point));
     let target = context.scope.dml_target.as_ref().unwrap();
     assert_eq!(target.name[0].normalized, "hidden");
     assert_eq!(target.alias.as_ref().unwrap().normalized, "active");
@@ -896,18 +894,16 @@ fn cte_scope_tracks_recursion_nesting_and_shadowing() {
 #[test]
 fn incomplete_derived_tables_keep_lateral_visibility_rules() {
     let non_lateral = "SELECT * FROM accounts a, (SELECT a.";
-    let context = collect(non_lateral, size(non_lateral.len()));
+    let context = collect(non_lateral, TextSize::from_usize(non_lateral.len()));
     assert!(context.scope.outer.is_empty());
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
-    assert!(
-        context
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
-    );
+    assert!(context
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete));
 
     let lateral = "SELECT * FROM accounts a, LATERAL (SELECT a.";
-    let context = collect(lateral, size(lateral.len()));
+    let context = collect(lateral, TextSize::from_usize(lateral.len()));
     assert_eq!(context.scope.outer.len(), 1);
     assert_eq!(
         context.scope.outer[0].relations[0]
@@ -925,7 +921,10 @@ fn subqueries_in_table_function_arguments_inherit_implicit_lateral_visibility() 
         "SELECT * FROM accounts a, lookup((SELECT a.)) f",
         "SELECT * FROM accounts a, ROWS FROM (lookup((SELECT a.))) f",
     ] {
-        let context = collect(source, size(source.find("a.)").unwrap() + 2));
+        let context = collect(
+            source,
+            TextSize::from_usize(source.find("a.)").unwrap() + 2),
+        );
         assert_eq!(context.scope.outer.len(), 1, "{source:?}");
         assert_eq!(
             context.scope.outer[0].relations[0]
@@ -942,7 +941,10 @@ fn subqueries_in_table_function_arguments_inherit_implicit_lateral_visibility() 
 #[test]
 fn correlated_subqueries_in_join_conditions_see_the_join_inputs() {
     let source = "SELECT * FROM accounts a JOIN users u ON u.account_id = (SELECT a.) IS NOT NULL, future_table future";
-    let context = collect(source, size(source.find("a.)").unwrap() + 2));
+    let context = collect(
+        source,
+        TextSize::from_usize(source.find("a.)").unwrap() + 2),
+    );
     assert_eq!(context.scope.outer.len(), 1);
     assert_eq!(
         context.scope.outer[0]
@@ -955,7 +957,7 @@ fn correlated_subqueries_in_join_conditions_see_the_join_inputs() {
 
     let source = "SELECT * FROM accounts a JOIN users u ON  LEFT JOIN future_table future ON true";
     let point = source.find("ON  LEFT").unwrap() + 3;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(
         context
             .scope
@@ -972,7 +974,7 @@ fn correlated_subqueries_in_join_conditions_see_the_join_inputs() {
 fn rows_from_arguments_see_only_preceding_from_items() {
     let source = "SELECT * FROM accounts a, ROWS FROM (f(a.id), g(a.id)) r, later_relation later";
     let point = source.rfind("a.id").unwrap() + 2;
-    let context = collect(source, size(point));
+    let context = collect(source, TextSize::from_usize(point));
     assert_eq!(context.scope.local.relations.len(), 1);
     assert_eq!(
         context.scope.local.relations[0]
@@ -987,7 +989,7 @@ fn rows_from_arguments_see_only_preceding_from_items() {
 #[test]
 fn merge_actions_keep_target_and_source_visible() {
     let source = "MERGE INTO target_table AS target USING source_table AS source ON target.id = source.id WHEN MATCHED THEN UPDATE SET value = source.";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     assert_eq!(
         context
             .scope
@@ -1020,18 +1022,18 @@ fn merge_not_matched_actions_expose_only_existing_rows() {
     let prefix =
         "MERGE INTO target_table AS target USING source_table AS source ON target.id = source.id ";
     let target_only = format!("{prefix}WHEN NOT MATCHED BY SOURCE AND ");
-    let context = collect(&target_only, size(target_only.len()));
+    let context = collect(&target_only, TextSize::from_usize(target_only.len()));
     assert!(context.scope.dml_target.is_some());
     assert!(context.scope.merge_source.is_none());
 
     let source_only = format!("{prefix}WHEN NOT MATCHED BY TARGET AND ");
-    let context = collect(&source_only, size(source_only.len()));
+    let context = collect(&source_only, TextSize::from_usize(source_only.len()));
     assert!(context.scope.dml_target.is_none());
     assert!(context.scope.merge_source.is_some());
 
     let source_only = format!("{prefix}WHEN NOT MATCHED THEN INSERT VALUES (source.)");
     let point = source_only.find("source.)").unwrap() + "source.".len();
-    let context = collect(&source_only, size(point));
+    let context = collect(&source_only, TextSize::from_usize(point));
     assert!(context.scope.dml_target.is_none());
     assert!(context.scope.merge_source.is_some());
 }
@@ -1039,7 +1041,10 @@ fn merge_not_matched_actions_expose_only_existing_rows() {
 #[test]
 fn parenthesized_joins_only_hide_relations_when_aliased() {
     let unaliased = "SELECT a. FROM (accounts a JOIN users u ON a.id = u.id)";
-    let context = collect(unaliased, size(unaliased.find(" FROM").unwrap()));
+    let context = collect(
+        unaliased,
+        TextSize::from_usize(unaliased.find(" FROM").unwrap()),
+    );
     assert_eq!(
         context
             .scope
@@ -1052,7 +1057,10 @@ fn parenthesized_joins_only_hide_relations_when_aliased() {
     );
 
     let aliased = "SELECT joined. FROM (accounts a JOIN users u ON a.id = u.id) AS joined";
-    let context = collect(aliased, size(aliased.find(" FROM").unwrap()));
+    let context = collect(
+        aliased,
+        TextSize::from_usize(aliased.find(" FROM").unwrap()),
+    );
     assert_eq!(context.scope.local.relations.len(), 1);
     assert_eq!(
         context.scope.local.relations[0].kind,
@@ -1068,7 +1076,7 @@ fn parenthesized_joins_only_hide_relations_when_aliased() {
     );
 
     let only = "SELECT target. FROM ONLY (app.accounts) AS target";
-    let context = collect(only, size(only.find(" FROM").unwrap()));
+    let context = collect(only, TextSize::from_usize(only.find(" FROM").unwrap()));
     let relation = &context.scope.local.relations[0];
     assert_eq!(relation.kind, pg_completion::RelationKind::Relation);
     assert_eq!(relation.name[0].normalized, "app");
@@ -1085,7 +1093,7 @@ fn parenthesized_joins_only_hide_relations_when_aliased() {
             "id)",
         ),
     ] {
-        let context = collect(source, size(source.find(marker).unwrap()));
+        let context = collect(source, TextSize::from_usize(source.find(marker).unwrap()));
         assert_eq!(
             context
                 .scope
@@ -1103,7 +1111,7 @@ fn parenthesized_joins_only_hide_relations_when_aliased() {
 #[test]
 fn classifies_table_functions_and_insert_aliases_through_collect() {
     let source = "SELECT r. FROM ROWS FROM (f(), g()) AS r(a)";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert_eq!(context.scope.local.relations.len(), 1);
     assert_eq!(
         context.scope.local.relations[0].kind,
@@ -1119,7 +1127,7 @@ fn classifies_table_functions_and_insert_aliases_through_collect() {
     );
 
     let source = "SELECT r. FROM ROWS FROM (f() AS (first bigint), g() AS (second text)) AS r";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert_eq!(
         context.scope.local.relations[0]
             .explicit_columns
@@ -1130,7 +1138,7 @@ fn classifies_table_functions_and_insert_aliases_through_collect() {
     );
 
     let source = "SELECT r. FROM ROWS FROM (f() AS (inner_name bigint)) AS r(outer_name)";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert_eq!(
         context.scope.local.relations[0]
             .explicit_columns
@@ -1141,11 +1149,14 @@ fn classifies_table_functions_and_insert_aliases_through_collect() {
     );
 
     let source = "INSERT INTO target OVERRIDING SYSTEM VALUE VALUES (1)";
-    let context = collect(source, size(source.find(" OVERRIDING").unwrap()));
+    let context = collect(
+        source,
+        TextSize::from_usize(source.find(" OVERRIDING").unwrap()),
+    );
     assert!(context.scope.dml_target.as_ref().unwrap().alias.is_none());
 
     let source = "INSERT INTO target AS inserted(first_column, second_column) VALUES (1, 2) RETURNING inserted.";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
     let target = context.scope.dml_target.as_ref().unwrap();
     assert_eq!(target.alias.as_ref().unwrap().normalized, "inserted");
     assert_eq!(
@@ -1164,7 +1175,7 @@ fn table_function_suffixes_do_not_masquerade_as_aliases() {
         "SELECT f. FROM generate_series(1, 2) WITH ORDINALITY AS f",
         "SELECT f. FROM ROWS FROM (generate_series(1, 2)) WITH ORDINALITY AS f",
     ] {
-        let context = collect(source, size(source.find(" FROM").unwrap()));
+        let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
         assert_eq!(context.scope.local.relations.len(), 1, "{source:?}");
         assert_eq!(
             context.scope.local.relations[0]
@@ -1178,7 +1189,7 @@ fn table_function_suffixes_do_not_masquerade_as_aliases() {
     }
 
     let source = "SELECT sampled. FROM sampled TABLESAMPLE bernoulli(10)";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert!(context.scope.local.relations[0].alias.is_none());
     assert_eq!(
         context.scope.local.relations[0].name[0].normalized,
@@ -1186,7 +1197,7 @@ fn table_function_suffixes_do_not_masquerade_as_aliases() {
     );
 
     let source = "SELECT f. FROM record_source() AS f(value bigint, label text)";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert_eq!(
         context.scope.local.relations[0]
             .explicit_columns
@@ -1197,7 +1208,7 @@ fn table_function_suffixes_do_not_masquerade_as_aliases() {
     );
 
     let source = "SELECT record_source. FROM record_source() AS (value bigint, label text)";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert!(context.scope.local.relations[0].alias.is_none());
     assert_eq!(
         context.scope.local.relations[0]
@@ -1212,7 +1223,7 @@ fn table_function_suffixes_do_not_masquerade_as_aliases() {
 #[test]
 fn exposes_explicit_subquery_alias_columns() {
     let source = "SELECT q. FROM (SELECT 1) AS q(first_column)";
-    let context = collect(source, size(source.find(" FROM").unwrap()));
+    let context = collect(source, TextSize::from_usize(source.find(" FROM").unwrap()));
     assert_eq!(context.scope.local.relations.len(), 1);
     assert_eq!(
         context.scope.local.relations[0]
@@ -1233,7 +1244,7 @@ fn suppresses_candidates_inside_non_identifier_lexical_containers() {
         "SELECT 1 -- unfinished",
         "SELECT E'escaped\\'quote",
     ] {
-        let context = collect(source, size(source.len()));
+        let context = collect(source, TextSize::from_usize(source.len()));
         assert!(
             context.expectations.tokens.is_empty(),
             "unexpected token candidates for {source:?}"
@@ -1248,56 +1259,48 @@ fn suppresses_candidates_inside_non_identifier_lexical_containers() {
 #[test]
 fn recovers_an_unterminated_identifier_as_the_active_prefix() {
     let source = "SELECT schema.\"Mi";
-    let context = collect(source, size(source.len()));
+    let context = collect(source, TextSize::from_usize(source.len()));
 
     assert_eq!(context.prefix.raw, "Mi");
     assert_eq!(context.prefix.normalized, "Mi");
     assert_eq!(context.prefix.quoting, IdentifierQuoting::Quoted);
     assert_eq!(context.intent.qualifier[0].normalized, "schema");
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
-    assert!(
-        context
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered)
-    );
+    assert!(context
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered));
 }
 
 #[test]
 fn distinguishes_an_active_unterminated_token_from_an_earlier_lex_error() {
     let active = "SELECT 'unfinished";
-    let context = collect(active, size(active.len()));
-    assert!(
-        context
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered)
-    );
+    let context = collect(active, TextSize::from_usize(active.len()));
+    assert!(context
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered));
 
     let before = "SELECT 1e+ FROM users";
-    let context = collect(before, size(before.len()));
+    let context = collect(before, TextSize::from_usize(before.len()));
     assert!(context.expectations.tokens.is_empty());
     assert!(context.expectations.slots.is_empty());
-    assert!(
-        context
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::LexErrorBeforePoint)
-    );
+    assert!(context
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::LexErrorBeforePoint));
 }
 
 #[test]
 fn scope_recovery_does_not_discard_parser_expectations() {
     let source = "SELECT  FROM \"unfinished";
-    let context = collect(source, size(7));
+    let context = collect(source, TextSize::from_usize(7));
 
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
     assert!(context.expectations.tokens.contains(&TokenKind::From));
     assert!(context.scope.local.relations.is_empty());
-    assert!(
-        context
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
-    );
+    assert!(context
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete));
 }

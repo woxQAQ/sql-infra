@@ -1,3 +1,9 @@
+//! Integration tests for PostgreSQL completion collection.
+//!
+//! The YAML files under `test-data/completion` are the fixtures. The private
+//! types and helpers in this crate deserialize, validate, and optionally
+//! re-record those fixtures; they are test infrastructure, not library code.
+
 use std::{collections::HashSet, fs, path::Path};
 
 use pg_completion::{
