@@ -309,12 +309,18 @@ pub(super) struct CompletionCollector {
 pub(super) type SharedCollector = Rc<RefCell<CompletionCollector>>;
 
 #[derive(Clone, Copy)]
-enum CompletionPass {
-    Initial,
+/// Controls how the lexer token at the completion point is treated before the
+/// synthetic marker is inserted.
+///
+/// Initial collection removes the token as an editor prefix. Membership
+/// recovery may need complete punctuation or numeric tokens at the same offset
+/// as owner syntax following the recovered name hole, so it preserves them.
+enum CompletionPointTokenPolicy {
+    InitialCollection,
     MembershipRecovery,
 }
 
-impl CompletionPass {
+impl CompletionPointTokenPolicy {
     fn should_remove_token(self, token: &Token, completion_point: TextSize) -> bool {
         let intersects_completion_point = token.kind != TokenKind::Eof
             && token.range.start() <= completion_point
@@ -325,11 +331,9 @@ impl CompletionPass {
         }
 
         match self {
-            Self::Initial => true,
-            // The recovery pass must keep complete punctuation and numeric
-            // tokens that start at the point: they belong to the owner syntax
-            // to the right of the recovered name hole. Names and incomplete
-            // tokens are still editor prefixes and therefore get replaced.
+            Self::InitialCollection => true,
+            // Names and incomplete tokens remain editor prefixes during
+            // recovery and therefore still get replaced.
             Self::MembershipRecovery => {
                 token.range.start() < completion_point
                     || matches!(
@@ -490,12 +494,12 @@ impl CompletionCollector {
 fn tokens_with_completion_marker(
     source: &str,
     completion_point: TextSize,
-    pass: CompletionPass,
+    token_policy: CompletionPointTokenPolicy,
 ) -> Result<Vec<Token>, crate::lexer::LexError> {
     let mut tokens = crate::lexer::lex_for_completion(source, completion_point)?.into_tokens();
     if let Some(prefix_token_index) = tokens
         .iter()
-        .position(|token| pass.should_remove_token(token, completion_point))
+        .position(|token| token_policy.should_remove_token(token, completion_point))
     {
         tokens.remove(prefix_token_index);
     }
@@ -770,8 +774,11 @@ pub fn collect_expectations(
 ) -> Result<ParserExpectations, crate::lexer::LexError> {
     let completion_point = TextSize::try_from(usize::from(completion_point).min(source.len()))
         .expect("completion point was bounded by source length");
-    let initial_tokens =
-        tokens_with_completion_marker(source, completion_point, CompletionPass::Initial)?;
+    let initial_tokens = tokens_with_completion_marker(
+        source,
+        completion_point,
+        CompletionPointTokenPolicy::InitialCollection,
+    )?;
     let initial_collector = Rc::new(RefCell::new(CompletionCollector::default()));
     run_completion_parse(initial_tokens, &initial_collector);
 
@@ -789,7 +796,7 @@ pub fn collect_expectations(
     let recovery_tokens = tokens_with_completion_marker(
         source,
         completion_point,
-        CompletionPass::MembershipRecovery,
+        CompletionPointTokenPolicy::MembershipRecovery,
     )?;
 
     let recovery_collector = Rc::new(RefCell::new(CompletionCollector {
