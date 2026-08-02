@@ -288,7 +288,7 @@ fn parse_object_with_args_tokens_impl(
 
 impl Parser {
     pub(super) fn parse_type_name_until(&mut self, stops: &[TokenKind]) -> Option<TypeName> {
-        self.record_completion_slot_within(completion::GrammarSlot::Type, stops);
+        self.record_completion_slot_within_fragment(completion::GrammarSlot::Type, stops);
         let location = self.location();
         let tokens = self.take_until_top_level(stops);
         if self.at_completion() {
@@ -723,7 +723,7 @@ impl Parser {
                     .and_then(|object_type| completion::definition_value_slot(object_type, &name));
                 if let Some(slot) = value_slot {
                     self.record_completion_slot(slot);
-                    self.record_completion_slot_within(
+                    self.record_completion_slot_within_fragment(
                         slot,
                         &[TokenKind::Char(','), TokenKind::Char(')')],
                     );

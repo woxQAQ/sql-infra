@@ -14,7 +14,7 @@ impl Parser {
         self.expect(TokenKind::Collation)?;
         let name_stops = [TokenKind::Refresh, TokenKind::Char(';'), TokenKind::Eof];
         self.record_completion_slot(completion::GrammarSlot::Collation);
-        self.record_completion_slot_before(completion::GrammarSlot::Collation, &name_stops);
+        self.record_completion_qualified_name_slot(completion::GrammarSlot::Collation, &name_stops);
         let collname = self.parse_name_list_until_keywords(&name_stops);
         if collname.is_empty() {
             return Err(self.error_here("ALTER COLLATION requires a collation name"));

@@ -40,7 +40,7 @@ impl Parser {
         slot: completion::GrammarSlot,
     ) -> PResult<Node> {
         self.record_completion_slot(slot);
-        self.record_completion_slot_before(slot, stops);
+        self.record_completion_qualified_name_slot(slot, stops);
         if !self.at_completion() && self.at_any(stops) {
             return Err(self.error_here("expected a qualified name"));
         }

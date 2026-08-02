@@ -171,7 +171,7 @@ impl Parser {
         if stmt.type_name.is_empty() {
             return Err(self.error_here("ALTER DOMAIN requires a domain name"));
         }
-        self.push_completion_membership_owner_range(
+        self.push_completion_membership_owner_from_tokens(
             &[completion::GrammarSlot::Constraint],
             &[ObjectType::Domain],
             owner_start,

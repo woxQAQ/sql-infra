@@ -892,7 +892,7 @@ impl Parser {
         ];
         let object_slot = completion::object_type_slot(objtype);
         self.record_completion_slot(object_slot);
-        self.record_completion_slot_before(object_slot, &stops);
+        self.record_completion_qualified_name_slot(object_slot, &stops);
         let owner_start = self.pos;
         let objects = match objtype {
             ObjectType::Function | ObjectType::Procedure | ObjectType::Routine => {
@@ -913,7 +913,7 @@ impl Parser {
         }
         let owner_end = self.pos;
         if objtype == ObjectType::Table && objects.len() == 1 {
-            self.push_completion_membership_owner_range(
+            self.push_completion_membership_owner_from_tokens(
                 &[completion::GrammarSlot::Column],
                 &[
                     ObjectType::Table,

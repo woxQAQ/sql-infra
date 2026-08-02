@@ -258,7 +258,7 @@ impl Parser {
 
     pub(super) fn parse_set_clause_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
         self.record_completion_slot(completion::GrammarSlot::Column);
-        self.record_completion_slot_before(completion::GrammarSlot::Column, stops);
+        self.record_completion_qualified_name_slot(completion::GrammarSlot::Column, stops);
         let mut targets = Vec::new();
         while self.at_completion() || !self.at_any(stops) {
             if self.consume(TokenKind::Char('(')) {

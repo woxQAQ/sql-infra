@@ -78,7 +78,7 @@ impl Parser {
             ));
             let owner_end = self.pos;
             let attlist = if self.consume(TokenKind::Char('(')) {
-                self.push_completion_membership_owner_range(
+                self.push_completion_membership_owner_from_tokens(
                     &[completion::GrammarSlot::Column],
                     &[ObjectType::Table, ObjectType::ForeignTable],
                     owner_start,
@@ -171,7 +171,7 @@ impl Parser {
             let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
             let owner_end = self.pos;
             let va_cols = if self.consume(TokenKind::Char('(')) {
-                self.push_completion_membership_owner_range(
+                self.push_completion_membership_owner_from_tokens(
                     &[completion::GrammarSlot::Column],
                     &[
                         ObjectType::Table,

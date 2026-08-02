@@ -270,14 +270,14 @@ impl ExprParser {
                         && let Some(collector) = &self.completion
                     {
                         let mut collector = collector.borrow_mut();
-                        collector.follow_tokens(&[
+                        collector.record_follow_tokens(&[
                             TokenKind::Absent,
                             TokenKind::NullP,
                             TokenKind::Returning,
                             TokenKind::Char(')'),
                         ]);
-                        collector.follow_phrase(JSON_ABSENT_ON_NULL);
-                        collector.follow_phrase(JSON_NULL_ON_NULL);
+                        collector.record_follow_phrase(JSON_ABSENT_ON_NULL);
+                        collector.record_follow_phrase(JSON_NULL_ON_NULL);
                     }
                     end += 1;
                     continue;

@@ -69,7 +69,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
         && let Some(collector) = &completion
     {
         let mut collector = collector.borrow_mut();
-        collector.slot(completion::GrammarSlot::Type);
+        collector.record_slot(completion::GrammarSlot::Type);
         let can_start_parameter_mode = completion_index == 0
             || (completion_index == 1
                 && tokens.first().is_some_and(|token| {
@@ -82,7 +82,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
                         .is_some()
                 }));
         if can_start_parameter_mode {
-            collector.lookahead_tokens(&[
+            collector.record_lookahead_tokens(&[
                 TokenKind::InP,
                 TokenKind::OutP,
                 TokenKind::Inout,
@@ -91,14 +91,14 @@ pub(super) fn function_parameter_from_tokens_with_completion(
         } else if tokens.first().map(|token| token.kind) == Some(TokenKind::InP)
             && completion_index == 1
         {
-            collector.lookahead_tokens(&[TokenKind::OutP]);
+            collector.record_lookahead_tokens(&[TokenKind::OutP]);
         }
         if function_parameter_from_tokens(tokens[..completion_index].to_vec()).is_ok() {
-            collector.lookahead_tokens(&[TokenKind::Default]);
+            collector.record_lookahead_tokens(&[TokenKind::Default]);
         }
-        collector.tokens(&[TokenKind::Char(')')]);
+        collector.record_tokens(&[TokenKind::Char(')')]);
         if completion_index > 0 {
-            collector.tokens(&[TokenKind::Char(',')]);
+            collector.record_tokens(&[TokenKind::Char(',')]);
         }
     }
     if let (Some(completion_index), Some(default_index)) = (
@@ -112,7 +112,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
     {
         collector
             .borrow_mut()
-            .follow_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            .record_follow_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
     }
     let default_tokens = default_index.map(|index| tokens.split_off(index + 1));
     if default_index.is_some() {

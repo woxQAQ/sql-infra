@@ -484,7 +484,7 @@ impl Parser {
         ));
         let owner_end = self.pos;
         if self.consume(TokenKind::Char('(')) {
-            self.push_completion_membership_owner_range(
+            self.push_completion_membership_owner_from_tokens(
                 &[completion::GrammarSlot::Column],
                 &[ObjectType::Table],
                 owner_start,

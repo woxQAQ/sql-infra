@@ -36,7 +36,7 @@ impl Parser {
             self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?,
         ));
         let owner_end = self.pos;
-        self.push_completion_membership_owner_range(
+        self.push_completion_membership_owner_from_tokens(
             &[completion::GrammarSlot::Column],
             &[
                 ObjectType::Table,

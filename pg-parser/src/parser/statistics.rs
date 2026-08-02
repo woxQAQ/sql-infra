@@ -124,7 +124,10 @@ impl Parser {
             TokenKind::Eof,
         ];
         self.record_completion_slot(completion::GrammarSlot::Statistics);
-        self.record_completion_slot_before(completion::GrammarSlot::Statistics, &name_stops);
+        self.record_completion_qualified_name_slot(
+            completion::GrammarSlot::Statistics,
+            &name_stops,
+        );
         let defnames = self.parse_name_list_until_keywords(&name_stops);
         if if_not_exists && defnames.is_empty() {
             return Err(self.error_here("IF NOT EXISTS requires a statistics object name"));
@@ -158,7 +161,7 @@ impl Parser {
         let owner_start = self.pos;
         let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
         let owner_end = self.pos;
-        self.push_completion_membership_owner_range(
+        self.push_completion_membership_owner_from_tokens(
             &[completion::GrammarSlot::Column],
             &[
                 ObjectType::Table,
@@ -193,7 +196,10 @@ impl Parser {
         let missing_ok = self.consume_if_exists()?;
         let name_stops = [TokenKind::Set, TokenKind::Char(';'), TokenKind::Eof];
         self.record_completion_slot(completion::GrammarSlot::Statistics);
-        self.record_completion_slot_before(completion::GrammarSlot::Statistics, &name_stops);
+        self.record_completion_qualified_name_slot(
+            completion::GrammarSlot::Statistics,
+            &name_stops,
+        );
         let defnames = self.parse_name_list_until_keywords(&name_stops);
         if defnames.is_empty() {
             return Err(self.error_here("ALTER STATISTICS requires a statistics object name"));

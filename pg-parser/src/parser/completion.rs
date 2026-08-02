@@ -4,6 +4,8 @@
 //! records tokens, phrases, catalog slots, membership, and provenance without
 //! changing strict parsing behavior.
 
+use std::{cell::RefCell, rc::Rc};
+
 use super::*;
 
 /// A named identifier or Catalog-object position accepted by the grammar.
@@ -298,13 +300,13 @@ pub struct ParserExpectations {
 #[derive(Debug, Default)]
 pub(super) struct CompletionCollector {
     expectations: ParserExpectations,
-    recover_holes: bool,
-    recovered_holes: usize,
-    membership_owners: Vec<(Vec<GrammarSlot>, GrammarObjectReference)>,
-    needs_membership_recovery: bool,
+    allows_hole_recovery: bool,
+    recovered_any_hole: bool,
+    active_membership_owners: Vec<(Vec<GrammarSlot>, GrammarObjectReference)>,
+    membership_recovery_requested: bool,
 }
 
-pub(super) type SharedCollector = std::rc::Rc<std::cell::RefCell<CompletionCollector>>;
+pub(super) type SharedCollector = Rc<RefCell<CompletionCollector>>;
 
 #[derive(Clone, Copy)]
 enum CompletionPass {
@@ -313,12 +315,12 @@ enum CompletionPass {
 }
 
 impl CompletionPass {
-    fn removes_token_at_point(self, token: &Token, point: TextSize) -> bool {
-        let intersects_point = token.kind != TokenKind::Eof
-            && token.range.start() <= point
-            && (point < token.range.end()
-                || (token.kind == TokenKind::Incomplete && point == token.range.end()));
-        if !intersects_point {
+    fn should_remove_token(self, token: &Token, completion_point: TextSize) -> bool {
+        let intersects_completion_point = token.kind != TokenKind::Eof
+            && token.range.start() <= completion_point
+            && (completion_point < token.range.end()
+                || (token.kind == TokenKind::Incomplete && completion_point == token.range.end()));
+        if !intersects_completion_point {
             return false;
         }
 
@@ -329,7 +331,7 @@ impl CompletionPass {
             // to the right of the recovered name hole. Names and incomplete
             // tokens are still editor prefixes and therefore get replaced.
             Self::MembershipRecovery => {
-                token.range.start() < point
+                token.range.start() < completion_point
                     || matches!(
                         &token.value,
                         Some(TokenValue::String(_) | TokenValue::Keyword(_))
@@ -341,17 +343,20 @@ impl CompletionPass {
 }
 
 impl CompletionCollector {
-    pub(super) fn tokens(&mut self, kinds: &[TokenKind]) {
+    pub(super) fn record_tokens(&mut self, kinds: &[TokenKind]) {
         Self::insert_tokens(&mut self.expectations.tokens, kinds);
         Self::insert_tokens(&mut self.expectations.direct_tokens, kinds);
     }
 
-    pub(super) fn expression_start_tokens(&mut self, kinds: &[TokenKind]) {
-        Self::insert_tokens(&mut self.expectations.tokens, kinds);
-        Self::insert_tokens(&mut self.expectations.expression_start_tokens, kinds);
+    pub(super) fn record_phrase(&mut self, phrase: &'static [TokenKind]) {
+        debug_assert!(phrase.len() > 1, "a single-token phrase is just a token");
+        self.record_tokens(&phrase[..1]);
+        if !self.expectations.phrases.contains(&phrase) {
+            self.expectations.phrases.push(phrase);
+        }
     }
 
-    pub(super) fn lookahead_tokens(&mut self, kinds: &[TokenKind]) {
+    pub(super) fn record_lookahead_tokens(&mut self, kinds: &[TokenKind]) {
         let keywords = kinds
             .iter()
             .copied()
@@ -361,14 +366,32 @@ impl CompletionCollector {
         Self::insert_tokens(&mut self.expectations.lookahead_tokens, &keywords);
     }
 
-    pub(super) fn expression_continuation_tokens(&mut self, kinds: &[TokenKind]) {
+    pub(super) fn record_expression_start_tokens(&mut self, kinds: &[TokenKind]) {
+        Self::insert_tokens(&mut self.expectations.tokens, kinds);
+        Self::insert_tokens(&mut self.expectations.expression_start_tokens, kinds);
+    }
+
+    pub(super) fn record_expression_continuation_tokens(&mut self, kinds: &[TokenKind]) {
         Self::insert_tokens(&mut self.expectations.tokens, kinds);
         Self::insert_tokens(&mut self.expectations.expression_continuation_tokens, kinds);
     }
 
-    pub(super) fn expression_continuation_phrase(&mut self, phrase: &'static [TokenKind]) {
+    pub(super) fn record_expression_continuation_phrase(&mut self, phrase: &'static [TokenKind]) {
         debug_assert!(phrase.len() > 1, "a single-token phrase is just a token");
-        self.expression_continuation_tokens(&phrase[..1]);
+        self.record_expression_continuation_tokens(&phrase[..1]);
+        if !self.expectations.phrases.contains(&phrase) {
+            self.expectations.phrases.push(phrase);
+        }
+    }
+
+    pub(super) fn record_follow_tokens(&mut self, kinds: &[TokenKind]) {
+        Self::insert_tokens(&mut self.expectations.tokens, kinds);
+        Self::insert_tokens(&mut self.expectations.follow_tokens, kinds);
+    }
+
+    pub(super) fn record_follow_phrase(&mut self, phrase: &'static [TokenKind]) {
+        debug_assert!(phrase.len() > 1, "a single-token phrase is just a token");
+        self.record_follow_tokens(&phrase[..1]);
         if !self.expectations.phrases.contains(&phrase) {
             self.expectations.phrases.push(phrase);
         }
@@ -387,28 +410,7 @@ impl CompletionCollector {
         }
     }
 
-    pub(super) fn phrase(&mut self, phrase: &'static [TokenKind]) {
-        debug_assert!(phrase.len() > 1, "a single-token phrase is just a token");
-        self.tokens(&phrase[..1]);
-        if !self.expectations.phrases.contains(&phrase) {
-            self.expectations.phrases.push(phrase);
-        }
-    }
-
-    pub(super) fn follow_tokens(&mut self, kinds: &[TokenKind]) {
-        Self::insert_tokens(&mut self.expectations.tokens, kinds);
-        Self::insert_tokens(&mut self.expectations.follow_tokens, kinds);
-    }
-
-    pub(super) fn follow_phrase(&mut self, phrase: &'static [TokenKind]) {
-        debug_assert!(phrase.len() > 1, "a single-token phrase is just a token");
-        self.follow_tokens(&phrase[..1]);
-        if !self.expectations.phrases.contains(&phrase) {
-            self.expectations.phrases.push(phrase);
-        }
-    }
-
-    pub(super) fn slot(&mut self, slot: GrammarSlot) {
+    pub(super) fn record_slot(&mut self, slot: GrammarSlot) {
         if slot == GrammarSlot::AnyName && !self.expectations.slots.is_empty() {
             return;
         }
@@ -421,7 +423,7 @@ impl CompletionCollector {
             self.expectations.slots.push(slot);
         }
         if let Some((member_slots, owner)) = self
-            .membership_owners
+            .active_membership_owners
             .iter()
             .rev()
             .find(|(member_slots, _)| member_slots.contains(&slot))
@@ -431,92 +433,93 @@ impl CompletionCollector {
         }
     }
 
-    pub(super) fn membership(
-        &mut self,
-        member_slots: &[GrammarSlot],
-        owner: GrammarObjectReference,
-    ) {
-        if self.expectations.membership.is_none() {
-            self.expectations.membership = Some(GrammarMembership {
-                member_slots: member_slots.to_vec(),
-                owner,
-            });
-        }
-    }
-
     pub(super) fn push_membership_owner(
         &mut self,
         member_slots: &[GrammarSlot],
         owner: GrammarObjectReference,
     ) {
-        self.membership_owners
+        self.active_membership_owners
             .push((member_slots.to_vec(), owner.clone()));
-        if self.recovered_holes > 0
-            || member_slots
-                .iter()
-                .any(|member| self.expectations.slots.contains(member))
-        {
+        let matches_recorded_slot = member_slots
+            .iter()
+            .any(|member| self.expectations.slots.contains(member));
+        if self.recovered_any_hole || matches_recorded_slot {
             self.attach_membership_owner(member_slots.to_vec(), owner);
         }
     }
 
     pub(super) fn pop_membership_owner(&mut self) {
-        self.membership_owners.pop();
+        self.active_membership_owners.pop();
     }
 
     fn clear_membership_owners(&mut self) {
-        self.membership_owners.clear();
+        self.active_membership_owners.clear();
     }
 
     pub(super) fn request_membership_recovery(&mut self) {
-        self.needs_membership_recovery = true;
+        self.membership_recovery_requested = true;
     }
 
-    pub(super) fn recover_hole(&mut self) -> bool {
-        if !self.recover_holes {
+    pub(super) fn try_recover_hole(&mut self) -> bool {
+        if !self.allows_hole_recovery {
             return false;
         }
-        self.recovered_holes += 1;
+        self.recovered_any_hole = true;
         true
     }
 
     fn attach_membership_owner(
         &mut self,
-        member_slots: Vec<GrammarSlot>,
+        candidate_slots: Vec<GrammarSlot>,
         owner: GrammarObjectReference,
     ) {
-        let member_slots = member_slots
+        let matching_slots = candidate_slots
             .into_iter()
             .filter(|member| self.expectations.slots.contains(member))
             .collect::<Vec<_>>();
-        if !member_slots.is_empty() {
-            self.membership(&member_slots, owner);
+        if matching_slots.is_empty() || self.expectations.membership.is_some() {
+            return;
         }
+        self.expectations.membership = Some(GrammarMembership {
+            member_slots: matching_slots,
+            owner,
+        });
     }
 }
 
 fn tokens_with_completion_marker(
     source: &str,
-    point: TextSize,
+    completion_point: TextSize,
     pass: CompletionPass,
 ) -> Result<Vec<Token>, crate::lexer::LexError> {
-    let mut tokens = crate::lexer::lex_for_completion(source, point)?.into_tokens();
-    if let Some(index) = tokens
+    let mut tokens = crate::lexer::lex_for_completion(source, completion_point)?.into_tokens();
+    if let Some(prefix_token_index) = tokens
         .iter()
-        .position(|token| pass.removes_token_at_point(token, point))
+        .position(|token| pass.should_remove_token(token, completion_point))
     {
-        tokens.remove(index);
+        tokens.remove(prefix_token_index);
     }
 
-    let insertion = tokens
+    let marker_index = tokens
         .iter()
-        .position(|token| token.range.start() >= point)
+        .position(|token| token.range.start() >= completion_point)
         .unwrap_or_else(|| tokens.len().saturating_sub(1));
     tokens.insert(
-        insertion,
-        Token::synthetic(TokenKind::Completion, usize::from(point)),
+        marker_index,
+        Token::synthetic(TokenKind::Completion, usize::from(completion_point)),
     );
     Ok(tokens)
+}
+
+fn run_completion_parse(tokens: Vec<Token>, collector: &SharedCollector) {
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion: Some(Rc::clone(collector)),
+    };
+    // Expectations collected before a syntax exit remain useful at the
+    // editing point, so completion intentionally ignores the parse outcome.
+    let _parse_outcome = parser.parse_statements_with_ranges();
 }
 
 // ── Parser completion hooks ───────────────────────────────────────────────
@@ -544,7 +547,7 @@ impl Parser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().tokens(kinds);
+            collector.borrow_mut().record_tokens(kinds);
         }
     }
 
@@ -553,7 +556,7 @@ impl Parser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().lookahead_tokens(kinds);
+            collector.borrow_mut().record_lookahead_tokens(kinds);
         }
     }
 
@@ -562,7 +565,7 @@ impl Parser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().follow_tokens(kinds);
+            collector.borrow_mut().record_follow_tokens(kinds);
         }
     }
 
@@ -571,7 +574,7 @@ impl Parser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().follow_phrase(phrase);
+            collector.borrow_mut().record_follow_phrase(phrase);
         }
     }
 
@@ -580,7 +583,7 @@ impl Parser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().phrase(phrase);
+            collector.borrow_mut().record_phrase(phrase);
         }
     }
 
@@ -589,39 +592,44 @@ impl Parser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().slot(slot);
+            collector.borrow_mut().record_slot(slot);
         }
     }
 
-    pub(super) fn record_completion_slot_before(
+    /// Record a slot when the completion point follows a top-level `.` inside
+    /// the current name fragment. The ordinary slot hook covers the fragment's
+    /// first component; this hook covers later components of a qualified name.
+    pub(super) fn record_completion_qualified_name_slot(
         &self,
         slot: GrammarSlot,
-        stop_tokens: &[TokenKind],
+        fragment_end_tokens: &[TokenKind],
     ) {
-        if self.top_level_token_before_completion(stop_tokens) != Some(TokenKind::Char('.')) {
+        if self.top_level_token_before_completion(fragment_end_tokens) != Some(TokenKind::Char('.'))
+        {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().slot(slot);
+            collector.borrow_mut().record_slot(slot);
         }
     }
 
     /// Publish a slot when the completion marker is anywhere inside the
-    /// fragment delimited by top-level `stop_tokens`, not only at its first token.
-    pub(super) fn record_completion_slot_within(
+    /// fragment delimited by top-level `fragment_end_tokens`, not only at its
+    /// first token.
+    pub(super) fn record_completion_slot_within_fragment(
         &self,
         slot: GrammarSlot,
-        stop_tokens: &[TokenKind],
+        fragment_end_tokens: &[TokenKind],
     ) {
         let follows_fragment_separator = matches!(
-            self.top_level_token_before_completion(stop_tokens),
+            self.top_level_token_before_completion(fragment_end_tokens),
             Some(TokenKind::Char('.') | TokenKind::Char(',') | TokenKind::Char('('))
         );
         if !self.at_completion() && !follows_fragment_separator {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().slot(slot);
+            collector.borrow_mut().record_slot(slot);
         }
     }
 
@@ -637,17 +645,17 @@ impl Parser {
         }
     }
 
-    pub(super) fn push_completion_membership_owner_range(
+    pub(super) fn push_completion_membership_owner_from_tokens(
         &self,
         member_slots: &[GrammarSlot],
         object_types: &[ObjectType],
-        start: usize,
-        end: usize,
+        start_token_index: usize,
+        end_token_index: usize,
     ) {
         self.push_completion_membership_owner_name(
             member_slots,
             object_types,
-            self.completion_name_tokens(start, end),
+            self.membership_owner_name_tokens(start_token_index, end_token_index),
         );
     }
 
@@ -681,11 +689,11 @@ impl Parser {
         if !self.at_completion() {
             return None;
         }
-        let recovered = self
+        let hole_recovered = self
             .completion
             .as_ref()
-            .is_some_and(|collector| collector.borrow_mut().recover_hole());
-        if !recovered {
+            .is_some_and(|collector| collector.borrow_mut().try_recover_hole());
+        if !hole_recovered {
             return None;
         }
         let location = self.peek().location();
@@ -693,8 +701,12 @@ impl Parser {
         Some(Token::completion_hole(location))
     }
 
-    fn completion_name_tokens(&self, start: usize, end: usize) -> Vec<Token> {
-        self.tokens[start..end]
+    fn membership_owner_name_tokens(
+        &self,
+        start_token_index: usize,
+        end_token_index: usize,
+    ) -> Vec<Token> {
+        self.tokens[start_token_index..end_token_index]
             .iter()
             .filter(|token| {
                 !matches!(
@@ -710,7 +722,10 @@ impl Parser {
             .collect()
     }
 
-    fn top_level_token_before_completion(&self, stop_tokens: &[TokenKind]) -> Option<TokenKind> {
+    fn top_level_token_before_completion(
+        &self,
+        fragment_end_tokens: &[TokenKind],
+    ) -> Option<TokenKind> {
         let mut delimiter_depth = 0usize;
         let mut previous_top_level_kind = None;
         for token in &self.tokens[self.pos..] {
@@ -722,7 +737,7 @@ impl Parser {
                 TokenKind::Completion if delimiter_depth == 0 => {
                     return previous_top_level_kind;
                 }
-                kind if delimiter_depth == 0 && stop_tokens.contains(&kind) => return None,
+                kind if delimiter_depth == 0 && fragment_end_tokens.contains(&kind) => return None,
                 kind if delimiter_depth == 0 => previous_top_level_kind = Some(kind),
                 _ => {}
             }
@@ -739,10 +754,10 @@ impl Parser {
 /// than the visual caret position so a partially typed identifier or keyword
 /// does not affect the surrounding grammar.
 ///
-/// `point` is clamped to `source.len()`. Callers should normalize it to a UTF-8
-/// character boundary before calling this function. Syntax errors at or after
-/// the marker can still yield partial expectations; only unrecoverable lexical
-/// errors are returned.
+/// `completion_point` is clamped to `source.len()`. Callers should normalize it
+/// to a UTF-8 character boundary before calling this function. Syntax errors at
+/// or after the marker can still yield partial expectations; only unrecoverable
+/// lexical errors are returned.
 ///
 /// # Errors
 ///
@@ -751,46 +766,55 @@ impl Parser {
 /// for [`TextSize`].
 pub fn collect_expectations(
     source: &str,
-    point: TextSize,
+    completion_point: TextSize,
 ) -> Result<ParserExpectations, crate::lexer::LexError> {
-    let point_usize = usize::from(point).min(source.len());
-    let point = TextSize::try_from(point_usize).expect("point was bounded by source length");
-    let tokens = tokens_with_completion_marker(source, point, CompletionPass::Initial)?;
+    let completion_point = TextSize::try_from(usize::from(completion_point).min(source.len()))
+        .expect("completion point was bounded by source length");
+    let initial_tokens =
+        tokens_with_completion_marker(source, completion_point, CompletionPass::Initial)?;
+    let initial_collector = Rc::new(RefCell::new(CompletionCollector::default()));
+    run_completion_parse(initial_tokens, &initial_collector);
 
-    let collector = std::rc::Rc::new(std::cell::RefCell::new(CompletionCollector::default()));
-    let mut parser = Parser {
-        tokens: tokens.clone(),
-        pos: 0,
-        completion: Some(collector.clone()),
+    let (initial_expectations, membership_recovery_requested) = {
+        let collector = initial_collector.borrow();
+        (
+            collector.expectations.clone(),
+            collector.membership_recovery_requested,
+        )
     };
-    let _outcome = parser.parse_statements_with_ranges();
-    let baseline = collector.borrow().expectations.clone();
-    let needs_membership_recovery = collector.borrow().needs_membership_recovery;
-    if baseline.membership.is_some() || !needs_membership_recovery {
-        return Ok(baseline);
+    if initial_expectations.membership.is_some() || !membership_recovery_requested {
+        return Ok(initial_expectations);
     }
 
-    let recovery_tokens =
-        tokens_with_completion_marker(source, point, CompletionPass::MembershipRecovery)?;
+    let recovery_tokens = tokens_with_completion_marker(
+        source,
+        completion_point,
+        CompletionPass::MembershipRecovery,
+    )?;
 
-    let recovery_collector = std::rc::Rc::new(std::cell::RefCell::new(CompletionCollector {
-        expectations: baseline,
-        recover_holes: true,
+    let recovery_collector = Rc::new(RefCell::new(CompletionCollector {
+        expectations: initial_expectations,
+        allows_hole_recovery: true,
         ..CompletionCollector::default()
     }));
-    let mut recovery_parser = Parser {
-        tokens: recovery_tokens,
-        pos: 0,
-        completion: Some(recovery_collector.clone()),
-    };
-    let _outcome = recovery_parser.parse_statements_with_ranges();
-    let recovered = recovery_collector.borrow().expectations.clone();
-    Ok(recovered)
+    run_completion_parse(recovery_tokens, &recovery_collector);
+    let recovered_expectations = recovery_collector.borrow().expectations.clone();
+    Ok(recovered_expectations)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn expectations_at(source: &str, byte_offset: usize) -> ParserExpectations {
+        let completion_point =
+            TextSize::try_from(byte_offset).expect("test completion point fits TextSize");
+        collect_expectations(source, completion_point).unwrap()
+    }
+
+    fn expectations_at_end(source: &str) -> ParserExpectations {
+        expectations_at(source, source.len())
+    }
 
     fn assert_token_provenance(source: &str, expectations: &ParserExpectations) {
         for token in &expectations.tokens {
@@ -818,10 +842,21 @@ mod tests {
         }
     }
 
+    fn assert_slots_at_end(cases: &[(&str, GrammarSlot)]) {
+        for &(source, expected_slot) in cases {
+            let expectations = expectations_at_end(source);
+            assert!(
+                expectations.slots.contains(&expected_slot),
+                "{source}: {:?}",
+                expectations.slots
+            );
+        }
+    }
+
     #[test]
     fn collects_statement_starters() {
-        let candidates = collect_expectations("", TextSize::ZERO).unwrap();
-        let actual = candidates
+        let expectations = expectations_at_end("");
+        let actual = expectations
             .tokens
             .into_iter()
             .collect::<std::collections::HashSet<_>>();
@@ -856,49 +891,44 @@ mod tests {
                 assert_token_provenance(source, &expectations);
             }
 
-            let complete = collect_expectations(
-                source,
-                TextSize::try_from(source.len()).expect("sample length fits TextSize"),
-            )
-            .unwrap();
+            let complete_expectations = expectations_at_end(source);
             assert!(
-                !complete.tokens.contains(&TokenKind::Char(';')),
-                "complete family sample published the statement terminator: {source:?}: {complete:?}"
+                !complete_expectations.tokens.contains(&TokenKind::Char(';')),
+                "complete family sample published the statement terminator: {source:?}: {complete_expectations:?}"
             );
             assert!(
-                complete
+                complete_expectations
                     .slots
                     .iter()
                     .all(|slot| *slot == GrammarSlot::Alias),
-                "complete family sample published a stale catalog slot: {source:?}: {complete:?}"
+                "complete family sample published a stale catalog slot: {source:?}: {complete_expectations:?}"
             );
         }
     }
 
     #[test]
     fn collects_select_and_from_slots() {
-        let candidates = collect_expectations("SELECT ", TextSize::new(7)).unwrap();
-        assert!(candidates.slots.contains(&GrammarSlot::Column));
-        assert!(candidates.slots.contains(&GrammarSlot::Function));
-        assert!(candidates.tokens.contains(&TokenKind::From));
+        let expectations = expectations_at_end("SELECT ");
+        assert!(expectations.slots.contains(&GrammarSlot::Column));
+        assert!(expectations.slots.contains(&GrammarSlot::Function));
+        assert!(expectations.tokens.contains(&TokenKind::From));
 
-        let candidates = collect_expectations("SELECT * FROM ", TextSize::new(14)).unwrap();
-        assert!(candidates.slots.contains(&GrammarSlot::Relation));
-        assert!(candidates.slots.contains(&GrammarSlot::Function));
+        let expectations = expectations_at_end("SELECT * FROM ");
+        assert!(expectations.slots.contains(&GrammarSlot::Relation));
+        assert!(expectations.slots.contains(&GrammarSlot::Function));
     }
 
     #[test]
     fn collects_relation_slot_after_schema_qualifier() {
         let sql = "SELECT * FROM public.";
-        let candidates = collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
-        assert!(candidates.slots.contains(&GrammarSlot::Relation));
+        let expectations = expectations_at_end(sql);
+        assert!(expectations.slots.contains(&GrammarSlot::Relation));
     }
 
     #[test]
     fn publishes_membership_before_the_completion_point() {
         let sql = "ALTER TABLE app.accounts DROP COLUMN ";
-        let expectations =
-            collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+        let expectations = expectations_at_end(sql);
         let membership = expectations.membership.expect("membership");
         assert_eq!(membership.member_slots, [GrammarSlot::Column]);
         assert_eq!(membership.owner.object_types, [ObjectType::Table]);
@@ -929,8 +959,7 @@ mod tests {
                 "CREATE STATISTICS s ON (lower(".len(),
             ),
         ] {
-            let expectations =
-                collect_expectations(sql, TextSize::try_from(point).unwrap()).unwrap();
+            let expectations = expectations_at(sql, point);
             let membership = expectations
                 .membership
                 .unwrap_or_else(|| panic!("missing membership for {sql:?}"));
@@ -951,8 +980,7 @@ mod tests {
     #[test]
     fn membership_owner_does_not_leak_across_statements() {
         let sql = "CREATE INDEX i ON app.accounts (id); SELECT ";
-        let expectations =
-            collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+        let expectations = expectations_at_end(sql);
 
         assert!(expectations.slots.contains(&GrammarSlot::Column));
         assert_eq!(expectations.membership, None);
@@ -960,17 +988,22 @@ mod tests {
 
     #[test]
     fn collects_alias_slots_without_leaking_past_explicit_as() {
-        let implicit = "SELECT * FROM public.orders o";
-        let point = TextSize::try_from(implicit.rfind('o').unwrap()).unwrap();
-        let implicit = collect_expectations(implicit, point).unwrap();
-        assert!(implicit.slots.contains(&GrammarSlot::Alias));
+        let implicit_source = "SELECT * FROM public.orders o";
+        let implicit_point = implicit_source.rfind('o').unwrap();
+        let implicit_expectations = expectations_at(implicit_source, implicit_point);
+        assert!(implicit_expectations.slots.contains(&GrammarSlot::Alias));
 
-        let explicit = "SELECT * FROM public.orders AS ";
-        let explicit =
-            collect_expectations(explicit, TextSize::try_from(explicit.len()).unwrap()).unwrap();
-        assert_eq!(explicit.slots, [GrammarSlot::Alias]);
-        assert!(explicit.tokens.is_empty(), "{explicit:?}");
-        assert!(explicit.phrases.is_empty(), "{explicit:?}");
+        let explicit_source = "SELECT * FROM public.orders AS ";
+        let explicit_expectations = expectations_at_end(explicit_source);
+        assert_eq!(explicit_expectations.slots, [GrammarSlot::Alias]);
+        assert!(
+            explicit_expectations.tokens.is_empty(),
+            "{explicit_expectations:?}"
+        );
+        assert!(
+            explicit_expectations.phrases.is_empty(),
+            "{explicit_expectations:?}"
+        );
     }
 
     #[test]
@@ -979,34 +1012,36 @@ mod tests {
             "SELECT * FROM public.orders o ",
             "SELECT * FROM public.orders AS o ",
         ] {
-            let candidates =
-                collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
-            assert!(candidates.tokens.contains(&TokenKind::Join), "{sql}");
+            let expectations = expectations_at_end(sql);
+            assert!(expectations.tokens.contains(&TokenKind::Join), "{sql}");
         }
     }
 
     #[test]
     fn separates_expression_continuations_from_enclosing_follows() {
         let sql = "SELECT * FROM public.users JOIN public.orders ON users.id ";
-        let candidates = collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+        let expectations = expectations_at_end(sql);
 
         for continuation in [TokenKind::Char('='), TokenKind::Between, TokenKind::And] {
-            assert!(candidates.tokens.contains(&continuation), "{candidates:?}");
             assert!(
-                candidates
-                    .expression_continuation_tokens
-                    .contains(&continuation),
-                "{continuation:?}: {candidates:?}"
+                expectations.tokens.contains(&continuation),
+                "{expectations:?}"
             );
             assert!(
-                !candidates.follow_tokens.contains(&continuation),
-                "{continuation:?}: {candidates:?}"
+                expectations
+                    .expression_continuation_tokens
+                    .contains(&continuation),
+                "{continuation:?}: {expectations:?}"
+            );
+            assert!(
+                !expectations.follow_tokens.contains(&continuation),
+                "{continuation:?}: {expectations:?}"
             );
         }
         for follow in [TokenKind::Join, TokenKind::Where, TokenKind::GroupP] {
             assert!(
-                candidates.follow_tokens.contains(&follow),
-                "{follow:?}: {candidates:?}"
+                expectations.follow_tokens.contains(&follow),
+                "{follow:?}: {expectations:?}"
             );
         }
     }
@@ -1051,18 +1086,17 @@ mod tests {
             ("SELECT rank() ", &[&[TokenKind::Within, TokenKind::GroupP]]),
         ];
         for (sql, phrases) in cases {
-            let candidates =
-                collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+            let expectations = expectations_at_end(sql);
             for phrase in *phrases {
                 assert!(
-                    candidates.phrases.contains(phrase),
+                    expectations.phrases.contains(phrase),
                     "{sql}: {:?}",
-                    candidates.phrases
+                    expectations.phrases
                 );
                 assert!(
-                    candidates.tokens.contains(&phrase[0]),
+                    expectations.tokens.contains(&phrase[0]),
                     "{sql}: phrase head missing from tokens: {:?}",
-                    candidates.tokens
+                    expectations.tokens
                 );
             }
         }
@@ -1070,80 +1104,83 @@ mod tests {
 
     #[test]
     fn complete_expression_fragments_publish_outer_follow_tokens() {
-        let select = collect_expectations("SELECT 1", TextSize::new(8)).unwrap();
-        assert!(select.tokens.contains(&TokenKind::Char(',')));
-        assert!(select.tokens.contains(&TokenKind::From));
-        assert!(select.tokens.contains(&TokenKind::And));
-        assert!(select.tokens.contains(&TokenKind::TypeCast));
-        assert!(select.follow_tokens.contains(&TokenKind::From));
-        assert!(select.follow_tokens.contains(&TokenKind::Char(',')));
+        let select_expectations = expectations_at_end("SELECT 1");
+        assert!(select_expectations.tokens.contains(&TokenKind::Char(',')));
+        assert!(select_expectations.tokens.contains(&TokenKind::From));
+        assert!(select_expectations.tokens.contains(&TokenKind::And));
+        assert!(select_expectations.tokens.contains(&TokenKind::TypeCast));
+        assert!(select_expectations.follow_tokens.contains(&TokenKind::From));
         assert!(
-            select
+            select_expectations
+                .follow_tokens
+                .contains(&TokenKind::Char(','))
+        );
+        assert!(
+            select_expectations
                 .expression_continuation_tokens
                 .contains(&TokenKind::And)
         );
         assert!(
-            select
+            select_expectations
                 .expression_continuation_tokens
                 .contains(&TokenKind::TypeCast)
         );
-        assert!(!select.slots.contains(&GrammarSlot::Operator));
+        assert!(!select_expectations.slots.contains(&GrammarSlot::Operator));
 
         let sql = "SELECT * FROM t WHERE true";
-        let where_clause =
-            collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
-        assert!(where_clause.tokens.contains(&TokenKind::GroupP));
-        assert!(where_clause.tokens.contains(&TokenKind::Order));
+        let where_clause_expectations = expectations_at_end(sql);
+        assert!(
+            where_clause_expectations
+                .tokens
+                .contains(&TokenKind::GroupP)
+        );
+        assert!(where_clause_expectations.tokens.contains(&TokenKind::Order));
     }
 
     #[test]
     fn completed_names_and_restricted_calls_do_not_publish_stale_slots() {
-        let drop_table = collect_expectations(
-            "DROP TABLE target ",
-            TextSize::try_from("DROP TABLE target ".len()).unwrap(),
-        )
-        .unwrap();
+        let drop_table = expectations_at_end("DROP TABLE target ");
         assert!(!drop_table.slots.contains(&GrammarSlot::Table));
         assert!(!drop_table.tokens.contains(&TokenKind::Char(';')));
 
-        let alter = "ALTER TABLE t ADD COLUMN c int ";
-        let alter = collect_expectations(alter, TextSize::try_from(alter.len()).unwrap()).unwrap();
-        assert!(!alter.slots.contains(&GrammarSlot::Type));
-        assert!(!alter.tokens.contains(&TokenKind::Char(';')));
+        let alter_expectations = expectations_at_end("ALTER TABLE t ADD COLUMN c int ");
+        assert!(!alter_expectations.slots.contains(&GrammarSlot::Type));
+        assert!(!alter_expectations.tokens.contains(&TokenKind::Char(';')));
 
-        let setting = "SET work_mem = '4MB' ";
-        let setting =
-            collect_expectations(setting, TextSize::try_from(setting.len()).unwrap()).unwrap();
-        assert!(!setting.slots.contains(&GrammarSlot::AnyName));
-        assert!(!setting.tokens.contains(&TokenKind::Default));
-        assert!(setting.tokens.contains(&TokenKind::Char(',')));
-        assert!(!setting.tokens.contains(&TokenKind::Char(';')));
+        let setting_expectations = expectations_at_end("SET work_mem = '4MB' ");
+        assert!(!setting_expectations.slots.contains(&GrammarSlot::AnyName));
+        assert!(!setting_expectations.tokens.contains(&TokenKind::Default));
+        assert!(setting_expectations.tokens.contains(&TokenKind::Char(',')));
+        assert!(!setting_expectations.tokens.contains(&TokenKind::Char(';')));
 
-        let call = "CALL f() ";
-        let call = collect_expectations(call, TextSize::try_from(call.len()).unwrap()).unwrap();
-        assert!(call.tokens.is_empty());
-        assert!(call.slots.is_empty());
+        let call_expectations = expectations_at_end("CALL f() ");
+        assert!(call_expectations.tokens.is_empty());
+        assert!(call_expectations.slots.is_empty());
 
-        let signature = "DROP FUNCTION f(int) ";
-        let signature =
-            collect_expectations(signature, TextSize::try_from(signature.len()).unwrap()).unwrap();
-        assert!(!signature.slots.contains(&GrammarSlot::Type));
-        assert!(!signature.slots.contains(&GrammarSlot::Function));
-        assert!(!signature.tokens.contains(&TokenKind::Char(';')));
+        let signature_expectations = expectations_at_end("DROP FUNCTION f(int) ");
+        assert!(!signature_expectations.slots.contains(&GrammarSlot::Type));
+        assert!(
+            !signature_expectations
+                .slots
+                .contains(&GrammarSlot::Function)
+        );
+        assert!(
+            !signature_expectations
+                .tokens
+                .contains(&TokenKind::Char(';'))
+        );
     }
 
     #[test]
     fn collects_slot_inside_an_expression_fragment() {
         let sql = "SELECT u.na FROM users AS u";
-        let point = TextSize::try_from(sql.find("na").unwrap()).unwrap();
-        let candidates = collect_expectations(sql, point).unwrap();
-        assert!(candidates.slots.contains(&GrammarSlot::Column));
+        let expectations = expectations_at(sql, sql.find("na").unwrap());
+        assert!(expectations.slots.contains(&GrammarSlot::Column));
 
         let sql = "CREATE INDEX i ON t ((lower(x)) COLLATE c)";
-        let point = TextSize::try_from(sql.find("x").unwrap()).unwrap();
-        let candidates = collect_expectations(sql, point).unwrap();
-        assert!(candidates.slots.contains(&GrammarSlot::Column));
-        assert!(candidates.slots.contains(&GrammarSlot::Function));
+        let expectations = expectations_at(sql, sql.find('x').unwrap());
+        assert!(expectations.slots.contains(&GrammarSlot::Column));
+        assert!(expectations.slots.contains(&GrammarSlot::Function));
     }
 
     #[test]
@@ -1171,34 +1208,30 @@ mod tests {
             "INSERT INTO t VALUES (1) ON CONFLICT ((lower(",
             "UPDATE t SET a[lower(",
         ] {
-            let candidates =
-                collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+            let expectations = expectations_at_end(sql);
             assert!(
-                candidates.slots.contains(&GrammarSlot::Column),
+                expectations.slots.contains(&GrammarSlot::Column),
                 "{sql}: {:?}",
-                candidates.slots
+                expectations.slots
             );
             assert!(
-                candidates.slots.contains(&GrammarSlot::Function),
+                expectations.slots.contains(&GrammarSlot::Function),
                 "{sql}: {:?}",
-                candidates.slots
+                expectations.slots
             );
         }
     }
 
     #[test]
     fn propagates_completion_into_copy_option_fragments() {
-        let option = "COPY source_table TO STDOUT WITH (";
-        let option =
-            collect_expectations(option, TextSize::try_from(option.len()).unwrap()).unwrap();
-        assert!(option.tokens.contains(&TokenKind::Format));
-        assert!(option.slots.contains(&GrammarSlot::AnyName));
+        let option_expectations = expectations_at_end("COPY source_table TO STDOUT WITH (");
+        assert!(option_expectations.tokens.contains(&TokenKind::Format));
+        assert!(option_expectations.slots.contains(&GrammarSlot::AnyName));
 
-        let columns = "COPY source_table TO STDOUT WITH (force_quote (";
-        let columns =
-            collect_expectations(columns, TextSize::try_from(columns.len()).unwrap()).unwrap();
-        assert!(columns.slots.contains(&GrammarSlot::Column));
-        assert!(!columns.slots.contains(&GrammarSlot::AnyName));
+        let column_expectations =
+            expectations_at_end("COPY source_table TO STDOUT WITH (force_quote (");
+        assert!(column_expectations.slots.contains(&GrammarSlot::Column));
+        assert!(!column_expectations.slots.contains(&GrammarSlot::AnyName));
     }
 
     #[test]
@@ -1206,7 +1239,7 @@ mod tests {
         let mut tokens = crate::lex("c text DEFAULT ").unwrap();
         let eof = tokens.pop().unwrap();
         tokens.push(Token::synthetic(TokenKind::Completion, eof.location()));
-        let collector = std::rc::Rc::new(std::cell::RefCell::new(CompletionCollector::default()));
+        let collector = Rc::new(RefCell::new(CompletionCollector::default()));
         let _ = xmltable_column_from_tokens_with_completion(tokens, Some(collector.clone()));
         let slots = &collector.borrow().expectations.slots;
         assert!(slots.contains(&GrammarSlot::Column), "{slots:?}");
@@ -1215,52 +1248,43 @@ mod tests {
 
     #[test]
     fn collects_json_array_query_suffixes_after_the_nested_query() {
-        let format_sql = "SELECT JSON_ARRAY(SELECT 1 FORMAT ";
-        let format =
-            collect_expectations(format_sql, TextSize::try_from(format_sql.len()).unwrap())
-                .unwrap();
-        assert!(format.tokens.contains(&TokenKind::Json));
+        let format_expectations = expectations_at_end("SELECT JSON_ARRAY(SELECT 1 FORMAT ");
+        assert!(format_expectations.tokens.contains(&TokenKind::Json));
 
-        let returning_sql = "SELECT JSON_ARRAY(SELECT 1 RETURNING ";
-        let returning = collect_expectations(
-            returning_sql,
-            TextSize::try_from(returning_sql.len()).unwrap(),
-        )
-        .unwrap();
-        assert!(returning.slots.contains(&GrammarSlot::Type));
+        let returning_expectations = expectations_at_end("SELECT JSON_ARRAY(SELECT 1 RETURNING ");
+        assert!(returning_expectations.slots.contains(&GrammarSlot::Type));
     }
 
     #[test]
     fn recovers_an_unterminated_token_at_the_point() {
         let sql = "SELECT \"na";
-        let candidates = collect_expectations(sql, TextSize::new(7)).unwrap();
-        assert!(candidates.slots.contains(&GrammarSlot::Column));
+        let expectations = expectations_at(sql, 7);
+        assert!(expectations.slots.contains(&GrammarSlot::Column));
     }
 
     #[test]
     fn collects_dml_and_ddl_slots() {
-        let candidates = collect_expectations("UPDATE accounts SET ", TextSize::new(20)).unwrap();
-        assert!(candidates.slots.contains(&GrammarSlot::Column));
+        let expectations = expectations_at_end("UPDATE accounts SET ");
+        assert!(expectations.slots.contains(&GrammarSlot::Column));
 
         let sql = "CREATE TABLE t (c )";
-        let point = TextSize::try_from(sql.find(')').unwrap()).unwrap();
-        let candidates = collect_expectations(sql, point).unwrap();
-        assert!(candidates.slots.contains(&GrammarSlot::Type));
+        let expectations = expectations_at(sql, sql.find(')').unwrap());
+        assert!(expectations.slots.contains(&GrammarSlot::Type));
     }
 
     #[test]
     fn collects_create_alter_and_drop_families() {
-        let create = collect_expectations("CREATE ", TextSize::new(7)).unwrap();
-        assert!(create.tokens.contains(&TokenKind::Table));
-        assert!(create.tokens.contains(&TokenKind::Function));
+        let create_expectations = expectations_at_end("CREATE ");
+        assert!(create_expectations.tokens.contains(&TokenKind::Table));
+        assert!(create_expectations.tokens.contains(&TokenKind::Function));
 
-        let alter = collect_expectations("ALTER ", TextSize::new(6)).unwrap();
-        assert!(alter.tokens.contains(&TokenKind::Table));
-        assert!(alter.tokens.contains(&TokenKind::Role));
+        let alter_expectations = expectations_at_end("ALTER ");
+        assert!(alter_expectations.tokens.contains(&TokenKind::Table));
+        assert!(alter_expectations.tokens.contains(&TokenKind::Role));
 
-        let drop = collect_expectations("DROP ", TextSize::new(5)).unwrap();
-        assert!(drop.tokens.contains(&TokenKind::Table));
-        assert!(drop.tokens.contains(&TokenKind::Function));
+        let drop_expectations = expectations_at_end("DROP ");
+        assert!(drop_expectations.tokens.contains(&TokenKind::Table));
+        assert!(drop_expectations.tokens.contains(&TokenKind::Function));
     }
 
     #[test]
@@ -1272,29 +1296,20 @@ mod tests {
             ("COMMENT ON COLUMN t.", GrammarSlot::Column),
             ("GRANT SELECT ON TABLE t TO ", GrammarSlot::Role),
         ];
-        for (sql, slot) in cases {
-            let point = TextSize::try_from(sql.len()).unwrap();
-            let candidates = collect_expectations(sql, point).unwrap();
-            assert!(
-                candidates.slots.contains(&slot),
-                "{sql}: {:?}",
-                candidates.slots
-            );
-        }
+        assert_slots_at_end(&cases);
 
         for sql in ["DROP FUNCTION f(", "ALTER FUNCTION f(", "DROP OPERATOR +("] {
-            let candidates =
-                collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
+            let expectations = expectations_at_end(sql);
             assert!(
-                candidates.slots.contains(&GrammarSlot::Type),
+                expectations.slots.contains(&GrammarSlot::Type),
                 "{sql}: {:?}",
-                candidates.slots
+                expectations.slots
             );
             assert!(
-                !candidates.slots.contains(&GrammarSlot::Function)
-                    && !candidates.slots.contains(&GrammarSlot::Operator),
+                !expectations.slots.contains(&GrammarSlot::Function)
+                    && !expectations.slots.contains(&GrammarSlot::Operator),
                 "{sql}: {:?}",
-                candidates.slots
+                expectations.slots
             );
         }
     }
@@ -1327,21 +1342,9 @@ mod tests {
             ("DROP OPERATOR ", GrammarSlot::Operator),
             ("DROP ROLE ", GrammarSlot::Role),
         ];
-        for (sql, slot) in cases {
-            let candidates =
-                collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
-            assert!(
-                candidates.slots.contains(&slot),
-                "{sql}: {:?}",
-                candidates.slots
-            );
-        }
+        assert_slots_at_end(&cases);
 
-        let index_target = collect_expectations(
-            "CREATE INDEX i ON ",
-            TextSize::try_from("CREATE INDEX i ON ".len()).unwrap(),
-        )
-        .unwrap();
+        let index_target = expectations_at_end("CREATE INDEX i ON ");
         assert!(index_target.slots.contains(&GrammarSlot::MaterializedView));
     }
 
@@ -1376,15 +1379,7 @@ mod tests {
             ("DROP POLICY p ON ", GrammarSlot::Table),
             ("GRANT role_a TO ", GrammarSlot::Role),
         ];
-        for (sql, slot) in cases {
-            let candidates =
-                collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
-            assert!(
-                candidates.slots.contains(&slot),
-                "{sql}: {:?}",
-                candidates.slots
-            );
-        }
+        assert_slots_at_end(&cases);
     }
 
     #[test]
@@ -1517,15 +1512,7 @@ mod tests {
             ("CREATE SEQUENCE s AS ", GrammarSlot::Type),
             ("CREATE SEQUENCE s OWNED BY ", GrammarSlot::Column),
         ];
-        for (sql, slot) in cases {
-            let candidates =
-                collect_expectations(sql, TextSize::try_from(sql.len()).unwrap()).unwrap();
-            assert!(
-                candidates.slots.contains(&slot),
-                "{sql}: {:?}",
-                candidates.slots
-            );
-        }
+        assert_slots_at_end(&cases);
     }
 
     #[test]
@@ -1536,9 +1523,7 @@ mod tests {
                 Token::synthetic(TokenKind::Eof, 0),
             ],
             pos: 0,
-            completion: Some(std::rc::Rc::new(std::cell::RefCell::new(
-                CompletionCollector::default(),
-            ))),
+            completion: Some(Rc::new(RefCell::new(CompletionCollector::default()))),
         };
         assert!(matches!(
             parser.error_here("not a syntax error"),

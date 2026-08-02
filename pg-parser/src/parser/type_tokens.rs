@@ -41,15 +41,15 @@ fn record_type_name_completion_impl(
         || kinds.as_slice() == [TokenKind::Setof]
         || kinds.last() == Some(&TokenKind::Char('.'))
     {
-        collector.slot(completion::GrammarSlot::Type);
+        collector.record_slot(completion::GrammarSlot::Type);
         return;
     }
     if kinds.last() == Some(&TokenKind::Char('%')) {
-        collector.tokens(&[TokenKind::TypeP]);
+        collector.record_tokens(&[TokenKind::TypeP]);
         return;
     }
     if matches!(kinds.last(), Some(TokenKind::With | TokenKind::Without)) {
-        collector.tokens(&[TokenKind::Time]);
+        collector.record_tokens(&[TokenKind::Time]);
         return;
     }
     if kinds.len() >= 2
@@ -63,7 +63,7 @@ fn record_type_name_completion_impl(
                 .copied()
                 .eq([TokenKind::Without, TokenKind::Time])
     {
-        collector.tokens(&[TokenKind::Zone]);
+        collector.record_tokens(&[TokenKind::Zone]);
         return;
     }
 
@@ -104,7 +104,7 @@ fn record_type_name_completion_impl(
     let base = &kinds[base_start..base_end];
 
     match base {
-        [TokenKind::DoubleP] => collector.tokens(&[TokenKind::Precision]),
+        [TokenKind::DoubleP] => collector.record_tokens(&[TokenKind::Precision]),
         [TokenKind::Bit]
         | [TokenKind::Character]
         | [TokenKind::CharP]
@@ -112,20 +112,20 @@ fn record_type_name_completion_impl(
         | [TokenKind::National, TokenKind::Character]
         | [TokenKind::National, TokenKind::CharP] => {
             if simple {
-                collector.tokens(&[TokenKind::Varying]);
+                collector.record_tokens(&[TokenKind::Varying]);
             } else {
-                collector.tokens(&[TokenKind::Varying, TokenKind::Array]);
+                collector.record_tokens(&[TokenKind::Varying, TokenKind::Array]);
             }
         }
         [TokenKind::Timestamp] | [TokenKind::Time] => {
             if simple {
-                collector.tokens(&[TokenKind::With, TokenKind::Without]);
+                collector.record_tokens(&[TokenKind::With, TokenKind::Without]);
             } else {
-                collector.tokens(&[TokenKind::With, TokenKind::Without, TokenKind::Array]);
+                collector.record_tokens(&[TokenKind::With, TokenKind::Without, TokenKind::Array]);
             }
         }
         [TokenKind::Interval] => {
-            collector.tokens(&[
+            collector.record_tokens(&[
                 TokenKind::YearP,
                 TokenKind::MonthP,
                 TokenKind::DayP,
@@ -134,28 +134,28 @@ fn record_type_name_completion_impl(
                 TokenKind::SecondP,
             ]);
             if !simple {
-                collector.tokens(&[TokenKind::Array]);
+                collector.record_tokens(&[TokenKind::Array]);
             }
         }
         [TokenKind::Interval, TokenKind::YearP]
         | [TokenKind::Interval, TokenKind::DayP]
         | [TokenKind::Interval, TokenKind::HourP] => {
-            collector.tokens(&[TokenKind::To]);
+            collector.record_tokens(&[TokenKind::To]);
             if !simple {
-                collector.tokens(&[TokenKind::Array]);
+                collector.record_tokens(&[TokenKind::Array]);
             }
         }
         [TokenKind::Interval, TokenKind::YearP, TokenKind::To] => {
-            collector.tokens(&[TokenKind::MonthP]);
+            collector.record_tokens(&[TokenKind::MonthP]);
         }
         [TokenKind::Interval, TokenKind::DayP, TokenKind::To] => {
-            collector.tokens(&[TokenKind::HourP, TokenKind::MinuteP, TokenKind::SecondP])
+            collector.record_tokens(&[TokenKind::HourP, TokenKind::MinuteP, TokenKind::SecondP])
         }
         [TokenKind::Interval, TokenKind::HourP, TokenKind::To] => {
-            collector.tokens(&[TokenKind::MinuteP, TokenKind::SecondP]);
+            collector.record_tokens(&[TokenKind::MinuteP, TokenKind::SecondP]);
         }
-        [] => collector.slot(completion::GrammarSlot::Type),
-        _ if !simple => collector.tokens(&[TokenKind::Array]),
+        [] => collector.record_slot(completion::GrammarSlot::Type),
+        _ if !simple => collector.record_tokens(&[TokenKind::Array]),
         _ => {}
     }
 }

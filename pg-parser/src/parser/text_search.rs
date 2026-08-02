@@ -56,7 +56,7 @@ impl Parser {
         let name_stops = [TokenKind::Char('('), TokenKind::Char(';'), TokenKind::Eof];
         let slot = completion::object_type_slot(kind);
         self.record_completion_slot(slot);
-        self.record_completion_slot_before(slot, &name_stops);
+        self.record_completion_qualified_name_slot(slot, &name_stops);
         let defnames = self.parse_name_list_until_keywords(&name_stops);
         if defnames.is_empty() {
             return Err(self.error_here("TEXT SEARCH object requires a name"));
@@ -82,7 +82,7 @@ impl Parser {
     pub(super) fn parse_alter_ts_dictionary(&mut self) -> PResult<Node> {
         let name_stops = [TokenKind::Char('('), TokenKind::Char(';'), TokenKind::Eof];
         self.record_completion_slot(completion::GrammarSlot::TextSearchDictionary);
-        self.record_completion_slot_before(
+        self.record_completion_qualified_name_slot(
             completion::GrammarSlot::TextSearchDictionary,
             &name_stops,
         );
@@ -123,7 +123,7 @@ impl Parser {
             TokenKind::Eof,
         ];
         self.record_completion_slot(completion::GrammarSlot::TextSearchConfiguration);
-        self.record_completion_slot_before(
+        self.record_completion_qualified_name_slot(
             completion::GrammarSlot::TextSearchConfiguration,
             &name_stops,
         );

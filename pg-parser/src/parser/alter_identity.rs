@@ -229,7 +229,7 @@ impl Parser {
         };
         let object_slot = completion::object_type_slot(object_type);
         self.record_completion_slot(object_slot);
-        self.record_completion_slot_before(object_slot, action_stops);
+        self.record_completion_qualified_name_slot(object_slot, action_stops);
         let mut identity = AlterIdentity {
             object_type,
             missing_ok,

@@ -68,7 +68,7 @@ impl Parser {
         let owner_start = self.pos;
         let relation = Some(Box::new(self.parse_relation_expr_with_slot(slot)?));
         let owner_end = self.pos;
-        self.push_completion_membership_owner_range(
+        self.push_completion_membership_owner_from_tokens(
             &[
                 completion::GrammarSlot::Column,
                 completion::GrammarSlot::Constraint,

@@ -191,7 +191,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("CREATE TRIGGER requires a relation"))?,
         ));
         let owner_end = self.pos;
-        self.push_completion_membership_owner_range(
+        self.push_completion_membership_owner_from_tokens(
             &[completion::GrammarSlot::Column],
             &[
                 ObjectType::Table,

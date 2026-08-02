@@ -102,9 +102,9 @@ impl Parser {
             remove_type,
             ObjectType::Policy | ObjectType::Rule | ObjectType::Trigger
         ) {
-            self.record_completion_slot_before(object_slot, &[TokenKind::On]);
+            self.record_completion_qualified_name_slot(object_slot, &[TokenKind::On]);
         } else {
-            self.record_completion_slot_before(object_slot, &stops);
+            self.record_completion_qualified_name_slot(object_slot, &stops);
         }
         let objects = match remove_type {
             ObjectType::Policy | ObjectType::Rule | ObjectType::Trigger => {
@@ -219,7 +219,7 @@ impl Parser {
         let name_stops = [TokenKind::Using];
         let slot = completion::object_type_slot(remove_type);
         self.record_completion_slot(slot);
-        self.record_completion_slot_before(slot, &name_stops);
+        self.record_completion_qualified_name_slot(slot, &name_stops);
         let mut names = self.parse_name_list_until_keywords(&name_stops);
         if names.is_empty() {
             return Err(self.error_here("operator class or family requires a name"));

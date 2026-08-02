@@ -41,7 +41,7 @@ impl Parser {
         let name_slot = completion::object_type_slot(kind);
         self.record_completion_slot(name_slot);
         let (defnames, args, definition, oldstyle) = if kind == ObjectType::Aggregate {
-            self.record_completion_slot_before(name_slot, &[TokenKind::Char('(')]);
+            self.record_completion_qualified_name_slot(name_slot, &[TokenKind::Char('(')]);
             let defnames = self.parse_name_list();
             if defnames.is_empty() {
                 return Err(self.error_here("CREATE AGGREGATE requires a name"));
@@ -104,7 +104,7 @@ impl Parser {
                 )
             }
         } else if kind == ObjectType::Operator {
-            self.record_completion_slot_before(name_slot, &[TokenKind::Char('(')]);
+            self.record_completion_qualified_name_slot(name_slot, &[TokenKind::Char('(')]);
             let tokens = self.take_until_top_level(&[TokenKind::Char('(')]);
             if tokens.is_empty() {
                 return Err(self.error_here("CREATE OPERATOR requires an operator name"));
@@ -123,7 +123,7 @@ impl Parser {
                 TokenKind::Char(';'),
                 TokenKind::Eof,
             ];
-            self.record_completion_slot_before(name_slot, &name_stops);
+            self.record_completion_qualified_name_slot(name_slot, &name_stops);
             let defnames = self.parse_name_list_until_keywords(&name_stops);
             if defnames.is_empty() {
                 return Err(self.error_here("CREATE COLLATION requires a name"));

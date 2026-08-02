@@ -82,7 +82,7 @@ impl Parser {
             } else {
                 let location = self.location();
                 self.record_completion_slot(completion::GrammarSlot::Type);
-                self.record_completion_slot_before(
+                self.record_completion_qualified_name_slot(
                     completion::GrammarSlot::Type,
                     Self::create_function_option_starts(),
                 );
@@ -486,9 +486,9 @@ impl Parser {
             {
                 let mut collector = collector.borrow_mut();
                 if completion_index == 0 {
-                    collector.slot(completion::GrammarSlot::AnyName);
+                    collector.record_slot(completion::GrammarSlot::AnyName);
                 } else {
-                    collector.slot(completion::GrammarSlot::Type);
+                    collector.record_slot(completion::GrammarSlot::Type);
                 }
             }
             let name = tokens

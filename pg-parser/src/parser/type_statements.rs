@@ -266,7 +266,7 @@ impl Parser {
         if names.is_empty() {
             return Err(self.error_here("ALTER TYPE requires a composite type name"));
         }
-        self.push_completion_membership_owner_range(
+        self.push_completion_membership_owner_from_tokens(
             &[completion::GrammarSlot::Attribute],
             &[ObjectType::Type],
             owner_start,

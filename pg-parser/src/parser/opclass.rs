@@ -25,7 +25,10 @@ impl Parser {
             TokenKind::Eof,
         ];
         self.record_completion_slot(completion::GrammarSlot::OperatorClass);
-        self.record_completion_slot_before(completion::GrammarSlot::OperatorClass, &name_stops);
+        self.record_completion_qualified_name_slot(
+            completion::GrammarSlot::OperatorClass,
+            &name_stops,
+        );
         let opclassname = self.parse_name_list_until_keywords(&name_stops);
         if opclassname.is_empty() {
             return Err(self.error_here("CREATE OPERATOR CLASS requires a name"));
@@ -46,7 +49,7 @@ impl Parser {
         let opfamilyname = if self.consume(TokenKind::Family) {
             let family_stops = [TokenKind::As, TokenKind::Char(';'), TokenKind::Eof];
             self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
-            self.record_completion_slot_before(
+            self.record_completion_qualified_name_slot(
                 completion::GrammarSlot::OperatorFamily,
                 &family_stops,
             );
@@ -78,7 +81,10 @@ impl Parser {
         self.expect(TokenKind::Family)?;
         let name_stops = [TokenKind::Using, TokenKind::Char(';'), TokenKind::Eof];
         self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
-        self.record_completion_slot_before(completion::GrammarSlot::OperatorFamily, &name_stops);
+        self.record_completion_qualified_name_slot(
+            completion::GrammarSlot::OperatorFamily,
+            &name_stops,
+        );
         let opfamilyname = self.parse_name_list_until_keywords(&name_stops);
         if opfamilyname.is_empty() {
             return Err(self.error_here("CREATE OPERATOR FAMILY requires a name"));
@@ -128,7 +134,10 @@ impl Parser {
             TokenKind::Eof,
         ];
         self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
-        self.record_completion_slot_before(completion::GrammarSlot::OperatorFamily, &name_stops);
+        self.record_completion_qualified_name_slot(
+            completion::GrammarSlot::OperatorFamily,
+            &name_stops,
+        );
         let opfamilyname = self.parse_name_list_until_keywords(&name_stops);
         if opfamilyname.is_empty() {
             return Err(self.error_here("ALTER OPERATOR FAMILY requires a name"));
@@ -251,7 +260,7 @@ impl Parser {
                 ));
             } else {
                 if itemtype == 2 && self.consume(TokenKind::Char('(')) {
-                    self.record_completion_slot_within(
+                    self.record_completion_slot_within_fragment(
                         completion::GrammarSlot::Type,
                         &[TokenKind::Char(')')],
                     );
@@ -325,7 +334,7 @@ impl Parser {
                 _ => return Err(self.error_here("expected an operator family item number")),
             };
             self.expect(TokenKind::Char('('))?;
-            self.record_completion_slot_within(
+            self.record_completion_slot_within_fragment(
                 completion::GrammarSlot::Type,
                 &[TokenKind::Char(')')],
             );

@@ -17,7 +17,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("PREPARE requires a statement name"))?,
         );
         let argtypes = if self.consume(TokenKind::Char('(')) {
-            self.record_completion_slot_within(
+            self.record_completion_slot_within_fragment(
                 completion::GrammarSlot::Type,
                 &[TokenKind::Char(')')],
             );

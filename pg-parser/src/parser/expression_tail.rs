@@ -884,7 +884,7 @@ impl ExprParser {
         let recovered = self
             .completion
             .as_ref()
-            .is_some_and(|collector| collector.borrow_mut().recover_hole());
+            .is_some_and(|collector| collector.borrow_mut().try_recover_hole());
         if !recovered {
             return None;
         }
@@ -898,7 +898,7 @@ impl ExprParser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().tokens(kinds);
+            collector.borrow_mut().record_tokens(kinds);
         }
     }
 
@@ -907,7 +907,7 @@ impl ExprParser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().lookahead_tokens(kinds);
+            collector.borrow_mut().record_lookahead_tokens(kinds);
         }
     }
 
@@ -916,7 +916,7 @@ impl ExprParser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().expression_start_tokens(kinds);
+            collector.borrow_mut().record_expression_start_tokens(kinds);
         }
     }
 
@@ -925,7 +925,9 @@ impl ExprParser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().expression_continuation_tokens(kinds);
+            collector
+                .borrow_mut()
+                .record_expression_continuation_tokens(kinds);
         }
     }
 
@@ -939,7 +941,7 @@ impl ExprParser {
         if let Some(collector) = &self.completion {
             collector
                 .borrow_mut()
-                .expression_continuation_phrase(phrase);
+                .record_expression_continuation_phrase(phrase);
         }
     }
 
@@ -948,7 +950,7 @@ impl ExprParser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().slot(slot);
+            collector.borrow_mut().record_slot(slot);
         }
     }
 
@@ -957,7 +959,7 @@ impl ExprParser {
             return;
         }
         if let Some(collector) = &self.completion {
-            collector.borrow_mut().phrase(phrase);
+            collector.borrow_mut().record_phrase(phrase);
         }
     }
 
