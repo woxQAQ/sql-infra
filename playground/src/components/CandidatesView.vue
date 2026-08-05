@@ -78,9 +78,96 @@ function iconFor(kind: string): Component {
             <strong>{{ item.label }}</strong>
             <small>{{ item.detail }}</small>
           </span>
-          <code>{{ item.insertText }}</code>
         </button>
       </div>
     </section>
   </div>
 </template>
+
+<style scoped>
+.candidate-group {
+  border-bottom: 1px solid var(--border);
+}
+
+.data-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 10px 16px 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.01em;
+}
+
+.data-heading b {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 550;
+}
+
+.candidate-list {
+  padding: 0 9px 9px;
+}
+
+.candidate-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 11px;
+  padding: 9px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  text-align: left;
+  transition: background 120ms ease, border-color 120ms ease, transform 100ms ease;
+}
+
+.candidate-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  background: var(--surface-active);
+}
+
+.candidate-row:active {
+  transform: translateY(1px);
+}
+
+.candidate-icon {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--accent-strong);
+}
+
+.candidate-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.candidate-copy strong {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-copy small {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+</style>

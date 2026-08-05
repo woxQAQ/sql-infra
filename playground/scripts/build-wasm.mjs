@@ -23,26 +23,7 @@ function run(command, args, options = {}) {
   });
 }
 
-let build = run("cargo", cargoArgs, { stdio: "inherit" });
-if (build.status !== 0 && process.platform === "darwin") {
-  const nix = run("nix", ["--version"]);
-  if (nix.status === 0) {
-    console.log("WASM linker is unavailable; retrying with nixpkgs#lld.");
-    build = run(
-      "nix",
-      [
-        "--extra-experimental-features",
-        "nix-command flakes",
-        "shell",
-        "nixpkgs#lld",
-        "-c",
-        "cargo",
-        ...cargoArgs,
-      ],
-      { stdio: "inherit" },
-    );
-  }
-}
+const build = run("cargo", cargoArgs, { stdio: "inherit" });
 if (build.status !== 0) {
   process.exit(build.status ?? 1);
 }

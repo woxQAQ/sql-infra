@@ -9,3 +9,7 @@ We have implemented a hand-written recursive descent parser that turns a Postgre
 ## Hints
 
 ./CONTEXT.md is helpful for you before dig into the repo
+
+When making UI or using components, always check if components from
+`@antfu/design` can be reused, before making new components or creating
+inline DOM elements.

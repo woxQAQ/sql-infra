@@ -1,9 +1,8 @@
 import { onScopeDispose, ref, shallowRef } from "vue";
 
-import { DEFAULT_CATALOG, INITIAL_QUERY } from "../data";
+import { DEFAULT_CATALOG_DOCUMENT, INITIAL_QUERY } from "../data";
 import { monaco, type MonacoEditor, type MonacoModel } from "../monaco";
 import type {
-  CatalogDocument,
   CompletionItemDto,
   CompletionResponseDto,
 } from "../types";
@@ -21,15 +20,10 @@ export function usePlayground() {
   const client = new CompletionWorkerClient();
   const sqlEditor = shallowRef<MonacoEditor>();
   const sqlModel = shallowRef<MonacoModel>();
-  const catalogModel = shallowRef<MonacoModel>();
   const result = shallowRef<CompletionResponseDto>();
-  const timing = ref("Waiting for first result");
-  const sqlMeta = ref("Starting WASM worker");
-  const catalogValid = ref(true);
-  const catalogMessage = ref("Valid JSON");
   const status = ref<AnalysisStatus>({ state: "loading", label: "Starting" });
+  const catalog = DEFAULT_CATALOG_DOCUMENT;
 
-  let lastCatalog = JSON.parse(DEFAULT_CATALOG) as CatalogDocument;
   let generation = 0;
   let analysisTimer: number | undefined;
   let provider: monaco.IDisposable | undefined;
@@ -41,43 +35,11 @@ export function usePlayground() {
     maybeStart();
   }
 
-  function attachCatalog(_editor: MonacoEditor, model: MonacoModel): void {
-    catalogModel.value = model;
-    maybeStart();
-  }
-
   function maybeStart(): void {
-    if (started || !sqlEditor.value || !sqlModel.value || !catalogModel.value) return;
+    if (started || !sqlEditor.value || !sqlModel.value) return;
     started = true;
     registerCompletionProvider();
     loadInitialQuery();
-  }
-
-  function parseCatalog(reportError = true): CatalogDocument | undefined {
-    const model = catalogModel.value;
-    if (!model) return undefined;
-    try {
-      const parsed = JSON.parse(model.getValue()) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("Catalog root must be a JSON object");
-      }
-      lastCatalog = parsed as CatalogDocument;
-      catalogValid.value = true;
-      catalogMessage.value = "Valid JSON";
-      return lastCatalog;
-    } catch (error) {
-      if (reportError) {
-        const message = error instanceof Error ? error.message : String(error);
-        catalogValid.value = false;
-        catalogMessage.value = message;
-        status.value = {
-          state: "error",
-          label: "Catalog error",
-          detail: "Fix Catalog JSON to resume completion.",
-        };
-      }
-      return undefined;
-    }
   }
 
   function scheduleAnalysis(delay = 90): void {
@@ -93,8 +55,7 @@ export function usePlayground() {
   async function refreshAnalysis(requestedGeneration: number): Promise<void> {
     const editor = sqlEditor.value;
     const model = sqlModel.value;
-    const catalog = parseCatalog();
-    if (!editor || !model || !catalog) return;
+    if (!editor || !model) return;
     const position = editor.getPosition() ?? { lineNumber: 1, column: 1 };
     status.value = { state: "running", label: "Collecting" };
     try {
@@ -113,17 +74,11 @@ export function usePlayground() {
         label: "Adapter error",
         detail: message,
       };
-      catalogValid.value = false;
-      catalogMessage.value = message;
     }
   }
 
   function applyResult(completion: TimedCompletion): void {
     result.value = completion.completion;
-    const count = completion.completion.items.length;
-    const duration = formatDuration(completion.elapsedMs);
-    timing.value = `${duration} worker round-trip`;
-    sqlMeta.value = `${count} candidate${count === 1 ? "" : "s"}, ${duration}`;
     const diagnosticCount = completion.completion.context.diagnostics.length;
     status.value = diagnosticCount
       ? {
@@ -132,8 +87,6 @@ export function usePlayground() {
           detail: `${diagnosticCount} completion diagnostic${diagnosticCount === 1 ? "" : "s"}`,
         }
       : { state: "ready", label: "Ready" };
-    catalogValid.value = true;
-    catalogMessage.value = "Valid JSON";
   }
 
   function registerCompletionProvider(): void {
@@ -143,8 +96,6 @@ export function usePlayground() {
       triggerCharacters: [".", '"', " "],
       async provideCompletionItems(activeModel, position, _context, cancellationToken) {
         if (activeModel !== model) return { suggestions: [] };
-        const catalog = parseCatalog(false);
-        if (!catalog) return { suggestions: [] };
         try {
           const completion = await client.complete(
             activeModel.getValue(),
@@ -220,10 +171,6 @@ export function usePlayground() {
     scheduleAnalysis(70);
   }
 
-  function onCatalogChange(): void {
-    if (parseCatalog()) scheduleAnalysis(180);
-  }
-
   onScopeDispose(() => {
     if (analysisTimer !== undefined) window.clearTimeout(analysisTimer);
     provider?.dispose();
@@ -233,16 +180,10 @@ export function usePlayground() {
   return {
     result,
     status,
-    timing,
-    sqlMeta,
-    catalogValid,
-    catalogMessage,
     attachSql,
-    attachCatalog,
     applyCandidate,
     onSqlChange,
     onSqlCursor,
-    onCatalogChange,
   };
 }
 
@@ -297,10 +238,4 @@ function mapMonacoKind(item: CompletionItemDto): monaco.languages.CompletionItem
     default:
       return monaco.languages.CompletionItemKind.Value;
   }
-}
-
-function formatDuration(milliseconds: number): string {
-  return milliseconds < 1
-    ? `${Math.max(1, Math.round(milliseconds * 1000))} µs`
-    : `${milliseconds.toFixed(milliseconds < 10 ? 1 : 0)} ms`;
 }

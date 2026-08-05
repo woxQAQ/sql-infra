@@ -9,11 +9,10 @@ import {
 } from "../monaco";
 
 const props = defineProps<{
-  language: "sql" | "json";
+  language: "sql";
   uri: string;
   initialValue: string;
   theme: "light" | "dark";
-  compact?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -40,33 +39,30 @@ onMounted(() => {
     theme: props.theme === "dark" ? "pg-dark" : "pg-light",
     automaticLayout: true,
     fontFamily: '"SFMono-Regular", "Cascadia Code", Consolas, monospace',
-    fontSize: props.compact ? 11.5 : 13,
-    lineHeight: props.compact ? 19 : 22,
+    fontSize: 13,
+    lineHeight: 22,
     fontLigatures: true,
     minimap: { enabled: false },
     overviewRulerLanes: 0,
     hideCursorInOverviewRuler: true,
-    renderLineHighlight: props.compact ? "none" : "all",
+    renderLineHighlight: "all",
     scrollBeyondLastLine: false,
     smoothScrolling: true,
     padding: { top: 16, bottom: 16 },
     fixedOverflowWidgets: true,
     bracketPairColorization: { enabled: true },
-    lineNumbers: props.compact ? "off" : "on",
+    lineNumbers: "on",
     lineNumbersMinChars: 3,
-    folding: props.compact,
-    wordWrap: props.compact ? "off" : "on",
+    folding: true,
+    wordWrap: "on",
     suggest: {
       showWords: false,
       showSnippets: false,
       preview: true,
       localityBonus: true,
     },
-    quickSuggestions:
-      props.language === "sql"
-        ? { other: true, comments: false, strings: false }
-        : false,
-    suggestOnTriggerCharacters: props.language === "sql",
+    quickSuggestions: { other: true, comments: false, strings: false },
+    suggestOnTriggerCharacters: true,
   });
   disposables.push(
     model.onDidChangeContent(() => emit("change")),
@@ -90,3 +86,12 @@ onBeforeUnmount(() => {
 <template>
   <div ref="host" class="monaco-host" />
 </template>
+
+<style scoped>
+.monaco-host {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+</style>

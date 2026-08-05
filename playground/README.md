@@ -6,24 +6,23 @@ browser does not send SQL or catalog data to a server.
 
 ## Run
 
-Prerequisites: current Rust, the `wasm32-unknown-unknown` target, Node.js 20+,
-and pnpm.
+Enter the repository's devenv shell. It provides Rust (including the
+`wasm32-unknown-unknown` target), Node.js, and pnpm:
 
 ```bash
-rustup target add wasm32-unknown-unknown
-cd playground
+devenv shell
 pnpm install
-pnpm dev
+playground
 ```
+
+The `playground` command starts the Vite development server. From inside the
+devenv shell, it is equivalent to `pnpm --dir playground dev`.
 
 Open <http://127.0.0.1:5173>. A production build is created with:
 
 ```bash
-pnpm build
+build-playground
 ```
-
-On Nix-based macOS environments where Rust was installed without `rust-lld`,
-the build script automatically retries through `nixpkgs#lld`.
 
 ## What is real
 

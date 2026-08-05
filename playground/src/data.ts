@@ -1,49 +1,5 @@
 import type { CatalogDocument } from "./types";
 
-export const OBJECT_KINDS = [
-  "Table",
-  "View",
-  "MaterializedView",
-  "ForeignTable",
-  "Sequence",
-  "Index",
-  "Column",
-  "Attribute",
-  "Function",
-  "Procedure",
-  "Routine",
-  "Aggregate",
-  "Type",
-  "Domain",
-  "Schema",
-  "Constraint",
-  "Collation",
-  "Operator",
-  "OperatorClass",
-  "OperatorFamily",
-  "Role",
-  "Database",
-  "AccessMethod",
-  "Conversion",
-  "EventTrigger",
-  "Extension",
-  "ForeignDataWrapper",
-  "ForeignServer",
-  "Language",
-  "Policy",
-  "PropertyGraph",
-  "Publication",
-  "Rule",
-  "Statistics",
-  "Subscription",
-  "Tablespace",
-  "TextSearchConfiguration",
-  "TextSearchDictionary",
-  "TextSearchParser",
-  "TextSearchTemplate",
-  "Trigger",
-] as const;
-
 export const DEFAULT_CATALOG = JSON.stringify(
   {
     searchPath: ["public"],
@@ -103,5 +59,7 @@ export const DEFAULT_CATALOG = JSON.stringify(
   null,
   2,
 );
+
+export const DEFAULT_CATALOG_DOCUMENT = JSON.parse(DEFAULT_CATALOG) as CatalogDocument;
 
 export const INITIAL_QUERY = "SELECT u.|\nFROM public.users AS u;";
