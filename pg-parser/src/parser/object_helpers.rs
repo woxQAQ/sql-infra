@@ -1,7 +1,8 @@
-//! Shared object-identity, signature, definition-list, and option-list parsing.
+//! Shared object identities, object types, signatures, and DDL clauses.
 //!
 //! These helpers retain strict object-specific seams while centralizing balanced
-//! token fragments and recurring PostgreSQL `DefElem` container shapes.
+//! token fragments, recurring `DefElem` shapes, and common object clauses such as
+//! `IF EXISTS` and drop behavior.
 
 use super::*;
 
@@ -851,5 +852,187 @@ impl Parser {
             }
         }
         Ok((events, columns))
+    }
+    pub(super) fn consume_object_type(&mut self) -> Option<ObjectType> {
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Access,
+            TokenKind::Aggregate,
+            TokenKind::Cast,
+            TokenKind::Collation,
+            TokenKind::ConversionP,
+            TokenKind::Database,
+            TokenKind::DomainP,
+            TokenKind::Event,
+            TokenKind::Extension,
+            TokenKind::Foreign,
+            TokenKind::Function,
+            TokenKind::Index,
+            TokenKind::Language,
+            TokenKind::Materialized,
+            TokenKind::Operator,
+            TokenKind::Policy,
+            TokenKind::Procedure,
+            TokenKind::Procedural,
+            TokenKind::Property,
+            TokenKind::Publication,
+            TokenKind::Routine,
+            TokenKind::Rule,
+            TokenKind::Schema,
+            TokenKind::Sequence,
+            TokenKind::Server,
+            TokenKind::Statistics,
+            TokenKind::Subscription,
+            TokenKind::Table,
+            TokenKind::Tablespace,
+            TokenKind::TextP,
+            TokenKind::Transform,
+            TokenKind::Trigger,
+            TokenKind::TypeP,
+            TokenKind::View,
+        ]);
+        let object_type_start = self.pos;
+        let ty = match self.peek_kind() {
+            TokenKind::Event => {
+                self.advance();
+                if !self.consume(TokenKind::Trigger) {
+                    self.pos = object_type_start;
+                    return None;
+                }
+                return Some(ObjectType::EventTrigger);
+            }
+            TokenKind::Property => {
+                self.advance();
+                if !self.consume(TokenKind::Graph) {
+                    self.pos = object_type_start;
+                    return None;
+                }
+                return Some(ObjectType::Propgraph);
+            }
+            TokenKind::TextP => {
+                self.advance();
+                if !self.consume(TokenKind::Search) {
+                    self.pos = object_type_start;
+                    return None;
+                }
+                self.record_completion_lookahead_tokens(&[
+                    TokenKind::Parser,
+                    TokenKind::Dictionary,
+                    TokenKind::Template,
+                    TokenKind::Configuration,
+                ]);
+                let ty = match self.peek_kind() {
+                    TokenKind::Parser => ObjectType::Tsparser,
+                    TokenKind::Dictionary => ObjectType::Tsdictionary,
+                    TokenKind::Template => ObjectType::Tstemplate,
+                    TokenKind::Configuration => ObjectType::Tsconfiguration,
+                    _ => {
+                        self.pos = object_type_start;
+                        return None;
+                    }
+                };
+                self.advance();
+                return Some(ty);
+            }
+            TokenKind::Procedural => {
+                self.advance();
+                if !self.consume(TokenKind::Language) {
+                    self.pos = object_type_start;
+                    return None;
+                }
+                return Some(ObjectType::Language);
+            }
+            TokenKind::Access => {
+                self.advance();
+                if !self.consume(TokenKind::Method) {
+                    self.pos = object_type_start;
+                    return None;
+                }
+                ObjectType::AccessMethod
+            }
+            TokenKind::Aggregate => ObjectType::Aggregate,
+            TokenKind::Table => ObjectType::Table,
+            TokenKind::Sequence => ObjectType::Sequence,
+            TokenKind::View => ObjectType::View,
+            TokenKind::Index => ObjectType::Index,
+            TokenKind::Schema => ObjectType::Schema,
+            TokenKind::Database => ObjectType::Database,
+            TokenKind::TypeP => ObjectType::Type,
+            TokenKind::DomainP => ObjectType::Domain,
+            TokenKind::Extension => ObjectType::Extension,
+            TokenKind::Function => ObjectType::Function,
+            TokenKind::Procedure => ObjectType::Procedure,
+            TokenKind::Routine => ObjectType::Routine,
+            TokenKind::Operator => ObjectType::Operator,
+            TokenKind::Language => ObjectType::Language,
+            TokenKind::Collation => ObjectType::Collation,
+            TokenKind::ConversionP => ObjectType::Conversion,
+            TokenKind::Policy => ObjectType::Policy,
+            TokenKind::Publication => ObjectType::Publication,
+            TokenKind::Subscription => ObjectType::Subscription,
+            TokenKind::Server => ObjectType::ForeignServer,
+            TokenKind::Cast => ObjectType::Cast,
+            TokenKind::Transform => ObjectType::Transform,
+            TokenKind::Trigger => ObjectType::Trigger,
+            TokenKind::Rule => ObjectType::Rule,
+            TokenKind::Tablespace => ObjectType::Tablespace,
+            TokenKind::Statistics => ObjectType::StatisticExt,
+            TokenKind::Foreign => {
+                self.advance();
+                if self.consume(TokenKind::Table) {
+                    ObjectType::ForeignTable
+                } else if self.consume(TokenKind::DataP) {
+                    if !self.consume(TokenKind::Wrapper) {
+                        self.pos = object_type_start;
+                        return None;
+                    }
+                    ObjectType::Fdw
+                } else {
+                    self.pos = object_type_start;
+                    return None;
+                }
+            }
+            TokenKind::Materialized => {
+                self.advance();
+                if !self.consume(TokenKind::View) {
+                    self.pos = object_type_start;
+                    return None;
+                }
+                ObjectType::Matview
+            }
+            _ => return None,
+        };
+        if !matches!(
+            ty,
+            ObjectType::AccessMethod
+                | ObjectType::ForeignTable
+                | ObjectType::Fdw
+                | ObjectType::Matview
+                | ObjectType::EventTrigger
+                | ObjectType::Propgraph
+                | ObjectType::Tsparser
+                | ObjectType::Tsdictionary
+                | ObjectType::Tstemplate
+                | ObjectType::Tsconfiguration
+                | ObjectType::Language
+        ) {
+            self.advance();
+        }
+        Some(ty)
+    }
+    pub(super) fn consume_if_exists(&mut self) -> PResult<bool> {
+        self.consume_phrase(&[TokenKind::IfP, TokenKind::Exists])
+    }
+
+    pub(super) fn consume_if_not_exists(&mut self) -> PResult<bool> {
+        self.consume_phrase(&[TokenKind::IfP, TokenKind::Not, TokenKind::Exists])
+    }
+
+    pub(super) fn parse_drop_behavior(&mut self) -> DropBehavior {
+        if self.consume(TokenKind::Cascade) {
+            DropBehavior::Cascade
+        } else {
+            self.consume(TokenKind::Restrict);
+            DropBehavior::Restrict
+        }
     }
 }

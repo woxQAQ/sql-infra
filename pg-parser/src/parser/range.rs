@@ -450,4 +450,27 @@ impl Parser {
         }
         Ok(definitions)
     }
+    fn parse_function_expression(&mut self) -> PResult<Node> {
+        self.record_completion_slot(completion::GrammarSlot::Function);
+        let start = self.pos;
+        let remaining = &self.tokens[start..];
+        let open = find_top_level_token(remaining, TokenKind::Char('('))
+            .ok_or_else(|| self.error_here("function expression requires '('"))?;
+        let close = match find_matching_close(remaining, open) {
+            Some(close) => close,
+            None => remaining
+                .iter()
+                .position(|token| token.kind == TokenKind::Completion)
+                .ok_or_else(|| self.error_here("unterminated function expression"))?,
+        };
+        let expression = parse_expression_tokens_with_completion(
+            remaining[..=close].to_vec(),
+            self.completion.clone(),
+        )?;
+        if !is_function_expression_node(&expression) {
+            return Err(self.error_here("expected a function expression"));
+        }
+        self.pos = start + close + 1;
+        Ok(expression)
+    }
 }

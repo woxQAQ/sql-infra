@@ -563,7 +563,6 @@ pub(super) fn parse_qualified_type_names(tokens: &[Token]) -> PResult<NodeList> 
     }
     Ok(names)
 }
-
 pub(super) fn parse_any_name_tokens(tokens: &[Token]) -> PResult<NodeList> {
     let location = tokens.first().map_or(0, |token| token.location());
     let mut names = Vec::new();
@@ -607,12 +606,4 @@ pub(super) fn parse_any_name_tokens(tokens: &[Token]) -> PResult<NodeList> {
         ));
     }
     Ok(names)
-}
-
-pub(super) fn tokens_to_name_nodes(tokens: &[Token]) -> NodeList {
-    tokens
-        .iter()
-        .filter(|token| token.kind != TokenKind::Char('.'))
-        .filter_map(|token| token_name(token).map(make_string_node))
-        .collect()
 }

@@ -61,11 +61,7 @@ impl Add for TextSize {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self {
-        Self::new(
-            self.0
-                .checked_add(rhs.0)
-                .expect("text offset overflow"),
-        )
+        Self::new(self.0.checked_add(rhs.0).expect("text offset overflow"))
     }
 }
 
@@ -73,11 +69,7 @@ impl Sub for TextSize {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self {
-        Self::new(
-            self.0
-                .checked_sub(rhs.0)
-                .expect("text offset underflow"),
-        )
+        Self::new(self.0.checked_sub(rhs.0).expect("text offset underflow"))
     }
 }
 
@@ -367,10 +359,10 @@ mod tests {
     fn text_range_shifts_by_offset() {
         let range = TextRange::new(TextSize::new(3), TextSize::new(10));
         let base = TextSize::new(100);
-        assert_eq!(range + base, TextRange::new(TextSize::new(103), TextSize::new(110)));
         assert_eq!(
-            (range + base) - base,
-            range
+            range + base,
+            TextRange::new(TextSize::new(103), TextSize::new(110))
         );
+        assert_eq!((range + base) - base, range);
     }
 }

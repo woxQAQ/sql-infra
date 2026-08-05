@@ -139,11 +139,7 @@ const FROM_LIST_END: &[TokenKind] = &[
 ];
 
 /// Set-operation operators that separate SELECT branches at the same depth.
-const SET_OPERATION: &[TokenKind] = &[
-    TokenKind::Union,
-    TokenKind::Intersect,
-    TokenKind::Except,
-];
+const SET_OPERATION: &[TokenKind] = &[TokenKind::Union, TokenKind::Intersect, TokenKind::Except];
 
 /// Trailing query-level clauses that sit after a SELECT (or after a
 /// parenthesized SELECT) rather than inside its FROM list.
@@ -170,8 +166,7 @@ fn from_segment(tokens: &[Token], depths: &[usize], select: SelectLocation) -> O
     let branch_end = (select.index + 1..tokens.len())
         .find(|index| {
             depths[*index] < select.depth
-                || (depths[*index] == select.depth
-                    && SET_OPERATION.contains(&tokens[*index].kind))
+                || (depths[*index] == select.depth && SET_OPERATION.contains(&tokens[*index].kind))
         })
         .unwrap_or(tokens.len());
     let from_keyword = (select.index + 1..branch_end)
@@ -221,16 +216,16 @@ fn derived_table_container(
                 TokenKind::Char(',') | TokenKind::Join | TokenKind::On | TokenKind::Using
             )
     });
-    if delimiter.is_some_and(|index| {
-        matches!(input.tokens[index].kind, TokenKind::On | TokenKind::Using)
-    }) {
+    if delimiter
+        .is_some_and(|index| matches!(input.tokens[index].kind, TokenKind::On | TokenKind::Using))
+    {
         return None;
     }
 
     // Explicit LATERAL, or the same shapes `is_table_function_open` already
     // recognizes as implicitly lateral (name(...), ROWS FROM (...)).
-    let explicit_lateral = open > segment.from_keyword
-        && input.tokens[open - 1].kind == TokenKind::LateralP;
+    let explicit_lateral =
+        open > segment.from_keyword && input.tokens[open - 1].kind == TokenKind::LateralP;
     let lateral = explicit_lateral
         || is_table_function_open(input.tokens, input.depths, open, outer_select.depth);
     Some((open, lateral))
@@ -371,12 +366,17 @@ fn point_is_in_set_operation_suffix(
 
 /// `(SELECT …) ORDER BY …` keeps the inner SELECT's scope at the suffix.
 fn wrapped_query_select_before_suffix(input: &ScopeInput<'_>, point_depth: usize) -> Option<usize> {
-    let suffix = input.tokens.iter().enumerate().rev().find_map(|(index, token)| {
-        (token.range.start() <= input.point
-            && input.depths[index] == point_depth
-            && QUERY_SUFFIX.contains(&token.kind))
-        .then_some(index)
-    })?;
+    let suffix = input
+        .tokens
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, token)| {
+            (token.range.start() <= input.point
+                && input.depths[index] == point_depth
+                && QUERY_SUFFIX.contains(&token.kind))
+            .then_some(index)
+        })?;
     let close = suffix.checked_sub(1)?;
     if input.tokens[close].kind != TokenKind::Char(')') || input.depths[close] != point_depth {
         return None;
@@ -635,10 +635,7 @@ fn parse_from_item(
             Some(kind) if is_query_body_kind(kind) => RelationKind::Subquery,
             _ => RelationKind::JoinAlias,
         };
-        let is_query_body = matches!(
-            relation_kind,
-            RelationKind::Values | RelationKind::Subquery
-        );
+        let is_query_body = matches!(relation_kind, RelationKind::Values | RelationKind::Subquery);
         // Join trees are exposed only through their alias; flag them so callers
         // can fall back instead of inventing a relation name.
         let unsupported = (!is_query_body).then(|| UnsupportedRelation {
@@ -1443,8 +1440,8 @@ fn collect_dml_scope(
             // Inside a FROM-item body: only LATERAL / table-function bodies may
             // see preceding source relations. The target stays hidden.
             snapshot.dml_target = None;
-            let sees_preceding = relations[active].lateral
-                || relations[active].kind == RelationKind::TableFunction;
+            let sees_preceding =
+                relations[active].lateral || relations[active].kind == RelationKind::TableFunction;
             if sees_preceding {
                 let boundary = relations[active].syntax_range.start();
                 relations.retain(|relation| relation.syntax_range.end() <= boundary);
@@ -1774,8 +1771,7 @@ fn active_join_condition_start(
 ) -> Option<TextSize> {
     let search_end = search_range.end;
     search_range.rev().find_map(|index| {
-        if input.depths[index] != condition_depth
-            || input.tokens[index].range.start() > input.point
+        if input.depths[index] != condition_depth || input.tokens[index].range.start() > input.point
         {
             return None;
         }
@@ -1912,11 +1908,7 @@ mod tests {
 
     use super::*;
 
-    fn collect(
-        source: &str,
-        base: TextSize,
-        point: TextSize,
-    ) -> Result<ScopeSnapshot, LexError> {
+    fn collect(source: &str, base: TextSize, point: TextSize) -> Result<ScopeSnapshot, LexError> {
         let tokens = lex(source)?;
         Ok(collect_tokens(source, base, point, &tokens))
     }

@@ -5,15 +5,6 @@
 
 use super::*;
 
-fn operator_name_nodes(tokens: Vec<Token>) -> NodeList {
-    let names = tokens_to_name_nodes(&tokens);
-    if names.is_empty() {
-        vec![make_string_node(tokens_to_text(&tokens))]
-    } else {
-        names
-    }
-}
-
 impl Parser {
     // PostgreSQL 18 Synopsis subset — definition-based CREATE commands
     // Sources:
@@ -105,11 +96,9 @@ impl Parser {
             }
         } else if kind == ObjectType::Operator {
             self.record_completion_qualified_name_slot(name_slot, &[TokenKind::Char('(')]);
+            let operator_location = self.location();
             let tokens = self.take_until_top_level(&[TokenKind::Char('(')]);
-            if tokens.is_empty() {
-                return Err(self.error_here("CREATE OPERATOR requires an operator name"));
-            }
-            let defnames = operator_name_nodes(tokens);
+            let defnames = parse_operator_name_tokens(tokens, operator_location)?;
             (
                 defnames,
                 Vec::new(),

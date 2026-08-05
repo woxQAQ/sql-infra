@@ -1,5 +1,5 @@
 use pg_completion::{
-    collect, CompletionDiagnosticKind, GrammarSlot, IdentifierQuoting, ObjectKind,
+    CompletionDiagnosticKind, GrammarSlot, IdentifierQuoting, ObjectKind, collect,
 };
 use pg_parser::{TextRange, TextSize, TokenKind};
 
@@ -233,29 +233,39 @@ fn preserves_expression_follow_provenance_for_callers() {
     assert!(!context.expectations.slots.contains(&GrammarSlot::Operator));
     assert!(!context.intent.object_kinds.contains(&ObjectKind::Operator));
     assert!(context.expectations.tokens.contains(&TokenKind::Char('=')));
-    assert!(context
-        .expectations
-        .expression_continuation_tokens
-        .contains(&TokenKind::Char('=')));
-    assert!(!context
-        .expectations
-        .follow_tokens
-        .contains(&TokenKind::Char('=')));
-    assert!(context
-        .expectations
-        .follow_tokens
-        .contains(&TokenKind::Join));
-    assert!(context
-        .expectations
-        .follow_tokens
-        .contains(&TokenKind::GroupP));
+    assert!(
+        context
+            .expectations
+            .expression_continuation_tokens
+            .contains(&TokenKind::Char('='))
+    );
+    assert!(
+        !context
+            .expectations
+            .follow_tokens
+            .contains(&TokenKind::Char('='))
+    );
+    assert!(
+        context
+            .expectations
+            .follow_tokens
+            .contains(&TokenKind::Join)
+    );
+    assert!(
+        context
+            .expectations
+            .follow_tokens
+            .contains(&TokenKind::GroupP)
+    );
 
     let source = "SELECT * FROM public.users JOIN public.orders ON users.id A";
     let context = collect(source, TextSize::from_usize(source.len()));
-    assert!(context
-        .syntax_completions()
-        .iter()
-        .any(|completion| completion.label == "AND"));
+    assert!(
+        context
+            .syntax_completions()
+            .iter()
+            .any(|completion| completion.label == "AND")
+    );
 }
 
 #[test]
@@ -264,10 +274,12 @@ fn exact_function_decoration_keyword_wins_over_output_alias_ambiguity() {
     let context = collect(source, TextSize::from_usize(source.len()));
 
     assert!(context.expectations.tokens.contains(&TokenKind::Over));
-    assert!(context
-        .syntax_completions()
-        .iter()
-        .any(|completion| completion.label == "OVER"));
+    assert!(
+        context
+            .syntax_completions()
+            .iter()
+            .any(|completion| completion.label == "OVER")
+    );
 }
 
 #[test]
@@ -686,12 +698,14 @@ fn captures_dml_target_and_source_scope() {
             .collect::<Vec<_>>(),
         ["previous", "current"]
     );
-    assert!(context
-        .scope
-        .local
-        .relations
-        .iter()
-        .all(|relation| relation.qualified_only));
+    assert!(
+        context
+            .scope
+            .local
+            .relations
+            .iter()
+            .all(|relation| relation.qualified_only)
+    );
 
     let source = "DELETE FROM app.items RETURNING old.";
     let context = collect(source, TextSize::from_usize(source.len()));
@@ -878,10 +892,12 @@ fn cte_scope_tracks_recursion_nesting_and_shadowing() {
     let incomplete = "WITH RECURSIVE self_ref AS (SELECT self_ref.";
     let context = collect(incomplete, TextSize::from_usize(incomplete.len()));
     assert_eq!(context.scope.ctes[0].name.normalized, "self_ref");
-    assert!(context
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete));
+    assert!(
+        context
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
+    );
 
     let nested_dml = "WITH changed AS (UPDATE hidden AS active SET id = active. RETURNING *) UPDATE visible SET id = 2";
     let point = nested_dml.find("active.").unwrap() + "active.".len();
@@ -897,10 +913,12 @@ fn incomplete_derived_tables_keep_lateral_visibility_rules() {
     let context = collect(non_lateral, TextSize::from_usize(non_lateral.len()));
     assert!(context.scope.outer.is_empty());
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
-    assert!(context
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete));
+    assert!(
+        context
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
+    );
 
     let lateral = "SELECT * FROM accounts a, LATERAL (SELECT a.";
     let context = collect(lateral, TextSize::from_usize(lateral.len()));
@@ -1266,29 +1284,35 @@ fn recovers_an_unterminated_identifier_as_the_active_prefix() {
     assert_eq!(context.prefix.quoting, IdentifierQuoting::Quoted);
     assert_eq!(context.intent.qualifier[0].normalized, "schema");
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
-    assert!(context
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered));
+    assert!(
+        context
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered)
+    );
 }
 
 #[test]
 fn distinguishes_an_active_unterminated_token_from_an_earlier_lex_error() {
     let active = "SELECT 'unfinished";
     let context = collect(active, TextSize::from_usize(active.len()));
-    assert!(context
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered));
+    assert!(
+        context
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered)
+    );
 
     let before = "SELECT 1e+ FROM users";
     let context = collect(before, TextSize::from_usize(before.len()));
     assert!(context.expectations.tokens.is_empty());
     assert!(context.expectations.slots.is_empty());
-    assert!(context
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::LexErrorBeforePoint));
+    assert!(
+        context
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::LexErrorBeforePoint)
+    );
 }
 
 #[test]
@@ -1299,8 +1323,10 @@ fn scope_recovery_does_not_discard_parser_expectations() {
     assert!(context.expectations.slots.contains(&GrammarSlot::Column));
     assert!(context.expectations.tokens.contains(&TokenKind::From));
     assert!(context.scope.local.relations.is_empty());
-    assert!(context
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete));
+    assert!(
+        context
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete)
+    );
 }

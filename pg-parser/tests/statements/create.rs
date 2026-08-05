@@ -2435,7 +2435,7 @@ fn define_stmt_populates_aggregate_operator_type_collation_and_text_search() {
 #[test]
 fn create_operator_definition_preserves_explicit_qualified_operator_values() {
     let Node::DefineStmt(operator) = parse_statement(
-        "create operator === (
+        "create operator app.=== (
             leftarg = integer,
             rightarg = integer,
             function = app.equal_integer,
@@ -2444,6 +2444,12 @@ fn create_operator_definition_preserves_explicit_qualified_operator_values() {
     ) else {
         panic!("expected operator DefineStmt");
     };
+    assert!(matches!(
+        operator.defnames.as_slice(),
+        [Node::String(schema), Node::String(operator)]
+            if schema.sval.as_deref() == Some("app")
+                && operator.sval.as_deref() == Some("===")
+    ));
     let commutator = operator
         .definition
         .iter()

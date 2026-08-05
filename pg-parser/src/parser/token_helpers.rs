@@ -1,6 +1,6 @@
-//! Token-to-AST projections and balanced token-list utilities.
+//! Token interpretation, statement lookahead, and balanced token-list utilities.
 //!
-//! This module centralizes token value interpretation, operator names, definition
+//! This module centralizes token-to-value projections, operator names, definition
 //! elements, top-level splitting/search, and source-like token rendering.
 
 use super::*;
@@ -333,13 +333,98 @@ pub(super) fn find_matching_close(tokens: &[Token], open: usize) -> Option<usize
     None
 }
 
-pub(super) fn tokens_to_text(tokens: &[Token]) -> std::string::String {
-    tokens.iter().map(token_text).collect::<Vec<_>>().join(" ")
-}
 pub(super) fn extend_stops(stops: &[TokenKind], extra: TokenKind) -> Vec<TokenKind> {
     let mut extended_stops = stops.to_vec();
     if !extended_stops.contains(&extra) {
         extended_stops.push(extra);
     }
     extended_stops
+}
+
+impl Parser {
+    pub(super) fn top_level_contains(&self, needle: TokenKind) -> bool {
+        self.top_level_kinds()
+            .into_iter()
+            .any(|kind| kind == needle)
+    }
+
+    pub(super) fn top_level_kinds(&self) -> Vec<TokenKind> {
+        let mut kinds = Vec::new();
+        let mut depth = 0usize;
+        let mut i = self.pos;
+        while let Some(token) = self.tokens.get(i) {
+            let kind = token.kind;
+            if kind == TokenKind::Eof || (depth == 0 && kind == TokenKind::Char(';')) {
+                break;
+            }
+            if depth == 0 {
+                kinds.push(kind);
+            }
+            match kind {
+                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            i += 1;
+        }
+        kinds
+    }
+
+    pub(super) fn consume_string_like(&mut self) -> Option<std::string::String> {
+        match self.peek().value.clone() {
+            Some(TokenValue::String(value)) => {
+                self.advance();
+                Some(value)
+            }
+            Some(TokenValue::Keyword(value)) => {
+                self.advance();
+                Some(value.to_owned())
+            }
+            Some(TokenValue::Integer(value)) => {
+                self.advance();
+                Some(value.to_string())
+            }
+            None => None,
+        }
+    }
+
+    pub(super) fn consume_opt_boolean_or_string(&mut self) -> Option<std::string::String> {
+        self.record_completion_tokens(&[
+            TokenKind::SConst,
+            TokenKind::TrueP,
+            TokenKind::FalseP,
+            TokenKind::On,
+        ]);
+        let token = self.peek().clone();
+        let accepted = matches!(
+            token.kind,
+            TokenKind::SConst | TokenKind::TrueP | TokenKind::FalseP | TokenKind::On
+        ) || token_name_in_categories(
+            &token,
+            &[
+                KeywordCategory::Unreserved,
+                KeywordCategory::ColName,
+                KeywordCategory::TypeFuncName,
+            ],
+        )
+        .is_some();
+        if !accepted {
+            return None;
+        }
+        let value = token_name(&token)?;
+        self.advance();
+        Some(value)
+    }
+
+    pub(super) fn consume_required_string(
+        &mut self,
+        message: &str,
+    ) -> PResult<std::string::String> {
+        self.record_completion_tokens(&[TokenKind::SConst]);
+        if !self.at(TokenKind::SConst) {
+            return Err(self.error_here(message));
+        }
+        self.consume_string_like()
+            .ok_or_else(|| self.error_here(message))
+    }
 }

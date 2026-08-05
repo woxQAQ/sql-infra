@@ -190,4 +190,86 @@ impl Parser {
         };
         Ok(node)
     }
+
+    fn looks_like_alter_enum(&self) -> bool {
+        if self.peek_kind() != TokenKind::TypeP {
+            return false;
+        }
+        let kinds = self.top_level_kinds();
+        let Some(action) = kinds.iter().position(|kind| {
+            matches!(
+                kind,
+                TokenKind::AddP
+                    | TokenKind::Rename
+                    | TokenKind::Drop
+                    | TokenKind::Alter
+                    | TokenKind::Set
+            )
+        }) else {
+            return false;
+        };
+        matches!(
+            kinds.get(action),
+            Some(TokenKind::AddP | TokenKind::Rename | TokenKind::Drop)
+        ) && matches!(
+            kinds.get(action + 1),
+            Some(TokenKind::ValueP | TokenKind::Completion)
+        )
+    }
+
+    fn looks_like_rename_stmt(&self) -> bool {
+        if self.peek_kind() == TokenKind::TypeP
+            && self.top_level_adjacent(TokenKind::Rename, TokenKind::ValueP)
+        {
+            return false;
+        }
+        self.top_level_contains(TokenKind::Rename)
+    }
+
+    fn looks_like_alter_object_depends_stmt(&self) -> bool {
+        self.top_level_contains(TokenKind::Depends)
+    }
+
+    fn looks_like_alter_object_schema_stmt(&self) -> bool {
+        self.top_level_adjacent(TokenKind::Set, TokenKind::Schema)
+    }
+
+    fn looks_like_alter_owner_stmt(&self) -> bool {
+        if !self.top_level_adjacent(TokenKind::Owner, TokenKind::To)
+            && !self.top_level_precedes_completion(TokenKind::Owner)
+        {
+            return false;
+        }
+        !matches!(
+            (self.peek_kind(), self.peek_kind_n(1)),
+            (TokenKind::Table, _)
+                | (TokenKind::View, _)
+                | (TokenKind::Materialized, TokenKind::View)
+                | (TokenKind::Foreign, TokenKind::Table)
+        )
+    }
+
+    fn looks_like_alter_composite_type(&self) -> bool {
+        self.peek_kind() == TokenKind::TypeP
+            && ((self.top_level_contains(TokenKind::Attribute)
+                && (self.top_level_contains(TokenKind::AddP)
+                    || self.top_level_contains(TokenKind::Drop)
+                    || self.top_level_contains(TokenKind::Alter)))
+                || self.top_level_precedes_completion(TokenKind::Alter))
+    }
+
+    fn top_level_adjacent(&self, first: TokenKind, second: TokenKind) -> bool {
+        self.top_level_kinds()
+            .into_iter()
+            .filter(|kind| *kind != TokenKind::Completion)
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|pair| pair == [first, second])
+    }
+
+    fn top_level_precedes_completion(&self, kind: TokenKind) -> bool {
+        self.top_level_kinds()
+            .windows(2)
+            .any(|pair| pair == [kind, TokenKind::Completion])
+    }
 }
