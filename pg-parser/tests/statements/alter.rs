@@ -1,8 +1,15 @@
-use pg_parser::{
-    AlterDomainType, AlterPropGraphElementKind, AlterSubscriptionType, AlterTableType,
-    AlterTsConfigType, ConstrType, DefElem, DefElemAction, DropBehavior, Node, ObjectType,
-    VariableSetKind,
-};
+use pg_parser::AlterDomainType;
+use pg_parser::AlterPropGraphElementKind;
+use pg_parser::AlterSubscriptionType;
+use pg_parser::AlterTableType;
+use pg_parser::AlterTsConfigType;
+use pg_parser::ConstrType;
+use pg_parser::DefElem;
+use pg_parser::DefElemAction;
+use pg_parser::DropBehavior;
+use pg_parser::Node;
+use pg_parser::ObjectType;
+use pg_parser::VariableSetKind;
 
 use super::common::parse_statement;
 

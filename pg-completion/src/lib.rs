@@ -11,10 +11,15 @@ mod prefix;
 mod scope;
 mod statement;
 
-use pg_parser::{KEYWORDS, TextRange, TextSize, TokenKind, collect_expectations};
-
 pub use pg_parser::GrammarSlot;
-pub use prefix::{CompletionPrefix, IdentifierQuoting, NamePart};
+use pg_parser::KEYWORDS;
+use pg_parser::TextRange;
+use pg_parser::TextSize;
+use pg_parser::TokenKind;
+use pg_parser::collect_expectations;
+pub use prefix::CompletionPrefix;
+pub use prefix::IdentifierQuoting;
+pub use prefix::NamePart;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CompletionContext {

@@ -46,8 +46,8 @@ impl Parser {
     //     [ CACHE cache ]
     //     [ OWNED BY { table_name.column_name | NONE } ]
     // ALTER SEQUENCE [ IF EXISTS ] name SET { LOGGED | UNLOGGED }
-    // ALTER SEQUENCE [ IF EXISTS ] name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER SEQUENCE [ IF EXISTS ] name RENAME TO new_name
+    // ALTER SEQUENCE [ IF EXISTS ] name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER |
+    // SESSION_USER } ALTER SEQUENCE [ IF EXISTS ] name RENAME TO new_name
     // ALTER SEQUENCE [ IF EXISTS ] name SET SCHEMA new_schema
     pub(super) fn parse_alter_sequence(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Sequence)?;

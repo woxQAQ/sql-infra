@@ -22,8 +22,9 @@ impl Parser {
     // and when_clause is:
     //
     //     { WHEN MATCHED [ AND condition ] THEN { merge_update | merge_delete | DO NOTHING } |
-    //       WHEN NOT MATCHED BY SOURCE [ AND condition ] THEN { merge_update | merge_delete | DO NOTHING } |
-    //       WHEN NOT MATCHED [ BY TARGET ] [ AND condition ] THEN { merge_insert | DO NOTHING } }
+    //       WHEN NOT MATCHED BY SOURCE [ AND condition ] THEN { merge_update | merge_delete | DO
+    // NOTHING } |       WHEN NOT MATCHED [ BY TARGET ] [ AND condition ] THEN { merge_insert |
+    // DO NOTHING } }
     //
     // and merge_insert is:
     //

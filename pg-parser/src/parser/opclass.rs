@@ -10,9 +10,9 @@ impl Parser {
     // Source: https://www.postgresql.org/docs/18/sql-createopclass.html
     // CREATE OPERATOR CLASS name [ DEFAULT ] FOR TYPE data_type
     //   USING index_method [ FAMILY family_name ] AS
-    //   {  OPERATOR strategy_number operator_name [ ( op_type, op_type ) ] [ FOR SEARCH | FOR ORDER BY sort_family_name ]
-    //    | FUNCTION support_number [ ( op_type [ , op_type ] ) ] function_name ( argument_type [, ...] )
-    //    | STORAGE storage_type
+    //   {  OPERATOR strategy_number operator_name [ ( op_type, op_type ) ] [ FOR SEARCH | FOR ORDER
+    // BY sort_family_name ]    | FUNCTION support_number [ ( op_type [ , op_type ] ) ]
+    // function_name ( argument_type [, ...] )    | STORAGE storage_type
     //   } [, ... ]
     pub(super) fn parse_create_op_class(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Class)?;

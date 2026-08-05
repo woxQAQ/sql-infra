@@ -7,12 +7,24 @@
 
 use std::collections::HashSet;
 
-use pg_completion::{
-    CompletionContext, CompletionPrefix, GrammarSlot, IdentifierQuoting, NamePart, ObjectKind,
-    ObjectReference, RelationKind, SyntaxCompletionKind, VisibleRelation, collect,
-};
-use pg_parser::{KEYWORDS, KeywordCategory, TextRange, TextSize, TokenKind};
-use serde::{Deserialize, Serialize};
+use pg_completion::CompletionContext;
+use pg_completion::CompletionPrefix;
+use pg_completion::GrammarSlot;
+use pg_completion::IdentifierQuoting;
+use pg_completion::NamePart;
+use pg_completion::ObjectKind;
+use pg_completion::ObjectReference;
+use pg_completion::RelationKind;
+use pg_completion::SyntaxCompletionKind;
+use pg_completion::VisibleRelation;
+use pg_completion::collect;
+use pg_parser::KEYWORDS;
+use pg_parser::KeywordCategory;
+use pg_parser::TextRange;
+use pg_parser::TextSize;
+use pg_parser::TokenKind;
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1315,7 +1327,8 @@ mod ffi {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::{Value, json};
+    use serde_json::Value;
+    use serde_json::json;
 
     use super::*;
 

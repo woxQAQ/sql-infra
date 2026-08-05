@@ -5,13 +5,22 @@
 
 use std::collections::HashSet;
 
-use pg_completion::{
-    CompletionContext, CompletionPrefix, GrammarSlot, NamePart, ObjectKind, ObjectReference,
-    RelationKind, SyntaxCompletionKind, VisibleRelation, collect,
-};
+use pg_completion::CompletionContext;
+use pg_completion::CompletionPrefix;
+use pg_completion::GrammarSlot;
+use pg_completion::NamePart;
+use pg_completion::ObjectKind;
+use pg_completion::ObjectReference;
+use pg_completion::RelationKind;
+use pg_completion::SyntaxCompletionKind;
+use pg_completion::VisibleRelation;
+use pg_completion::collect;
+use pg_parser::KEYWORDS;
+use pg_parser::KeywordCategory;
+use pg_parser::TextRange;
+use pg_parser::TextSize;
 #[cfg(test)]
 use pg_parser::TokenKind;
-use pg_parser::{KEYWORDS, KeywordCategory, TextRange, TextSize};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum CompletionItemKind {

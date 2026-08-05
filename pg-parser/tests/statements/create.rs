@@ -1,7 +1,13 @@
-use pg_parser::{
-    CmdType, ConstrType, FunctionParameterMode, Node, NodeTag, PartitionStrategy,
-    PropGraphProperties, TableLikeOption, VariableSetKind, ViewCheckOption,
-};
+use pg_parser::CmdType;
+use pg_parser::ConstrType;
+use pg_parser::FunctionParameterMode;
+use pg_parser::Node;
+use pg_parser::NodeTag;
+use pg_parser::PartitionStrategy;
+use pg_parser::PropGraphProperties;
+use pg_parser::TableLikeOption;
+use pg_parser::VariableSetKind;
+use pg_parser::ViewCheckOption;
 
 use super::common::parse_statement;
 

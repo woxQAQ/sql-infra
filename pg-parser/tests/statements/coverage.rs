@@ -2,7 +2,11 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use pg_parser::{KEYWORDS, KeywordCategory, TextSize, collect_expectations, lex};
+use pg_parser::KEYWORDS;
+use pg_parser::KeywordCategory;
+use pg_parser::TextSize;
+use pg_parser::collect_expectations;
+use pg_parser::lex;
 
 use super::smoke::CASES;
 

@@ -3,12 +3,17 @@
 //! This module maps syntactic object categories and membership owners into the
 //! object kinds a catalog adapter can resolve; it does not perform catalog I/O.
 
-use pg_parser::{GrammarMembership, TextSize, object_type_slot};
+use pg_parser::GrammarMembership;
+use pg_parser::TextSize;
+use pg_parser::object_type_slot;
 
-use crate::{
-    CatalogMembership, CompletionIntent, ExpectationSet, GrammarSlot, ObjectKind, ObjectReference,
-    prefix,
-};
+use crate::CatalogMembership;
+use crate::CompletionIntent;
+use crate::ExpectationSet;
+use crate::GrammarSlot;
+use crate::ObjectKind;
+use crate::ObjectReference;
+use crate::prefix;
 
 pub(super) fn from_expectations(
     expectations: &ExpectationSet,

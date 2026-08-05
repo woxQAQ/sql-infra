@@ -176,7 +176,8 @@ impl Parser {
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-drop-owned.html
-    // DROP OWNED BY { name | CURRENT_ROLE | CURRENT_USER | SESSION_USER } [, ...] [ CASCADE | RESTRICT ]
+    // DROP OWNED BY { name | CURRENT_ROLE | CURRENT_USER | SESSION_USER } [, ...] [ CASCADE |
+    // RESTRICT ]
     pub(super) fn parse_drop_owned(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Owned)?;
         self.expect(TokenKind::By)?;

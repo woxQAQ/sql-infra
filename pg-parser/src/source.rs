@@ -4,7 +4,8 @@
 //! locations. [`SourceText`] validates boundaries before exposing source slices.
 
 use std::fmt;
-use std::ops::{Add, Sub};
+use std::ops::Add;
+use std::ops::Sub;
 
 /// A UTF-8 byte offset into a SQL source string.
 ///

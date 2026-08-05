@@ -4,12 +4,20 @@
 //! lateral/table-function visibility, set operations, CTE ordering, and DML
 //! targets without requiring a complete AST or catalog access.
 
-use pg_parser::{TextRange, TextSize, Token, TokenKind, TokenValue};
+use pg_parser::TextRange;
+use pg_parser::TextSize;
+use pg_parser::Token;
+use pg_parser::TokenKind;
+use pg_parser::TokenValue;
 
-use crate::{
-    CteDefinition, NamePart, QueryScope, RelationKind, ScopeSnapshot, UnsupportedRelation,
-    VisibleRelation, prefix::name_part_from_token,
-};
+use crate::CteDefinition;
+use crate::NamePart;
+use crate::QueryScope;
+use crate::RelationKind;
+use crate::ScopeSnapshot;
+use crate::UnsupportedRelation;
+use crate::VisibleRelation;
+use crate::prefix::name_part_from_token;
 
 #[derive(Clone, Copy)]
 struct ScopeInput<'a> {
@@ -1356,8 +1364,8 @@ fn collect_dml_scope(
         snapshot.dml_target = Some(target);
     }
 
-    // 2. Statement-specific visibility. Each branch may clear or augment the
-    //    target and/or push source relations into the snapshot.
+    // 2. Statement-specific visibility. Each branch may clear or augment the target and/or push
+    //    source relations into the snapshot.
 
     // INSERT sources never see the target.
     if statement_kind == TokenKind::Insert
@@ -1904,7 +1912,8 @@ fn token_can_be_name(token: &Token) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use pg_parser::{LexError, lex};
+    use pg_parser::LexError;
+    use pg_parser::lex;
 
     use super::*;
 

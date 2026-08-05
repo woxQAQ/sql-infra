@@ -1,4 +1,7 @@
-use pg_parser::{DropBehavior, Node, ObjectType, RoleSpecType};
+use pg_parser::DropBehavior;
+use pg_parser::Node;
+use pg_parser::ObjectType;
+use pg_parser::RoleSpecType;
 
 use super::common::parse_statement;
 

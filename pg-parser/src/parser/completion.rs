@@ -4,7 +4,8 @@
 //! records tokens, phrases, catalog slots, membership, and provenance without
 //! changing strict parsing behavior.
 
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::*;
 

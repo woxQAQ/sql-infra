@@ -245,7 +245,8 @@ impl Parser {
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-dropusermapping.html
-    // DROP USER MAPPING [ IF EXISTS ] FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | PUBLIC } SERVER server_name
+    // DROP USER MAPPING [ IF EXISTS ] FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | PUBLIC
+    // } SERVER server_name
     fn parse_drop_user_mapping(&mut self) -> PResult<Node> {
         self.expect(TokenKind::User)?;
         self.expect(TokenKind::Mapping)?;

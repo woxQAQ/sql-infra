@@ -127,9 +127,10 @@ impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-altersubscription.html
     // ALTER SUBSCRIPTION name CONNECTION 'conninfo'
-    // ALTER SUBSCRIPTION name SET PUBLICATION publication_name [, ...] [ WITH ( publication_option [= value] [, ... ] ) ]
-    // ALTER SUBSCRIPTION name ADD PUBLICATION publication_name [, ...] [ WITH ( publication_option [= value] [, ... ] ) ]
-    // ALTER SUBSCRIPTION name DROP PUBLICATION publication_name [, ...] [ WITH ( publication_option [= value] [, ... ] ) ]
+    // ALTER SUBSCRIPTION name SET PUBLICATION publication_name [, ...] [ WITH ( publication_option
+    // [= value] [, ... ] ) ] ALTER SUBSCRIPTION name ADD PUBLICATION publication_name [, ...] [
+    // WITH ( publication_option [= value] [, ... ] ) ] ALTER SUBSCRIPTION name DROP PUBLICATION
+    // publication_name [, ...] [ WITH ( publication_option [= value] [, ... ] ) ]
     // ALTER SUBSCRIPTION name REFRESH PUBLICATION [ WITH ( refresh_option [= value] [, ... ] ) ]
     // ALTER SUBSCRIPTION name ENABLE
     // ALTER SUBSCRIPTION name DISABLE

@@ -1,6 +1,8 @@
-use pg_parser::{
-    Node, NodeTag, parse_plpgsql_assignment, parse_plpgsql_expression, parse_type_name,
-};
+use pg_parser::Node;
+use pg_parser::NodeTag;
+use pg_parser::parse_plpgsql_assignment;
+use pg_parser::parse_plpgsql_expression;
+use pg_parser::parse_type_name;
 
 #[test]
 fn plpgsql_assignment_mode_builds_complete_raw_statement() {

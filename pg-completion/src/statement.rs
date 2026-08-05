@@ -3,7 +3,8 @@
 //! The scanner recognizes strings, identifiers, dollar quotes, and nested
 //! comments so contained semicolons do not split the active statement.
 
-use pg_parser::{TextRange, TextSize};
+use pg_parser::TextRange;
+use pg_parser::TextSize;
 
 use crate::lexical;
 

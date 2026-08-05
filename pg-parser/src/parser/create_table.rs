@@ -8,39 +8,40 @@ use super::*;
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createtable.html
-    // CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] table_name ( [
-    //   { column_name data_type [ STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN | DEFAULT } ] [ COMPRESSION compression_method ] [ COLLATE collation ] [ column_constraint [ ... ] ]
-    //     | table_constraint
+    // CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ]
+    // table_name ( [   { column_name data_type [ STORAGE { PLAIN | EXTERNAL | EXTENDED | MAIN |
+    // DEFAULT } ] [ COMPRESSION compression_method ] [ COLLATE collation ] [ column_constraint [
+    // ... ] ]     | table_constraint
     //     | LIKE source_table [ like_option ... ] }
     //     [, ... ]
     // ] )
     // [ INHERITS ( parent_table [, ... ] ) ]
-    // [ PARTITION BY { RANGE | LIST | HASH } ( { column_name | ( expression ) } [ COLLATE collation ] [ opclass ] [, ... ] ) ]
-    // [ USING method ]
+    // [ PARTITION BY { RANGE | LIST | HASH } ( { column_name | ( expression ) } [ COLLATE collation
+    // ] [ opclass ] [, ... ] ) ] [ USING method ]
     // [ WITH ( storage_parameter [= value] [, ... ] ) | WITHOUT OIDS ]
     // [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
     // [ TABLESPACE tablespace_name ]
     //
-    // CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] table_name
-    //     OF type_name [ (
+    // CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ]
+    // table_name     OF type_name [ (
     //   { column_name [ WITH OPTIONS ] [ column_constraint [ ... ] ]
     //     | table_constraint }
     //     [, ... ]
     // ) ]
-    // [ PARTITION BY { RANGE | LIST | HASH } ( { column_name | ( expression ) } [ COLLATE collation ] [ opclass ] [, ... ] ) ]
-    // [ USING method ]
+    // [ PARTITION BY { RANGE | LIST | HASH } ( { column_name | ( expression ) } [ COLLATE collation
+    // ] [ opclass ] [, ... ] ) ] [ USING method ]
     // [ WITH ( storage_parameter [= value] [, ... ] ) | WITHOUT OIDS ]
     // [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
     // [ TABLESPACE tablespace_name ]
     //
-    // CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] table_name
-    //     PARTITION OF parent_table [ (
+    // CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ]
+    // table_name     PARTITION OF parent_table [ (
     //   { column_name [ WITH OPTIONS ] [ column_constraint [ ... ] ]
     //     | table_constraint }
     //     [, ... ]
     // ) ] { FOR VALUES partition_bound_spec | DEFAULT }
-    // [ PARTITION BY { RANGE | LIST | HASH } ( { column_name | ( expression ) } [ COLLATE collation ] [ opclass ] [, ... ] ) ]
-    // [ USING method ]
+    // [ PARTITION BY { RANGE | LIST | HASH } ( { column_name | ( expression ) } [ COLLATE collation
+    // ] [ opclass ] [, ... ] ) ] [ USING method ]
     // [ WITH ( storage_parameter [= value] [, ... ] ) | WITHOUT OIDS ]
     // [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]
     // [ TABLESPACE tablespace_name ]
@@ -58,23 +59,27 @@ impl Parser {
     //   PRIMARY KEY index_parameters |
     //   REFERENCES reftable [ ( refcolumn ) ] [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ]
     //     [ ON DELETE referential_action ] [ ON UPDATE referential_action ] }
-    // [ DEFERRABLE | NOT DEFERRABLE ] [ INITIALLY DEFERRED | INITIALLY IMMEDIATE ] [ ENFORCED | NOT ENFORCED ]
+    // [ DEFERRABLE | NOT DEFERRABLE ] [ INITIALLY DEFERRED | INITIALLY IMMEDIATE ] [ ENFORCED | NOT
+    // ENFORCED ]
     //
     // and table_constraint is:
     //
     // [ CONSTRAINT constraint_name ]
     // { CHECK ( expression ) [ NO INHERIT ] |
     //   NOT NULL column_name [ NO INHERIT ] |
-    //   UNIQUE [ NULLS [ NOT ] DISTINCT ] ( column_name [, ... ] [, column_name WITHOUT OVERLAPS ] ) index_parameters |
-    //   PRIMARY KEY ( column_name [, ... ] [, column_name WITHOUT OVERLAPS ] ) index_parameters |
-    //   EXCLUDE [ USING index_method ] ( exclude_element WITH operator [, ... ] ) index_parameters [ WHERE ( predicate ) ] |
-    //   FOREIGN KEY ( column_name [, ... ] [, PERIOD column_name ] ) REFERENCES reftable [ ( refcolumn [, ... ] [, PERIOD refcolumn ] ) ]
-    //     [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE referential_action ] [ ON UPDATE referential_action ] }
-    // [ DEFERRABLE | NOT DEFERRABLE ] [ INITIALLY DEFERRED | INITIALLY IMMEDIATE ] [ ENFORCED | NOT ENFORCED ]
+    //   UNIQUE [ NULLS [ NOT ] DISTINCT ] ( column_name [, ... ] [, column_name WITHOUT OVERLAPS ]
+    // ) index_parameters |   PRIMARY KEY ( column_name [, ... ] [, column_name WITHOUT OVERLAPS
+    // ] ) index_parameters |   EXCLUDE [ USING index_method ] ( exclude_element WITH operator
+    // [, ... ] ) index_parameters [ WHERE ( predicate ) ] |   FOREIGN KEY ( column_name [, ...
+    // ] [, PERIOD column_name ] ) REFERENCES reftable [ ( refcolumn [, ... ] [, PERIOD refcolumn ]
+    // ) ]     [ MATCH FULL | MATCH PARTIAL | MATCH SIMPLE ] [ ON DELETE referential_action ] [
+    // ON UPDATE referential_action ] } [ DEFERRABLE | NOT DEFERRABLE ] [ INITIALLY DEFERRED |
+    // INITIALLY IMMEDIATE ] [ ENFORCED | NOT ENFORCED ]
     //
     // and like_option is:
     //
-    // { INCLUDING | EXCLUDING } { COMMENTS | COMPRESSION | CONSTRAINTS | DEFAULTS | GENERATED | IDENTITY | INDEXES | STATISTICS | STORAGE | ALL }
+    // { INCLUDING | EXCLUDING } { COMMENTS | COMPRESSION | CONSTRAINTS | DEFAULTS | GENERATED |
+    // IDENTITY | INDEXES | STATISTICS | STORAGE | ALL }
     //
     // and partition_bound_spec is:
     //
@@ -91,17 +96,19 @@ impl Parser {
     //
     // exclude_element in an EXCLUDE constraint is:
     //
-    // { column_name | ( expression ) } [ COLLATE collation ] [ opclass [ ( opclass_parameter = value [, ... ] ) ] ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ]
+    // { column_name | ( expression ) } [ COLLATE collation ] [ opclass [ ( opclass_parameter =
+    // value [, ... ] ) ] ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ]
     //
     // referential_action in a FOREIGN KEY/REFERENCES constraint is:
     //
-    // { NO ACTION | RESTRICT | CASCADE | SET NULL [ ( column_name [, ... ] ) ] | SET DEFAULT [ ( column_name [, ... ] ) ] }
+    // { NO ACTION | RESTRICT | CASCADE | SET NULL [ ( column_name [, ... ] ) ] | SET DEFAULT [ (
+    // column_name [, ... ] ) ] }
     //
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createforeigntable.html
     // CREATE FOREIGN TABLE [ IF NOT EXISTS ] table_name ( [
-    //   { column_name data_type [ OPTIONS ( option 'value' [, ... ] ) ] [ COLLATE collation ] [ column_constraint [ ... ] ]
-    //     | table_constraint
+    //   { column_name data_type [ OPTIONS ( option 'value' [, ... ] ) ] [ COLLATE collation ] [
+    // column_constraint [ ... ] ]     | table_constraint
     //     | LIKE source_table [ like_option ... ] }
     //     [, ... ]
     // ] )
@@ -138,7 +145,8 @@ impl Parser {
     //
     // and like_option is:
     //
-    // { INCLUDING | EXCLUDING } { COMMENTS | CONSTRAINTS | DEFAULTS | GENERATED | STATISTICS | ALL }
+    // { INCLUDING | EXCLUDING } { COMMENTS | CONSTRAINTS | DEFAULTS | GENERATED | STATISTICS | ALL
+    // }
     //
     // and partition_bound_spec is:
     //
@@ -479,8 +487,8 @@ impl Parser {
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createtableas.html
-    // CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ] table_name
-    //     [ (column_name [, ...] ) ]
+    // CREATE [ [ GLOBAL | LOCAL ] { TEMPORARY | TEMP } | UNLOGGED ] TABLE [ IF NOT EXISTS ]
+    // table_name     [ (column_name [, ...] ) ]
     //     [ USING method ]
     //     [ WITH ( storage_parameter [= value] [, ... ] ) | WITHOUT OIDS ]
     //     [ ON COMMIT { PRESERVE ROWS | DELETE ROWS | DROP } ]

@@ -123,8 +123,8 @@ impl Parser {
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createtrigger.html
-    // CREATE [ OR REPLACE ] [ CONSTRAINT ] TRIGGER name { BEFORE | AFTER | INSTEAD OF } { event [ OR ... ] }
-    //     ON table_name
+    // CREATE [ OR REPLACE ] [ CONSTRAINT ] TRIGGER name { BEFORE | AFTER | INSTEAD OF } { event [
+    // OR ... ] }     ON table_name
     //     [ FROM referenced_table_name ]
     //     [ NOT DEFERRABLE | [ DEFERRABLE ] [ INITIALLY IMMEDIATE | INITIALLY DEFERRED ] ]
     //     [ REFERENCING { { OLD | NEW } TABLE [ AS ] transition_relation_name } [ ... ] ]
@@ -305,7 +305,8 @@ impl Parser {
                     }
                     TokenKind::Enforced => {
                         self.advance();
-                        // Accepted by ConstraintAttributeSpec; CreateTrigStmt has no raw field for it.
+                        // Accepted by ConstraintAttributeSpec; CreateTrigStmt has no raw field for
+                        // it.
                     }
                     _ => break,
                 }

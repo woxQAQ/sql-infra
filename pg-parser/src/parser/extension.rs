@@ -117,7 +117,8 @@ impl Parser {
     //
     // * |
     // [ argmode ] [ argname ] argtype [ , ... ] |
-    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ , ... ]
+    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ ,
+    // ... ]
     pub(super) fn parse_alter_extension(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Extension)?;
         self.record_completion_slot(completion::GrammarSlot::Extension);

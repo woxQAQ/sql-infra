@@ -8,8 +8,8 @@ use super::*;
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-alterusermapping.html
-    // ALTER USER MAPPING FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | SESSION_USER | PUBLIC }
-    //     SERVER server_name
+    // ALTER USER MAPPING FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | SESSION_USER |
+    // PUBLIC }     SERVER server_name
     //     OPTIONS ( [ ADD | SET | DROP ] option ['value'] [, ... ] )
     pub(super) fn parse_alter_user_mapping(&mut self) -> PResult<Node> {
         self.expect(TokenKind::User)?;
@@ -42,8 +42,8 @@ impl Parser {
     //     [ HANDLER handler_function | NO HANDLER ]
     //     [ VALIDATOR validator_function | NO VALIDATOR ]
     //     [ OPTIONS ( [ ADD | SET | DROP ] option ['value'] [, ... ]) ]
-    // ALTER FOREIGN DATA WRAPPER name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER FOREIGN DATA WRAPPER name RENAME TO new_name
+    // ALTER FOREIGN DATA WRAPPER name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER |
+    // SESSION_USER } ALTER FOREIGN DATA WRAPPER name RENAME TO new_name
     pub(super) fn parse_alter_fdw(&mut self) -> PResult<Node> {
         self.record_completion_slot(completion::GrammarSlot::ForeignDataWrapper);
         let fdwname = Some(
@@ -194,8 +194,8 @@ impl Parser {
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createserver.html
-    // CREATE SERVER [ IF NOT EXISTS ] server_name [ TYPE 'server_type' ] [ VERSION 'server_version' ]
-    //     FOREIGN DATA WRAPPER fdw_name
+    // CREATE SERVER [ IF NOT EXISTS ] server_name [ TYPE 'server_type' ] [ VERSION 'server_version'
+    // ]     FOREIGN DATA WRAPPER fdw_name
     //     [ OPTIONS ( option 'value' [, ... ] ) ]
     pub(super) fn parse_create_server(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Server)?;
@@ -244,8 +244,8 @@ impl Parser {
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createusermapping.html
-    // CREATE USER MAPPING [ IF NOT EXISTS ] FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | PUBLIC }
-    //     SERVER server_name
+    // CREATE USER MAPPING [ IF NOT EXISTS ] FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER |
+    // PUBLIC }     SERVER server_name
     //     [ OPTIONS ( option 'value' [ , ... ] ) ]
     pub(super) fn parse_create_user_mapping(&mut self) -> PResult<Node> {
         self.expect(TokenKind::User)?;

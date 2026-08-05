@@ -1,7 +1,15 @@
-use pg_parser::{
-    GrammarSlot, KEYWORDS, KeywordCategory, Node, NodeTag, ParseError, ParserExpectations,
-    TextSize, TokenKind, collect_expectations, lex, parse_one,
-};
+use pg_parser::GrammarSlot;
+use pg_parser::KEYWORDS;
+use pg_parser::KeywordCategory;
+use pg_parser::Node;
+use pg_parser::NodeTag;
+use pg_parser::ParseError;
+use pg_parser::ParserExpectations;
+use pg_parser::TextSize;
+use pg_parser::TokenKind;
+use pg_parser::collect_expectations;
+use pg_parser::lex;
+use pg_parser::parse_one;
 
 #[derive(Clone, Copy)]
 pub struct StatementCase {

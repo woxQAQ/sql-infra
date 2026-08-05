@@ -4,14 +4,27 @@
 //! types and helpers in this crate deserialize, validate, and optionally
 //! re-record those fixtures; they are test infrastructure, not library code.
 
-use std::{collections::HashSet, fs, path::Path};
+use std::collections::HashSet;
+use std::fs;
+use std::path::Path;
 
-use pg_completion::{
-    CatalogMembership, CompletionContext, CteDefinition, GrammarSlot, NamePart, ObjectKind,
-    RelationKind, ScopeSnapshot, VisibleRelation, collect,
-};
-use pg_parser::{KEYWORDS, TextSize, TokenKind, lex, parse_one};
-use serde::{Deserialize, Serialize};
+use pg_completion::CatalogMembership;
+use pg_completion::CompletionContext;
+use pg_completion::CteDefinition;
+use pg_completion::GrammarSlot;
+use pg_completion::NamePart;
+use pg_completion::ObjectKind;
+use pg_completion::RelationKind;
+use pg_completion::ScopeSnapshot;
+use pg_completion::VisibleRelation;
+use pg_completion::collect;
+use pg_parser::KEYWORDS;
+use pg_parser::TextSize;
+use pg_parser::TokenKind;
+use pg_parser::lex;
+use pg_parser::parse_one;
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

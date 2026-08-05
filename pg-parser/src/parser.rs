@@ -4,9 +4,16 @@
 //! submodules add concept-focused parsing methods, while public entry points
 //! preserve PostgreSQL raw-tree and source-location semantics.
 
+use crate::BareLabel;
+use crate::KeywordCategory;
+use crate::TextRange;
+use crate::TextSize;
+use crate::TokenKind;
 use crate::ast::*;
-use crate::lexer::{Token, TokenValue, lex, lookup_keyword};
-use crate::{BareLabel, KeywordCategory, TextRange, TextSize, TokenKind};
+use crate::lexer::Token;
+use crate::lexer::TokenValue;
+use crate::lexer::lex;
+use crate::lexer::lookup_keyword;
 
 mod access_method;
 mod aggregate_signatures;
@@ -16,10 +23,12 @@ mod alter_identity;
 mod alter_table;
 mod alter_table_partition;
 pub mod completion;
-pub use completion::{
-    GrammarMembership, GrammarObjectReference, GrammarSlot, ParserExpectations,
-    collect_expectations, object_type_slot,
-};
+pub use completion::GrammarMembership;
+pub use completion::GrammarObjectReference;
+pub use completion::GrammarSlot;
+pub use completion::ParserExpectations;
+pub use completion::collect_expectations;
+pub use completion::object_type_slot;
 mod constraints;
 mod create;
 mod create_cast_transform;
@@ -91,14 +100,15 @@ mod xmltable_columns;
 use aggregate_signatures::*;
 use expression::ExprParser;
 use expression_helpers::*;
-use expression_json::{
-    default_json_format, json_behavior_starts, parse_json_value_expr_tokens_with_completion,
-};
+use expression_json::default_json_format;
+use expression_json::json_behavior_starts;
+use expression_json::parse_json_value_expr_tokens_with_completion;
 use fragment_parser::*;
 use function_parameters::*;
 use index::*;
 use object_helpers::*;
-use settings::{parse_setting_value_tokens, parse_time_zone_value_tokens};
+use settings::parse_setting_value_tokens;
+use settings::parse_time_zone_value_tokens;
 use table_elements::*;
 use token_helpers::*;
 use type_tokens::*;
@@ -379,12 +389,10 @@ impl Parser {
 // extra lookahead or keep cursor save/restore operations together.
 //
 // Production code follows these cursor conventions:
-// - `consume` expresses optional syntax, repetition, delimiters, and compact
-//   binary choices;
+// - `consume` expresses optional syntax, repetition, delimiters, and compact binary choices;
 // - `match peek_kind()` dispatches required or multi-way grammar alternatives;
 // - `expect` consumes mandatory tokens after a production has been selected;
-// - fallible `consume_* -> Option<_>` helpers leave the cursor unchanged when
-//   returning `None`.
+// - fallible `consume_* -> Option<_>` helpers leave the cursor unchanged when returning `None`.
 
 impl Parser {
     /// Consume tokens from the current position until a **top-level** token in

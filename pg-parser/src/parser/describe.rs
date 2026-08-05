@@ -115,7 +115,8 @@ impl Parser {
     //
     // * |
     // [ argmode ] [ argname ] argtype [ , ... ] |
-    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ , ... ]
+    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ ,
+    // ... ]
     pub(super) fn parse_comment(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Comment)?;
         self.expect(TokenKind::On)?;
@@ -165,7 +166,8 @@ impl Parser {
     //
     // * |
     // [ argmode ] [ argname ] argtype [ , ... ] |
-    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ , ... ]
+    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ ,
+    // ... ]
     pub(super) fn parse_security_label(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Security)?;
         self.expect(TokenKind::Label)?;

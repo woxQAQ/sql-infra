@@ -1,6 +1,9 @@
-use pg_parser::{AlterPublicationAction, Node, PublicationObjSpecType};
+use pg_parser::AlterPublicationAction;
+use pg_parser::Node;
+use pg_parser::PublicationObjSpecType;
 
-use super::common::{parse_error, parse_statement};
+use super::common::parse_error;
+use super::common::parse_statement;
 
 #[test]
 fn create_publication_stmt_populates_tables_columns_filters_and_schemas() {

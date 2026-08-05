@@ -355,8 +355,8 @@ impl Parser {
     //     [ GRANTED BY role_specification ]
     //
     // GRANT { EXECUTE | ALL [ PRIVILEGES ] }
-    //     ON { { FUNCTION | PROCEDURE | ROUTINE } routine_name [ ( [ [ argmode ] [ arg_name ] arg_type [, ...] ] ) ] [, ...]
-    //          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
+    //     ON { { FUNCTION | PROCEDURE | ROUTINE } routine_name [ ( [ [ argmode ] [ arg_name ]
+    // arg_type [, ...] ] ) ] [, ...]          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
     //     TO role_specification [, ...] [ WITH GRANT OPTION ]
     //     [ GRANTED BY role_specification ]
     //
@@ -460,8 +460,8 @@ impl Parser {
     //
     // REVOKE [ GRANT OPTION FOR ]
     //     { EXECUTE | ALL [ PRIVILEGES ] }
-    //     ON { { FUNCTION | PROCEDURE | ROUTINE } function_name [ ( [ [ argmode ] [ arg_name ] arg_type [, ...] ] ) ] [, ...]
-    //          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
+    //     ON { { FUNCTION | PROCEDURE | ROUTINE } function_name [ ( [ [ argmode ] [ arg_name ]
+    // arg_type [, ...] ] ) ] [, ...]          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
     //     FROM role_specification [, ...]
     //     [ GRANTED BY role_specification ]
     //     [ CASCADE | RESTRICT ]

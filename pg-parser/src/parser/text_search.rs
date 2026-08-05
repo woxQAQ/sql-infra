@@ -77,8 +77,8 @@ impl Parser {
     //     option [ = value ] [, ... ]
     // )
     // ALTER TEXT SEARCH DICTIONARY name RENAME TO new_name
-    // ALTER TEXT SEARCH DICTIONARY name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER TEXT SEARCH DICTIONARY name SET SCHEMA new_schema
+    // ALTER TEXT SEARCH DICTIONARY name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER |
+    // SESSION_USER } ALTER TEXT SEARCH DICTIONARY name SET SCHEMA new_schema
     pub(super) fn parse_alter_ts_dictionary(&mut self) -> PResult<Node> {
         let name_stops = [TokenKind::Char('('), TokenKind::Char(';'), TokenKind::Eof];
         self.record_completion_slot(completion::GrammarSlot::TextSearchDictionary);
@@ -112,8 +112,8 @@ impl Parser {
     // ALTER TEXT SEARCH CONFIGURATION name
     //     DROP MAPPING [ IF EXISTS ] FOR token_type [, ... ]
     // ALTER TEXT SEARCH CONFIGURATION name RENAME TO new_name
-    // ALTER TEXT SEARCH CONFIGURATION name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
-    // ALTER TEXT SEARCH CONFIGURATION name SET SCHEMA new_schema
+    // ALTER TEXT SEARCH CONFIGURATION name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER |
+    // SESSION_USER } ALTER TEXT SEARCH CONFIGURATION name SET SCHEMA new_schema
     pub(super) fn parse_alter_ts_configuration(&mut self) -> PResult<Node> {
         let name_stops = [
             TokenKind::AddP,

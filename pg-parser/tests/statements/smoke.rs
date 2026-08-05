@@ -1,6 +1,7 @@
 use pg_parser::NodeTag;
 
-use super::common::{StatementCase, assert_statement_cases};
+use super::common::StatementCase;
+use super::common::assert_statement_cases;
 
 pub const CASES: &[StatementCase] = &[
     StatementCase {

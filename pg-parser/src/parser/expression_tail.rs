@@ -3,7 +3,8 @@
 //! Indirection, casts, quantified comparisons, `BETWEEN`, `IS`, list parsing,
 //! and expression-level completion recording extend already parsed prefixes.
 
-use super::expression::{ExprParser, PREDICATE_BINDING_POWER};
+use super::expression::ExprParser;
+use super::expression::PREDICATE_BINDING_POWER;
 use super::*;
 
 impl ExprParser {

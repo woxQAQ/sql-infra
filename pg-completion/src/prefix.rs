@@ -4,9 +4,14 @@
 //! qualifiers, and whether parser grammar suggestions are meaningful at the
 //! point. It tolerates incomplete quoted and Unicode identifiers.
 
-use pg_parser::{TextRange, TextSize, Token, TokenValue};
+use pg_parser::TextRange;
+use pg_parser::TextSize;
+use pg_parser::Token;
+use pg_parser::TokenValue;
 
-use crate::{CompletionDiagnostic, CompletionDiagnosticKind, lexical};
+use crate::CompletionDiagnostic;
+use crate::CompletionDiagnosticKind;
+use crate::lexical;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum IdentifierQuoting {

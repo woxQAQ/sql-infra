@@ -4,7 +4,12 @@
 //! replace an error at the editing point with an `Incomplete` token. The
 //! implementation follows PostgreSQL `scan.l`, `gram.y`, and `kwlist.h` rules.
 
-use crate::{BareLabel, KEYWORDS, KeywordCategory, TextRange, TextSize, TokenKind};
+use crate::BareLabel;
+use crate::KEYWORDS;
+use crate::KeywordCategory;
+use crate::TextRange;
+use crate::TextSize;
+use crate::TokenKind;
 
 /// PostgreSQL's fixed name width, including the terminating NUL byte.
 const NAMEDATALEN: usize = 64;

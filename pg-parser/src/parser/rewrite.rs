@@ -109,8 +109,8 @@ impl Parser {
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createview.html
-    // CREATE [ OR REPLACE ] [ TEMP | TEMPORARY ] [ RECURSIVE ] VIEW name [ ( column_name [, ...] ) ]
-    //     [ WITH ( view_option_name [= view_option_value] [, ... ] ) ]
+    // CREATE [ OR REPLACE ] [ TEMP | TEMPORARY ] [ RECURSIVE ] VIEW name [ ( column_name [, ...] )
+    // ]     [ WITH ( view_option_name [= view_option_value] [, ... ] ) ]
     //     AS query
     //     [ WITH [ CASCADED | LOCAL ] CHECK OPTION ]
     pub(super) fn parse_view(

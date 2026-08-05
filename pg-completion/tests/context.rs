@@ -1,7 +1,11 @@
-use pg_completion::{
-    CompletionDiagnosticKind, GrammarSlot, IdentifierQuoting, ObjectKind, collect,
-};
-use pg_parser::{TextRange, TextSize, TokenKind};
+use pg_completion::CompletionDiagnosticKind;
+use pg_completion::GrammarSlot;
+use pg_completion::IdentifierQuoting;
+use pg_completion::ObjectKind;
+use pg_completion::collect;
+use pg_parser::TextRange;
+use pg_parser::TextSize;
+use pg_parser::TokenKind;
 
 #[test]
 fn isolates_the_statement_and_extracts_the_prefix() {
