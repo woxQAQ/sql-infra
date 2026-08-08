@@ -3,7 +3,7 @@
 //! Literals, unary operators, names, parenthesized forms, and constructor starts
 //! enter the precedence parser through this module.
 
-use super::expression::ExprParser;
+use super::expression::{AND_BINDING_POWER, ExprParser, UMINUS_BINDING_POWER};
 use super::*;
 
 impl ExprParser {
@@ -140,7 +140,7 @@ impl ExprParser {
                     return self.fail("NOT is not allowed in a restricted expression");
                 }
                 let location = self.advance().location();
-                let arg = self.parse_expr_mode(60, restricted)?;
+                let arg = self.parse_expr_mode(AND_BINDING_POWER + 1, restricted)?;
                 Some(Node::BoolExpr(BoolExpr {
                     xpr: Expr::new(NodeTag::BoolExpr),
                     boolop: BoolExprType::NotExpr,
@@ -150,7 +150,7 @@ impl ExprParser {
             }
             TokenKind::Char('+') => {
                 let token = self.advance().clone();
-                let rhs = self.parse_expr_mode(70, restricted)?;
+                let rhs = self.parse_expr_mode(UMINUS_BINDING_POWER, restricted)?;
                 Some(make_aexpr(
                     AExprKind::Op,
                     vec![token_text(&token)],
@@ -161,7 +161,7 @@ impl ExprParser {
             }
             TokenKind::Char('-') => {
                 let location = self.advance().location();
-                let rhs = self.parse_expr_mode(70, restricted)?;
+                let rhs = self.parse_expr_mode(UMINUS_BINDING_POWER, restricted)?;
                 Some(negate_node(rhs, location))
             }
             TokenKind::Op => {

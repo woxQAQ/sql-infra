@@ -33,7 +33,7 @@ use pg_parser::ValUnion;
 use pg_parser::WithClause;
 use pg_parser::XmlExprOp;
 
-use super::common::parse_statement;
+use super::common::{parse_error, parse_statement};
 
 #[test]
 fn raw_select_statement_locations_follow_postgresql_semicolon_rules() {
@@ -2362,6 +2362,117 @@ fn select_qualified_prefix_and_quantified_operators_follow_postgresql_precedence
             if between.kind == pg_parser::AExprKind::NotBetweenSym
                 && matches!(between.name.as_slice(), [Node::String(name)] if name.sval.as_deref() == Some("NOT BETWEEN SYMMETRIC"))
     ));
+}
+
+#[test]
+fn select_boolean_null_and_collation_precedence_follow_postgresql() {
+    let Node::SelectStmt(stmt) = parse_statement(
+        "select not x = y,
+                not x is null,
+                not x like 'a%',
+                not x between 1 and 2,
+                not x not like 'a%',
+                1 + 1 isnull,
+                a = b isnull,
+                x like 'a%' isnull,
+                -x notnull,
+                -x collate \"C\",
+                x collate \"C\"::text,
+                1 = any (select 1) = 2",
+    ) else {
+        panic!("expected SelectStmt");
+    };
+    let values = stmt
+        .target_list
+        .iter()
+        .map(|target| match target {
+            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
+            other => panic!("expected ResTarget, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    for value in &values[..5] {
+        assert!(matches!(
+            value,
+            Node::BoolExpr(expression)
+                if expression.boolop == pg_parser::BoolExprType::NotExpr
+                    && expression.args.len() == 1
+        ));
+    }
+    assert!(matches!(
+        values[5],
+        Node::NullTest(test)
+            if matches!(test.arg.as_deref(), Some(Node::AExpr(expression))
+                if matches!(expression.name.as_slice(), [Node::String(name)]
+                    if name.sval.as_deref() == Some("+")
+                ))
+    ));
+    assert!(matches!(
+        values[6],
+        Node::NullTest(test)
+            if matches!(test.arg.as_deref(), Some(Node::AExpr(expression))
+                if expression.kind == pg_parser::AExprKind::Op
+                    && matches!(expression.name.as_slice(), [Node::String(name)]
+                        if name.sval.as_deref() == Some("=")
+                    ))
+    ));
+    assert!(matches!(
+        values[7],
+        Node::NullTest(test)
+            if matches!(test.arg.as_deref(), Some(Node::AExpr(expression))
+                if expression.kind == pg_parser::AExprKind::Like
+            )
+    ));
+    assert!(matches!(
+        values[8],
+        Node::NullTest(test)
+            if matches!(test.arg.as_deref(), Some(Node::AExpr(expression))
+                if matches!(expression.name.as_slice(), [Node::String(name)]
+                    if name.sval.as_deref() == Some("-")
+                ))
+    ));
+    assert!(matches!(
+        values[9],
+        Node::CollateClause(clause)
+            if matches!(clause.arg.as_deref(), Some(Node::AExpr(expression))
+                if matches!(expression.name.as_slice(), [Node::String(name)]
+                    if name.sval.as_deref() == Some("-")
+                ))
+    ));
+    assert!(matches!(
+        values[10],
+        Node::TypeCast(cast)
+            if matches!(cast.arg.as_deref(), Some(Node::CollateClause(_)))
+    ));
+    assert!(matches!(
+        values[11],
+        Node::AExpr(expression)
+            if expression.kind == pg_parser::AExprKind::Op
+                && matches!(expression.lexpr.as_deref(), Some(Node::SubLink(link))
+                    if link.sub_link_type == pg_parser::SubLinkType::AnySublink)
+    ));
+
+    for sql in [
+        "select a isnull notnull",
+        "select a is not null isnull",
+        "select a is null isnull",
+    ] {
+        assert!(
+            parse_error(sql)
+                .message
+                .contains("cannot chain IS predicates")
+        );
+    }
+    for sql in [
+        "select a = b = any (select 1)",
+        "select a = b < any (select 1)",
+        "select 1 = any (select 1) = 2 = 3",
+    ] {
+        assert!(
+            parse_error(sql)
+                .message
+                .contains("cannot chain comparison operators")
+        );
+    }
 }
 
 #[test]

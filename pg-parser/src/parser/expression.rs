@@ -14,8 +14,17 @@ const NEGATED_PREDICATE_TOKENS: &[TokenKind] = &[
     TokenKind::Between,
 ];
 
+// Binding powers for precedence-climbing expression parsing. The numeric
+// values are arbitrary scores; only their relative order matters. An infix
+// or postfix operator is folded into the left-hand side only while its
+// binding power is at least the current `min_bp`, and parsing its operand
+// at `binding_power + 1` yields left associativity. Prefix operators
+// (`NOT`, unary `+`/`-`) capture everything up to their binding power.
+// The ladder mirrors the `%left` / `%nonassoc` / `%right` declaration stack
+// in PostgreSQL's `gram.y`; gaps between adjacent levels leave room to
+// insert a new level later without renumbering.
 const OR_BINDING_POWER: u8 = 10;
-const AND_BINDING_POWER: u8 = 20;
+pub(super) const AND_BINDING_POWER: u8 = 20;
 const IS_BINDING_POWER: u8 = 25;
 const COMPARISON_BINDING_POWER: u8 = 30;
 pub(super) const PREDICATE_BINDING_POWER: u8 = 35;
@@ -24,7 +33,8 @@ const ADDITIVE_BINDING_POWER: u8 = 45;
 const MULTIPLICATIVE_BINDING_POWER: u8 = 50;
 const EXPONENTIATION_BINDING_POWER: u8 = 55;
 const AT_TIME_ZONE_BINDING_POWER: u8 = 60;
-const POSTFIX_NULL_TEST_BINDING_POWER: u8 = 70;
+const COLLATE_BINDING_POWER: u8 = 65;
+pub(super) const UMINUS_BINDING_POWER: u8 = 70;
 const TYPE_CAST_BINDING_POWER: u8 = 80;
 const INDIRECTION_BINDING_POWER: u8 = 90;
 
@@ -172,11 +182,22 @@ impl ExprParser {
                 if operator.binding_power < min_bp {
                     break;
                 }
+                // A quantified comparison has the precedence of `Op` in
+                // PostgreSQL and may be followed by another comparison
+                // operator (for example, `1 = ANY (SELECT 1) = 2`), but it
+                // may not follow one (`a = b = ANY (...)` is still invalid).
+                let quantified = !restricted
+                    && matches!(
+                        self.peek_kind_n(1),
+                        TokenKind::Any | TokenKind::Some | TokenKind::All
+                    );
                 if operator.is_comparison {
                     if chain.saw_comparison {
                         return self.fail("cannot chain comparison operators");
                     }
-                    chain.saw_comparison = true;
+                    if !quantified {
+                        chain.saw_comparison = true;
+                    }
                 }
                 let location = self.advance().location();
                 lhs = self.parse_binary_operator_rhs(
@@ -228,7 +249,7 @@ impl ExprParser {
                     })
                 }
                 TokenKind::Collate => {
-                    if restricted || TYPE_CAST_BINDING_POWER < min_bp {
+                    if restricted || COLLATE_BINDING_POWER < min_bp {
                         break;
                     }
                     let location = self.advance().location();
@@ -245,9 +266,13 @@ impl ExprParser {
                     })
                 }
                 kind @ (TokenKind::Isnull | TokenKind::Notnull) => {
-                    if restricted || POSTFIX_NULL_TEST_BINDING_POWER < min_bp {
+                    if restricted || IS_BINDING_POWER < min_bp {
                         break;
                     }
+                    if chain.saw_is_predicate {
+                        return self.fail("cannot chain IS predicates");
+                    }
+                    chain.saw_is_predicate = true;
                     let location = self.advance().location();
                     Node::NullTest(NullTest {
                         xpr: Expr::new(NodeTag::NullTest),
@@ -393,11 +418,11 @@ impl ExprParser {
         }
         if min_bp <= TYPE_CAST_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[TokenKind::TypeCast]);
-            if !restricted {
+            if !restricted && min_bp <= COLLATE_BINDING_POWER {
                 self.record_completion_expression_continuation_tokens(&[TokenKind::Collate]);
             }
         }
-        if !restricted && min_bp <= POSTFIX_NULL_TEST_BINDING_POWER {
+        if !restricted && min_bp <= IS_BINDING_POWER && !chain.saw_is_predicate {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Isnull,
                 TokenKind::Notnull,
