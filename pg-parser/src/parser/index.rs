@@ -49,11 +49,7 @@ impl Parser {
             owner_end,
         );
         let access_method = if self.consume(TokenKind::Using) {
-            self.record_completion_slot(completion::GrammarSlot::AccessMethod);
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("USING requires an access method"))?,
-            )
+            Some(self.parse_access_method_name()?)
         } else {
             Some("btree".to_owned())
         };

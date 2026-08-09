@@ -41,11 +41,7 @@ impl Parser {
             .map(Box::new)
             .ok_or_else(|| self.error_here("operator class requires a data type"))?;
         self.expect(TokenKind::Using)?;
-        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
-        let amname = Some(
-            self.consume_col_id()
-                .ok_or_else(|| self.error_here("USING requires an access method"))?,
-        );
+        let amname = Some(self.parse_access_method_name()?);
         let opfamilyname = if self.consume(TokenKind::Family) {
             let family_stops = [TokenKind::As, TokenKind::Char(';'), TokenKind::Eof];
             self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
@@ -89,11 +85,7 @@ impl Parser {
             return Err(self.error_here("CREATE OPERATOR FAMILY requires a name"));
         }
         self.expect(TokenKind::Using)?;
-        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
-        let amname = Some(
-            self.consume_col_id()
-                .ok_or_else(|| self.error_here("USING requires an access method"))?,
-        );
+        let amname = Some(self.parse_access_method_name()?);
         Ok(node!(CreateOpFamilyStmt {
             opfamilyname,
             amname,
@@ -141,11 +133,7 @@ impl Parser {
             return Err(self.error_here("ALTER OPERATOR FAMILY requires a name"));
         }
         self.expect(TokenKind::Using)?;
-        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
-        let amname = Some(
-            self.consume_col_id()
-                .ok_or_else(|| self.error_here("USING requires an access method"))?,
-        );
+        let amname = Some(self.parse_access_method_name()?);
         self.record_completion_tokens(&[
             TokenKind::AddP,
             TokenKind::Drop,

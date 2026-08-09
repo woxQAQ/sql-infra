@@ -305,10 +305,7 @@ impl Parser {
                 return Err(self.error_here("operator class or family requires a name"));
             }
             self.expect(TokenKind::Using)?;
-            self.record_completion_slot(completion::GrammarSlot::AccessMethod);
-            let amname = self
-                .consume_col_id()
-                .ok_or_else(|| self.error_here("USING requires an access method"))?;
+            let amname = self.parse_access_method_name()?;
             names.insert(0, make_string_node(amname));
             identity.object = Some(Box::new(name_list_node(names)));
             return Ok(identity);

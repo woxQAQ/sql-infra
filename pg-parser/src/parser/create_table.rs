@@ -334,11 +334,7 @@ impl Parser {
             Vec::new()
         };
         let access_method = if self.consume(TokenKind::Using) {
-            self.record_completion_slot(completion::GrammarSlot::AccessMethod);
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("USING requires an access method"))?,
-            )
+            Some(self.parse_access_method_name()?)
         } else {
             None
         };
@@ -436,8 +432,7 @@ impl Parser {
             self.expect(TokenKind::Char(')'))?;
         }
         if self.consume(TokenKind::Using) {
-            self.consume_col_id()
-                .ok_or_else(|| self.error_here("USING requires an access method"))?;
+            self.parse_access_method_name()?;
         }
         if self.consume(TokenKind::With) {
             self.parse_parenthesized_reloptions()?;
@@ -510,11 +505,7 @@ impl Parser {
             Vec::new()
         };
         let access_method = if self.consume(TokenKind::Using) {
-            self.record_completion_slot(completion::GrammarSlot::AccessMethod);
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("USING requires an access method"))?,
-            )
+            Some(self.parse_access_method_name()?)
         } else {
             None
         };

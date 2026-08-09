@@ -6,6 +6,12 @@
 use super::*;
 
 impl Parser {
+    pub(super) fn parse_access_method_name(&mut self) -> PResult<std::string::String> {
+        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
+        self.consume_col_id()
+            .ok_or_else(|| self.error_here("USING requires an access method"))
+    }
+
     pub(super) fn parse_optional_constraint_name(
         &mut self,
     ) -> PResult<Option<std::string::String>> {
