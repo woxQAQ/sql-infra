@@ -222,6 +222,24 @@ impl Parser {
         parse_expression_tokens_with_completion(tokens, self.completion.clone()).map(Box::new)
     }
 
+    pub(super) fn parse_optional_expr_clause(
+        &mut self,
+        start: TokenKind,
+        stops: &[TokenKind],
+    ) -> PResult<Option<Box<Node>>> {
+        if !self.consume(start) {
+            return Ok(None);
+        }
+        self.parse_expr_box_strict_until(stops).map(Some)
+    }
+
+    pub(super) fn parse_parenthesized_expr_box(&mut self) -> PResult<Box<Node>> {
+        self.expect(TokenKind::Char('('))?;
+        let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
+        self.expect(TokenKind::Char(')'))?;
+        Ok(expr)
+    }
+
     pub(super) fn parse_b_expr_box_strict_until(
         &mut self,
         stops: &[TokenKind],

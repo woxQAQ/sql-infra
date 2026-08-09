@@ -449,8 +449,9 @@ impl Parser {
                 TokenKind::Eof,
             ])?;
         }
-        if self.consume(TokenKind::Where) {
-            stmt.where_clause = Some(self.parse_expr_box_strict_until(&[
+        stmt.where_clause = self.parse_optional_expr_clause(
+            TokenKind::Where,
+            &[
                 TokenKind::GroupP,
                 TokenKind::Having,
                 TokenKind::Window,
@@ -464,8 +465,8 @@ impl Parser {
                 TokenKind::Except,
                 TokenKind::Char(';'),
                 TokenKind::Eof,
-            ])?);
-        }
+            ],
+        )?;
         if self.consume_phrase(&[TokenKind::GroupP, TokenKind::By])? {
             if self.consume(TokenKind::All) {
                 stmt.group_by_all = true;
@@ -492,8 +493,9 @@ impl Parser {
                 }
             }
         }
-        if self.consume(TokenKind::Having) {
-            stmt.having_clause = Some(self.parse_expr_box_strict_until(&[
+        stmt.having_clause = self.parse_optional_expr_clause(
+            TokenKind::Having,
+            &[
                 TokenKind::Window,
                 TokenKind::Order,
                 TokenKind::Limit,
@@ -505,8 +507,8 @@ impl Parser {
                 TokenKind::Except,
                 TokenKind::Char(';'),
                 TokenKind::Eof,
-            ])?);
-        }
+            ],
+        )?;
         if self.consume(TokenKind::Window) {
             stmt.window_clause = self.parse_window_clause_until(&[
                 TokenKind::Order,

@@ -78,19 +78,13 @@ impl Parser {
             })]
         };
         let qual = if self.consume(TokenKind::Using) {
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };
         let with_check = if self.consume(TokenKind::With) {
             self.expect(TokenKind::Check)?;
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };
@@ -144,19 +138,13 @@ impl Parser {
             Vec::new()
         };
         let qual = if self.consume(TokenKind::Using) {
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };
         let with_check = if self.consume(TokenKind::With) {
             self.expect(TokenKind::Check)?;
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };

@@ -44,15 +44,10 @@ impl Parser {
             self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CREATE RULE requires a target relation"))?,
         ));
-        let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[
-                TokenKind::Do,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?)
-        } else {
-            None
-        };
+        let where_clause = self.parse_optional_expr_clause(
+            TokenKind::Where,
+            &[TokenKind::Do, TokenKind::Char(';'), TokenKind::Eof],
+        )?;
         self.expect(TokenKind::Do)?;
         let instead = self.consume(TokenKind::Instead);
         if !instead {

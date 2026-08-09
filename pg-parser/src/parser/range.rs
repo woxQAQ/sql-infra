@@ -147,10 +147,7 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             let repeatable = if self.consume(TokenKind::Repeatable) {
-                self.expect(TokenKind::Char('('))?;
-                let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-                self.expect(TokenKind::Char(')'))?;
-                Some(expr)
+                Some(self.parse_parenthesized_expr_box()?)
             } else {
                 None
             };

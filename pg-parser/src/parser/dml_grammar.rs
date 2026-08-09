@@ -143,11 +143,8 @@ impl Parser {
                 return Err(self.error_here("ON CONFLICT inference list cannot be empty"));
             }
             self.expect(TokenKind::Char(')'))?;
-            let where_clause = if self.consume(TokenKind::Where) {
-                Some(self.parse_expr_box_strict_until(&[TokenKind::Do])?)
-            } else {
-                None
-            };
+            let where_clause =
+                self.parse_optional_expr_clause(TokenKind::Where, &[TokenKind::Do])?;
             Some(Box::new(InferClause {
                 index_elems,
                 where_clause,
@@ -190,15 +187,10 @@ impl Parser {
                     TokenKind::Char(';'),
                     TokenKind::Eof,
                 ])?;
-                let where_clause = if self.consume(TokenKind::Where) {
-                    Some(self.parse_expr_box_strict_until(&[
-                        TokenKind::Returning,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?)
-                } else {
-                    None
-                };
+                let where_clause = self.parse_optional_expr_clause(
+                    TokenKind::Where,
+                    &[TokenKind::Returning, TokenKind::Char(';'), TokenKind::Eof],
+                )?;
                 (
                     OnConflictAction::Update,
                     LockClauseStrength::None,
@@ -213,15 +205,10 @@ impl Parser {
                 } else {
                     LockClauseStrength::None
                 };
-                let where_clause = if self.consume(TokenKind::Where) {
-                    Some(self.parse_expr_box_strict_until(&[
-                        TokenKind::Returning,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?)
-                } else {
-                    None
-                };
+                let where_clause = self.parse_optional_expr_clause(
+                    TokenKind::Where,
+                    &[TokenKind::Returning, TokenKind::Char(';'), TokenKind::Eof],
+                )?;
                 (
                     OnConflictAction::Select,
                     lock_strength,
@@ -385,11 +372,7 @@ impl Parser {
                     MergeMatchKind::NotMatchedByTarget
                 }
             };
-            let condition = if self.consume(TokenKind::And) {
-                Some(self.parse_expr_box_strict_until(&[TokenKind::Then])?)
-            } else {
-                None
-            };
+            let condition = self.parse_optional_expr_clause(TokenKind::And, &[TokenKind::Then])?;
             self.expect(TokenKind::Then)?;
 
             match match_kind {

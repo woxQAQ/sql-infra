@@ -86,11 +86,10 @@ impl Parser {
             Vec::new()
         };
         let table_space = self.parse_optional_tablespace_name()?;
-        let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?)
-        } else {
-            None
-        };
+        let where_clause = self.parse_optional_expr_clause(
+            TokenKind::Where,
+            &[TokenKind::Char(';'), TokenKind::Eof],
+        )?;
         Ok(node!(IndexStmt {
             idxname,
             relation,

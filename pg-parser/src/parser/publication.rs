@@ -450,11 +450,7 @@ impl Parser {
                         self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
                     let columns = self.parse_optional_column_name_list()?;
                     let where_clause = if self.consume(TokenKind::Where) {
-                        self.expect(TokenKind::Char('('))?;
-                        let expression =
-                            self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-                        self.expect(TokenKind::Char(')'))?;
-                        Some(expression)
+                        Some(self.parse_parenthesized_expr_box()?)
                     } else {
                         None
                     };

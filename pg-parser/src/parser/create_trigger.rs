@@ -319,10 +319,7 @@ impl Parser {
             false
         };
         let when_clause = if self.consume(TokenKind::When) {
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };

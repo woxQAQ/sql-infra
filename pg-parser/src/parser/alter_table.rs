@@ -553,15 +553,10 @@ impl Parser {
                     } else {
                         None
                     };
-                    let raw_default = if self.consume(TokenKind::Using) {
-                        Some(self.parse_expr_box_strict_until(&[
-                            TokenKind::Char(','),
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ])?)
-                    } else {
-                        None
-                    };
+                    let raw_default = self.parse_optional_expr_clause(
+                        TokenKind::Using,
+                        &[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof],
+                    )?;
                     cmd.def = Some(Box::new(node!(ColumnDef {
                         type_name: Some(Box::new(type_name)),
                         coll_clause,
