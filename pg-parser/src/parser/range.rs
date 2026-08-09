@@ -108,12 +108,7 @@ impl Parser {
             self.pos = name_start;
             if looks_like_function_name {
                 let function = self.parse_function_expression()?;
-                let ordinality = if self.consume(TokenKind::With) {
-                    self.expect(TokenKind::Ordinality)?;
-                    true
-                } else {
-                    false
-                };
+                let ordinality = self.consume_phrase(&[TokenKind::With, TokenKind::Ordinality])?;
                 let (alias, coldeflist) = self.parse_function_alias_clause()?;
                 node!(RangeFunction {
                     lateral,
@@ -324,12 +319,7 @@ impl Parser {
             }
         }
         self.expect(TokenKind::Char(')'))?;
-        let ordinality = if self.consume(TokenKind::With) {
-            self.expect(TokenKind::Ordinality)?;
-            true
-        } else {
-            false
-        };
+        let ordinality = self.consume_phrase(&[TokenKind::With, TokenKind::Ordinality])?;
         let (alias, coldeflist) = self.parse_function_alias_clause()?;
         Ok(RangeFunction {
             lateral,
@@ -421,12 +411,7 @@ impl Parser {
             return Err(self.error_here("column definition list cannot be empty"));
         }
         loop {
-            definitions.push(
-                *self.parse_table_func_element_until(&[
-                    TokenKind::Char(','),
-                    TokenKind::Char(')'),
-                ])?,
-            );
+            definitions.push(*self.parse_table_func_element_until(COMMA_OR_CLOSE_PAREN_TOKENS)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }

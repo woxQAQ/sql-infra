@@ -1057,12 +1057,17 @@ mod tests {
     #[test]
     fn publishes_fixed_phrases_as_units() {
         let cases: &[(&str, &[&'static [TokenKind]])] = &[
+            ("CREATE ", &[&[TokenKind::Or, TokenKind::Replace]]),
             (
                 "SELECT * FROM t ",
                 &[
                     &[TokenKind::GroupP, TokenKind::By],
                     &[TokenKind::Order, TokenKind::By],
                 ],
+            ),
+            (
+                "SELECT * FROM generate_series(1, 2) ",
+                &[&[TokenKind::With, TokenKind::Ordinality]],
             ),
             ("DROP TABLE ", &[&[TokenKind::IfP, TokenKind::Exists]]),
             (

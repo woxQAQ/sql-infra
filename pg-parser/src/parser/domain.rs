@@ -183,11 +183,7 @@ impl Parser {
                 ]);
                 if self.consume(TokenKind::Default) {
                     stmt.subtype = AlterDomainType::AlterDefault;
-                    stmt.def =
-                        Some(self.parse_expr_box_strict_until(&[
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ])?);
+                    stmt.def = Some(self.parse_expr_box_strict_until(STATEMENT_END_TOKENS)?);
                 } else if self.consume(TokenKind::Not) {
                     self.expect(TokenKind::NullP)?;
                     stmt.subtype = AlterDomainType::SetNotNull;

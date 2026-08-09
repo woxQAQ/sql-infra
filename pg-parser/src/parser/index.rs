@@ -86,10 +86,8 @@ impl Parser {
             Vec::new()
         };
         let table_space = self.parse_optional_tablespace_name()?;
-        let where_clause = self.parse_optional_expr_clause(
-            TokenKind::Where,
-            &[TokenKind::Char(';'), TokenKind::Eof],
-        )?;
+        let where_clause =
+            self.parse_optional_expr_clause(TokenKind::Where, STATEMENT_END_TOKENS)?;
         Ok(node!(IndexStmt {
             idxname,
             relation,
@@ -113,12 +111,11 @@ impl Parser {
         }
         let mut elements = Vec::new();
         loop {
-            let mut tokens =
-                self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
             if tokens_end_at_top_level(&tokens)
                 && parse_index_elem_tokens_with_completion(tokens.clone(), None).is_ok()
             {
-                self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
             }
             self.append_completion_marker(&mut tokens);
             let location = tokens.first().location_or(self.location());

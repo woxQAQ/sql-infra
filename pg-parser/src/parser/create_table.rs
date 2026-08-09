@@ -172,8 +172,7 @@ impl Parser {
         relation_node.relpersistence = relpersistence;
         let relation = Some(Box::new(relation_node));
         if !foreign
-            && (self
-                .has_top_level_token_before(TokenKind::As, &[TokenKind::Char(';'), TokenKind::Eof])
+            && (self.has_top_level_token_before(TokenKind::As, STATEMENT_END_TOKENS)
                 || self.completion_follows_create_table_as_target())
         {
             return self.parse_create_table_as_target(relation, if_not_exists);
@@ -375,7 +374,7 @@ impl Parser {
                 ..CreateTableAsStmt::default()
             }));
         }
-        let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let query_tokens = self.take_until_top_level(STATEMENT_END_TOKENS);
         self.record_with_data_suffix_completion(&query_tokens);
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
         let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
@@ -526,7 +525,7 @@ impl Parser {
         };
         let table_space_name = self.parse_optional_tablespace_name()?;
         self.expect(TokenKind::As)?;
-        let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let query_tokens = self.take_until_top_level(STATEMENT_END_TOKENS);
         self.record_with_data_suffix_completion(&query_tokens);
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
         let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));

@@ -97,9 +97,8 @@ impl Parser {
                 }));
             } else {
                 let location = self.location();
-                let mut chunk =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                let mut chunk = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+                self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
                 self.append_completion_marker(&mut chunk);
                 elements.push(
                     parse_table_element_tokens_with_completion(chunk, self.completion.clone())
@@ -129,9 +128,8 @@ impl Parser {
         }
         while !self.at(TokenKind::Char(')')) {
             let location = self.location();
-            let mut chunk =
-                self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let mut chunk = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+            self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
             self.append_completion_marker(&mut chunk);
             elements.push(
                 parse_typed_table_element_tokens_with_completion(chunk, self.completion.clone())

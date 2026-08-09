@@ -553,7 +553,7 @@ impl Parser {
         loop {
             let location = self.location();
             self.record_completion_slot(completion::GrammarSlot::AnyName);
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
             self.record_def_elem_value_candidates(value_grammar, &tokens);
             if self.at_completion() && tokens.len() == 1 && token_name(&tokens[0]).is_some() {
                 self.record_completion_follow_tokens(&[TokenKind::Char('=')]);
@@ -621,7 +621,7 @@ impl Parser {
                 self.consume_non_reserved_word()
                     .ok_or_else(|| self.error_here("expected a utility option name"))?
             };
-            let arg = if self.at_any(&[TokenKind::Char(','), TokenKind::Char(')')]) {
+            let arg = if self.at_any(COMMA_OR_CLOSE_PAREN_TOKENS) {
                 None
             } else if matches!(
                 self.peek_kind(),
@@ -649,8 +649,7 @@ impl Parser {
                 };
                 Some(make_string_node(value))
             };
-            if !self.at_completion() && !self.at_any(&[TokenKind::Char(','), TokenKind::Char(')')])
-            {
+            if !self.at_completion() && !self.at_any(COMMA_OR_CLOSE_PAREN_TOKENS) {
                 return Err(self.error_here("unexpected token after utility option"));
             }
             options.push(make_def_elem(&name, arg, location));
@@ -697,8 +696,7 @@ impl Parser {
                     TokenKind::Default,
                 ]);
                 self.record_completion_slot(completion::GrammarSlot::AnyName);
-                let tokens =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                 if tokens.is_empty() {
                     return Err(self.error_here("relation option '=' requires a value"));
                 }
@@ -708,8 +706,8 @@ impl Parser {
             } else {
                 None
             };
-            self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            if !self.at_any(&[TokenKind::Char(','), TokenKind::Char(')')]) {
+            self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
+            if !self.at_any(COMMA_OR_CLOSE_PAREN_TOKENS) {
                 return Err(self.error_here("relation option values require '='"));
             }
             options.push(node!(DefElem {
@@ -754,10 +752,7 @@ impl Parser {
                     .and_then(|object_type| completion::definition_value_slot(object_type, &name));
                 if let Some(slot) = value_slot {
                     self.record_completion_slot(slot);
-                    self.record_completion_slot_within_fragment(
-                        slot,
-                        &[TokenKind::Char(','), TokenKind::Char(')')],
-                    );
+                    self.record_completion_slot_within_fragment(slot, COMMA_OR_CLOSE_PAREN_TOKENS);
                 } else {
                     self.record_completion_tokens(&[
                         TokenKind::IConst,
@@ -770,8 +765,7 @@ impl Parser {
                     ]);
                     self.record_completion_slot(completion::GrammarSlot::AnyName);
                 }
-                let tokens =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                 if let Some(slot) = value_slot
                     && self.at_completion()
                     && (tokens.is_empty()
@@ -789,8 +783,8 @@ impl Parser {
             } else {
                 None
             };
-            self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            if !self.at_any(&[TokenKind::Char(','), TokenKind::Char(')')]) {
+            self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
+            if !self.at_any(COMMA_OR_CLOSE_PAREN_TOKENS) {
                 return Err(self.error_here("definition values require '='"));
             }
             definition.push(make_def_elem(&name, arg, location));

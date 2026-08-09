@@ -98,10 +98,8 @@ impl Parser {
                 self.advance();
                 let mut coldeflist = Vec::new();
                 while !self.at(TokenKind::Char(')')) {
-                    coldeflist.push(*self.parse_table_func_element_until(&[
-                        TokenKind::Char(','),
-                        TokenKind::Char(')'),
-                    ])?);
+                    coldeflist
+                        .push(*self.parse_table_func_element_until(COMMA_OR_CLOSE_PAREN_TOKENS)?);
                     if !self.consume(TokenKind::Char(',')) {
                         break;
                     }

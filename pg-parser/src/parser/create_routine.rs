@@ -443,8 +443,7 @@ impl Parser {
         self.expect(TokenKind::Char('('))?;
         let mut parameters = Vec::new();
         while !self.at(TokenKind::Char(')')) {
-            let mut tokens =
-                self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
             self.append_completion_marker(&mut tokens);
             parameters.push(Node::FunctionParameter(
                 function_parameter_from_tokens_with_completion(tokens, self.completion.clone())?,

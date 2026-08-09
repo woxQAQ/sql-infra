@@ -206,8 +206,7 @@ impl Parser {
             self.advance();
             self.record_completion_tokens(&[TokenKind::Class, TokenKind::Family]);
             self.record_completion_slot(completion::GrammarSlot::Operator);
-            let object =
-                self.parse_operator_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+            let object = self.parse_operator_with_args_until(STATEMENT_END_TOKENS)?;
             return Ok((ObjectType::Operator, Node::ObjectWithArgs(object)));
         }
         let function_type = match self.peek_kind() {
@@ -220,12 +219,12 @@ impl Parser {
         if let Some(objtype) = function_type {
             self.advance();
             let object = if objtype == ObjectType::Operator {
-                self.parse_operator_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?
+                self.parse_operator_with_args_until(STATEMENT_END_TOKENS)?
             } else if objtype == ObjectType::Aggregate {
-                self.parse_aggregate_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?
+                self.parse_aggregate_with_args_until(STATEMENT_END_TOKENS)?
             } else {
                 self.parse_object_with_args_until_with_slot(
-                    &[TokenKind::Char(';'), TokenKind::Eof],
+                    STATEMENT_END_TOKENS,
                     completion::object_type_slot(objtype),
                 )?
             };
@@ -254,7 +253,7 @@ impl Parser {
                 ObjectType::Type
             };
             let type_name = self
-                .parse_type_name_until(&[TokenKind::Char(';'), TokenKind::Eof])
+                .parse_type_name_until(STATEMENT_END_TOKENS)
                 .ok_or_else(|| self.error_here("object requires a type name"))?;
             return Ok((objtype, Node::TypeName(type_name)));
         }
@@ -407,8 +406,7 @@ impl Parser {
                 | ObjectType::Tsconfiguration
         );
         if uses_any_name {
-            let names =
-                self.parse_name_list_until_keywords(&[TokenKind::Char(';'), TokenKind::Eof]);
+            let names = self.parse_name_list_until_keywords(STATEMENT_END_TOKENS);
             if names.is_empty() {
                 return Err(self.error_here("extension member requires an object name"));
             }

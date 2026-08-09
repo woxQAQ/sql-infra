@@ -62,7 +62,7 @@ impl Parser {
             Vec::new()
         };
         self.expect(TokenKind::As)?;
-        let items = self.parse_opclass_item_list(&[TokenKind::Char(';'), TokenKind::Eof])?;
+        let items = self.parse_opclass_item_list(STATEMENT_END_TOKENS)?;
         Ok(node!(CreateOpClassStmt {
             opclassname,
             opfamilyname,
@@ -167,7 +167,7 @@ impl Parser {
         let items = if is_drop {
             self.parse_opclass_drop_list()?
         } else {
-            self.parse_opclass_item_list(&[TokenKind::Char(';'), TokenKind::Eof])?
+            self.parse_opclass_item_list(STATEMENT_END_TOKENS)?
         };
         self.expect_statement_end()?;
         Ok(node!(AlterOpFamilyStmt {
@@ -256,12 +256,8 @@ impl Parser {
             };
             if itemtype == 3 {
                 item.storedtype = Some(Box::new(
-                    self.parse_type_name_until(&[
-                        TokenKind::Char(','),
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])
-                    .ok_or_else(|| self.error_here("STORAGE requires a type"))?,
+                    self.parse_type_name_until(COMMA_OR_STATEMENT_END_TOKENS)
+                        .ok_or_else(|| self.error_here("STORAGE requires a type"))?,
                 ));
             } else {
                 if itemtype == 2 && self.consume(TokenKind::Char('(')) {
@@ -296,11 +292,8 @@ impl Parser {
                         ));
                     }
                     if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
-                        item.order_family = self.parse_name_list_until_keywords(&[
-                            TokenKind::Char(','),
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ]);
+                        item.order_family =
+                            self.parse_name_list_until_keywords(COMMA_OR_STATEMENT_END_TOKENS);
                         if item.order_family.is_empty() {
                             return Err(self.error_here("ORDER BY requires an operator family"));
                         }

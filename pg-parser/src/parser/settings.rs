@@ -180,7 +180,7 @@ impl Parser {
                         TokenKind::Interval,
                     ]);
                     self.record_completion_slot(completion::GrammarSlot::AnyName);
-                    let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+                    let tokens = self.take_until_top_level(STATEMENT_END_TOKENS);
                     if self.at_completion() && tokens.first().has_kind(TokenKind::Interval) {
                         let qualifier = tokens
                             .iter()
@@ -336,11 +336,7 @@ impl Parser {
     pub(super) fn parse_setting_value_list(&mut self) -> PResult<NodeList> {
         let mut args = Vec::new();
         loop {
-            let tokens = self.take_until_top_level(&[
-                TokenKind::Char(','),
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ]);
+            let tokens = self.take_until_top_level(COMMA_OR_STATEMENT_END_TOKENS);
             if self.at_completion() && tokens.is_empty() {
                 self.record_completion_tokens(&[TokenKind::Default]);
                 self.record_completion_slot(completion::GrammarSlot::AnyName);

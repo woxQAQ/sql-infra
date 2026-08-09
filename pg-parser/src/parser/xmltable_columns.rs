@@ -34,7 +34,7 @@ impl Parser {
         self.record_completion_tokens(&[TokenKind::For]);
         if self.consume(TokenKind::For) {
             self.expect(TokenKind::Ordinality)?;
-            self.record_completion_follow_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            self.record_completion_follow_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
             return Ok(RangeTableFuncCol {
                 colname: Some(colname),
                 for_ordinality: true,

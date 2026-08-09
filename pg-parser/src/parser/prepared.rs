@@ -220,7 +220,7 @@ impl Parser {
         if self.at_completion() {
             return Err(self.error_here("completion point at CALL routine name"));
         }
-        let mut tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let mut tokens = self.take_until_top_level(STATEMENT_END_TOKENS);
         if self.at_completion()
             && matches!(
                 parse_expression_tokens(tokens.clone()),

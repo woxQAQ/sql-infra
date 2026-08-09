@@ -59,8 +59,7 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
         }
-        let exprs =
-            self.parse_res_target_list_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+        let exprs = self.parse_res_target_list_strict_until(STATEMENT_END_TOKENS)?;
         if exprs.is_empty() {
             return Err(self.error_here("RETURNING requires at least one expression"));
         }
@@ -125,8 +124,7 @@ impl Parser {
             let infer_location = self.previous_location();
             let mut index_elems = Vec::new();
             while !self.at(TokenKind::Char(')')) {
-                let mut tokens =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                 self.append_completion_marker(&mut tokens);
                 index_elems.push(Node::IndexElem(parse_index_elem_tokens_with_completion(
                     tokens,

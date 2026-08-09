@@ -155,7 +155,7 @@ impl Parser {
                 )?;
                 self.expect(TokenKind::With)?;
                 stmt.dicts = self.parse_any_name_list_until_with_slot(
-                    &[TokenKind::Char(';'), TokenKind::Eof],
+                    STATEMENT_END_TOKENS,
                     completion::GrammarSlot::TextSearchDictionary,
                 )?;
                 stmt.kind = AlterTsConfigType::AddMapping;
@@ -175,7 +175,7 @@ impl Parser {
                         )?;
                         self.expect(TokenKind::With)?;
                         let new = self.parse_one_any_name_with_slot(
-                            &[TokenKind::Char(';'), TokenKind::Eof],
+                            STATEMENT_END_TOKENS,
                             completion::GrammarSlot::TextSearchDictionary,
                         )?;
                         stmt.kind = AlterTsConfigType::ReplaceDictForToken;
@@ -185,7 +185,7 @@ impl Parser {
                         self.expect(TokenKind::With)?;
                         stmt.kind = AlterTsConfigType::AlterMappingForToken;
                         stmt.dicts = self.parse_any_name_list_until_with_slot(
-                            &[TokenKind::Char(';'), TokenKind::Eof],
+                            STATEMENT_END_TOKENS,
                             completion::GrammarSlot::TextSearchDictionary,
                         )?;
                         stmt.override_ = true;
@@ -198,7 +198,7 @@ impl Parser {
                     )?;
                     self.expect(TokenKind::With)?;
                     let new = self.parse_one_any_name_with_slot(
-                        &[TokenKind::Char(';'), TokenKind::Eof],
+                        STATEMENT_END_TOKENS,
                         completion::GrammarSlot::TextSearchDictionary,
                     )?;
                     stmt.kind = AlterTsConfigType::ReplaceDict;
@@ -212,7 +212,7 @@ impl Parser {
                 stmt.missing_ok = self.consume_if_exists()?;
                 self.expect(TokenKind::For)?;
                 stmt.tokentype = self.parse_simple_name_list_until(
-                    &[TokenKind::Char(';'), TokenKind::Eof],
+                    STATEMENT_END_TOKENS,
                     completion::GrammarSlot::AnyName,
                 )?;
                 stmt.kind = AlterTsConfigType::DropMapping;

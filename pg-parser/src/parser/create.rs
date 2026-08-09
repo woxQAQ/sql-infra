@@ -8,12 +8,7 @@ use super::*;
 impl Parser {
     pub(super) fn parse_create(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Create)?;
-        let replace = if self.consume(TokenKind::Or) {
-            self.expect(TokenKind::Replace)?;
-            true
-        } else {
-            false
-        };
+        let replace = self.consume_phrase(&[TokenKind::Or, TokenKind::Replace])?;
         let relpersistence = self.parse_create_relpersistence()?;
         if relpersistence == b'p' {
             self.record_completion_tokens(&[TokenKind::Trusted, TokenKind::Procedural]);

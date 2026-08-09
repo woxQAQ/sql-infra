@@ -357,7 +357,7 @@ impl Parser {
                         self.expect(TokenKind::Char(')'))?;
                         tokens
                     } else {
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')])
+                        self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS)
                     };
                     if operator_tokens.is_empty() {
                         return Err(self.error_here("EXCLUDE element requires an operator"));
@@ -630,7 +630,7 @@ impl Parser {
         let mut saw_deferrable = None;
         let mut saw_initially = None;
         let mut saw_enforced = None;
-        while !self.at_any(&[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof]) {
+        while !self.at_any(COMMA_OR_STATEMENT_END_TOKENS) {
             let mut attributes = Vec::new();
             if supports_deferrable {
                 attributes.extend([TokenKind::Deferrable, TokenKind::Initially]);

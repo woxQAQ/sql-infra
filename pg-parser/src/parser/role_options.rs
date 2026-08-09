@@ -86,8 +86,7 @@ impl Parser {
             };
             self.expect(TokenKind::User)?;
             let members_location = self.location();
-            let members =
-                self.parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+            let members = self.parse_role_specs_until(STATEMENT_END_TOKENS, false)?;
             if members.is_empty() {
                 return Err(self.error_here("ALTER GROUP requires at least one member"));
             }
@@ -293,8 +292,7 @@ impl Parser {
                         }
                         _ => unreachable!(),
                     };
-                    let roles = self
-                        .parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+                    let roles = self.parse_role_specs_until(STATEMENT_END_TOKENS, false)?;
                     options.push(make_def_elem(
                         defname,
                         Some(node!(AArrayExpr {
@@ -393,8 +391,7 @@ impl Parser {
                 }
                 TokenKind::User => {
                     self.advance();
-                    let members = self
-                        .parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+                    let members = self.parse_role_specs_until(STATEMENT_END_TOKENS, false)?;
                     if members.is_empty() {
                         return Err(self.error_here("USER requires at least one role"));
                     }

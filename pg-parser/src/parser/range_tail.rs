@@ -18,8 +18,7 @@ impl Parser {
             while !self.at(TokenKind::Char(')')) {
                 let target_location = self.location();
                 if self.consume(TokenKind::Default) {
-                    let tokens =
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                    let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                     namespaces.push(node!(ResTarget {
                         val: Some(Box::new(self.parse_b_expression_fragment_tokens(tokens)?)),
                         location: target_location as ParseLoc,
@@ -97,8 +96,7 @@ impl Parser {
             return Err(self.error_here("XMLTABLE COLUMNS requires at least one column"));
         }
         while !self.at(TokenKind::Char(')')) {
-            let mut tokens =
-                self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
             self.append_completion_marker(&mut tokens);
             columns.push(Node::RangeTableFuncCol(
                 xmltable_column_from_tokens_with_completion(tokens, self.completion.clone())?,

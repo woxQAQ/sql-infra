@@ -150,7 +150,7 @@ impl Parser {
             Vec::new()
         };
         self.expect(TokenKind::As)?;
-        let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let tokens = self.take_until_top_level(STATEMENT_END_TOKENS);
         self.record_view_check_option_completion(&tokens);
         let (query_tokens, with_check_option) = split_view_check_option(tokens);
         if recursive && with_check_option != ViewCheckOption::NoCheckOption {

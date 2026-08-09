@@ -110,7 +110,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
     {
         collector
             .borrow_mut()
-            .record_follow_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            .record_follow_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
     }
     let default_tokens = default_index.map(|index| tokens.split_off(index + 1));
     if default_index.is_some() {

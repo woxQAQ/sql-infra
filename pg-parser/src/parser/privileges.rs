@@ -276,13 +276,8 @@ impl Parser {
             true,
         )?;
         let (grant_option, behavior) = if is_grant {
-            let with_grant_option = if self.consume(TokenKind::With) {
-                self.expect(TokenKind::Grant)?;
-                self.expect(TokenKind::Option)?;
-                true
-            } else {
-                false
-            };
+            let with_grant_option =
+                self.consume_phrase(&[TokenKind::With, TokenKind::Grant, TokenKind::Option])?;
             (with_grant_option, DropBehavior::Restrict)
         } else {
             (grant_option, self.parse_drop_behavior())

@@ -121,11 +121,7 @@ impl Parser {
         } else {
             cmd.subtype = AlterTableType::AddColumn;
             cmd.missing_ok = self.consume_if_not_exists()?;
-            let mut tokens = self.take_until_top_level(&[
-                TokenKind::Char(','),
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ]);
+            let mut tokens = self.take_until_top_level(COMMA_OR_STATEMENT_END_TOKENS);
             self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(';')]);
             self.append_completion_marker(&mut tokens);
             let Node::ColumnDef(column) =
@@ -407,11 +403,7 @@ impl Parser {
                         altered.alter_inheritability = true;
                     } else {
                         let mut saw_attribute = false;
-                        while !self.at_any(&[
-                            TokenKind::Char(','),
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ]) {
+                        while !self.at_any(COMMA_OR_STATEMENT_END_TOKENS) {
                             self.record_completion_tokens(&[
                                 TokenKind::Deferrable,
                                 TokenKind::Initially,
@@ -513,12 +505,7 @@ impl Parser {
 
                 let saw_set = self.consume(TokenKind::Set);
                 let set_data_type = if saw_set {
-                    if self.consume(TokenKind::DataP) {
-                        self.expect(TokenKind::TypeP)?;
-                        true
-                    } else {
-                        false
-                    }
+                    self.consume_phrase(&[TokenKind::DataP, TokenKind::TypeP])?
                 } else {
                     false
                 };
@@ -555,7 +542,7 @@ impl Parser {
                     };
                     let raw_default = self.parse_optional_expr_clause(
                         TokenKind::Using,
-                        &[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof],
+                        COMMA_OR_STATEMENT_END_TOKENS,
                     )?;
                     cmd.def = Some(Box::new(node!(ColumnDef {
                         type_name: Some(Box::new(type_name)),
@@ -593,11 +580,9 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::ColumnDefault;
-                            cmd.def = Some(self.parse_expr_box_strict_until(&[
-                                TokenKind::Char(','),
-                                TokenKind::Char(';'),
-                                TokenKind::Eof,
-                            ])?);
+                            cmd.def = Some(
+                                self.parse_expr_box_strict_until(COMMA_OR_STATEMENT_END_TOKENS)?,
+                            );
                         }
                         TokenKind::Not => {
                             self.advance();
@@ -1008,9 +993,7 @@ impl Parser {
             }
         }
         self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(';')]);
-        if !self.at_completion()
-            && !self.at_any(&[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof])
-        {
+        if !self.at_completion() && !self.at_any(COMMA_OR_STATEMENT_END_TOKENS) {
             return Err(self.error_here("unexpected token after ALTER TABLE command"));
         }
         Ok(cmd)

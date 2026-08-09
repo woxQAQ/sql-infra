@@ -15,6 +15,15 @@ use crate::lexer::TokenValue;
 use crate::lexer::lex;
 use crate::lexer::lookup_keyword;
 
+/// Tokens that terminate a statement-level grammar fragment.
+pub(super) const STATEMENT_END_TOKENS: &[TokenKind] = &[TokenKind::Char(';'), TokenKind::Eof];
+/// Tokens that terminate a list item at statement level.
+pub(super) const COMMA_OR_STATEMENT_END_TOKENS: &[TokenKind] =
+    &[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof];
+/// Tokens that terminate a parenthesized list item.
+pub(super) const COMMA_OR_CLOSE_PAREN_TOKENS: &[TokenKind] =
+    &[TokenKind::Char(','), TokenKind::Char(')')];
+
 // Construct or destructure a `Node` variant whose payload type has the same name.
 macro_rules! node {
     ($kind:ident { $($fields:tt)* } $(,)?) => {

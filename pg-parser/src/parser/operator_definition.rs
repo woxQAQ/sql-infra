@@ -24,16 +24,12 @@ impl Parser {
             let arg = if self.consume(TokenKind::Char('=')) {
                 if let Some(slot) = completion::definition_value_slot(object_type, &name) {
                     self.record_completion_slot(slot);
-                    self.record_completion_slot_within_fragment(
-                        slot,
-                        &[TokenKind::Char(','), TokenKind::Char(')')],
-                    );
+                    self.record_completion_slot_within_fragment(slot, COMMA_OR_CLOSE_PAREN_TOKENS);
                 }
                 if self.consume(TokenKind::None) {
                     None
                 } else {
-                    let tokens =
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                    let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                     Some(Box::new(parse_operator_def_arg(&name, tokens, location)?))
                 }
             } else {

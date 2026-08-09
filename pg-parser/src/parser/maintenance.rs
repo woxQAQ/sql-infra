@@ -143,7 +143,7 @@ impl Parser {
             if !is_from {
                 return Err(self.error_here("WHERE clause is not allowed with COPY TO"));
             }
-            Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?)
+            Some(self.parse_expr_box_strict_until(STATEMENT_END_TOKENS)?)
         } else {
             None
         };
@@ -216,8 +216,7 @@ impl Parser {
             let mut options = Vec::new();
             loop {
                 let location = self.location();
-                let mut tokens =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                 self.append_completion_marker(&mut tokens);
                 options.push(Node::DefElem(parse_copy_generic_option(
                     tokens,
@@ -943,7 +942,7 @@ fn parse_copy_generic_option(
                 .consume_opt_boolean_or_string()
                 .ok_or_else(|| parser.error_here("expected a COPY option string value"))?;
             values.push(make_string_node(value));
-            parser.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            parser.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
             if !parser.consume(TokenKind::Char(',')) {
                 break;
             }
@@ -975,7 +974,7 @@ fn parse_copy_generic_option(
                 .ok_or_else(|| parser.error_here("invalid COPY option value"))?,
         ))
     };
-    parser.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
+    parser.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
     if !parser.at(TokenKind::Eof) {
         return Err(parser.error_here("unexpected token after COPY option"));
     }
