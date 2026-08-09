@@ -61,15 +61,7 @@ impl Parser {
                 continue;
             }
             let location = self.location();
-            let conname = if self.consume(TokenKind::Constraint) {
-                self.record_completion_slot(completion::GrammarSlot::Constraint);
-                Some(
-                    self.consume_col_id()
-                        .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
-                )
-            } else {
-                None
-            };
+            let conname = self.parse_optional_constraint_name()?;
             let (contype, raw_expr) = match self.peek_kind() {
                 TokenKind::Default => {
                     self.advance();
@@ -262,15 +254,7 @@ impl Parser {
     fn parse_domain_constraint(&mut self) -> PResult<Constraint> {
         let location = self.location();
         self.record_completion_tokens(&[TokenKind::Constraint, TokenKind::Check, TokenKind::Not]);
-        let conname = if self.consume(TokenKind::Constraint) {
-            self.record_completion_slot(completion::GrammarSlot::Constraint);
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
-            )
-        } else {
-            None
-        };
+        let conname = self.parse_optional_constraint_name()?;
         self.record_completion_tokens(&[TokenKind::Check, TokenKind::Not]);
         let (contype, raw_expr, keys) = match self.peek_kind() {
             TokenKind::Check => {

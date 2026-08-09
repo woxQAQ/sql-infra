@@ -85,15 +85,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        let table_space = if self.consume(TokenKind::Tablespace) {
-            self.record_completion_slot(completion::GrammarSlot::Tablespace);
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?,
-            )
-        } else {
-            None
-        };
+        let table_space = self.parse_optional_tablespace_name()?;
         let where_clause = if self.consume(TokenKind::Where) {
             Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?)
         } else {

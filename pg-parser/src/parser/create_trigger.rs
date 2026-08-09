@@ -280,12 +280,7 @@ impl Parser {
                     }
                     TokenKind::Initially => {
                         self.advance();
-                        let deferred = if self.consume(TokenKind::Deferred) {
-                            true
-                        } else {
-                            self.expect(TokenKind::Immediate)?;
-                            false
-                        };
+                        let deferred = self.parse_deferred_or_immediate()?;
                         if saw_initially.is_some_and(|previous| previous != deferred) {
                             return Err(self.error_here("conflicting constraint properties"));
                         }

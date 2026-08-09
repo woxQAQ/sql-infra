@@ -429,12 +429,7 @@ impl Parser {
                                 TokenKind::Initially => {
                                     self.advance();
                                     altered.alter_deferrability = true;
-                                    altered.initdeferred = if self.consume(TokenKind::Deferred) {
-                                        true
-                                    } else {
-                                        self.expect(TokenKind::Immediate)?;
-                                        false
-                                    };
+                                    altered.initdeferred = self.parse_deferred_or_immediate()?;
                                 }
                                 TokenKind::Enforced => {
                                     self.advance();

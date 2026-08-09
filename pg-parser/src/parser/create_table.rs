@@ -352,15 +352,7 @@ impl Parser {
             Vec::new()
         };
         let on_commit = self.parse_on_commit_option()?;
-        let table_space_name = if self.consume(TokenKind::Tablespace) {
-            self.record_completion_slot(completion::GrammarSlot::Tablespace);
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?,
-            )
-        } else {
-            None
-        };
+        let table_space_name = self.parse_optional_tablespace_name()?;
         self.expect(TokenKind::As)?;
         if self.at(TokenKind::Execute) {
             let query = Some(Box::new(Node::ExecuteStmt(self.parse_execute_core()?)));
@@ -532,15 +524,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        let table_space_name = if self.consume(TokenKind::Tablespace) {
-            self.record_completion_slot(completion::GrammarSlot::Tablespace);
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?,
-            )
-        } else {
-            None
-        };
+        let table_space_name = self.parse_optional_tablespace_name()?;
         self.expect(TokenKind::As)?;
         let query_tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
         self.record_with_data_suffix_completion(&query_tokens);

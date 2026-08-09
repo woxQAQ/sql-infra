@@ -6,6 +6,15 @@
 use super::*;
 
 impl Parser {
+    pub(super) fn parse_deferred_or_immediate(&mut self) -> PResult<bool> {
+        if self.consume(TokenKind::Deferred) {
+            Ok(true)
+        } else {
+            self.expect(TokenKind::Immediate)?;
+            Ok(false)
+        }
+    }
+
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-set-constraints.html
     // SET CONSTRAINTS { ALL | name [, ...] } { DEFERRED | IMMEDIATE }
@@ -42,12 +51,7 @@ impl Parser {
             constraints
         };
         self.record_completion_tokens(&[TokenKind::Deferred, TokenKind::Immediate]);
-        let deferred = if self.consume(TokenKind::Deferred) {
-            true
-        } else {
-            self.expect(TokenKind::Immediate)?;
-            false
-        };
+        let deferred = self.parse_deferred_or_immediate()?;
         self.expect_statement_end()?;
         Ok(node!(ConstraintsSetStmt {
             constraints,
@@ -231,15 +235,7 @@ impl Parser {
 
     pub(super) fn parse_table_constraint(&mut self) -> PResult<Constraint> {
         let location = self.location();
-        let conname = if self.consume(TokenKind::Constraint) {
-            self.record_completion_slot(completion::GrammarSlot::Constraint);
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
-            )
-        } else {
-            None
-        };
+        let conname = self.parse_optional_constraint_name()?;
         let mut constraint = Constraint {
             conname,
             location: location as ParseLoc,
@@ -666,12 +662,7 @@ impl Parser {
                     if !supports_deferrable {
                         return Err(self.error_here("this constraint cannot be marked DEFERRABLE"));
                     }
-                    let deferred = if self.consume(TokenKind::Deferred) {
-                        true
-                    } else {
-                        self.expect(TokenKind::Immediate)?;
-                        false
-                    };
+                    let deferred = self.parse_deferred_or_immediate()?;
                     if saw_initially.is_some_and(|previous| previous != deferred) {
                         return Err(self.error_here("conflicting constraint properties"));
                     }

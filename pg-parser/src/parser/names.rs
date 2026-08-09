@@ -6,6 +6,30 @@
 use super::*;
 
 impl Parser {
+    pub(super) fn parse_optional_constraint_name(
+        &mut self,
+    ) -> PResult<Option<std::string::String>> {
+        if !self.consume(TokenKind::Constraint) {
+            return Ok(None);
+        }
+        self.record_completion_slot(completion::GrammarSlot::Constraint);
+        self.consume_col_id()
+            .map(Some)
+            .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))
+    }
+
+    pub(super) fn parse_optional_tablespace_name(
+        &mut self,
+    ) -> PResult<Option<std::string::String>> {
+        if !self.consume(TokenKind::Tablespace) {
+            return Ok(None);
+        }
+        self.record_completion_slot(completion::GrammarSlot::Tablespace);
+        self.consume_col_id()
+            .map(Some)
+            .ok_or_else(|| self.error_here("TABLESPACE requires a name"))
+    }
+
     pub(super) fn parse_simple_name_list_until(
         &mut self,
         stops: &[TokenKind],

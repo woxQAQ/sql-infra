@@ -324,15 +324,7 @@ impl Parser {
                 continue;
             }
             let con_location = self.location();
-            let conname = if self.consume(TokenKind::Constraint) {
-                self.record_completion_slot(completion::GrammarSlot::Constraint);
-                Some(
-                    self.consume_col_id()
-                        .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
-                )
-            } else {
-                None
-            };
+            let conname = self.parse_optional_constraint_name()?;
             let mut constraint = self.parse_column_constraint_element(con_location)?;
             if conname.is_some()
                 && matches!(
