@@ -149,6 +149,16 @@ pub(super) fn append_indirection(arg: Node, item: Node) -> Node {
     }
 }
 
+pub(super) fn node_ends_in_star_indirection(node: &Node) -> bool {
+    match node {
+        Node::ColumnRef(reference) => matches!(reference.fields.last(), Some(Node::AStar(_))),
+        Node::AIndirection(indirection) => {
+            matches!(indirection.indirection.last(), Some(Node::AStar(_)))
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn comparison_operator(kind: TokenKind) -> Option<&'static str> {
     match kind {
         TokenKind::Char('=') => Some("="),

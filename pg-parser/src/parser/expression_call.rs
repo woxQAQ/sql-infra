@@ -20,6 +20,7 @@ impl ExprParser {
                 location: location as ParseLoc,
                 ..FuncCall::default()
             };
+            self.record_completion_tokens(&[TokenKind::Char('*')]);
             if self.consume(TokenKind::Char('*')) {
                 call.agg_star = true;
                 self.expect(TokenKind::Char(')'))?;

@@ -550,6 +550,26 @@ pub(super) fn parse_qualified_type_names(tokens: &[Token]) -> PResult<NodeList> 
                 "type name components must be separated by '.'",
             ));
         }
+        if names.is_empty() {
+            let accepted = matches!(token.kind, TokenKind::Ident | TokenKind::UIdent)
+                || match &token.value {
+                    Some(TokenValue::Keyword(word)) => {
+                        lookup_keyword(word).is_some_and(|keyword| {
+                            matches!(
+                                keyword.category,
+                                KeywordCategory::Unreserved | KeywordCategory::TypeFuncName
+                            )
+                        })
+                    }
+                    _ => false,
+                };
+            if !accepted {
+                return Err(ParseError::ranged(
+                    token.range,
+                    "invalid first component of a type name",
+                ));
+            }
+        }
         let name = token_name(token)
             .ok_or_else(|| ParseError::ranged(token.range, "invalid token in type name"))?;
         names.push(make_string_node(name));

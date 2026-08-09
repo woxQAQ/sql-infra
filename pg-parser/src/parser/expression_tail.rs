@@ -4,7 +4,6 @@
 //! and expression-level completion recording extend already parsed prefixes.
 
 use super::expression::ExprParser;
-use super::expression::PREDICATE_BINDING_POWER;
 use super::*;
 
 impl ExprParser {
@@ -36,7 +35,7 @@ impl ExprParser {
                     return self.fail("completion point in a qualified name");
                 };
                 fields.push(make_string_node(token_name(&hole)?));
-            } else if allow_star && self.consume(TokenKind::Char('*')) {
+            } else if allow_star && !fields.is_empty() && self.consume(TokenKind::Char('*')) {
                 fields.push(Node::AStar(AStar {
                     node_tag: NodeTag::AStar,
                 }));
@@ -116,20 +115,22 @@ impl ExprParser {
         }))
     }
 
-    pub(super) fn parse_parenthesized_expr(&mut self) -> Option<Node> {
+    pub(super) fn parse_parenthesized_expr(&mut self) -> Option<(Node, bool)> {
         let location = self.expect(TokenKind::Char('('))?.location();
         self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
-        if self.starts_statement() {
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        if let Some(tokens) = self.take_parenthesized_select_tokens() {
             let subselect = self.parse_nested_select(tokens)?;
             self.expect(TokenKind::Char(')'))?;
-            return Some(Node::SubLink(SubLink {
-                xpr: Expr::new(NodeTag::SubLink),
-                sub_link_type: SubLinkType::ExprSublink,
-                subselect: Some(Box::new(subselect)),
-                location: location as ParseLoc,
-                ..SubLink::default()
-            }));
+            return Some((
+                Node::SubLink(SubLink {
+                    xpr: Expr::new(NodeTag::SubLink),
+                    sub_link_type: SubLinkType::ExprSublink,
+                    subselect: Some(Box::new(subselect)),
+                    location: location as ParseLoc,
+                    ..SubLink::default()
+                }),
+                false,
+            ));
         }
         let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
         self.expect(TokenKind::Char(')'))?;
@@ -137,15 +138,18 @@ impl ExprParser {
             return self.fail("parenthesized expression cannot be empty");
         }
         if args.len() == 1 {
-            args.into_iter().next()
+            args.into_iter().next().map(|node| (node, false))
         } else {
-            Some(Node::RowExpr(RowExpr {
-                xpr: Expr::new(NodeTag::RowExpr),
-                args,
-                row_format: CoercionForm::ImplicitCast,
-                location: location as ParseLoc,
-                ..RowExpr::default()
-            }))
+            Some((
+                Node::RowExpr(RowExpr {
+                    xpr: Expr::new(NodeTag::RowExpr),
+                    args,
+                    row_format: CoercionForm::ImplicitCast,
+                    location: location as ParseLoc,
+                    ..RowExpr::default()
+                }),
+                true,
+            ))
         }
     }
 
@@ -222,8 +226,7 @@ impl ExprParser {
             TokenKind::InP => {
                 let list_start = self.expect(TokenKind::Char('('))?.location();
                 self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
-                if self.starts_statement() {
-                    let tokens = self.take_until_balanced(TokenKind::Char(')'));
+                if let Some(tokens) = self.take_parenthesized_select_tokens() {
                     let subselect = self.parse_nested_select(tokens)?;
                     self.expect(TokenKind::Char(')'))?;
                     let sublink = Node::SubLink(SubLink {
@@ -376,8 +379,7 @@ impl ExprParser {
         self.advance();
         self.expect(TokenKind::Char('('))?;
         self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
-        if self.starts_statement() {
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        if let Some(tokens) = self.take_parenthesized_select_tokens() {
             let subselect = self.parse_nested_select(tokens)?;
             self.expect(TokenKind::Char(')'))?;
             Some(Node::SubLink(SubLink {
@@ -442,12 +444,7 @@ impl ExprParser {
         ))
     }
 
-    pub(super) fn parse_overlaps(
-        &mut self,
-        lhs: Node,
-        restricted: bool,
-        location: usize,
-    ) -> Option<Node> {
+    pub(super) fn parse_overlaps(&mut self, lhs: Node, location: usize) -> Option<Node> {
         let Node::RowExpr(left_row) = lhs else {
             return self.fail("left side of OVERLAPS must be a two-element row");
         };
@@ -455,9 +452,12 @@ impl ExprParser {
             return self.fail("left side of OVERLAPS must have two elements");
         }
 
-        let rhs = self.parse_expr_mode(PREDICATE_BINDING_POWER + 1, restricted)?;
-        let Node::RowExpr(right_row) = rhs else {
-            return self.fail("right side of OVERLAPS must be a two-element row");
+        let right = self.parse_prefix(false)?;
+        if !right.is_row_syntax {
+            return self.fail("right side of OVERLAPS must be a row expression");
+        }
+        let Node::RowExpr(right_row) = right.node else {
+            return self.fail("right side of OVERLAPS must be a row expression");
         };
         if right_row.args.len() != 2 {
             return self.fail("right side of OVERLAPS must have two elements");

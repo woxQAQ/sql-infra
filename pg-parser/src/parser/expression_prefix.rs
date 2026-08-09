@@ -6,14 +6,86 @@
 use super::expression::{AND_BINDING_POWER, ExprParser, UMINUS_BINDING_POWER};
 use super::*;
 
+const COMMON_EXPRESSION_START_TOKENS: &[TokenKind] = &[
+    TokenKind::Exists,
+    TokenKind::Array,
+    TokenKind::Case,
+    TokenKind::Grouping,
+    TokenKind::Collation,
+    TokenKind::Cast,
+    TokenKind::Treat,
+    TokenKind::Extract,
+    TokenKind::Normalize,
+    TokenKind::Position,
+    TokenKind::Overlay,
+    TokenKind::Substring,
+    TokenKind::Trim,
+    TokenKind::Xmlexists,
+    TokenKind::SystemUser,
+    TokenKind::CurrentDate,
+    TokenKind::CurrentTime,
+    TokenKind::CurrentTimestamp,
+    TokenKind::Localtime,
+    TokenKind::Localtimestamp,
+    TokenKind::CurrentRole,
+    TokenKind::CurrentUser,
+    TokenKind::User,
+    TokenKind::SessionUser,
+    TokenKind::CurrentCatalog,
+    TokenKind::CurrentSchema,
+    TokenKind::Xmlconcat,
+    TokenKind::Xmlelement,
+    TokenKind::Xmlforest,
+    TokenKind::Xmlparse,
+    TokenKind::Xmlpi,
+    TokenKind::Xmlroot,
+    TokenKind::Xmlserialize,
+    TokenKind::Json,
+    TokenKind::JsonObject,
+    TokenKind::JsonArray,
+    TokenKind::JsonScalar,
+    TokenKind::JsonSerialize,
+    TokenKind::JsonQuery,
+    TokenKind::JsonExists,
+    TokenKind::JsonValue,
+    TokenKind::JsonObjectagg,
+    TokenKind::JsonArrayagg,
+    TokenKind::MergeAction,
+    TokenKind::Row,
+    TokenKind::Char('('),
+    TokenKind::Coalesce,
+    TokenKind::Greatest,
+    TokenKind::Least,
+    TokenKind::Nullif,
+    TokenKind::NullP,
+    TokenKind::TrueP,
+    TokenKind::FalseP,
+];
+
+pub(super) struct PrefixExpression {
+    pub(super) node: Node,
+    pub(super) is_row_syntax: bool,
+}
+
 impl ExprParser {
     pub(super) fn parse_c_expr(&mut self) -> Option<Node> {
+        if self.at_completion() {
+            self.record_completion_expression_start_tokens(COMMON_EXPRESSION_START_TOKENS);
+            self.record_completion_slot(completion::GrammarSlot::Column);
+            self.record_completion_slot(completion::GrammarSlot::Function);
+            if let Some(hole) = self.recover_completion_hole() {
+                return token_to_leaf(&hole);
+            }
+            return self.fail("completion point at common expression start");
+        }
         if matches!(
             self.peek_kind(),
             TokenKind::Not
                 | TokenKind::Char('+')
                 | TokenKind::Char('-')
                 | TokenKind::Char('*')
+                | TokenKind::Char('|')
+                | TokenKind::RightArrow
                 | TokenKind::Op
                 | TokenKind::Operator
                 | TokenKind::Default
@@ -23,14 +95,19 @@ impl ExprParser {
             return self.fail("token cannot start a common expression");
         }
 
-        let mut lhs = self.parse_prefix(false)?;
+        let prefix_kind = self.peek_kind();
+        let mut lhs = self.parse_prefix(false)?.node;
+        let indirection_allowed = prefix_kind == TokenKind::Char('(')
+            || matches!(lhs, Node::ColumnRef(_) | Node::ParamRef(_));
+        let mut indirection_ends_in_star =
+            prefix_kind != TokenKind::Char('(') && node_ends_in_star_indirection(&lhs);
         loop {
             lhs = match self.peek_kind() {
-                TokenKind::Char('[') => {
+                TokenKind::Char('[') if indirection_allowed && !indirection_ends_in_star => {
                     let index = self.parse_indirection_index()?;
                     append_indirection(lhs, index)
                 }
-                TokenKind::Char('.') => {
+                TokenKind::Char('.') if indirection_allowed && !indirection_ends_in_star => {
                     self.advance();
                     let item = if self.consume(TokenKind::Char('*')) {
                         Node::AStar(AStar {
@@ -42,6 +119,7 @@ impl ExprParser {
                             .or_else(|| self.fail("expected a field name after '.'"))?;
                         make_string_node(name)
                     };
+                    indirection_ends_in_star = matches!(item, Node::AStar(_));
                     append_indirection(lhs, item)
                 }
                 _ => break,
@@ -50,67 +128,16 @@ impl ExprParser {
         Some(lhs)
     }
 
-    pub(super) fn parse_prefix(&mut self, restricted: bool) -> Option<Node> {
+    pub(super) fn parse_prefix(&mut self, restricted: bool) -> Option<PrefixExpression> {
         if self.at_completion() {
+            self.record_completion_expression_start_tokens(COMMON_EXPRESSION_START_TOKENS);
             self.record_completion_expression_start_tokens(&[
                 TokenKind::Char('+'),
                 TokenKind::Char('-'),
+                TokenKind::RightArrow,
+                TokenKind::Char('|'),
                 TokenKind::Op,
                 TokenKind::Operator,
-                TokenKind::Exists,
-                TokenKind::Array,
-                TokenKind::Case,
-                TokenKind::Grouping,
-                TokenKind::Collation,
-                TokenKind::Cast,
-                TokenKind::Treat,
-                TokenKind::Extract,
-                TokenKind::Normalize,
-                TokenKind::Position,
-                TokenKind::Overlay,
-                TokenKind::Substring,
-                TokenKind::Trim,
-                TokenKind::Xmlexists,
-                TokenKind::SystemUser,
-                TokenKind::CurrentDate,
-                TokenKind::CurrentTime,
-                TokenKind::CurrentTimestamp,
-                TokenKind::Localtime,
-                TokenKind::Localtimestamp,
-                TokenKind::CurrentRole,
-                TokenKind::CurrentUser,
-                TokenKind::User,
-                TokenKind::SessionUser,
-                TokenKind::CurrentCatalog,
-                TokenKind::CurrentSchema,
-                TokenKind::Xmlconcat,
-                TokenKind::Xmlelement,
-                TokenKind::Xmlforest,
-                TokenKind::Xmlparse,
-                TokenKind::Xmlpi,
-                TokenKind::Xmlroot,
-                TokenKind::Xmlserialize,
-                TokenKind::Json,
-                TokenKind::JsonObject,
-                TokenKind::JsonArray,
-                TokenKind::JsonScalar,
-                TokenKind::JsonSerialize,
-                TokenKind::JsonQuery,
-                TokenKind::JsonExists,
-                TokenKind::JsonValue,
-                TokenKind::JsonObjectagg,
-                TokenKind::JsonArrayagg,
-                TokenKind::MergeAction,
-                TokenKind::Row,
-                TokenKind::Char('('),
-                TokenKind::Char('*'),
-                TokenKind::Coalesce,
-                TokenKind::Greatest,
-                TokenKind::Least,
-                TokenKind::Nullif,
-                TokenKind::NullP,
-                TokenKind::TrueP,
-                TokenKind::FalseP,
             ]);
             if !restricted {
                 self.record_completion_expression_start_tokens(&[
@@ -121,12 +148,18 @@ impl ExprParser {
             self.record_completion_slot(completion::GrammarSlot::Column);
             self.record_completion_slot(completion::GrammarSlot::Function);
             if let Some(hole) = self.recover_completion_hole() {
-                return token_to_leaf(&hole);
+                return token_to_leaf(&hole).map(|node| PrefixExpression {
+                    node,
+                    is_row_syntax: false,
+                });
             }
             return self.fail("completion point at expression start");
         }
         if let Some(constant) = self.try_parse_typed_constant() {
-            return Some(constant);
+            return Some(PrefixExpression {
+                node: constant,
+                is_row_syntax: false,
+            });
         }
         let token = self.peek().clone();
         if token.kind == TokenKind::Collation && self.peek_kind_n(1) == TokenKind::Completion {
@@ -134,7 +167,8 @@ impl ExprParser {
             self.record_completion_tokens(&[TokenKind::For]);
             return self.fail("COLLATION requires FOR");
         }
-        match token.kind {
+        let mut is_row_syntax = false;
+        let node = match token.kind {
             TokenKind::Not => {
                 if restricted {
                     return self.fail("NOT is not allowed in a restricted expression");
@@ -164,12 +198,12 @@ impl ExprParser {
                 let rhs = self.parse_expr_mode(UMINUS_BINDING_POWER, restricted)?;
                 Some(negate_node(rhs, location))
             }
-            TokenKind::Op => {
+            TokenKind::RightArrow | TokenKind::Char('|') | TokenKind::Op => {
                 let token = self.advance().clone();
                 let rhs = self.parse_expr_mode(41, restricted)?;
                 Some(make_aexpr(
                     AExprKind::Op,
-                    vec![token_name(&token)?],
+                    vec![token_name(&token).unwrap_or_else(|| token_text(&token))],
                     None,
                     Some(rhs),
                     token.location(),
@@ -285,6 +319,7 @@ impl ExprParser {
             | TokenKind::JsonArrayagg => self.parse_json_expression(),
             TokenKind::MergeAction => self.parse_merge_support_func(),
             TokenKind::Row => {
+                is_row_syntax = true;
                 let location = self.advance().location();
                 self.expect(TokenKind::Char('('))?;
                 let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
@@ -297,12 +332,10 @@ impl ExprParser {
                     ..RowExpr::default()
                 }))
             }
-            TokenKind::Char('(') => self.parse_parenthesized_expr(),
-            TokenKind::Char('*') => {
-                self.advance();
-                Some(Node::AStar(AStar {
-                    node_tag: NodeTag::AStar,
-                }))
+            TokenKind::Char('(') => {
+                let (node, row_syntax) = self.parse_parenthesized_expr()?;
+                is_row_syntax = row_syntax;
+                Some(node)
             }
             TokenKind::Coalesce => self.parse_keyword_call_as_coalesce(),
             TokenKind::Greatest | TokenKind::Least => self.parse_keyword_call_as_minmax(),
@@ -330,6 +363,10 @@ impl ExprParser {
                     self.parse_name_or_func()
                 }
             }
-        }
+        }?;
+        Some(PrefixExpression {
+            node,
+            is_row_syntax,
+        })
     }
 }

@@ -60,6 +60,11 @@ impl Parser {
             } else {
                 split_target_alias(tokens)
             };
+            let standalone_star =
+                matches!(expr_tokens.as_slice(), [token] if token.kind == TokenKind::Char('*'));
+            if standalone_star && name.is_some() {
+                return Err(self.error_here("an unqualified '*' cannot have an output alias"));
+            }
             if self.at_completion()
                 && !expr_tokens.is_empty()
                 && parse_expression_tokens(expr_tokens.clone()).is_ok()
@@ -72,17 +77,20 @@ impl Parser {
                 &extend_stops(stops, TokenKind::Char(',')),
                 false,
             );
+            if standalone_star {
+                self.record_completion_follow_tokens(&extend_stops(stops, TokenKind::Char(',')));
+            }
             self.append_completion_marker(&mut expr_tokens);
-            let target_value = match parse_expression_tokens_with_completion(
-                expr_tokens,
-                self.completion.clone(),
-            )? {
-                Node::AStar(star) => Node::ColumnRef(ColumnRef {
+            let target_value = if standalone_star {
+                Node::ColumnRef(ColumnRef {
                     node_tag: NodeTag::ColumnRef,
-                    fields: vec![Node::AStar(star)],
+                    fields: vec![Node::AStar(AStar {
+                        node_tag: NodeTag::AStar,
+                    })],
                     location: location as ParseLoc,
-                }),
-                expression => expression,
+                })
+            } else {
+                parse_expression_tokens_with_completion(expr_tokens, self.completion.clone())?
             };
             items.push(Node::ResTarget(ResTarget {
                 node_tag: NodeTag::ResTarget,

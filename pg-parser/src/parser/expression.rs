@@ -40,9 +40,9 @@ const INDIRECTION_BINDING_POWER: u8 = 90;
 
 #[derive(Default)]
 struct InfixChainState {
-    saw_is_predicate: bool,
+    saw_binary_is_predicate: bool,
     saw_comparison: bool,
-    saw_special_predicate: bool,
+    saw_nonassociative_predicate: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -149,6 +149,27 @@ impl ExprParser {
         }
     }
 
+    /// Takes the contents up to the current parenthesis' closing token when
+    /// they form a `select_with_parens` fragment.  PostgreSQL allows the
+    /// SELECT to be wrapped in additional pairs of parentheses.
+    pub(super) fn take_parenthesized_select_tokens(&mut self) -> Option<Vec<Token>> {
+        if self.starts_statement() {
+            return Some(self.take_until_balanced(TokenKind::Char(')')));
+        }
+        if !self.at(TokenKind::Char('(')) {
+            return None;
+        }
+
+        let start = self.pos;
+        let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        if parse_select_statement_tokens(tokens.clone()).is_ok() {
+            Some(tokens)
+        } else {
+            self.pos = start;
+            None
+        }
+    }
+
     pub(super) fn parse_expr(&mut self, min_bp: u8) -> Option<Node> {
         self.parse_expr_mode(min_bp, false)
     }
@@ -159,13 +180,29 @@ impl ExprParser {
 
     pub(super) fn parse_expr_mode(&mut self, min_bp: u8, restricted: bool) -> Option<Node> {
         let expression_start = self.location();
-        let mut lhs = self.parse_prefix(restricted)?;
+        let prefix_kind = self.peek_kind();
+        let prefix = self.parse_prefix(restricted)?;
+        let mut lhs = prefix.node;
+        let mut parsed_overlaps = false;
+        if !restricted && prefix.is_row_syntax {
+            self.record_completion_expression_continuation_tokens(&[TokenKind::Overlaps]);
+            if self.at(TokenKind::Overlaps) {
+                let location = self.advance().location();
+                lhs = self.parse_overlaps(lhs, location)?;
+                parsed_overlaps = true;
+            }
+        }
+        let mut indirection_allowed = !parsed_overlaps
+            && (prefix_kind == TokenKind::Char('(')
+                || matches!(lhs, Node::ColumnRef(_) | Node::ParamRef(_)));
+        let mut indirection_ends_in_star =
+            prefix_kind != TokenKind::Char('(') && node_ends_in_star_indirection(&lhs);
         let mut chain = InfixChainState::default();
 
         loop {
             if !restricted
                 && min_bp <= PREDICATE_BINDING_POWER
-                && !chain.saw_special_predicate
+                && !chain.saw_nonassociative_predicate
                 && self.at(TokenKind::Not)
                 && self.peek_kind_n(1) == TokenKind::Completion
             {
@@ -174,7 +211,12 @@ impl ExprParser {
                 return self.fail("NOT requires IN, LIKE, ILIKE, SIMILAR, or BETWEEN");
             }
             if self.at_completion() {
-                self.record_completion_infix(min_bp, restricted, &chain);
+                self.record_completion_infix(
+                    min_bp,
+                    restricted,
+                    &chain,
+                    indirection_allowed && !indirection_ends_in_star,
+                );
                 break;
             }
 
@@ -207,19 +249,27 @@ impl ExprParser {
                     restricted,
                     location,
                 )?;
+                indirection_allowed = false;
                 continue;
             }
 
-            lhs = match self.peek_kind() {
+            let infix_kind = self.peek_kind();
+            lhs = match infix_kind {
                 TokenKind::Char('[') => {
-                    if INDIRECTION_BINDING_POWER < min_bp {
+                    if !indirection_allowed
+                        || indirection_ends_in_star
+                        || INDIRECTION_BINDING_POWER < min_bp
+                    {
                         break;
                     }
                     let index = self.parse_indirection_index()?;
                     append_indirection(lhs, index)
                 }
                 TokenKind::Char('.') => {
-                    if INDIRECTION_BINDING_POWER < min_bp {
+                    if !indirection_allowed
+                        || indirection_ends_in_star
+                        || INDIRECTION_BINDING_POWER < min_bp
+                    {
                         break;
                     }
                     self.advance();
@@ -233,6 +283,7 @@ impl ExprParser {
                             .or_else(|| self.fail("expected a field name after '.'"))?;
                         make_string_node(name)
                     };
+                    indirection_ends_in_star = matches!(item, Node::AStar(_));
                     append_indirection(lhs, item)
                 }
                 TokenKind::TypeCast => {
@@ -269,10 +320,9 @@ impl ExprParser {
                     if restricted || IS_BINDING_POWER < min_bp {
                         break;
                     }
-                    if chain.saw_is_predicate {
+                    if chain.saw_binary_is_predicate {
                         return self.fail("cannot chain IS predicates");
                     }
-                    chain.saw_is_predicate = true;
                     let location = self.advance().location();
                     Node::NullTest(NullTest {
                         xpr: Expr::new(NodeTag::NullTest),
@@ -326,13 +376,21 @@ impl ExprParser {
                     make_bool_expr(BoolExprType::AndExpr, lhs, rhs, location)
                 }
                 TokenKind::Not if NEGATED_PREDICATE_TOKENS.contains(&self.peek_kind_n(1)) => {
+                    let op = self.peek_kind_n(1);
+                    let quantified = matches!(op, TokenKind::Like | TokenKind::Ilike)
+                        && matches!(
+                            self.peek_kind_n(2),
+                            TokenKind::Any | TokenKind::Some | TokenKind::All
+                        );
                     if restricted || PREDICATE_BINDING_POWER < min_bp {
                         break;
                     }
-                    if chain.saw_special_predicate {
+                    if chain.saw_nonassociative_predicate {
                         return self.fail("cannot chain non-associative predicates");
                     }
-                    chain.saw_special_predicate = true;
+                    if !quantified && op != TokenKind::InP {
+                        chain.saw_nonassociative_predicate = true;
+                    }
                     let location = self.advance().location();
                     let op = self.advance().kind;
                     self.parse_special_infix(lhs, op, true, location)?
@@ -342,13 +400,21 @@ impl ExprParser {
                 | TokenKind::Ilike
                 | TokenKind::Similar
                 | TokenKind::Between => {
+                    let op = self.peek_kind();
+                    let quantified = matches!(op, TokenKind::Like | TokenKind::Ilike)
+                        && matches!(
+                            self.peek_kind_n(1),
+                            TokenKind::Any | TokenKind::Some | TokenKind::All
+                        );
                     if restricted || PREDICATE_BINDING_POWER < min_bp {
                         break;
                     }
-                    if chain.saw_special_predicate {
+                    if chain.saw_nonassociative_predicate {
                         return self.fail("cannot chain non-associative predicates");
                     }
-                    chain.saw_special_predicate = true;
+                    if !quantified && op != TokenKind::InP {
+                        chain.saw_nonassociative_predicate = true;
+                    }
                     let token = self.advance().clone();
                     self.parse_special_infix(lhs, token.kind, false, token.location())?
                 }
@@ -356,23 +422,16 @@ impl ExprParser {
                     if IS_BINDING_POWER < min_bp {
                         break;
                     }
-                    if chain.saw_is_predicate {
+                    if chain.saw_binary_is_predicate {
                         return self.fail("cannot chain IS predicates");
                     }
-                    chain.saw_is_predicate = true;
                     let location = self.advance().location();
+                    let binary = self.at(TokenKind::Distinct)
+                        || (self.at(TokenKind::Not) && self.peek_kind_n(1) == TokenKind::Distinct);
+                    if binary {
+                        chain.saw_binary_is_predicate = true;
+                    }
                     self.parse_is_expr(lhs, location, expression_start, restricted)?
-                }
-                TokenKind::Overlaps => {
-                    if restricted || PREDICATE_BINDING_POWER < min_bp {
-                        break;
-                    }
-                    if chain.saw_special_predicate {
-                        return self.fail("cannot chain non-associative predicates");
-                    }
-                    chain.saw_special_predicate = true;
-                    let location = self.advance().location();
-                    self.parse_overlaps(lhs, restricted, location)?
                 }
                 TokenKind::RightArrow | TokenKind::Char('|') | TokenKind::Op => {
                     if GENERIC_OPERATOR_BINDING_POWER < min_bp {
@@ -404,13 +463,22 @@ impl ExprParser {
                 }
                 _ => break,
             };
+            if !matches!(infix_kind, TokenKind::Char('[') | TokenKind::Char('.')) {
+                indirection_allowed = false;
+            }
         }
 
         Some(lhs)
     }
 
-    fn record_completion_infix(&self, min_bp: u8, restricted: bool, chain: &InfixChainState) {
-        if min_bp <= INDIRECTION_BINDING_POWER {
+    fn record_completion_infix(
+        &self,
+        min_bp: u8,
+        restricted: bool,
+        chain: &InfixChainState,
+        indirection_allowed: bool,
+    ) {
+        if indirection_allowed && min_bp <= INDIRECTION_BINDING_POWER {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Char('['),
                 TokenKind::Char('.'),
@@ -422,7 +490,7 @@ impl ExprParser {
                 self.record_completion_expression_continuation_tokens(&[TokenKind::Collate]);
             }
         }
-        if !restricted && min_bp <= IS_BINDING_POWER && !chain.saw_is_predicate {
+        if !restricted && min_bp <= IS_BINDING_POWER && !chain.saw_binary_is_predicate {
             self.record_completion_expression_continuation_tokens(&[
                 TokenKind::Isnull,
                 TokenKind::Notnull,
@@ -455,11 +523,8 @@ impl ExprParser {
                 TokenKind::Operator,
             ]);
         }
-        if !restricted && min_bp <= PREDICATE_BINDING_POWER && !chain.saw_special_predicate {
-            self.record_completion_expression_continuation_tokens(&[
-                TokenKind::Not,
-                TokenKind::Overlaps,
-            ]);
+        if !restricted && min_bp <= PREDICATE_BINDING_POWER && !chain.saw_nonassociative_predicate {
+            self.record_completion_expression_continuation_tokens(&[TokenKind::Not]);
             self.record_completion_expression_continuation_tokens(NEGATED_PREDICATE_TOKENS);
         }
         if min_bp <= COMPARISON_BINDING_POWER && !chain.saw_comparison {
@@ -472,7 +537,7 @@ impl ExprParser {
                 TokenKind::NotEquals,
             ]);
         }
-        if min_bp <= IS_BINDING_POWER && !chain.saw_is_predicate {
+        if min_bp <= IS_BINDING_POWER && !chain.saw_binary_is_predicate {
             self.record_completion_expression_continuation_tokens(&[TokenKind::Is]);
         }
         if !restricted && min_bp <= AND_BINDING_POWER {
