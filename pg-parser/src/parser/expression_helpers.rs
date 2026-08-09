@@ -67,7 +67,6 @@ pub(super) fn make_aexpr_with_name(
     location: usize,
 ) -> Node {
     Node::AExpr(AExpr {
-        node_tag: NodeTag::AExpr,
         kind,
         name,
         lexpr: lexpr.map(Box::new),
@@ -84,7 +83,6 @@ pub(super) fn make_bool_expr(kind: BoolExprType, lhs: Node, rhs: Node, location:
             Node::BoolExpr(expression)
         }
         lhs => Node::BoolExpr(BoolExpr {
-            xpr: Expr::new(NodeTag::BoolExpr),
             boolop: kind,
             args: vec![lhs, rhs],
             location: location as ParseLoc,
@@ -94,7 +92,6 @@ pub(super) fn make_bool_expr(kind: BoolExprType, lhs: Node, rhs: Node, location:
 
 pub(super) fn make_not_expr(arg: Node, location: usize) -> Node {
     Node::BoolExpr(BoolExpr {
-        xpr: Expr::new(NodeTag::BoolExpr),
         boolop: BoolExprType::NotExpr,
         args: vec![arg],
         location: location as ParseLoc,
@@ -142,7 +139,6 @@ pub(super) fn append_indirection(arg: Node, item: Node) -> Node {
             Node::AIndirection(indirection)
         }
         arg => Node::AIndirection(AIndirection {
-            node_tag: NodeTag::AIndirection,
             arg: Some(Box::new(arg)),
             indirection: vec![item],
         }),
@@ -410,7 +406,6 @@ pub(super) fn parse_aexpr_const_tokens(tokens: Vec<Token>) -> PResult<Node> {
         let value = token_name(string_token)
             .ok_or_else(|| ParseError::ranged(string_token.range, "invalid string constant"))?;
         return Ok(Node::TypeCast(TypeCast {
-            node_tag: NodeTag::TypeCast,
             arg: Some(Box::new(Node::AConst(AConst::string(
                 value,
                 string_token.location() as ParseLoc,

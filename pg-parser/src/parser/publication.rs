@@ -44,7 +44,6 @@ impl Parser {
             Vec::new()
         };
         Ok(Node::CreateSubscriptionStmt(CreateSubscriptionStmt {
-            node_tag: NodeTag::CreateSubscriptionStmt,
             subname,
             servername,
             conninfo,
@@ -114,7 +113,6 @@ impl Parser {
             (objects, all_tables, all_sequences, Vec::new())
         };
         Ok(Node::AlterPublicationStmt(AlterPublicationStmt {
-            node_tag: NodeTag::AlterPublicationStmt,
             pubname,
             options,
             pubobjects,
@@ -147,7 +145,6 @@ impl Parser {
                 .ok_or_else(|| self.error_here("ALTER SUBSCRIPTION requires a name"))?,
         );
         let mut stmt = AlterSubscriptionStmt {
-            node_tag: NodeTag::AlterSubscriptionStmt,
             subname,
             ..AlterSubscriptionStmt::default()
         };
@@ -267,7 +264,6 @@ impl Parser {
         let behavior = self.parse_drop_behavior();
         self.expect_statement_end()?;
         Ok(Node::DropSubscriptionStmt(DropSubscriptionStmt {
-            node_tag: NodeTag::DropSubscriptionStmt,
             subname,
             missing_ok,
             behavior,
@@ -308,7 +304,6 @@ impl Parser {
             Vec::new()
         };
         Ok(Node::CreatePublicationStmt(CreatePublicationStmt {
-            node_tag: NodeTag::CreatePublicationStmt,
             pubname,
             options,
             pubobjects,
@@ -351,10 +346,8 @@ impl Parser {
                                     completion::GrammarSlot::Table,
                                 )?;
                                 tables.push(Node::PublicationObjSpec(PublicationObjSpec {
-                                    node_tag: NodeTag::PublicationObjSpec,
                                     pubobjtype: PublicationObjSpecType::ExceptTable,
                                     pubtable: Some(Box::new(PublicationTable {
-                                        node_tag: NodeTag::PublicationTable,
                                         relation: Some(Box::new(relation)),
                                         except: true,
                                         ..PublicationTable::default()
@@ -405,7 +398,6 @@ impl Parser {
                     };
                     continuation = Some(PublicationObjSpecType::TablesInSchema);
                     objects.push(Node::PublicationObjSpec(PublicationObjSpec {
-                        node_tag: NodeTag::PublicationObjSpec,
                         pubobjtype: if current {
                             PublicationObjSpecType::TablesInCurSchema
                         } else {
@@ -440,7 +432,6 @@ impl Parser {
                             })?)
                         };
                         objects.push(Node::PublicationObjSpec(PublicationObjSpec {
-                            node_tag: NodeTag::PublicationObjSpec,
                             pubobjtype: if current {
                                 PublicationObjSpecType::TablesInCurSchema
                             } else {
@@ -469,10 +460,8 @@ impl Parser {
                     };
                     continuation = Some(PublicationObjSpecType::Table);
                     objects.push(Node::PublicationObjSpec(PublicationObjSpec {
-                        node_tag: NodeTag::PublicationObjSpec,
                         pubobjtype: PublicationObjSpecType::Table,
                         pubtable: Some(Box::new(PublicationTable {
-                            node_tag: NodeTag::PublicationTable,
                             relation: Some(Box::new(relation)),
                             where_clause,
                             columns,

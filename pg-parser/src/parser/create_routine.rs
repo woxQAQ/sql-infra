@@ -70,7 +70,6 @@ impl Parser {
                         })?
                     } else {
                         TypeName {
-                            node_tag: NodeTag::TypeName,
                             names: system_type_names("record"),
                             ..TypeName::default()
                         }
@@ -134,7 +133,6 @@ impl Parser {
                     options.push(make_def_elem(
                         "as",
                         Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: bodies,
                             ..AArrayExpr::default()
                         })),
@@ -198,7 +196,6 @@ impl Parser {
                     options.push(make_def_elem(
                         "support",
                         Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: name,
                             ..AArrayExpr::default()
                         })),
@@ -304,7 +301,6 @@ impl Parser {
             }
         }
         Ok(Node::CreateFunctionStmt(CreateFunctionStmt {
-            node_tag: NodeTag::CreateFunctionStmt,
             is_procedure: false,
             replace,
             funcname,
@@ -365,7 +361,6 @@ impl Parser {
                     options.push(make_def_elem(
                         "as",
                         Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: bodies,
                             ..AArrayExpr::default()
                         })),
@@ -434,7 +429,6 @@ impl Parser {
             }
         }
         Ok(Node::CreateFunctionStmt(CreateFunctionStmt {
-            node_tag: NodeTag::CreateFunctionStmt,
             is_procedure: true,
             replace,
             funcname,
@@ -508,7 +502,6 @@ impl Parser {
                     ParseError::syntax_exit(location, "expected a table function column type")
                 })?;
             columns.push(Node::FunctionParameter(FunctionParameter {
-                node_tag: NodeTag::FunctionParameter,
                 name: Some(name),
                 arg_type: Some(arg_type),
                 mode: FunctionParameterMode::Table,

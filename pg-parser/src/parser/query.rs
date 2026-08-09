@@ -91,7 +91,6 @@ impl Parser {
             let search_clause = self.parse_cte_search_clause()?;
             let cycle_clause = self.parse_cte_cycle_clause()?;
             ctes.push(Node::CommonTableExpr(CommonTableExpr {
-                node_tag: NodeTag::CommonTableExpr,
                 ctename: Some(name),
                 aliascolnames,
                 ctematerialized,
@@ -107,7 +106,6 @@ impl Parser {
         }
 
         Ok(WithClause {
-            node_tag: NodeTag::WithClause,
             ctes,
             recursive,
             location: location as ParseLoc,
@@ -135,7 +133,6 @@ impl Parser {
                 .ok_or_else(|| self.error_here("SEARCH SET requires a column name"))?,
         );
         Ok(Some(Box::new(CteSearchClause {
-            node_tag: NodeTag::CteSearchClause,
             search_col_list,
             search_breadth_first,
             search_seq_column,
@@ -172,13 +169,11 @@ impl Parser {
         } else {
             (
                 Some(Box::new(Node::AConst(AConst {
-                    node_tag: NodeTag::AConst,
                     val: ValUnion::Boolean(Boolean::new(true)),
                     location: -1,
                     ..AConst::default()
                 }))),
                 Some(Box::new(Node::AConst(AConst {
-                    node_tag: NodeTag::AConst,
                     val: ValUnion::Boolean(Boolean::new(false)),
                     location: -1,
                     ..AConst::default()
@@ -191,7 +186,6 @@ impl Parser {
                 .ok_or_else(|| self.error_here("CYCLE USING requires a path column name"))?,
         );
         Ok(Some(Box::new(CteCycleClause {
-            node_tag: NodeTag::CteCycleClause,
             cycle_col_list,
             cycle_mark_column,
             cycle_mark_value,
@@ -282,7 +276,6 @@ impl Parser {
             let rhs = self.parse_select_set_expr(None, precedence + 1)?;
             let outer_with = lhs.with_clause.take();
             lhs = SelectStmt {
-                node_tag: NodeTag::SelectStmt,
                 op,
                 all,
                 larg: Some(Box::new(lhs)),
@@ -347,7 +340,6 @@ impl Parser {
             };
         }
         let mut stmt = SelectStmt {
-            node_tag: NodeTag::SelectStmt,
             with_clause: with_clause.map(Box::new),
             ..SelectStmt::default()
         };
@@ -365,12 +357,8 @@ impl Parser {
                 self.advance();
                 let range = self.parse_relation_expr()?;
                 stmt.target_list.push(Node::ResTarget(ResTarget {
-                    node_tag: NodeTag::ResTarget,
                     val: Some(Box::new(Node::ColumnRef(ColumnRef {
-                        node_tag: NodeTag::ColumnRef,
-                        fields: vec![Node::AStar(AStar {
-                            node_tag: NodeTag::AStar,
-                        })],
+                        fields: vec![Node::AStar(AStar {})],
                         location: -1,
                     }))),
                     location: -1,
@@ -587,7 +575,6 @@ impl Parser {
             .ok_or_else(|| self.error_here("SELECT INTO requires a relation name"))?;
         relation.relpersistence = relpersistence;
         Ok(IntoClause {
-            node_tag: NodeTag::IntoClause,
             rel: Some(Box::new(relation)),
             ..IntoClause::default()
         })

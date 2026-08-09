@@ -64,7 +64,6 @@ impl Parser {
         }
         let returning_clause = self.parse_returning_clause()?;
         Ok(Node::MergeStmt(MergeStmt {
-            node_tag: NodeTag::MergeStmt,
             relation,
             source_relation,
             join_condition: Some(join_condition),

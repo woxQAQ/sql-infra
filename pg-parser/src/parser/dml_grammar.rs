@@ -21,7 +21,6 @@ impl Parser {
                     .ok_or_else(|| self.error_here("CURRENT OF requires a cursor name"))?,
             );
             return Ok(Some(Box::new(Node::CurrentOfExpr(CurrentOfExpr {
-                xpr: Expr::new(NodeTag::CurrentOfExpr),
                 cursor_name,
                 ..CurrentOfExpr::default()
             }))));
@@ -50,7 +49,6 @@ impl Parser {
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("expected a returning option alias"))?;
                 options.push(Node::ReturningOption(ReturningOption {
-                    node_tag: NodeTag::ReturningOption,
                     option,
                     value: Some(value),
                     location: location as ParseLoc,
@@ -66,11 +64,7 @@ impl Parser {
         if exprs.is_empty() {
             return Err(self.error_here("RETURNING requires at least one expression"));
         }
-        Ok(Some(Box::new(ReturningClause {
-            node_tag: NodeTag::ReturningClause,
-            options,
-            exprs,
-        })))
+        Ok(Some(Box::new(ReturningClause { options, exprs })))
     }
 
     pub(super) fn parse_for_portion_of_clause(
@@ -92,7 +86,6 @@ impl Parser {
             let target = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
             self.expect(TokenKind::Char(')'))?;
             return Ok(Some(Box::new(ForPortionOfClause {
-                node_tag: NodeTag::ForPortionOfClause,
                 range_name: Some(range_name),
                 location: location as ParseLoc,
                 target_location: target_location as ParseLoc,
@@ -113,7 +106,6 @@ impl Parser {
             TokenKind::Eof,
         ])?;
         Ok(Some(Box::new(ForPortionOfClause {
-            node_tag: NodeTag::ForPortionOfClause,
             range_name: Some(range_name),
             location: location as ParseLoc,
             target_location: target_location as ParseLoc,
@@ -157,7 +149,6 @@ impl Parser {
                 None
             };
             Some(Box::new(InferClause {
-                node_tag: NodeTag::InferClause,
                 index_elems,
                 where_clause,
                 location: infer_location as ParseLoc,
@@ -171,7 +162,6 @@ impl Parser {
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a constraint name"))?;
             Some(Box::new(InferClause {
-                node_tag: NodeTag::InferClause,
                 conname: Some(conname),
                 location: infer_location as ParseLoc,
                 ..InferClause::default()
@@ -246,7 +236,6 @@ impl Parser {
             }
         };
         Ok(Some(Box::new(OnConflictClause {
-            node_tag: NodeTag::OnConflictClause,
             action,
             infer,
             lock_strength,
@@ -281,11 +270,9 @@ impl Parser {
                 let ncolumns = names.len() as i32;
                 for (index, (name, indirection, location)) in names.into_iter().enumerate() {
                     targets.push(Node::ResTarget(ResTarget {
-                        node_tag: NodeTag::ResTarget,
                         name: Some(name),
                         indirection,
                         val: Some(Box::new(Node::MultiAssignRef(MultiAssignRef {
-                            node_tag: NodeTag::MultiAssignRef,
                             source: Some(source.clone()),
                             colno: index as i32 + 1,
                             ncolumns,
@@ -303,7 +290,6 @@ impl Parser {
                 let assignment_value =
                     self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
                 targets.push(Node::ResTarget(ResTarget {
-                    node_tag: NodeTag::ResTarget,
                     name: Some(name),
                     indirection,
                     val: Some(assignment_value),
@@ -369,7 +355,6 @@ impl Parser {
                 };
                 self.expect(TokenKind::Char(']'))?;
                 indirection.push(Node::AIndices(AIndices {
-                    node_tag: NodeTag::AIndices,
                     is_slice,
                     lidx,
                     uidx,
@@ -476,7 +461,6 @@ impl Parser {
                 return Err(self.error_here("MERGE action is not valid for this match kind"));
             }
             clauses.push(Node::MergeWhenClause(MergeWhenClause {
-                node_tag: NodeTag::MergeWhenClause,
                 match_kind,
                 command_type,
                 override_,

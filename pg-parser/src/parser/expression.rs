@@ -274,9 +274,7 @@ impl ExprParser {
                     }
                     self.advance();
                     let item = if self.consume(TokenKind::Char('*')) {
-                        Node::AStar(AStar {
-                            node_tag: NodeTag::AStar,
-                        })
+                        Node::AStar(AStar {})
                     } else {
                         let name = self
                             .consume_column_label()
@@ -293,7 +291,6 @@ impl ExprParser {
                     let location = self.advance().location();
                     let type_name = Some(Box::new(self.parse_cast_type_name()?));
                     Node::TypeCast(TypeCast {
-                        node_tag: NodeTag::TypeCast,
                         arg: Some(Box::new(lhs)),
                         type_name,
                         location: location as ParseLoc,
@@ -310,7 +307,6 @@ impl ExprParser {
                         false,
                     )?;
                     Node::CollateClause(CollateClause {
-                        node_tag: NodeTag::CollateClause,
                         arg: Some(Box::new(lhs)),
                         collname,
                         location: location as ParseLoc,
@@ -325,7 +321,6 @@ impl ExprParser {
                     }
                     let location = self.advance().location();
                     Node::NullTest(NullTest {
-                        xpr: Expr::new(NodeTag::NullTest),
                         arg: Some(Box::new(lhs)),
                         nulltesttype: if kind == TokenKind::Isnull {
                             NullTestType::Null
@@ -351,7 +346,6 @@ impl ExprParser {
                         (vec![lhs], -1)
                     };
                     Node::FuncCall(FuncCall {
-                        node_tag: NodeTag::FuncCall,
                         funcname: system_type_names("timezone"),
                         args,
                         funcformat: CoercionForm::SqlSyntax,

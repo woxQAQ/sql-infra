@@ -359,7 +359,6 @@ impl Parser {
                 0
             };
             let raw_statement = RawStmt {
-                node_tag: NodeTag::RawStmt,
                 stmt: Some(Box::new(statement)),
                 stmt_location: statement_start as ParseLoc,
                 stmt_len: raw_statement_length,

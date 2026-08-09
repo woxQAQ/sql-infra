@@ -62,7 +62,6 @@ impl Parser {
                 Vec::new()
             };
             return Ok(Node::DefineStmt(DefineStmt {
-                node_tag: NodeTag::DefineStmt,
                 kind: ObjectType::Type,
                 defnames: type_name,
                 definition,
@@ -88,20 +87,12 @@ impl Parser {
                     }
                 }
                 self.expect(TokenKind::Char(')'))?;
-                Ok(Node::CreateEnumStmt(CreateEnumStmt {
-                    node_tag: NodeTag::CreateEnumStmt,
-                    type_name,
-                    vals,
-                }))
+                Ok(Node::CreateEnumStmt(CreateEnumStmt { type_name, vals }))
             }
             TokenKind::Range => {
                 self.advance();
                 let params = self.parse_parenthesized_definition()?;
-                Ok(Node::CreateRangeStmt(CreateRangeStmt {
-                    node_tag: NodeTag::CreateRangeStmt,
-                    type_name,
-                    params,
-                }))
+                Ok(Node::CreateRangeStmt(CreateRangeStmt { type_name, params }))
             }
             TokenKind::Char('(') => {
                 self.advance();
@@ -120,7 +111,6 @@ impl Parser {
                 }
                 self.expect(TokenKind::Char(')'))?;
                 Ok(Node::CompositeTypeStmt(CompositeTypeStmt {
-                    node_tag: NodeTag::CompositeTypeStmt,
                     typevar: Some(Box::new(range_var_from_parts(
                         list_to_names(&type_name),
                         type_location,
@@ -158,11 +148,7 @@ impl Parser {
         self.record_completion_tokens(&[TokenKind::Schema, TokenKind::Char('(')]);
         let options = self.parse_operator_definition_list(ObjectType::Type)?;
         self.expect_statement_end()?;
-        Ok(Node::AlterTypeStmt(AlterTypeStmt {
-            node_tag: NodeTag::AlterTypeStmt,
-            type_name,
-            options,
-        }))
+        Ok(Node::AlterTypeStmt(AlterTypeStmt { type_name, options }))
     }
 
     // PostgreSQL 18 Synopsis subset — enum values
@@ -182,7 +168,6 @@ impl Parser {
             TokenKind::Eof,
         ]);
         let mut stmt = AlterEnumStmt {
-            node_tag: NodeTag::AlterEnumStmt,
             type_name,
             ..AlterEnumStmt::default()
         };
@@ -290,7 +275,6 @@ impl Parser {
         }
         self.expect_statement_end()?;
         Ok(Node::AlterTableStmt(AlterTableStmt {
-            node_tag: NodeTag::AlterTableStmt,
             relation,
             cmds,
             objtype: ObjectType::Type,
@@ -300,7 +284,6 @@ impl Parser {
 
     fn parse_alter_composite_type_cmd(&mut self) -> PResult<AlterTableCmd> {
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
         match self.peek_kind() {
@@ -368,7 +351,6 @@ impl Parser {
                         return Err(self.error_here("COLLATE requires a collation name"));
                     }
                     Some(Box::new(CollateClause {
-                        node_tag: NodeTag::CollateClause,
                         collname,
                         location: location as ParseLoc,
                         ..CollateClause::default()
@@ -377,7 +359,6 @@ impl Parser {
                     None
                 };
                 cmd.def = Some(Box::new(Node::ColumnDef(ColumnDef {
-                    node_tag: NodeTag::ColumnDef,
                     type_name,
                     coll_clause,
                     location: attribute_location as ParseLoc,

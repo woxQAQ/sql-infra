@@ -1,5 +1,4 @@
 use pg_parser::Node;
-use pg_parser::NodeTag;
 use pg_parser::parse_plpgsql_assignment;
 use pg_parser::parse_plpgsql_expression;
 use pg_parser::parse_type_name;
@@ -12,19 +11,16 @@ fn plpgsql_assignment_mode_builds_complete_raw_statement() {
     )
     .expect("parse PL/pgSQL assignment");
 
-    assert_eq!(raw.node_tag, NodeTag::RawStmt);
     assert_eq!(raw.stmt_location, 0);
     assert_eq!(raw.stmt_len, 0);
     let Some(Node::PlAssignStmt(stmt)) = raw.stmt.as_deref() else {
         panic!("expected PlAssignStmt");
     };
-    assert_eq!(stmt.node_tag, NodeTag::PlAssignStmt);
     assert_eq!(stmt.name.as_deref(), Some("record"));
     assert_eq!(stmt.nnames, 2);
     assert_eq!(stmt.location, 0);
     assert_eq!(stmt.indirection.len(), 3);
     let select = stmt.val.as_deref().expect("assignment value SelectStmt");
-    assert_eq!(select.node_tag, NodeTag::SelectStmt);
     assert_eq!(select.distinct_clause.len(), 1);
     assert_eq!(select.target_list.len(), 1);
     assert_eq!(select.from_clause.len(), 1);

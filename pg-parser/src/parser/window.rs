@@ -47,7 +47,6 @@ impl Parser {
         self.record_completion_phrase(&[TokenKind::Order, TokenKind::By]);
         self.record_completion_slot(completion::GrammarSlot::AnyName);
         let mut window = WindowDef {
-            node_tag: NodeTag::WindowDef,
             location: location as ParseLoc,
             frame_options: FRAMEOPTION_DEFAULTS,
             ..WindowDef::default()
@@ -243,7 +242,6 @@ impl Parser {
                 LockWaitPolicy::Block
             };
             clauses.push(Node::LockingClause(LockingClause {
-                node_tag: NodeTag::LockingClause,
                 locked_rels,
                 strength,
                 wait_policy,

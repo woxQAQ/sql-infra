@@ -172,10 +172,8 @@ impl Parser {
                         return Err(self.error_here("FOR ROLE/USER requires at least one role"));
                     }
                     options.push(Node::DefElem(DefElem {
-                        node_tag: NodeTag::DefElem,
                         defname: Some("roles".to_owned()),
                         arg: Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: roles,
                             ..AArrayExpr::default()
                         }))),
@@ -200,10 +198,8 @@ impl Parser {
                         return Err(self.error_here("IN SCHEMA requires at least one schema"));
                     }
                     options.push(Node::DefElem(DefElem {
-                        node_tag: NodeTag::DefElem,
                         defname: Some("schemas".to_owned()),
                         arg: Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: schemas,
                             ..AArrayExpr::default()
                         }))),
@@ -222,11 +218,7 @@ impl Parser {
             return Err(self.error_here("ALTER DEFAULT PRIVILEGES requires GRANT or REVOKE"));
         };
         Ok(Node::AlterDefaultPrivilegesStmt(
-            AlterDefaultPrivilegesStmt {
-                node_tag: NodeTag::AlterDefaultPrivilegesStmt,
-                options,
-                action,
-            },
+            AlterDefaultPrivilegesStmt { options, action },
         ))
     }
 
@@ -299,7 +291,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(GrantStmt {
-            node_tag: NodeTag::GrantStmt,
             is_grant,
             targtype: GrantTargetType::Defaults,
             objtype,
@@ -581,7 +572,6 @@ impl Parser {
             self.parse_drop_behavior()
         };
         Ok(Node::GrantStmt(GrantStmt {
-            node_tag: NodeTag::GrantStmt,
             is_grant: kind.is_grant(),
             targtype,
             objtype,
@@ -674,7 +664,6 @@ impl Parser {
             self.parse_drop_behavior()
         };
         Ok(Node::GrantRoleStmt(GrantRoleStmt {
-            node_tag: NodeTag::GrantRoleStmt,
             granted_roles,
             grantee_roles,
             is_grant: kind.is_grant(),
@@ -700,7 +689,6 @@ impl Parser {
                 Ok(Vec::new())
             } else {
                 Ok(vec![Node::AccessPriv(AccessPriv {
-                    node_tag: NodeTag::AccessPriv,
                     cols,
                     ..AccessPriv::default()
                 })])
@@ -737,7 +725,6 @@ impl Parser {
                 Vec::new()
             };
             privileges.push(Node::AccessPriv(AccessPriv {
-                node_tag: NodeTag::AccessPriv,
                 priv_name: Some(name),
                 cols,
             }));

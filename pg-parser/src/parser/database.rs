@@ -35,11 +35,7 @@ impl Parser {
         );
         self.consume(TokenKind::With);
         let options = self.parse_database_options()?;
-        Ok(Node::CreatedbStmt(CreatedbStmt {
-            node_tag: NodeTag::CreatedbStmt,
-            dbname,
-            options,
-        }))
+        Ok(Node::CreatedbStmt(CreatedbStmt { dbname, options }))
     }
 
     fn parse_database_options(&mut self) -> PResult<NodeList> {
@@ -84,7 +80,6 @@ impl Parser {
                 Some(Box::new(make_string_node(value)))
             };
             options.push(Node::DefElem(DefElem {
-                node_tag: NodeTag::DefElem,
                 defname: Some(name),
                 arg,
                 location: location as ParseLoc,
@@ -128,10 +123,7 @@ impl Parser {
             self.expect(TokenKind::Collation)?;
             self.expect(TokenKind::VersionP)?;
             Ok(Node::AlterDatabaseRefreshCollStmt(
-                AlterDatabaseRefreshCollStmt {
-                    node_tag: NodeTag::AlterDatabaseRefreshCollStmt,
-                    dbname,
-                },
+                AlterDatabaseRefreshCollStmt { dbname },
             ))
         } else if self.peek_kind() == TokenKind::Set && self.peek_kind_n(1) == TokenKind::Tablespace
         {
@@ -143,7 +135,6 @@ impl Parser {
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("SET TABLESPACE requires a tablespace name"))?;
             Ok(Node::AlterDatabaseStmt(AlterDatabaseStmt {
-                node_tag: NodeTag::AlterDatabaseStmt,
                 dbname,
                 options: vec![make_def_elem(
                     "tablespace",
@@ -154,7 +145,6 @@ impl Parser {
         } else if matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
             let setstmt = Some(Box::new(self.parse_variable_set_like(false)?));
             Ok(Node::AlterDatabaseSetStmt(AlterDatabaseSetStmt {
-                node_tag: NodeTag::AlterDatabaseSetStmt,
                 dbname,
                 setstmt,
             }))
@@ -165,7 +155,6 @@ impl Parser {
                 return Err(self.error_here("ALTER DATABASE requires an action or option"));
             }
             Ok(Node::AlterDatabaseStmt(AlterDatabaseStmt {
-                node_tag: NodeTag::AlterDatabaseStmt,
                 dbname,
                 options,
             }))
@@ -185,10 +174,7 @@ impl Parser {
             return Err(self.error_here("ALTER SYSTEM requires SET or RESET"));
         }
         let setstmt = Some(Box::new(self.parse_generic_set_reset_clause()?));
-        Ok(Node::AlterSystemStmt(AlterSystemStmt {
-            node_tag: NodeTag::AlterSystemStmt,
-            setstmt,
-        }))
+        Ok(Node::AlterSystemStmt(AlterSystemStmt { setstmt }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -227,7 +213,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(Node::DropdbStmt(DropdbStmt {
-            node_tag: NodeTag::DropdbStmt,
             dbname,
             missing_ok,
             options,

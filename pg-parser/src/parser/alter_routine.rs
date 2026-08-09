@@ -46,7 +46,6 @@ impl Parser {
         self.consume(TokenKind::Restrict);
         self.expect_statement_end()?;
         Ok(Node::AlterFunctionStmt(AlterFunctionStmt {
-            node_tag: NodeTag::AlterFunctionStmt,
             objtype,
             func,
             actions,
@@ -256,7 +255,6 @@ impl Parser {
                 ),
             };
             return Ok(VariableSetStmt {
-                node_tag: NodeTag::VariableSetStmt,
                 kind,
                 name,
                 location: -1,
@@ -265,7 +263,6 @@ impl Parser {
         }
         self.expect(TokenKind::Set)?;
         let mut stmt = VariableSetStmt {
-            node_tag: NodeTag::VariableSetStmt,
             kind: VariableSetKind::SetValue,
             location: -1,
             ..VariableSetStmt::default()
@@ -378,7 +375,6 @@ impl Parser {
         if self.consume(TokenKind::From) {
             self.expect(TokenKind::CurrentP)?;
             return Ok(VariableSetStmt {
-                node_tag: NodeTag::VariableSetStmt,
                 kind: VariableSetKind::SetCurrent,
                 name,
                 location: -1,
@@ -407,7 +403,6 @@ impl Parser {
             (VariableSetKind::SetValue, args, value_location)
         };
         Ok(VariableSetStmt {
-            node_tag: NodeTag::VariableSetStmt,
             kind,
             name,
             args,

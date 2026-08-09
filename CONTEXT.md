@@ -13,8 +13,8 @@ _避免使用_: 已解析分析树、语义 AST
 _避免使用_: 原始 AST、解析器输出
 
 **语法节点（Syntax node）**:
-按照 PostgreSQL 语法能够从原始解析树到达的 `NodeTag`。并非每个 `NodeTag` 都是语法节点，因为 `ast.rs` 还包含分析树节点。
-_避免使用_: 任意 `NodeTag`
+按照 PostgreSQL 语法能够从原始解析树到达的 `Node` variant。并非每个 `Node` variant 都是语法节点，因为 AST 模块还包含分析树节点。
+_避免使用_: 任意 `Node` variant
 
 **语句节点（Statement node）**:
 Rust 类型名以 `Stmt` 结尾的原始解析树语法节点；它既可能是顶层语句，也可能是 `ReplicaIdentityStmt` 之类由语法产生的嵌套语句。

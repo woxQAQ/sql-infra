@@ -59,7 +59,6 @@ pub(super) fn parse_aggregate_with_args_tokens(
         })
         .collect();
     Ok(ObjectWithArgs {
-        node_tag: NodeTag::ObjectWithArgs,
         objname: name.objname,
         objargs,
         objfuncargs: parameters,
@@ -279,7 +278,6 @@ fn parse_object_with_args_tokens_impl(
         }
     }
     Ok(ObjectWithArgs {
-        node_tag: NodeTag::ObjectWithArgs,
         objname,
         objargs,
         objfuncargs,
@@ -722,7 +720,6 @@ impl Parser {
                 return Err(self.error_here("relation option values require '='"));
             }
             options.push(Node::DefElem(DefElem {
-                node_tag: NodeTag::DefElem,
                 defnamespace,
                 defname: Some(defname),
                 arg,

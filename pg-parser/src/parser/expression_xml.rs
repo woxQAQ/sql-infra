@@ -11,7 +11,6 @@ impl ExprParser {
         let token = self.advance().clone();
         self.expect(TokenKind::Char('('))?;
         let mut expr = XmlExpr {
-            xpr: Expr::new(NodeTag::XmlExpr),
             op: match token.kind {
                 TokenKind::Xmlconcat => XmlExprOp::Xmlconcat,
                 TokenKind::Xmlelement => XmlExprOp::Xmlelement,
@@ -108,7 +107,6 @@ impl ExprParser {
         expr.args = vec![
             value,
             Node::AConst(AConst {
-                node_tag: NodeTag::AConst,
                 val: ValUnion::Boolean(Boolean::new(preserve_whitespace)),
                 location: -1,
                 ..AConst::default()
@@ -162,7 +160,6 @@ impl ExprParser {
                 None
             };
             targets.push(Node::ResTarget(ResTarget {
-                node_tag: NodeTag::ResTarget,
                 name,
                 val: Some(Box::new(value)),
                 location: location as ParseLoc,
@@ -228,7 +225,6 @@ impl ExprParser {
         };
         self.expect(TokenKind::Char(')'))?;
         Some(Node::XmlSerialize(XmlSerialize {
-            node_tag: NodeTag::XmlSerialize,
             xmloption,
             expr: Some(Box::new(expr)),
             type_name: Some(type_name),
@@ -242,7 +238,6 @@ impl ExprParser {
         self.expect(TokenKind::Char('('))?;
         self.expect(TokenKind::Char(')'))?;
         Some(Node::MergeSupportFunc(MergeSupportFunc {
-            xpr: Expr::new(NodeTag::MergeSupportFunc),
             msftype: 25,
             location: location as ParseLoc,
             ..MergeSupportFunc::default()

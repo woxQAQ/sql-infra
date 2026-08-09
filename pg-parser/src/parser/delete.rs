@@ -45,7 +45,6 @@ impl Parser {
         ])?;
         let returning_clause = self.parse_returning_clause()?;
         Ok(Node::DeleteStmt(DeleteStmt {
-            node_tag: NodeTag::DeleteStmt,
             relation,
             using_clause,
             where_clause,

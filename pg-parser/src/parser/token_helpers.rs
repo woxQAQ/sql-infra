@@ -74,7 +74,6 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
         },
         TokenKind::FConst => match &token.value {
             Some(TokenValue::String(value)) => Some(Node::AConst(AConst {
-                node_tag: NodeTag::AConst,
                 val: ValUnion::Float(Float::new(value.clone())),
                 location: token.location() as ParseLoc,
                 ..AConst::default()
@@ -85,7 +84,6 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
             .map(|value| Node::AConst(AConst::string(value, token.location() as ParseLoc))),
         TokenKind::BConst | TokenKind::XConst => match &token.value {
             Some(TokenValue::String(value)) => Some(Node::AConst(AConst {
-                node_tag: NodeTag::AConst,
                 val: ValUnion::BitString(BitString::new(value.clone())),
                 location: token.location() as ParseLoc,
                 ..AConst::default()
@@ -94,7 +92,6 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
         },
         TokenKind::Param => match token.value {
             Some(TokenValue::Integer(number)) => Some(Node::ParamRef(ParamRef {
-                node_tag: NodeTag::ParamRef,
                 number,
                 location: token.location() as ParseLoc,
             })),
@@ -102,23 +99,18 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
         },
         TokenKind::NullP => Some(Node::AConst(AConst::null(token.location() as ParseLoc))),
         TokenKind::TrueP => Some(Node::AConst(AConst {
-            node_tag: NodeTag::AConst,
             val: ValUnion::Boolean(Boolean::new(true)),
             location: token.location() as ParseLoc,
             ..AConst::default()
         })),
         TokenKind::FalseP => Some(Node::AConst(AConst {
-            node_tag: NodeTag::AConst,
             val: ValUnion::Boolean(Boolean::new(false)),
             location: token.location() as ParseLoc,
             ..AConst::default()
         })),
-        TokenKind::Char('*') => Some(Node::AStar(AStar {
-            node_tag: NodeTag::AStar,
-        })),
+        TokenKind::Char('*') => Some(Node::AStar(AStar {})),
         _ => token_name(token).map(|name| {
             Node::ColumnRef(ColumnRef {
-                node_tag: NodeTag::ColumnRef,
                 fields: vec![make_string_node(name)],
                 location: token.location() as ParseLoc,
             })
@@ -171,7 +163,6 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
         )?))
     };
     Ok(DefElem {
-        node_tag: NodeTag::DefElem,
         defnamespace: None,
         defname: Some(defname),
         arg,

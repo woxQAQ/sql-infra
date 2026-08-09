@@ -36,9 +36,7 @@ impl ExprParser {
                 };
                 fields.push(make_string_node(token_name(&hole)?));
             } else if allow_star && !fields.is_empty() && self.consume(TokenKind::Char('*')) {
-                fields.push(Node::AStar(AStar {
-                    node_tag: NodeTag::AStar,
-                }));
+                fields.push(Node::AStar(AStar {}));
             } else {
                 let token = self.peek().clone();
                 let categories: &[KeywordCategory] = if fields.is_empty() {
@@ -108,7 +106,6 @@ impl ExprParser {
         };
         self.expect(TokenKind::Char(']'))?;
         Some(Node::AIndices(AIndices {
-            node_tag: NodeTag::AIndices,
             is_slice,
             lidx,
             uidx,
@@ -123,7 +120,6 @@ impl ExprParser {
             self.expect(TokenKind::Char(')'))?;
             return Some((
                 Node::SubLink(SubLink {
-                    xpr: Expr::new(NodeTag::SubLink),
                     sub_link_type: SubLinkType::ExprSublink,
                     subselect: Some(Box::new(subselect)),
                     location: location as ParseLoc,
@@ -142,7 +138,6 @@ impl ExprParser {
         } else {
             Some((
                 Node::RowExpr(RowExpr {
-                    xpr: Expr::new(NodeTag::RowExpr),
                     args,
                     row_format: CoercionForm::ImplicitCast,
                     location: location as ParseLoc,
@@ -173,7 +168,6 @@ impl ExprParser {
             return self.fail("COALESCE requires at least one argument");
         }
         Some(Node::CoalesceExpr(CoalesceExpr {
-            xpr: Expr::new(NodeTag::CoalesceExpr),
             args,
             location: location as ParseLoc,
             ..CoalesceExpr::default()
@@ -189,7 +183,6 @@ impl ExprParser {
             return self.fail("GREATEST/LEAST requires at least one argument");
         }
         Some(Node::MinMaxExpr(MinMaxExpr {
-            xpr: Expr::new(NodeTag::MinMaxExpr),
             op: if token.kind == TokenKind::Least {
                 MinMaxOp::Least
             } else {
@@ -230,7 +223,6 @@ impl ExprParser {
                     let subselect = self.parse_nested_select(tokens)?;
                     self.expect(TokenKind::Char(')'))?;
                     let sublink = Node::SubLink(SubLink {
-                        xpr: Expr::new(NodeTag::SubLink),
                         sub_link_type: SubLinkType::AnySublink,
                         testexpr: Some(Box::new(lhs)),
                         subselect: Some(Box::new(subselect)),
@@ -253,7 +245,6 @@ impl ExprParser {
                         vec![if negated { "<>" } else { "=" }],
                         Some(lhs),
                         Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements,
                             location: location as ParseLoc,
                             ..AArrayExpr::default()
@@ -307,7 +298,6 @@ impl ExprParser {
                         args.push(escape);
                     }
                     Node::FuncCall(FuncCall {
-                        node_tag: NodeTag::FuncCall,
                         funcname: system_type_names(if op == TokenKind::Similar {
                             "similar_to_escape"
                         } else {
@@ -383,7 +373,6 @@ impl ExprParser {
             let subselect = self.parse_nested_select(tokens)?;
             self.expect(TokenKind::Char(')'))?;
             Some(Node::SubLink(SubLink {
-                xpr: Expr::new(NodeTag::SubLink),
                 sub_link_type,
                 testexpr: Some(Box::new(lhs)),
                 oper_name: operator_name,
@@ -435,7 +424,6 @@ impl ExprParser {
             }],
             Some(lhs),
             Some(Node::AArrayExpr(AArrayExpr {
-                node_tag: NodeTag::AArrayExpr,
                 elements: vec![lower, upper],
                 location: location as ParseLoc,
                 ..AArrayExpr::default()
@@ -466,7 +454,6 @@ impl ExprParser {
         let mut args = left_row.args;
         args.extend(right_row.args);
         Some(Node::FuncCall(FuncCall {
-            node_tag: NodeTag::FuncCall,
             funcname: system_type_names("overlaps"),
             args,
             funcformat: CoercionForm::SqlSyntax,
@@ -500,7 +487,6 @@ impl ExprParser {
         }
         if self.consume(TokenKind::DocumentP) {
             let document = Node::XmlExpr(XmlExpr {
-                xpr: Expr::new(NodeTag::XmlExpr),
                 op: XmlExprOp::Document,
                 args: vec![lhs],
                 location: location as ParseLoc,
@@ -533,7 +519,6 @@ impl ExprParser {
             }
             self.expect(TokenKind::Normalized)?;
             let normalized = Node::FuncCall(FuncCall {
-                node_tag: NodeTag::FuncCall,
                 funcname: system_type_names("is_normalized"),
                 args,
                 funcformat: CoercionForm::SqlSyntax,
@@ -580,7 +565,6 @@ impl ExprParser {
                 false
             };
             let predicate = Node::JsonIsPredicate(JsonIsPredicate {
-                node_tag: NodeTag::JsonIsPredicate,
                 expr: Some(Box::new(lhs)),
                 format: Some(Box::new(default_json_format())),
                 item_type,
@@ -611,7 +595,6 @@ impl ExprParser {
         }
         if self.consume(TokenKind::NullP) {
             return Some(Node::NullTest(NullTest {
-                xpr: Expr::new(NodeTag::NullTest),
                 arg: Some(Box::new(lhs)),
                 nulltesttype: if negated {
                     NullTestType::NotNull
@@ -643,7 +626,6 @@ impl ExprParser {
         if let Some(booltesttype) = booltesttype {
             self.advance();
             return Some(Node::BooleanTest(BooleanTest {
-                xpr: Expr::new(NodeTag::BooleanTest),
                 arg: Some(Box::new(lhs)),
                 booltesttype,
                 location: location as ParseLoc,

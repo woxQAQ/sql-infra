@@ -204,54 +204,7 @@ fn completion_publishes_every_punctuation_token_in_smoke_statements() {
 }
 
 #[test]
-fn every_node_variant_has_a_same_named_node_tag_and_mapping() {
-    let ast = include_str!("../../src/ast/mod.rs");
-    let node_tags: BTreeSet<_> = ast
-        .split_once("pub enum NodeTag {")
-        .expect("NodeTag enum")
-        .1
-        .split_once("}\n")
-        .expect("NodeTag enum end")
-        .0
-        .lines()
-        .filter_map(|line| line.trim().trim_end_matches(',').split_whitespace().next())
-        .filter(|name| {
-            !name.is_empty()
-                && *name != "Invalid"
-                && name
-                    .chars()
-                    .next()
-                    .is_some_and(|character| character.is_ascii_alphabetic())
-        })
-        .map(str::to_owned)
-        .collect();
-    let variants: BTreeSet<_> = ast
-        .split_once("pub enum Node {")
-        .expect("Node enum")
-        .1
-        .split_once("}\nimpl Node {")
-        .expect("Node enum end")
-        .0
-        .lines()
-        .filter_map(|line| line.trim().split_once('(').map(|(name, _)| name))
-        .map(str::to_owned)
-        .collect();
-    let tag_arms: BTreeSet<_> = ast
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("Self::"))
-        .filter_map(|line| line.split_once("(..) => NodeTag::"))
-        .filter_map(|(variant, tag)| {
-            let tag = tag.trim_end_matches(',');
-            (variant == tag).then(|| variant.to_owned())
-        })
-        .collect();
-
-    assert_eq!(node_tags, variants, "NodeTag and Node variants drifted");
-    assert_eq!(variants, tag_arms, "Node::tag mappings drifted");
-}
-
-#[test]
-fn every_ast_statement_has_a_node_variant_and_tag_mapping() {
+fn every_ast_statement_has_a_node_variant() {
     let ast = include_str!("../../src/ast/mod.rs");
     let structs: BTreeSet<_> = ast
         .lines()
@@ -260,19 +213,9 @@ fn every_ast_statement_has_a_node_variant_and_tag_mapping() {
         .filter(|name| name.ends_with("Stmt"))
         .map(str::to_owned)
         .collect();
-    let variants = names_between(ast, "pub enum Node {", "}\nimpl Node {");
-    let tag_arms: BTreeSet<_> = ast
-        .lines()
-        .filter_map(|line| line.trim().strip_prefix("Self::"))
-        .filter_map(|line| line.split_once("(..) => NodeTag::"))
-        .filter_map(|(variant, tag)| {
-            let tag = tag.trim_end_matches(',');
-            (variant == tag && variant.ends_with("Stmt")).then(|| variant.to_owned())
-        })
-        .collect();
+    let variants = names_between(ast, "pub enum Node {", "pub struct Alias");
 
     assert_eq!(structs, variants, "Stmt structs and Node variants drifted");
-    assert_eq!(structs, tag_arms, "Stmt structs and Node::tag arms drifted");
 }
 
 #[test]
@@ -334,6 +277,8 @@ fn every_ast_struct_is_parsed_or_explicitly_classified_as_non_parser_output() {
         "CollateExpr".to_owned(),
         "Const".to_owned(),
         "ConvertRowtypeExpr".to_owned(),
+        // PostgreSQL expression-base marker; concrete expressions use Node variants.
+        "Expr".to_owned(),
         "FieldSelect".to_owned(),
         "FieldStore".to_owned(),
         "ForPortionOfExpr".to_owned(),
@@ -404,7 +349,7 @@ fn every_parser_statement_constructor_has_statement_organized_coverage() {
         .collect();
     let mut covered: BTreeSet<_> = CASES
         .iter()
-        .map(|case| format!("{:?}", case.expected))
+        .map(|case| case.expected_name.to_owned())
         .collect();
     // These are grammar-produced nested statement nodes, not top-level statements.
     covered.insert("ReplicaIdentityStmt".to_owned());
@@ -485,7 +430,11 @@ fn every_raw_statement_field_is_exercised_by_statement_tests() {
         if !name.ends_with("Stmt") || analysis_only_statements.contains(name) {
             continue;
         }
-        let body = body.split_once("\n}").expect("struct body").0;
+        let body = if body.starts_with('}') {
+            ""
+        } else {
+            body.split_once("\n}").expect("struct body").0
+        };
         let related_tests = test_blocks
             .iter()
             .filter(|source| contains_identifier(source, name))
@@ -496,10 +445,9 @@ fn every_raw_statement_field_is_exercised_by_statement_tests() {
                 .split_once(':')
                 .map(|(field, _)| field.trim())
         }) {
-            if field != "node_tag"
-                && !related_tests
-                    .iter()
-                    .any(|source| contains_identifier(source, field))
+            if !related_tests
+                .iter()
+                .any(|source| contains_identifier(source, field))
             {
                 missing.insert(format!("{name}.{field}"));
             }
@@ -592,7 +540,6 @@ fn every_nested_raw_field_is_exercised_or_analysis_only() {
         "RowExpr.row_typeid",
         "SetToDefault.type_id",
         "SetToDefault.type_mod",
-        "TypeName.type_oid",
         "TypeName.typemod",
         "VacuumRelation.oid",
     ]
@@ -611,14 +558,18 @@ fn every_nested_raw_field_is_exercised_or_analysis_only() {
         {
             continue;
         }
-        let body = body.split_once("\n}").expect("struct body").0;
+        let body = if body.starts_with('}') {
+            ""
+        } else {
+            body.split_once("\n}").expect("struct body").0
+        };
         for field in body.lines().filter_map(|line| {
             line.trim()
                 .strip_prefix("pub ")?
                 .split_once(':')
                 .map(|(field, _)| field.trim())
         }) {
-            if !matches!(field, "node_tag" | "xpr") && !contains_identifier(&tests, field) {
+            if !contains_identifier(&tests, field) {
                 missing.insert(format!("{name}.{field}"));
             }
         }

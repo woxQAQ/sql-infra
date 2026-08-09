@@ -22,7 +22,6 @@ impl ExprParser {
             self.expect(TokenKind::Then)?;
             let result = self.parse_expr(0)?;
             args.push(Node::CaseWhen(CaseWhen {
-                xpr: Expr::new(NodeTag::CaseWhen),
                 expr: Some(Box::new(expr)),
                 result: Some(Box::new(result)),
                 location: when_location as ParseLoc,
@@ -38,7 +37,6 @@ impl ExprParser {
         };
         self.expect(TokenKind::EndP)?;
         Some(Node::CaseExpr(CaseExpr {
-            xpr: Expr::new(NodeTag::CaseExpr),
             arg,
             args,
             defresult,
@@ -56,7 +54,6 @@ impl ExprParser {
             return self.fail("GROUPING requires at least one argument");
         }
         Some(Node::GroupingFunc(GroupingFunc {
-            xpr: Expr::new(NodeTag::GroupingFunc),
             args,
             location: location as ParseLoc,
             ..GroupingFunc::default()
@@ -78,7 +75,6 @@ impl ExprParser {
         self.expect(TokenKind::Char(')'))?;
         if token.kind == TokenKind::Cast {
             Some(Node::TypeCast(TypeCast {
-                node_tag: NodeTag::TypeCast,
                 arg: Some(Box::new(arg)),
                 type_name: Some(Box::new(type_name)),
                 location: token.location() as ParseLoc,
@@ -89,7 +85,6 @@ impl ExprParser {
                 _ => None,
             })?;
             Some(Node::FuncCall(FuncCall {
-                node_tag: NodeTag::FuncCall,
                 funcname: system_type_names(&function_name),
                 args: vec![arg],
                 location: token.location() as ParseLoc,
@@ -131,7 +126,6 @@ impl ExprParser {
         let arg = self.parse_expr(0)?;
         self.expect(TokenKind::Char(')'))?;
         Some(Node::FuncCall(FuncCall {
-            node_tag: NodeTag::FuncCall,
             funcname: system_type_names("extract"),
             args: vec![
                 Node::AConst(AConst::string(field, field_token.location() as ParseLoc)),
@@ -169,7 +163,6 @@ impl ExprParser {
         }
         self.expect(TokenKind::Char(')'))?;
         Some(Node::FuncCall(FuncCall {
-            node_tag: NodeTag::FuncCall,
             funcname: system_type_names("normalize"),
             args,
             funcformat: CoercionForm::SqlSyntax,
@@ -180,7 +173,6 @@ impl ExprParser {
 
     pub(super) fn make_sql_syntax_call(&self, name: &str, args: NodeList, location: usize) -> Node {
         Node::FuncCall(FuncCall {
-            node_tag: NodeTag::FuncCall,
             funcname: system_type_names(name),
             args,
             funcformat: CoercionForm::SqlSyntax,
@@ -204,7 +196,6 @@ impl ExprParser {
         self.expect(TokenKind::Char('('))?;
         if self.consume(TokenKind::Char(')')) {
             return Some(Node::FuncCall(FuncCall {
-                node_tag: NodeTag::FuncCall,
                 funcname: vec![make_string_node("overlay")],
                 location: location as ParseLoc,
                 ..FuncCall::default()
@@ -228,7 +219,6 @@ impl ExprParser {
             let args = self.parse_plain_function_arguments_after(first)?;
             self.expect(TokenKind::Char(')'))?;
             Some(Node::FuncCall(FuncCall {
-                node_tag: NodeTag::FuncCall,
                 funcname: vec![make_string_node("overlay")],
                 args,
                 location: location as ParseLoc,
@@ -242,7 +232,6 @@ impl ExprParser {
         self.expect(TokenKind::Char('('))?;
         if self.consume(TokenKind::Char(')')) {
             return Some(Node::FuncCall(FuncCall {
-                node_tag: NodeTag::FuncCall,
                 funcname: vec![make_string_node("substring")],
                 location: location as ParseLoc,
                 ..FuncCall::default()
@@ -253,7 +242,6 @@ impl ExprParser {
             let args = self.parse_plain_function_arguments_after(first)?;
             self.expect(TokenKind::Char(')'))?;
             return Some(Node::FuncCall(FuncCall {
-                node_tag: NodeTag::FuncCall,
                 funcname: vec![make_string_node("substring")],
                 args,
                 location: location as ParseLoc,
@@ -279,10 +267,8 @@ impl ExprParser {
                     first,
                     Node::AConst(AConst::integer(1, -1)),
                     Node::TypeCast(TypeCast {
-                        node_tag: NodeTag::TypeCast,
                         arg: Some(Box::new(count)),
                         type_name: Some(Box::new(TypeName {
-                            node_tag: NodeTag::TypeName,
                             names: system_type_names("int4"),
                             location: -1,
                             ..TypeName::default()
@@ -302,7 +288,6 @@ impl ExprParser {
                 let args = self.parse_plain_function_arguments_after(first)?;
                 self.expect(TokenKind::Char(')'))?;
                 return Some(Node::FuncCall(FuncCall {
-                    node_tag: NodeTag::FuncCall,
                     funcname: vec![make_string_node("substring")],
                     args,
                     location: location as ParseLoc,
@@ -413,7 +398,6 @@ impl ExprParser {
             (plain, -1)
         };
         Some(Node::SqlValueFunction(SqlValueFunction {
-            xpr: Expr::new(NodeTag::SqlValueFunction),
             op,
             typmod,
             location: token.location() as ParseLoc,

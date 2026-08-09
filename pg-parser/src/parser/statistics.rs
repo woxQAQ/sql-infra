@@ -34,7 +34,6 @@ fn parse_stats_params_with_completion(
                 .is_some()
             {
                 return Ok(Node::StatsElem(StatsElem {
-                    node_tag: NodeTag::StatsElem,
                     name: token_name(&tokens[0]),
                     ..StatsElem::default()
                 }));
@@ -65,7 +64,6 @@ fn parse_stats_params_with_completion(
                     )
                     .map(|expression| {
                         Node::StatsElem(StatsElem {
-                            node_tag: NodeTag::StatsElem,
                             expr: Some(Box::new(expression)),
                             ..StatsElem::default()
                         })
@@ -94,7 +92,6 @@ fn parse_stats_params_with_completion(
                 expression
             };
             Ok(Node::StatsElem(StatsElem {
-                node_tag: NodeTag::StatsElem,
                 expr: Some(Box::new(expression)),
                 ..StatsElem::default()
             }))
@@ -175,7 +172,6 @@ impl Parser {
         self.expect_statement_end()?;
         let relations = vec![Node::RangeVar(relation)];
         Ok(Node::CreateStatsStmt(CreateStatsStmt {
-            node_tag: NodeTag::CreateStatsStmt,
             defnames,
             stat_types,
             exprs,
@@ -215,7 +211,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(Node::AlterStatsStmt(AlterStatsStmt {
-            node_tag: NodeTag::AlterStatsStmt,
             defnames,
             stxstattarget,
             missing_ok,

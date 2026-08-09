@@ -128,7 +128,6 @@ impl Parser {
             Some(self.consume_required_string("COMMENT text must be a string or NULL")?)
         };
         Ok(Node::CommentStmt(CommentStmt {
-            node_tag: NodeTag::CommentStmt,
             objtype,
             object: Some(Box::new(object)),
             comment,
@@ -189,7 +188,6 @@ impl Parser {
             Some(self.consume_required_string("security label must be a string or NULL")?)
         };
         Ok(Node::SecLabelStmt(SecLabelStmt {
-            node_tag: NodeTag::SecLabelStmt,
             objtype,
             object: Some(Box::new(object)),
             provider,

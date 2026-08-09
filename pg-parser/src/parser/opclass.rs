@@ -64,7 +64,6 @@ impl Parser {
         self.expect(TokenKind::As)?;
         let items = self.parse_opclass_item_list(&[TokenKind::Char(';'), TokenKind::Eof])?;
         Ok(Node::CreateOpClassStmt(CreateOpClassStmt {
-            node_tag: NodeTag::CreateOpClassStmt,
             opclassname,
             opfamilyname,
             amname,
@@ -96,7 +95,6 @@ impl Parser {
                 .ok_or_else(|| self.error_here("USING requires an access method"))?,
         );
         Ok(Node::CreateOpFamilyStmt(CreateOpFamilyStmt {
-            node_tag: NodeTag::CreateOpFamilyStmt,
             opfamilyname,
             amname,
         }))
@@ -173,7 +171,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(Node::AlterOpFamilyStmt(AlterOpFamilyStmt {
-            node_tag: NodeTag::AlterOpFamilyStmt,
             opfamilyname,
             amname,
             is_drop,
@@ -203,7 +200,6 @@ impl Parser {
                 return Err(self.error_here("COLLATE requires a collation name"));
             }
             Some(Box::new(CollateClause {
-                node_tag: NodeTag::CollateClause,
                 collname,
                 location: coll_location as ParseLoc,
                 ..CollateClause::default()
@@ -212,7 +208,6 @@ impl Parser {
             None
         };
         Ok(Box::new(Node::ColumnDef(ColumnDef {
-            node_tag: NodeTag::ColumnDef,
             colname,
             type_name,
             is_local: true,
@@ -255,7 +250,6 @@ impl Parser {
                 0
             };
             let mut item = CreateOpClassItem {
-                node_tag: NodeTag::CreateOpClassItem,
                 itemtype,
                 number,
                 ..CreateOpClassItem::default()
@@ -356,7 +350,6 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             items.push(Node::CreateOpClassItem(CreateOpClassItem {
-                node_tag: NodeTag::CreateOpClassItem,
                 itemtype,
                 number,
                 class_args,

@@ -42,7 +42,6 @@ impl Parser {
         let alias = self.parse_optional_alias_clause()?;
 
         Ok(JsonTable {
-            node_tag: NodeTag::JsonTable,
             context_item: Some(Box::new(context_item)),
             pathspec: Some(Box::new(pathspec)),
             passing,
@@ -74,7 +73,6 @@ impl Parser {
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("JSON PASSING argument requires a name"))?;
             arguments.push(Node::JsonArgument(JsonArgument {
-                node_tag: NodeTag::JsonArgument,
                 val: Some(Box::new(value)),
                 name: Some(name),
             }));
@@ -123,7 +121,6 @@ impl Parser {
             let columns = self.parse_json_table_column_list()?;
             self.expect(TokenKind::Char(')'))?;
             return Ok(JsonTableColumn {
-                node_tag: NodeTag::JsonTableColumn,
                 coltype: JsonTableColumnType::Nested,
                 pathspec: Some(Box::new(pathspec)),
                 columns,
@@ -138,7 +135,6 @@ impl Parser {
         if self.consume(TokenKind::For) {
             self.expect(TokenKind::Ordinality)?;
             return Ok(JsonTableColumn {
-                node_tag: NodeTag::JsonTableColumn,
                 coltype: JsonTableColumnType::ForOrdinality,
                 name: Some(name),
                 location: location as ParseLoc,
@@ -180,7 +176,6 @@ impl Parser {
         if exists {
             let on_error = self.parse_json_table_on_error_clause()?;
             return Ok(JsonTableColumn {
-                node_tag: NodeTag::JsonTableColumn,
                 coltype: JsonTableColumnType::Exists,
                 name: Some(name),
                 type_name: Some(type_name),
@@ -198,7 +193,6 @@ impl Parser {
         let quotes = self.parse_json_quotes_clause()?;
         let (on_empty, on_error) = self.parse_json_table_behavior_clauses()?;
         Ok(JsonTableColumn {
-            node_tag: NodeTag::JsonTableColumn,
             coltype: if explicit_format.is_some() {
                 JsonTableColumnType::Formatted
             } else {
@@ -243,7 +237,6 @@ impl Parser {
             (None, -1)
         };
         Ok(Some(JsonTablePathSpec {
-            node_tag: NodeTag::JsonTablePathSpec,
             string: Some(Box::new(Node::AConst(AConst::string(
                 value,
                 token.location() as ParseLoc,
@@ -280,7 +273,6 @@ impl Parser {
             JsonEncoding::Default
         };
         Ok(Some(JsonFormat {
-            node_tag: NodeTag::JsonFormat,
             format_type: JsonFormatType::Json,
             encoding,
             location: location as ParseLoc,
@@ -413,7 +405,6 @@ impl Parser {
             _ => return Err(self.error_here("expected a JSON behavior")),
         };
         Ok(JsonBehavior {
-            node_tag: NodeTag::JsonBehavior,
             btype,
             expr,
             location: location as ParseLoc,

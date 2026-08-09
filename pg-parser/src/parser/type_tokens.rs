@@ -217,7 +217,6 @@ pub(super) fn parse_func_type_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
             ));
         }
         return Ok(TypeName {
-            node_tag: NodeTag::TypeName,
             names: parse_qualified_type_names(&tokens)?,
             pct_type: true,
             setof,
@@ -484,7 +483,6 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         typmods
     };
     Ok(TypeName {
-        node_tag: NodeTag::TypeName,
         names,
         setof,
         typmods,

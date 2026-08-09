@@ -69,7 +69,6 @@ impl Parser {
         self.expect(TokenKind::Char('('))?;
         self.expect(TokenKind::Char(')'))?;
         Ok(Node::CreateEventTrigStmt(CreateEventTrigStmt {
-            node_tag: NodeTag::CreateEventTrigStmt,
             trigname,
             eventname,
             whenclause,
@@ -115,7 +114,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(Node::AlterEventTrigStmt(AlterEventTrigStmt {
-            node_tag: NodeTag::AlterEventTrigStmt,
             trigname,
             tgenabled,
         }))
@@ -233,7 +231,6 @@ impl Parser {
                         .ok_or_else(|| self.error_here("trigger transition requires a name"))?,
                 );
                 transition_rels.push(Node::TriggerTransition(TriggerTransition {
-                    node_tag: NodeTag::TriggerTransition,
                     name,
                     is_new,
                     is_table,
@@ -376,7 +373,6 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(Node::CreateTrigStmt(CreateTrigStmt {
-            node_tag: NodeTag::CreateTrigStmt,
             replace,
             isconstraint: is_constraint,
             trigname,

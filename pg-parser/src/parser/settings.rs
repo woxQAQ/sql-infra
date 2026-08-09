@@ -89,7 +89,6 @@ impl Parser {
                     };
                 self.expect_statement_end()?;
                 return Ok(VariableSetStmt {
-                    node_tag: NodeTag::VariableSetStmt,
                     kind,
                     name,
                     location: -1,
@@ -124,7 +123,6 @@ impl Parser {
             self.advance();
         }
         let mut stmt = VariableSetStmt {
-            node_tag: NodeTag::VariableSetStmt,
             kind: VariableSetKind::SetValue,
             is_local,
             location: -1,
@@ -407,10 +405,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("SHOW requires a parameter name"))?,
         });
         self.expect_statement_end()?;
-        Ok(Node::VariableShowStmt(VariableShowStmt {
-            node_tag: NodeTag::VariableShowStmt,
-            name,
-        }))
+        Ok(Node::VariableShowStmt(VariableShowStmt { name }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -475,7 +470,6 @@ impl Parser {
     pub(super) fn parse_transaction(&mut self) -> PResult<Node> {
         let first = self.advance().kind;
         let mut stmt = TransactionStmt {
-            node_tag: NodeTag::TransactionStmt,
             location: -1,
             ..TransactionStmt::default()
         };

@@ -34,9 +34,7 @@ pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<Raw
     let assignment_value = Some(Box::new(parse_expression_select(&mut parser)?));
 
     Ok(RawStmt {
-        node_tag: NodeTag::RawStmt,
         stmt: Some(Box::new(Node::PlAssignStmt(PlAssignStmt {
-            node_tag: NodeTag::PlAssignStmt,
             name: Some(name),
             indirection,
             nnames: target_name_count,
@@ -53,7 +51,6 @@ pub(super) fn parse_expression(sql: &str) -> PResult<RawStmt> {
     let location = parser.location();
     let select = parse_expression_select(&mut parser)?;
     Ok(RawStmt {
-        node_tag: NodeTag::RawStmt,
         stmt: Some(Box::new(Node::SelectStmt(select))),
         stmt_location: location as ParseLoc,
         stmt_len: 0,

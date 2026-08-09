@@ -26,7 +26,6 @@ impl Parser {
         let sequence = Some(Box::new(sequence_node));
         let options = self.parse_sequence_options()?;
         Ok(Node::CreateSeqStmt(CreateSeqStmt {
-            node_tag: NodeTag::CreateSeqStmt,
             sequence,
             options,
             if_not_exists,
@@ -62,7 +61,6 @@ impl Parser {
             return Err(self.error_here("ALTER SEQUENCE requires at least one option"));
         }
         Ok(Node::AlterSeqStmt(AlterSeqStmt {
-            node_tag: NodeTag::AlterSeqStmt,
             sequence,
             options,
             missing_ok,
@@ -170,7 +168,6 @@ impl Parser {
                     (
                         "owned_by",
                         Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: names,
                             ..AArrayExpr::default()
                         })),
@@ -187,7 +184,6 @@ impl Parser {
                     (
                         "sequence_name",
                         Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: names,
                             ..AArrayExpr::default()
                         })),

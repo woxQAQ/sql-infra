@@ -39,7 +39,6 @@ impl ExprParser {
         let (on_empty, on_error) = self.parse_json_behaviors(op != JsonExprOp::ExistsOp)?;
         self.expect(TokenKind::Char(')'))?;
         Some(Node::JsonFuncExpr(JsonFuncExpr {
-            node_tag: NodeTag::JsonFuncExpr,
             op,
             context_item: Some(Box::new(context_item)),
             pathspec: Some(Box::new(pathspec)),
@@ -66,7 +65,6 @@ impl ExprParser {
                 .consume_column_label()
                 .or_else(|| self.fail("JSON PASSING requires a column label after AS"))?;
             arguments.push(Node::JsonArgument(JsonArgument {
-                node_tag: NodeTag::JsonArgument,
                 val: Some(Box::new(value)),
                 name: Some(name),
             }));
@@ -218,7 +216,6 @@ impl ExprParser {
             _ => return None,
         };
         Some(JsonBehavior {
-            node_tag: NodeTag::JsonBehavior,
             btype,
             expr,
             location: location as ParseLoc,
@@ -237,17 +234,14 @@ impl ExprParser {
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
         let mut constructor = JsonAggConstructor {
-            node_tag: NodeTag::JsonAggConstructor,
             output,
             location: location as ParseLoc,
             ..JsonAggConstructor::default()
         };
         self.parse_json_aggregate_decorations(&mut constructor)?;
         Some(Node::JsonObjectAgg(JsonObjectAgg {
-            node_tag: NodeTag::JsonObjectAgg,
             constructor: Some(Box::new(constructor)),
             arg: Some(Box::new(JsonKeyValue {
-                node_tag: NodeTag::JsonKeyValue,
                 key: Some(Box::new(key)),
                 value: Some(Box::new(value)),
             })),
@@ -317,7 +311,6 @@ impl ExprParser {
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
         let mut constructor = JsonAggConstructor {
-            node_tag: NodeTag::JsonAggConstructor,
             output,
             agg_order,
             location: location as ParseLoc,
@@ -325,7 +318,6 @@ impl ExprParser {
         };
         self.parse_json_aggregate_decorations(&mut constructor)?;
         Some(Node::JsonArrayAgg(JsonArrayAgg {
-            node_tag: NodeTag::JsonArrayAgg,
             constructor: Some(Box::new(constructor)),
             arg: Some(Box::new(value)),
             absent_on_null,

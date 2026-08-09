@@ -2,7 +2,6 @@ use pg_parser::CmdType;
 use pg_parser::ConstrType;
 use pg_parser::FunctionParameterMode;
 use pg_parser::Node;
-use pg_parser::NodeTag;
 use pg_parser::PartitionStrategy;
 use pg_parser::PropGraphProperties;
 use pg_parser::TableLikeOption;
@@ -1688,20 +1687,20 @@ fn create_schema_populates_nested_schema_statements() {
         panic!("expected CreateSchemaStmt");
     };
     assert_eq!(schema.schemaname.as_deref(), Some("app"));
-    assert_eq!(
-        schema.schema_elts.iter().map(Node::tag).collect::<Vec<_>>(),
+    assert!(matches!(
+        schema.schema_elts.as_slice(),
         [
-            NodeTag::CreateStmt,
-            NodeTag::IndexStmt,
-            NodeTag::CreateDomainStmt,
-            NodeTag::CreateFunctionStmt,
-            NodeTag::CreateSeqStmt,
-            NodeTag::CreateTrigStmt,
-            NodeTag::DefineStmt,
-            NodeTag::GrantStmt,
-            NodeTag::ViewStmt,
+            Node::CreateStmt(_),
+            Node::IndexStmt(_),
+            Node::CreateDomainStmt(_),
+            Node::CreateFunctionStmt(_),
+            Node::CreateSeqStmt(_),
+            Node::CreateTrigStmt(_),
+            Node::DefineStmt(_),
+            Node::GrantStmt(_),
+            Node::ViewStmt(_),
         ]
-    );
+    ));
 
     let Node::CreateSchemaStmt(authorized) =
         parse_statement("create schema analytics authorization current_user")

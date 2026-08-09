@@ -68,7 +68,6 @@ impl Parser {
             }
         }
         Ok(Node::CreateExtensionStmt(CreateExtensionStmt {
-            node_tag: NodeTag::CreateExtensionStmt,
             extname,
             if_not_exists,
             options,
@@ -143,7 +142,6 @@ impl Parser {
             self.expect_statement_end()?;
             Ok(Node::AlterExtensionContentsStmt(
                 AlterExtensionContentsStmt {
-                    node_tag: NodeTag::AlterExtensionContentsStmt,
                     extname,
                     action,
                     objtype,
@@ -166,7 +164,6 @@ impl Parser {
             }
             self.expect_statement_end()?;
             Ok(Node::AlterExtensionStmt(AlterExtensionStmt {
-                node_tag: NodeTag::AlterExtensionStmt,
                 extname,
                 options,
             }))

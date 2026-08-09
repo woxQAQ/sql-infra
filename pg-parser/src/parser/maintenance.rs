@@ -148,7 +148,6 @@ impl Parser {
             None
         };
         Ok(Node::CopyStmt(CopyStmt {
-            node_tag: NodeTag::CopyStmt,
             relation,
             query,
             attlist,
@@ -191,7 +190,6 @@ impl Parser {
                 Vec::new()
             };
             rels.push(Node::VacuumRelation(VacuumRelation {
-                node_tag: NodeTag::VacuumRelation,
                 relation: Some(Box::new(relation)),
                 va_cols,
                 ..VacuumRelation::default()
@@ -294,9 +292,7 @@ impl Parser {
                         "force_null"
                     };
                     let value = if self.consume(TokenKind::Char('*')) {
-                        Node::AStar(AStar {
-                            node_tag: NodeTag::AStar,
-                        })
+                        Node::AStar(AStar {})
                     } else {
                         let mut columns = Vec::new();
                         loop {
@@ -323,7 +319,6 @@ impl Parser {
                             }
                         }
                         Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: columns,
                             location: -1,
                             ..AArrayExpr::default()
@@ -419,7 +414,6 @@ impl Parser {
         }
         let rels = self.parse_vacuum_relation_list()?;
         Ok(Node::VacuumStmt(VacuumStmt {
-            node_tag: NodeTag::VacuumStmt,
             options,
             rels,
             is_vacuumcmd,
@@ -436,10 +430,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CheckPointStmt(CheckPointStmt {
-            node_tag: NodeTag::CheckPointStmt,
-            options,
-        }))
+        Ok(Node::CheckPointStmt(CheckPointStmt { options }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -461,10 +452,7 @@ impl Parser {
             TokenKind::Temp | TokenKind::Temporary => DiscardMode::Temp,
             _ => return Err(self.error_here("DISCARD requires ALL, PLANS, SEQUENCES, or TEMP")),
         };
-        Ok(Node::DiscardStmt(DiscardStmt {
-            node_tag: NodeTag::DiscardStmt,
-            target,
-        }))
+        Ok(Node::DiscardStmt(DiscardStmt { target }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -497,7 +485,6 @@ impl Parser {
         };
         let nowait = self.consume(TokenKind::Nowait);
         Ok(Node::LockStmt(LockStmt {
-            node_tag: NodeTag::LockStmt,
             relations,
             mode,
             nowait,
@@ -578,10 +565,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("LISTEN requires a channel name"))?,
         );
-        Ok(Node::ListenStmt(ListenStmt {
-            node_tag: NodeTag::ListenStmt,
-            conditionname,
-        }))
+        Ok(Node::ListenStmt(ListenStmt { conditionname }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -598,10 +582,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("UNLISTEN requires a channel name or '*'"))?,
             )
         };
-        Ok(Node::UnlistenStmt(UnlistenStmt {
-            node_tag: NodeTag::UnlistenStmt,
-            conditionname,
-        }))
+        Ok(Node::UnlistenStmt(UnlistenStmt { conditionname }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -620,7 +601,6 @@ impl Parser {
             None
         };
         Ok(Node::NotifyStmt(NotifyStmt {
-            node_tag: NodeTag::NotifyStmt,
             conditionname,
             payload,
         }))
@@ -632,10 +612,7 @@ impl Parser {
     pub(super) fn parse_load(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Load)?;
         let filename = Some(self.consume_required_string("LOAD requires a string filename")?);
-        Ok(Node::LoadStmt(LoadStmt {
-            node_tag: NodeTag::LoadStmt,
-            filename,
-        }))
+        Ok(Node::LoadStmt(LoadStmt { filename }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -661,7 +638,6 @@ impl Parser {
             false
         };
         Ok(Node::RefreshMatViewStmt(RefreshMatViewStmt {
-            node_tag: NodeTag::RefreshMatViewStmt,
             concurrent,
             skip_data,
             relation,
@@ -747,7 +723,6 @@ impl Parser {
             }
         };
         Ok(Node::ReindexStmt(ReindexStmt {
-            node_tag: NodeTag::ReindexStmt,
             kind,
             relation,
             name,
@@ -791,7 +766,6 @@ impl Parser {
                 Vec::new()
             };
             let relation = Some(Box::new(VacuumRelation {
-                node_tag: NodeTag::VacuumRelation,
                 relation: Some(Box::new(relation)),
                 va_cols,
                 ..VacuumRelation::default()
@@ -805,7 +779,6 @@ impl Parser {
             }
         };
         Ok(Node::RepackStmt(RepackStmt {
-            node_tag: NodeTag::RepackStmt,
             command: RepackCommand::Repack,
             relation,
             indexname,
@@ -826,7 +799,6 @@ impl Parser {
         }
         if self.at_statement_end() {
             return Ok(Node::RepackStmt(RepackStmt {
-                node_tag: NodeTag::RepackStmt,
                 command: RepackCommand::Cluster,
                 usingindex: true,
                 params,
@@ -843,10 +815,8 @@ impl Parser {
                 .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CLUSTER ON requires a relation"))?;
             return Ok(Node::RepackStmt(RepackStmt {
-                node_tag: NodeTag::RepackStmt,
                 command: RepackCommand::Cluster,
                 relation: Some(Box::new(VacuumRelation {
-                    node_tag: NodeTag::VacuumRelation,
                     relation: Some(Box::new(relation)),
                     ..VacuumRelation::default()
                 })),
@@ -870,10 +840,8 @@ impl Parser {
             None
         };
         Ok(Node::RepackStmt(RepackStmt {
-            node_tag: NodeTag::RepackStmt,
             command: RepackCommand::Cluster,
             relation: Some(Box::new(VacuumRelation {
-                node_tag: NodeTag::VacuumRelation,
                 relation: Some(Box::new(relation)),
                 ..VacuumRelation::default()
             })),
@@ -911,7 +879,6 @@ impl Parser {
         };
         let behavior = self.parse_drop_behavior();
         Ok(Node::TruncateStmt(TruncateStmt {
-            node_tag: NodeTag::TruncateStmt,
             relations,
             restart_seqs,
             behavior,
@@ -986,15 +953,12 @@ fn parse_copy_generic_option(
         }
         parser.expect(TokenKind::Char(')'))?;
         Some(Node::AArrayExpr(AArrayExpr {
-            node_tag: NodeTag::AArrayExpr,
             elements: values,
             location: -1,
             ..AArrayExpr::default()
         }))
     } else if parser.consume(TokenKind::Char('*')) {
-        Some(Node::AStar(AStar {
-            node_tag: NodeTag::AStar,
-        }))
+        Some(Node::AStar(AStar {}))
     } else if parser.consume(TokenKind::Default) {
         Some(make_string_node("default"))
     } else if parser.at_any(&[
@@ -1016,7 +980,6 @@ fn parse_copy_generic_option(
         return Err(parser.error_here("unexpected token after COPY option"));
     }
     Ok(DefElem {
-        node_tag: NodeTag::DefElem,
         defname: Some(name),
         arg: arg.map(Box::new),
         location: location as ParseLoc,

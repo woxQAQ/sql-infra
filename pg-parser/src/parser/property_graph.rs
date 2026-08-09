@@ -36,7 +36,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(Node::CreatePropGraphStmt(CreatePropGraphStmt {
-            node_tag: NodeTag::CreatePropGraphStmt,
             pgname,
             vertex_tables,
             edge_tables,
@@ -50,7 +49,6 @@ impl Parser {
                 .ok_or_else(|| self.error_here("ALTER PROPERTY GRAPH requires a name"))?,
         ));
         let mut stmt = AlterPropGraphStmt {
-            node_tag: NodeTag::AlterPropGraphStmt,
             pgname,
             ..AlterPropGraphStmt::default()
         };
@@ -162,7 +160,6 @@ impl Parser {
                             let properties = Some(Box::new(self.parse_prop_graph_properties()?));
                             stmt.add_labels.push(Node::PropGraphLabelAndProperties(
                                 PropGraphLabelAndProperties {
-                                    node_tag: NodeTag::PropGraphLabelAndProperties,
                                     label,
                                     properties,
                                     location: location as ParseLoc,
@@ -235,7 +232,6 @@ impl Parser {
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("AS requires a graph table alias"))?;
                 vtable.alias = Some(Box::new(Alias {
-                    node_tag: NodeTag::Alias,
                     aliasname: Some(aliasname),
                     ..Alias::default()
                 }));
@@ -243,7 +239,6 @@ impl Parser {
             let vkey = self.parse_optional_key_clause()?;
             let labels = self.parse_prop_graph_labels()?;
             vertices.push(Node::PropGraphVertex(PropGraphVertex {
-                node_tag: NodeTag::PropGraphVertex,
                 vtable: Some(Box::new(vtable)),
                 vkey,
                 labels,
@@ -276,7 +271,6 @@ impl Parser {
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("AS requires a graph table alias"))?;
                 etable.alias = Some(Box::new(Alias {
-                    node_tag: NodeTag::Alias,
                     aliasname: Some(aliasname),
                     ..Alias::default()
                 }));
@@ -288,7 +282,6 @@ impl Parser {
                 self.parse_prop_graph_endpoint(TokenKind::Destination, "DESTINATION")?;
             let labels = self.parse_prop_graph_labels()?;
             edges.push(Node::PropGraphEdge(PropGraphEdge {
-                node_tag: NodeTag::PropGraphEdge,
                 etable: Some(Box::new(etable)),
                 ekey,
                 esrckey,
@@ -359,7 +352,6 @@ impl Parser {
         if self.consume(TokenKind::No) {
             self.expect(TokenKind::Properties)?;
             return Ok(PropGraphProperties {
-                node_tag: NodeTag::PropGraphProperties,
                 location: location as ParseLoc,
                 ..PropGraphProperties::default()
             });
@@ -368,7 +360,6 @@ impl Parser {
         if self.consume(TokenKind::All) {
             self.expect(TokenKind::Columns)?;
             return Ok(PropGraphProperties {
-                node_tag: NodeTag::PropGraphProperties,
                 all: true,
                 location: location as ParseLoc,
                 ..PropGraphProperties::default()
@@ -381,7 +372,6 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(PropGraphProperties {
-            node_tag: NodeTag::PropGraphProperties,
             properties,
             location: location as ParseLoc,
             ..PropGraphProperties::default()
@@ -398,7 +388,6 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(PropGraphProperties {
-            node_tag: NodeTag::PropGraphProperties,
             properties,
             location: location as ParseLoc,
             ..PropGraphProperties::default()
@@ -418,7 +407,6 @@ impl Parser {
             let properties = Some(Box::new(self.parse_prop_graph_properties()?));
             labels.push(Node::PropGraphLabelAndProperties(
                 PropGraphLabelAndProperties {
-                    node_tag: NodeTag::PropGraphLabelAndProperties,
                     properties,
                     location: location as ParseLoc,
                     ..PropGraphLabelAndProperties::default()
@@ -443,7 +431,6 @@ impl Parser {
                 Some(Box::new(self.parse_prop_graph_properties()?))
             } else {
                 Some(Box::new(PropGraphProperties {
-                    node_tag: NodeTag::PropGraphProperties,
                     all: true,
                     location: -1,
                     ..PropGraphProperties::default()
@@ -451,7 +438,6 @@ impl Parser {
             };
             labels.push(Node::PropGraphLabelAndProperties(
                 PropGraphLabelAndProperties {
-                    node_tag: NodeTag::PropGraphLabelAndProperties,
                     label,
                     properties,
                     location: location as ParseLoc,
@@ -461,9 +447,7 @@ impl Parser {
         if labels.is_empty() {
             labels.push(Node::PropGraphLabelAndProperties(
                 PropGraphLabelAndProperties {
-                    node_tag: NodeTag::PropGraphLabelAndProperties,
                     properties: Some(Box::new(PropGraphProperties {
-                        node_tag: NodeTag::PropGraphProperties,
                         all: true,
                         location: -1,
                         ..PropGraphProperties::default()

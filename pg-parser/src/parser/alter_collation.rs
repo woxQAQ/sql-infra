@@ -22,9 +22,6 @@ impl Parser {
         self.expect(TokenKind::Refresh)?;
         self.expect(TokenKind::VersionP)?;
         self.expect_statement_end()?;
-        Ok(Node::AlterCollationStmt(AlterCollationStmt {
-            node_tag: NodeTag::AlterCollationStmt,
-            collname,
-        }))
+        Ok(Node::AlterCollationStmt(AlterCollationStmt { collname }))
     }
 }

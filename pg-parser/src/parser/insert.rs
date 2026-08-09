@@ -37,7 +37,6 @@ impl Parser {
             .ok_or_else(|| self.error_here("INSERT INTO requires a relation name"))?;
         if self.consume(TokenKind::As) {
             relation.alias = Some(Box::new(Alias {
-                node_tag: NodeTag::Alias,
                 aliasname: Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("INSERT AS requires an alias"))?,
@@ -118,7 +117,6 @@ impl Parser {
         let on_conflict_clause = self.parse_on_conflict_clause()?;
         let returning_clause = self.parse_returning_clause()?;
         Ok(Node::InsertStmt(InsertStmt {
-            node_tag: NodeTag::InsertStmt,
             relation,
             cols,
             select_stmt,

@@ -29,7 +29,6 @@ impl Parser {
         let options = self.parse_alter_generic_options()?;
         self.expect_statement_end()?;
         Ok(Node::AlterUserMappingStmt(AlterUserMappingStmt {
-            node_tag: NodeTag::AlterUserMappingStmt,
             user,
             servername,
             options,
@@ -62,7 +61,6 @@ impl Parser {
         }
         self.expect_statement_end()?;
         Ok(Node::AlterFdwStmt(AlterFdwStmt {
-            node_tag: NodeTag::AlterFdwStmt,
             fdwname,
             func_options,
             options,
@@ -103,7 +101,6 @@ impl Parser {
         }
         self.expect_statement_end()?;
         Ok(Node::AlterForeignServerStmt(AlterForeignServerStmt {
-            node_tag: NodeTag::AlterForeignServerStmt,
             servername,
             version,
             options,
@@ -130,7 +127,6 @@ impl Parser {
             Vec::new()
         };
         Ok(Node::CreateFdwStmt(CreateFdwStmt {
-            node_tag: NodeTag::CreateFdwStmt,
             fdwname,
             func_options,
             options,
@@ -234,7 +230,6 @@ impl Parser {
             Vec::new()
         };
         Ok(Node::CreateForeignServerStmt(CreateForeignServerStmt {
-            node_tag: NodeTag::CreateForeignServerStmt,
             servername,
             servertype,
             version,
@@ -257,7 +252,6 @@ impl Parser {
         self.record_completion_slot(completion::GrammarSlot::Role);
         let user = if self.consume(TokenKind::User) {
             Some(Box::new(RoleSpec {
-                node_tag: NodeTag::RoleSpec,
                 roletype: RoleSpecType::CurrentUser,
                 location: self.previous_location() as ParseLoc,
                 ..RoleSpec::default()
@@ -279,7 +273,6 @@ impl Parser {
             Vec::new()
         };
         Ok(Node::CreateUserMappingStmt(CreateUserMappingStmt {
-            node_tag: NodeTag::CreateUserMappingStmt,
             user,
             servername,
             if_not_exists,

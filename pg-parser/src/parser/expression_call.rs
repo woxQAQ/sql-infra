@@ -15,7 +15,6 @@ impl ExprParser {
         }
         if self.consume(TokenKind::Char('(')) {
             let mut call = FuncCall {
-                node_tag: NodeTag::FuncCall,
                 funcname: fields,
                 location: location as ParseLoc,
                 ..FuncCall::default()
@@ -62,7 +61,6 @@ impl ExprParser {
             Some(Node::FuncCall(call))
         } else {
             Some(Node::ColumnRef(ColumnRef {
-                node_tag: NodeTag::ColumnRef,
                 fields,
                 location: location as ParseLoc,
             }))
@@ -93,7 +91,6 @@ impl ExprParser {
         }
         let list_end = self.expect(TokenKind::Char(']'))?.location();
         Some(Node::AArrayExpr(AArrayExpr {
-            node_tag: NodeTag::AArrayExpr,
             elements,
             list_start: list_start as ParseLoc,
             list_end: list_end as ParseLoc,
@@ -107,7 +104,6 @@ impl ExprParser {
             let location = name_token.location();
             self.advance();
             return Some(Node::NamedArgExpr(NamedArgExpr {
-                xpr: Expr::new(NodeTag::NamedArgExpr),
                 arg: Some(Box::new(self.parse_expr(0)?)),
                 name: token_name(&name_token),
                 argnumber: -1,
@@ -207,7 +203,6 @@ impl ExprParser {
                 SortByNulls::Default
             };
             items.push(Node::SortBy(SortBy {
-                node_tag: NodeTag::SortBy,
                 node: Some(Box::new(expression)),
                 sortby_dir,
                 sortby_nulls,
@@ -293,7 +288,6 @@ impl ExprParser {
                 ])
                 .or_else(|| self.fail("OVER requires a window name"))?;
             Some(Some(Box::new(WindowDef {
-                node_tag: NodeTag::WindowDef,
                 name: Some(name),
                 frame_options: FRAMEOPTION_DEFAULTS,
                 location: name_location as ParseLoc,

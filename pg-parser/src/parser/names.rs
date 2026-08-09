@@ -199,7 +199,6 @@ impl Parser {
             return Ok(None);
         };
         Ok(Some(Box::new(Alias {
-            node_tag: NodeTag::Alias,
             aliasname: Some(aliasname),
             ..Alias::default()
         })))
@@ -388,7 +387,6 @@ impl Parser {
     pub(super) fn consume_auth_ident(&mut self) -> Option<RoleSpec> {
         if self.consume(TokenKind::User) {
             Some(RoleSpec {
-                node_tag: NodeTag::RoleSpec,
                 roletype: RoleSpecType::CurrentUser,
                 location: self.previous_location() as ParseLoc,
                 ..RoleSpec::default()
@@ -434,7 +432,6 @@ impl Parser {
             TokenKind::CurrentRole => {
                 self.advance();
                 return Some(RoleSpec {
-                    node_tag: NodeTag::RoleSpec,
                     roletype: RoleSpecType::CurrentRole,
                     location: location as ParseLoc,
                     ..RoleSpec::default()
@@ -443,7 +440,6 @@ impl Parser {
             TokenKind::CurrentUser => {
                 self.advance();
                 return Some(RoleSpec {
-                    node_tag: NodeTag::RoleSpec,
                     roletype: RoleSpecType::CurrentUser,
                     location: location as ParseLoc,
                     ..RoleSpec::default()
@@ -452,7 +448,6 @@ impl Parser {
             TokenKind::SessionUser => {
                 self.advance();
                 return Some(RoleSpec {
-                    node_tag: NodeTag::RoleSpec,
                     roletype: RoleSpecType::SessionUser,
                     location: location as ParseLoc,
                     ..RoleSpec::default()
@@ -471,7 +466,6 @@ impl Parser {
             roletype
         };
         Some(RoleSpec {
-            node_tag: NodeTag::RoleSpec,
             roletype,
             rolename: (roletype == RoleSpecType::Cstring).then_some(rolename),
             location: location as ParseLoc,

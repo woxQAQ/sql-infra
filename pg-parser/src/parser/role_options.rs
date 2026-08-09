@@ -39,7 +39,6 @@ impl Parser {
         self.consume(TokenKind::With);
         let options = self.parse_create_role_options()?;
         Ok(Node::CreateRoleStmt(CreateRoleStmt {
-            node_tag: NodeTag::CreateRoleStmt,
             stmt_type,
             role,
             options,
@@ -93,7 +92,6 @@ impl Parser {
                 return Err(self.error_here("ALTER GROUP requires at least one member"));
             }
             return Ok(Node::AlterRoleStmt(AlterRoleStmt {
-                node_tag: NodeTag::AlterRoleStmt,
                 role: Some(role),
                 options: vec![make_def_elem(
                     "rolemembers",
@@ -127,7 +125,6 @@ impl Parser {
         if matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
             let setstmt = Some(Box::new(self.parse_variable_set_like(false)?));
             return Ok(Node::AlterRoleSetStmt(AlterRoleSetStmt {
-                node_tag: NodeTag::AlterRoleSetStmt,
                 role,
                 database,
                 setstmt,
@@ -139,7 +136,6 @@ impl Parser {
         self.consume(TokenKind::With);
         let options = self.parse_alter_role_options()?;
         Ok(Node::AlterRoleStmt(AlterRoleStmt {
-            node_tag: NodeTag::AlterRoleStmt,
             role,
             options,
             action: 1,
@@ -170,11 +166,7 @@ impl Parser {
                 break;
             }
         }
-        Ok(Node::DropRoleStmt(DropRoleStmt {
-            node_tag: NodeTag::DropRoleStmt,
-            roles,
-            missing_ok,
-        }))
+        Ok(Node::DropRoleStmt(DropRoleStmt { roles, missing_ok }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -194,11 +186,7 @@ impl Parser {
             false,
         )?;
         let behavior = self.parse_drop_behavior();
-        Ok(Node::DropOwnedStmt(DropOwnedStmt {
-            node_tag: NodeTag::DropOwnedStmt,
-            roles,
-            behavior,
-        }))
+        Ok(Node::DropOwnedStmt(DropOwnedStmt { roles, behavior }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -221,7 +209,6 @@ impl Parser {
             self.error_here("REASSIGN OWNED requires a destination role")
         })?));
         Ok(Node::ReassignOwnedStmt(ReassignOwnedStmt {
-            node_tag: NodeTag::ReassignOwnedStmt,
             roles,
             newrole,
         }))
@@ -314,7 +301,6 @@ impl Parser {
                     options.push(make_def_elem(
                         defname,
                         Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
                             elements: roles,
                             ..AArrayExpr::default()
                         })),
@@ -478,7 +464,6 @@ impl Parser {
             };
             self.expect_statement_end()?;
             return Ok(VariableSetStmt {
-                node_tag: NodeTag::VariableSetStmt,
                 kind,
                 name,
                 location: -1,
@@ -514,7 +499,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(VariableSetStmt {
-            node_tag: NodeTag::VariableSetStmt,
             kind,
             name,
             args,

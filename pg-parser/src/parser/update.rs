@@ -62,7 +62,6 @@ impl Parser {
         ])?;
         let returning_clause = self.parse_returning_clause()?;
         Ok(Node::UpdateStmt(UpdateStmt {
-            node_tag: NodeTag::UpdateStmt,
             relation,
             target_list,
             from_clause,

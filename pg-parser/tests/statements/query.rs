@@ -961,7 +961,7 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
     );
     assert!(element.arg_names.is_empty());
     assert_eq!(element.args.len(), 1);
-    assert_eq!(element.node_tag, 0);
+    assert_eq!(element.type_oid, 0);
     assert_eq!(element.typmod, 0);
 
     let Node::ResTarget(forest_target) = &stmt.target_list[1] else {

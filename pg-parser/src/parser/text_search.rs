@@ -63,7 +63,6 @@ impl Parser {
         }
         let definition = self.parse_parenthesized_definition_for(Some(kind))?;
         Ok(Node::DefineStmt(DefineStmt {
-            node_tag: NodeTag::DefineStmt,
             kind,
             defnames,
             definition,
@@ -98,7 +97,6 @@ impl Parser {
         let options = self.parse_parenthesized_definition()?;
         self.expect_statement_end()?;
         Ok(Node::AlterTsDictionaryStmt(AlterTsDictionaryStmt {
-            node_tag: NodeTag::AlterTsDictionaryStmt,
             dictname,
             options,
         }))
@@ -138,7 +136,6 @@ impl Parser {
         }
         self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Set, TokenKind::Owner]);
         let mut stmt = AlterTsConfigurationStmt {
-            node_tag: NodeTag::AlterTsConfigurationStmt,
             cfgname,
             ..AlterTsConfigurationStmt::default()
         };

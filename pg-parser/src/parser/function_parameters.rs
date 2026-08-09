@@ -173,7 +173,6 @@ pub(super) fn function_parameter_from_tokens_with_completion(
         .map(Box::new)
         .map_err(|_| ParseError::syntax_exit(location, "expected a function parameter type"))?;
     Ok(FunctionParameter {
-        node_tag: NodeTag::FunctionParameter,
         name,
         arg_type: Some(arg_type),
         mode,

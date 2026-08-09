@@ -47,7 +47,6 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
             })?;
             let arg = parse_operator_def_arg(&name, tokens[2..].to_vec(), item_location)?;
             Ok(Node::DefElem(DefElem {
-                node_tag: NodeTag::DefElem,
                 defname: Some(name),
                 arg: Some(Box::new(arg)),
                 location: item_location as ParseLoc,

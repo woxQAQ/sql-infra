@@ -49,7 +49,6 @@ impl Parser {
             schema_elts.push(self.parse_schema_statement()?);
         }
         Ok(Node::CreateSchemaStmt(CreateSchemaStmt {
-            node_tag: NodeTag::CreateSchemaStmt,
             schemaname,
             authrole,
             schema_elts,

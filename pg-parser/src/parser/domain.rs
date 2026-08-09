@@ -54,7 +54,6 @@ impl Parser {
                     return Err(self.error_here("COLLATE requires a collation name"));
                 }
                 coll_clause = Some(Box::new(CollateClause {
-                    node_tag: NodeTag::CollateClause,
                     collname,
                     location: location as ParseLoc,
                     ..CollateClause::default()
@@ -103,7 +102,6 @@ impl Parser {
                 _ => return Err(self.error_here("invalid domain constraint")),
             };
             let constraint = Constraint {
-                node_tag: NodeTag::Constraint,
                 conname,
                 contype,
                 raw_expr,
@@ -115,7 +113,6 @@ impl Parser {
             constraints.push(Node::Constraint(constraint));
         }
         Ok(Node::CreateDomainStmt(CreateDomainStmt {
-            node_tag: NodeTag::CreateDomainStmt,
             domainname,
             type_name,
             coll_clause,
@@ -164,7 +161,6 @@ impl Parser {
         ]);
         let owner_end = self.pos;
         let mut stmt = AlterDomainStmt {
-            node_tag: NodeTag::AlterDomainStmt,
             type_name,
             ..AlterDomainStmt::default()
         };
@@ -292,7 +288,6 @@ impl Parser {
             _ => return Err(self.error_here("domain constraint must be CHECK or NOT NULL")),
         };
         let mut constraint = Constraint {
-            node_tag: NodeTag::Constraint,
             conname,
             contype,
             raw_expr,

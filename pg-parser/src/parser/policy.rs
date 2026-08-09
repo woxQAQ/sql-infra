@@ -72,7 +72,6 @@ impl Parser {
             )?
         } else {
             vec![Node::RoleSpec(RoleSpec {
-                node_tag: NodeTag::RoleSpec,
                 roletype: RoleSpecType::Public,
                 rolename: None,
                 location: -1,
@@ -96,7 +95,6 @@ impl Parser {
             None
         };
         Ok(Node::CreatePolicyStmt(CreatePolicyStmt {
-            node_tag: NodeTag::CreatePolicyStmt,
             policy_name,
             table,
             cmd_name,
@@ -164,7 +162,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(Node::AlterPolicyStmt(AlterPolicyStmt {
-            node_tag: NodeTag::AlterPolicyStmt,
             policy_name,
             table,
             roles,

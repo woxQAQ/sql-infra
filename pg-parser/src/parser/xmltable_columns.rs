@@ -36,7 +36,6 @@ impl Parser {
             self.expect(TokenKind::Ordinality)?;
             self.record_completion_follow_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
             return Ok(RangeTableFuncCol {
-                node_tag: NodeTag::RangeTableFuncCol,
                 colname: Some(colname),
                 for_ordinality: true,
                 location: location as ParseLoc,
@@ -56,7 +55,6 @@ impl Parser {
             .map(Box::new)
             .ok_or_else(|| self.error_here("expected an XMLTABLE column type"))?;
         let mut column = RangeTableFuncCol {
-            node_tag: NodeTag::RangeTableFuncCol,
             colname: Some(colname.clone()),
             type_name: Some(type_name),
             location: location as ParseLoc,

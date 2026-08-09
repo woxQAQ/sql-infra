@@ -147,7 +147,6 @@ impl Parser {
         }
         let behavior = self.parse_drop_behavior();
         Ok(Node::DropStmt(DropStmt {
-            node_tag: NodeTag::DropStmt,
             objects,
             remove_type,
             behavior,
@@ -192,7 +191,6 @@ impl Parser {
         let behavior = self.parse_drop_behavior();
         self.expect_statement_end()?;
         Ok(Node::DropStmt(DropStmt {
-            node_tag: NodeTag::DropStmt,
             objects: vec![object],
             remove_type,
             behavior,
@@ -234,7 +232,6 @@ impl Parser {
         let behavior = self.parse_drop_behavior();
         self.expect_statement_end()?;
         Ok(Node::DropStmt(DropStmt {
-            node_tag: NodeTag::DropStmt,
             objects,
             remove_type,
             behavior,
@@ -265,7 +262,6 @@ impl Parser {
         );
         self.expect_statement_end()?;
         Ok(Node::DropUserMappingStmt(DropUserMappingStmt {
-            node_tag: NodeTag::DropUserMappingStmt,
             user,
             servername,
             missing_ok,

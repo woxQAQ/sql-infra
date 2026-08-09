@@ -22,7 +22,6 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             values.push(Node::AArrayExpr(AArrayExpr {
-                node_tag: NodeTag::AArrayExpr,
                 elements,
                 ..AArrayExpr::default()
             }));
@@ -83,17 +82,13 @@ impl Parser {
             self.append_completion_marker(&mut expr_tokens);
             let target_value = if standalone_star {
                 Node::ColumnRef(ColumnRef {
-                    node_tag: NodeTag::ColumnRef,
-                    fields: vec![Node::AStar(AStar {
-                        node_tag: NodeTag::AStar,
-                    })],
+                    fields: vec![Node::AStar(AStar {})],
                     location: location as ParseLoc,
                 })
             } else {
                 parse_expression_tokens_with_completion(expr_tokens, self.completion.clone())?
             };
             items.push(Node::ResTarget(ResTarget {
-                node_tag: NodeTag::ResTarget,
                 name,
                 val: Some(Box::new(target_value)),
                 location: location as ParseLoc,
@@ -160,7 +155,6 @@ impl Parser {
             let location = self.advance().location();
             self.advance();
             return Ok(Node::GroupingSet(GroupingSet {
-                node_tag: NodeTag::GroupingSet,
                 kind: GroupingSetKind::Empty,
                 location: location as ParseLoc,
                 ..GroupingSet::default()
@@ -202,7 +196,6 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             return Ok(Node::GroupingSet(GroupingSet {
-                node_tag: NodeTag::GroupingSet,
                 kind,
                 content,
                 location: location as ParseLoc,
@@ -328,7 +321,6 @@ impl Parser {
             }
             let node = self.parse_expression_fragment_tokens(tokens)?;
             items.push(Node::SortBy(SortBy {
-                node_tag: NodeTag::SortBy,
                 node: Some(Box::new(node)),
                 sortby_dir,
                 sortby_nulls,

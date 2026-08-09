@@ -56,7 +56,6 @@ impl Parser {
         }
         let query = Some(Box::new(self.parse_statement(None)?));
         Ok(Node::PrepareStmt(PrepareStmt {
-            node_tag: NodeTag::PrepareStmt,
             name,
             argtypes,
             query,
@@ -89,11 +88,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(ExecuteStmt {
-            node_tag: NodeTag::ExecuteStmt,
-            name,
-            params,
-        })
+        Ok(ExecuteStmt { name, params })
     }
 
     pub(super) fn parse_optional_with_data(&mut self) -> PResult<bool> {
@@ -127,7 +122,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(Node::DeallocateStmt(DeallocateStmt {
-            node_tag: NodeTag::DeallocateStmt,
             name,
             isall,
             location,
@@ -212,7 +206,6 @@ impl Parser {
             return Err(self.error_here("statement is not explainable"));
         }
         Ok(Node::ExplainStmt(ExplainStmt {
-            node_tag: NodeTag::ExplainStmt,
             query: Some(Box::new(query)),
             options,
         }))
@@ -257,7 +250,6 @@ impl Parser {
                 _ => return Err(self.error_here("CALL requires a function application")),
             };
         Ok(Node::CallStmt(CallStmt {
-            node_tag: NodeTag::CallStmt,
             funccall,
             ..CallStmt::default()
         }))

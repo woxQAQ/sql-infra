@@ -36,7 +36,6 @@ impl Parser {
             Vec::new()
         };
         Ok(Node::CreateTableSpaceStmt(CreateTableSpaceStmt {
-            node_tag: NodeTag::CreateTableSpaceStmt,
             tablespacename,
             owner,
             location,
@@ -65,7 +64,6 @@ impl Parser {
                     .ok_or_else(|| self.error_here("RENAME TO requires a new name"))?,
             );
             return Ok(Node::RenameStmt(RenameStmt {
-                node_tag: NodeTag::RenameStmt,
                 rename_type: ObjectType::Tablespace,
                 subname: tablespacename,
                 newname,
@@ -82,7 +80,6 @@ impl Parser {
         let options = self.parse_parenthesized_reloptions()?;
         Ok(Node::AlterTableSpaceOptionsStmt(
             AlterTableSpaceOptionsStmt {
-                node_tag: NodeTag::AlterTableSpaceOptionsStmt,
                 tablespacename,
                 options,
                 is_reset,
@@ -103,7 +100,6 @@ impl Parser {
         );
         self.expect_statement_end()?;
         Ok(Node::DropTableSpaceStmt(DropTableSpaceStmt {
-            node_tag: NodeTag::DropTableSpaceStmt,
             tablespacename,
             missing_ok,
         }))

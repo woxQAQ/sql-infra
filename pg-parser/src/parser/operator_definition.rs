@@ -40,7 +40,6 @@ impl Parser {
                 None
             };
             options.push(Node::DefElem(DefElem {
-                node_tag: NodeTag::DefElem,
                 defname: Some(name),
                 arg,
                 location: location as ParseLoc,
@@ -87,7 +86,6 @@ impl Parser {
         let options = self.parse_operator_definition_list(ObjectType::Operator)?;
         self.expect_statement_end()?;
         Ok(Node::AlterOperatorStmt(AlterOperatorStmt {
-            node_tag: NodeTag::AlterOperatorStmt,
             opername,
             options,
         }))

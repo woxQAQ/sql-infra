@@ -33,7 +33,6 @@ impl Parser {
             return Err(self.error_here("access method HANDLER requires a function name"));
         }
         Ok(Node::CreateAmStmt(CreateAmStmt {
-            node_tag: NodeTag::CreateAmStmt,
             amname,
             handler_name,
             amtype,

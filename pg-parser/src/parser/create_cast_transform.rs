@@ -62,7 +62,6 @@ impl Parser {
             CoercionContext::Explicit
         };
         Ok(Node::CreateCastStmt(CreateCastStmt {
-            node_tag: NodeTag::CreateCastStmt,
             sourcetype: Some(sourcetype),
             targettype: Some(targettype),
             func,
@@ -105,7 +104,6 @@ impl Parser {
             return Err(self.error_here("CREATE CONVERSION requires a function"));
         }
         Ok(Node::CreateConversionStmt(CreateConversionStmt {
-            node_tag: NodeTag::CreateConversionStmt,
             conversion_name,
             for_encoding_name,
             to_encoding_name,
@@ -184,7 +182,6 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(Node::CreateTransformStmt(CreateTransformStmt {
-            node_tag: NodeTag::CreateTransformStmt,
             replace,
             type_name: Some(type_name),
             lang,

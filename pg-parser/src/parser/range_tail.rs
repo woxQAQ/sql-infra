@@ -21,7 +21,6 @@ impl Parser {
                     let tokens =
                         self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
                     namespaces.push(Node::ResTarget(ResTarget {
-                        node_tag: NodeTag::ResTarget,
                         val: Some(Box::new(self.parse_b_expression_fragment_tokens(tokens)?)),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
@@ -36,7 +35,6 @@ impl Parser {
                         .consume_col_label()
                         .ok_or_else(|| self.error_here("XML namespace requires AS alias"))?;
                     namespaces.push(Node::ResTarget(ResTarget {
-                        node_tag: NodeTag::ResTarget,
                         name: Some(name),
                         val: Some(Box::new(value)),
                         location: target_location as ParseLoc,
@@ -115,7 +113,6 @@ impl Parser {
         self.expect(TokenKind::Char(')'))?;
         let alias = self.parse_optional_alias_clause()?;
         Ok(RangeTableFunc {
-            node_tag: NodeTag::RangeTableFunc,
             lateral,
             docexpr: Some(Box::new(docexpr)),
             rowexpr: Some(rowexpr),
@@ -237,7 +234,6 @@ impl Parser {
             self.expect(TokenKind::Char(')'))?;
             if self.consume(TokenKind::As) {
                 join_using_alias = Some(Box::new(Alias {
-                    node_tag: NodeTag::Alias,
                     aliasname: Some(
                         self.consume_col_id()
                             .ok_or_else(|| self.error_here("USING AS requires an alias"))?,
@@ -252,7 +248,6 @@ impl Parser {
             None
         };
         Ok(Node::JoinExpr(JoinExpr {
-            node_tag: NodeTag::JoinExpr,
             jointype,
             is_natural,
             larg: Some(Box::new(larg)),

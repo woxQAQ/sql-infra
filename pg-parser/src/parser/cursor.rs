@@ -69,7 +69,6 @@ impl Parser {
             return Err(self.error_here("DECLARE CURSOR query must be a SELECT statement"));
         }
         Ok(Node::DeclareCursorStmt(DeclareCursorStmt {
-            node_tag: NodeTag::DeclareCursorStmt,
             portalname,
             options,
             query: Some(Box::new(query)),
@@ -91,10 +90,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("CLOSE requires a cursor name or ALL"))?,
             )
         };
-        Ok(Node::ClosePortalStmt(ClosePortalStmt {
-            node_tag: NodeTag::ClosePortalStmt,
-            portalname,
-        }))
+        Ok(Node::ClosePortalStmt(ClosePortalStmt { portalname }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -151,7 +147,6 @@ impl Parser {
                 .ok_or_else(|| self.error_here("FETCH/MOVE requires a cursor name"))?,
         );
         Ok(Node::FetchStmt(FetchStmt {
-            node_tag: NodeTag::FetchStmt,
             direction,
             how_many,
             portalname,

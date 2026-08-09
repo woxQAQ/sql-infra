@@ -50,7 +50,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(Node::ConstraintsSetStmt(ConstraintsSetStmt {
-            node_tag: NodeTag::ConstraintsSetStmt,
             constraints,
             deferred,
         }))
@@ -61,7 +60,6 @@ impl Parser {
         location: usize,
     ) -> PResult<Constraint> {
         let mut constraint = Constraint {
-            node_tag: NodeTag::Constraint,
             location: location as ParseLoc,
             ..Constraint::default()
         };
@@ -243,7 +241,6 @@ impl Parser {
             None
         };
         let mut constraint = Constraint {
-            node_tag: NodeTag::Constraint,
             conname,
             location: location as ParseLoc,
             ..Constraint::default()
@@ -379,7 +376,6 @@ impl Parser {
                         operator_location,
                     )?);
                     constraint.exclusions.push(Node::AArrayExpr(AArrayExpr {
-                        node_tag: NodeTag::AArrayExpr,
                         elements: vec![Node::IndexElem(index_elem), operator],
                         ..AArrayExpr::default()
                     }));

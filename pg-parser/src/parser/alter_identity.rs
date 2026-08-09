@@ -518,7 +518,6 @@ impl Parser {
         }
         self.expect_statement_end()?;
         Ok(Node::RenameStmt(RenameStmt {
-            node_tag: NodeTag::RenameStmt,
             rename_type,
             relation_type,
             relation: identity.relation,
@@ -563,7 +562,6 @@ impl Parser {
         )));
         self.expect_statement_end()?;
         Ok(Node::AlterObjectDependsStmt(AlterObjectDependsStmt {
-            node_tag: NodeTag::AlterObjectDependsStmt,
             object_type: identity.object_type,
             relation: identity.relation,
             object: identity.object.take(),
@@ -612,7 +610,6 @@ impl Parser {
         );
         self.expect_statement_end()?;
         Ok(Node::AlterObjectSchemaStmt(AlterObjectSchemaStmt {
-            node_tag: NodeTag::AlterObjectSchemaStmt,
             object_type: identity.object_type,
             relation: identity.relation,
             object: identity.object,
@@ -651,7 +648,6 @@ impl Parser {
             })?));
         self.expect_statement_end()?;
         Ok(Node::AlterOwnerStmt(AlterOwnerStmt {
-            node_tag: NodeTag::AlterOwnerStmt,
             object_type: identity.object_type,
             relation: identity.relation,
             object: identity.object,

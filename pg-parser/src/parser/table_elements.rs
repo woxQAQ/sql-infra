@@ -19,7 +19,6 @@ impl Parser {
                 .ok_or_else(|| self.error_here("expected a column name"))?;
             let indirection = self.parse_assignment_indirection()?;
             cols.push(Node::ResTarget(ResTarget {
-                node_tag: NodeTag::ResTarget,
                 name: Some(name),
                 indirection,
                 location: location as ParseLoc,
@@ -92,7 +91,6 @@ impl Parser {
                     ]);
                 }
                 elements.push(Node::TableLikeClause(TableLikeClause {
-                    node_tag: NodeTag::TableLikeClause,
                     relation: Some(Box::new(relation)),
                     options,
                     ..TableLikeClause::default()
@@ -268,7 +266,6 @@ impl Parser {
         let (constraints, coll_clause) = self.parse_column_qualifiers()?;
 
         Ok(ColumnDef {
-            node_tag: NodeTag::ColumnDef,
             colname,
             type_name,
             compression,
@@ -294,7 +291,6 @@ impl Parser {
         }
         let (constraints, coll_clause) = self.parse_column_qualifiers()?;
         Ok(ColumnDef {
-            node_tag: NodeTag::ColumnDef,
             colname,
             is_local: true,
             coll_clause,
@@ -321,7 +317,6 @@ impl Parser {
                     return Err(self.error_here("multiple COLLATE clauses are not allowed"));
                 }
                 coll_clause = Some(Box::new(CollateClause {
-                    node_tag: NodeTag::CollateClause,
                     collname,
                     location: coll_location as ParseLoc,
                     ..CollateClause::default()

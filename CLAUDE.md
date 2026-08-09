@@ -37,7 +37,7 @@ Other entry points: `parse_one` (asserts exactly one statement), `parse_type_nam
 
 Inside `pg-parser/`:
 
-- `src/ast/mod.rs` (~4500 lines) — the node universe. Three things that must stay in lockstep: the `Node` enum, the `NodeTag` enum, and the `Node::tag()` mapping arms. Statement structs end in `Stmt`.
+- `src/ast/mod.rs` (~4500 lines) — the node universe. The `Node` enum variant is the single node-kind discriminator. Statement structs end in `Stmt`.
 - `src/ast/enums.rs`, `src/ast/keywords.rs` — grammar enums and the keyword table.
 - `src/parser.rs` — `Parser`, the `parse*` functions, `PResult`, `ParseError` (build errors with `self.error_here(...)`), and the `mod`/`use` declarations for ~80 parser submodules.
 - `src/parser/*.rs` — one concern per file (`create_table.rs`, `alter_table.rs`, `expression*.rs`, `privileges.rs`, `dml.rs`, `query.rs`, `plpgsql.rs`, …). `expression` parsing is split across many `expression_*.rs` files by construct (json, xml, call, prefix, tail, sql).
@@ -49,16 +49,16 @@ Inside `pg-parser/`:
 
 - **Raw expression children use `Box<Node>`, not `Box<Expr>`** (see `docs/adr/0001-raw-expression-children-use-node.md`). A grammar `Expr *` field is polymorphic (`AExpr`, `AConst`, `ColumnRef`, `FuncCall`, …), so it holds `Box<Node>`. Use a typed box only where the grammar fixes the concrete child type. Do not introduce a second expression enum parallel to `Node`.
 - Raw-parse-tree fidelity is the goal. `ast/mod.rs` also contains **analysis-tree** nodes (`Query`, `Var`, `Const`, `OpExpr`) that the text parser never produces — don't emit them from parser code. `CONTEXT.md` is the source of truth for this vocabulary (raw parse tree vs. analysis tree, syntax node, statement node).
-- When adding a node: add the `Node` variant, the matching `NodeTag`, and the `Node::tag()` arm together. Coverage tests fail otherwise (see below).
+- When adding a node, add its `Node` variant and parser construction path together. Coverage tests fail when parser-produced statement structs lack a corresponding variant or test (see below).
 
 ## Tests
 
 Integration tests live in `pg-parser/tests/`. `tests/statements.rs` wires up submodules via `#[path = "statements/<x>.rs"]`. Shared helpers are in `tests/statements/common.rs`: `parse_statement(sql)`, `parse_error(sql)`, `assert_statement_cases(&[StatementCase])`.
 
 `tests/statements/coverage.rs` is a guardrail suite that reads the source text of `ast/mod.rs` and the parser modules and asserts:
-- `Node` variants, `NodeTag` variants, and `tag()` arms have not drifted from each other.
-- Every `*Stmt` struct has a corresponding variant, tag, and mapping.
+- Every parser-produced `*Stmt` struct has a corresponding `Node` variant.
+- Every parser-produced statement constructor has a smoke case or nested-node test.
 
-If you rename/add nodes and coverage tests fail, the fix is to sync the three lists — not to weaken the test.
+If you rename or add nodes and coverage tests fail, update the AST struct, `Node` variant, parser constructor, and tests together.
 
 `pg-completion` tests live in `pg-completion/tests/`: `completion.rs` runs declarative YAML scenarios from `test-data/completion/` (`|` marks the completion point; `PG_COMPLETION_RECORD=1` re-records candidates and refreshes any present `qualifier`/`container`/`scope` assertions), `context.rs` asserts the public context and scope rules programmatically, and `performance.rs` enforces the allocation/latency budget. New pg-parser grammar must also publish collect-mode expectations — collect coverage is a completion condition for parser changes, not an optional add-on (see `docs/pg-completion-design.md`).

@@ -16,7 +16,6 @@ impl Parser {
             completion::GrammarSlot::Table
         };
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
         match self.peek_kind() {
@@ -36,7 +35,6 @@ impl Parser {
                 };
                 cmd.subtype = AlterTableType::AttachPartition;
                 cmd.def = Some(Box::new(Node::PartitionCmd(PartitionCmd {
-                    node_tag: NodeTag::PartitionCmd,
                     name: Some(name),
                     bound,
                     ..PartitionCmd::default()
@@ -64,7 +62,6 @@ impl Parser {
                     AlterTableType::DetachPartition
                 };
                 cmd.def = Some(Box::new(Node::PartitionCmd(PartitionCmd {
-                    node_tag: NodeTag::PartitionCmd,
                     name: Some(name),
                     concurrent,
                     ..PartitionCmd::default()
@@ -95,7 +92,6 @@ impl Parser {
                     );
                     let bound = Some(Box::new(self.parse_partition_bound()?));
                     partlist.push(Node::SinglePartitionSpec(SinglePartitionSpec {
-                        node_tag: NodeTag::SinglePartitionSpec,
                         name: Some(part_name),
                         bound,
                     }));
@@ -109,7 +105,6 @@ impl Parser {
                 self.expect(TokenKind::Char(')'))?;
                 cmd.subtype = AlterTableType::SplitPartition;
                 cmd.def = Some(Box::new(Node::PartitionCmd(PartitionCmd {
-                    node_tag: NodeTag::PartitionCmd,
                     name: Some(name),
                     partlist,
                     ..PartitionCmd::default()
@@ -145,7 +140,6 @@ impl Parser {
                 );
                 cmd.subtype = AlterTableType::MergePartitions;
                 cmd.def = Some(Box::new(Node::PartitionCmd(PartitionCmd {
-                    node_tag: NodeTag::PartitionCmd,
                     name: Some(name),
                     partlist,
                     ..PartitionCmd::default()

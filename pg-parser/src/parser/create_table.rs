@@ -209,7 +209,6 @@ impl Parser {
                     return Err(self.error_here("CREATE TABLE OF requires a type name"));
                 }
                 of_typename = Some(Box::new(TypeName {
-                    node_tag: NodeTag::TypeName,
                     names: names.into_iter().map(make_string_node).collect(),
                     location: type_location as ParseLoc,
                     ..TypeName::default()
@@ -288,7 +287,6 @@ impl Parser {
             (partspec, access_method, options, oncommit, tablespacename)
         };
         let create = CreateStmt {
-            node_tag: NodeTag::CreateStmt,
             relation,
             table_elts,
             inh_relations,
@@ -369,10 +367,8 @@ impl Parser {
             let skip_data = self.parse_optional_with_data()?;
             self.expect_statement_end()?;
             return Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
-                node_tag: NodeTag::CreateTableAsStmt,
                 query,
                 into: Some(Box::new(IntoClause {
-                    node_tag: NodeTag::IntoClause,
                     rel: relation,
                     col_names,
                     access_method,
@@ -392,10 +388,8 @@ impl Parser {
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
         let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
         Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
-            node_tag: NodeTag::CreateTableAsStmt,
             query,
             into: Some(Box::new(IntoClause {
-                node_tag: NodeTag::IntoClause,
                 rel: relation,
                 col_names,
                 access_method,
@@ -553,10 +547,8 @@ impl Parser {
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
         let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
         Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
-            node_tag: NodeTag::CreateTableAsStmt,
             query,
             into: Some(Box::new(IntoClause {
-                node_tag: NodeTag::IntoClause,
                 rel,
                 col_names,
                 access_method,

@@ -2,7 +2,6 @@ use pg_parser::GrammarSlot;
 use pg_parser::KEYWORDS;
 use pg_parser::KeywordCategory;
 use pg_parser::Node;
-use pg_parser::NodeTag;
 use pg_parser::ParseError;
 use pg_parser::ParserExpectations;
 use pg_parser::TextSize;
@@ -13,7 +12,8 @@ use pg_parser::parse_one;
 
 #[derive(Clone, Copy)]
 pub struct StatementCase {
-    pub expected: NodeTag,
+    pub expected_name: &'static str,
+    pub expected: fn(&Node) -> bool,
     pub sql: &'static str,
 }
 
@@ -136,6 +136,6 @@ pub fn parse_error(sql: &str) -> ParseError {
 pub fn assert_statement_cases(cases: &[StatementCase]) {
     for case in cases {
         let node = parse_statement(case.sql);
-        assert_eq!(node.tag(), case.expected, "wrong node for {:?}", case.sql);
+        assert!((case.expected)(&node), "wrong node for {:?}", case.sql);
     }
 }

@@ -73,7 +73,6 @@ impl Parser {
                 )?)))
             };
             options.push(Node::DefElem(DefElem {
-                node_tag: NodeTag::DefElem,
                 defname: Some(name),
                 arg,
                 defaction: action,

@@ -23,7 +23,6 @@ impl ExprParser {
                     let args = self.parse_plain_function_arguments_after(first)?;
                     self.expect(TokenKind::Char(')'))?;
                     Some(Node::FuncCall(FuncCall {
-                        node_tag: NodeTag::FuncCall,
                         funcname: system_type_names("json_object"),
                         args,
                         location: token.location() as ParseLoc,
@@ -37,7 +36,6 @@ impl ExprParser {
                 let unique_keys = self.parse_json_unique_keys()?;
                 self.expect(TokenKind::Char(')'))?;
                 Some(Node::JsonParseExpr(JsonParseExpr {
-                    node_tag: NodeTag::JsonParseExpr,
                     expr: Some(Box::new(expr)),
                     unique_keys,
                     location: token.location() as ParseLoc,
@@ -48,7 +46,6 @@ impl ExprParser {
                 let expr = self.parse_expr(0)?;
                 self.expect(TokenKind::Char(')'))?;
                 Some(Node::JsonScalarExpr(JsonScalarExpr {
-                    node_tag: NodeTag::JsonScalarExpr,
                     expr: Some(Box::new(expr)),
                     location: token.location() as ParseLoc,
                     ..JsonScalarExpr::default()
@@ -59,7 +56,6 @@ impl ExprParser {
                 let output = self.parse_json_output()?;
                 self.expect(TokenKind::Char(')'))?;
                 Some(Node::JsonSerializeExpr(JsonSerializeExpr {
-                    node_tag: NodeTag::JsonSerializeExpr,
                     expr: Some(Box::new(expr)),
                     output,
                     location: token.location() as ParseLoc,
@@ -78,7 +74,6 @@ impl ExprParser {
         let raw_expr = self.parse_expr(0)?;
         let format = self.parse_json_format()?;
         Some(JsonValueExpr {
-            node_tag: NodeTag::JsonValueExpr,
             raw_expr: Some(Box::new(raw_expr)),
             format: Some(Box::new(format.unwrap_or_else(default_json_format))),
             ..JsonValueExpr::default()
@@ -132,7 +127,6 @@ impl ExprParser {
             JsonEncoding::Default
         };
         Some(Some(JsonFormat {
-            node_tag: NodeTag::JsonFormat,
             format_type: JsonFormatType::Json,
             encoding,
             location: location as ParseLoc,
@@ -180,10 +174,8 @@ impl ExprParser {
                 .unwrap_or_else(default_json_format),
         ));
         Some(Some(Box::new(JsonOutput {
-            node_tag: NodeTag::JsonOutput,
             type_name: Some(type_name),
             returning: Some(Box::new(JsonReturning {
-                node_tag: NodeTag::JsonReturning,
                 format,
                 ..JsonReturning::default()
             })),
@@ -236,7 +228,6 @@ impl ExprParser {
             }
             let value = self.parse_json_value_expr()?;
             exprs.push(Node::JsonKeyValue(JsonKeyValue {
-                node_tag: NodeTag::JsonKeyValue,
                 key: Some(Box::new(key)),
                 value: Some(Box::new(value)),
             }));
@@ -261,7 +252,6 @@ impl ExprParser {
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
         Some(Node::JsonObjectConstructor(JsonObjectConstructor {
-            node_tag: NodeTag::JsonObjectConstructor,
             exprs,
             output,
             absent_on_null,
@@ -330,7 +320,6 @@ impl ExprParser {
                 return self.fail("unexpected token after JSON_ARRAY query clauses");
             }
             return Some(Node::JsonArrayQueryConstructor(JsonArrayQueryConstructor {
-                node_tag: NodeTag::JsonArrayQueryConstructor,
                 query: Some(Box::new(query)),
                 output,
                 format,
@@ -366,7 +355,6 @@ impl ExprParser {
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
         Some(Node::JsonArrayConstructor(JsonArrayConstructor {
-            node_tag: NodeTag::JsonArrayConstructor,
             exprs,
             output,
             absent_on_null,
@@ -403,7 +391,6 @@ pub(super) fn parse_json_value_expr_tokens_with_completion(
 
 pub(super) fn default_json_format() -> JsonFormat {
     JsonFormat {
-        node_tag: NodeTag::JsonFormat,
         location: -1,
         ..JsonFormat::default()
     }

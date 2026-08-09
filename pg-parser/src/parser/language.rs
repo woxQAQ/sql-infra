@@ -24,7 +24,6 @@ impl Parser {
         );
         if !self.consume(TokenKind::Handler) {
             return Ok(Node::CreateExtensionStmt(CreateExtensionStmt {
-                node_tag: NodeTag::CreateExtensionStmt,
                 extname: plname,
                 if_not_exists: replace,
                 options: Vec::new(),
@@ -59,7 +58,6 @@ impl Parser {
             Vec::new()
         };
         Ok(Node::CreatePLangStmt(CreatePLangStmt {
-            node_tag: NodeTag::CreatePLangStmt,
             replace,
             plname,
             plhandler,

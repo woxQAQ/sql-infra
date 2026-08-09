@@ -52,7 +52,6 @@ impl Parser {
                 ));
             }
             let elem = PartitionElem {
-                node_tag: NodeTag::PartitionElem,
                 name: parsed.name,
                 expr: parsed.expr,
                 collation: parsed.collation,
@@ -72,7 +71,6 @@ impl Parser {
             return Err(self.error_here("partition key cannot be empty"));
         }
         Ok(PartitionSpec {
-            node_tag: NodeTag::PartitionSpec,
             strategy,
             part_params,
             location: location as ParseLoc,
@@ -83,7 +81,6 @@ impl Parser {
         let location = self.location();
         if self.consume(TokenKind::Default) {
             return Ok(PartitionBoundSpec {
-                node_tag: NodeTag::PartitionBoundSpec,
                 is_default: true,
                 location: location as ParseLoc,
                 ..PartitionBoundSpec::default()
@@ -100,7 +97,6 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             return Ok(PartitionBoundSpec {
-                node_tag: NodeTag::PartitionBoundSpec,
                 strategy: b'l',
                 listdatums,
                 location: location as ParseLoc,
@@ -123,7 +119,6 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             return Ok(PartitionBoundSpec {
-                node_tag: NodeTag::PartitionBoundSpec,
                 strategy: b'r',
                 lowerdatums,
                 upperdatums,
@@ -162,7 +157,6 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(PartitionBoundSpec {
-            node_tag: NodeTag::PartitionBoundSpec,
             strategy: b'h',
             modulus: modulus.ok_or_else(|| self.error_here("missing MODULUS"))?,
             remainder: remainder.ok_or_else(|| self.error_here("missing REMAINDER"))?,
