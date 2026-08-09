@@ -13,10 +13,12 @@ mod statement;
 
 pub use pg_parser::GrammarSlot;
 use pg_parser::KEYWORDS;
+use pg_parser::ParserExpectations;
 use pg_parser::TextRange;
 use pg_parser::TextSize;
 use pg_parser::TokenKind;
 use pg_parser::collect_expectations;
+use pg_parser::lex_for_completion;
 pub use prefix::CompletionPrefix;
 pub use prefix::IdentifierQuoting;
 pub use prefix::NamePart;
@@ -267,17 +269,17 @@ pub enum CompletionDiagnosticKind {
 /// The requested point is clamped and normalized before any slicing occurs.
 pub fn collect(source: &str, point: TextSize) -> CompletionContext {
     let normalized = prefix::normalize_point(source, point);
-    let statement_range = statement::range_at(source, normalized.point);
-    let site = prefix::analyze(source, statement_range, normalized.point);
+    let stmt_range = statement::range_at(source, normalized.point);
+    let site = prefix::analyze(source, stmt_range, normalized.point);
     let mut diagnostics = normalized.diagnostics;
 
-    let statement_start = usize::from(statement_range.start());
-    let statement_text = &source[statement_start..usize::from(statement_range.end())];
+    let statement_start = usize::from(stmt_range.start());
+    let stmt_text = &source[statement_start..usize::from(stmt_range.end())];
     let completion_start = TextSize::try_from(
         usize::from(site.replacement_range.start()).saturating_sub(statement_start),
     )
     .expect("completion start fits TextSize");
-    let tokenization_result = pg_parser::lex_for_completion(statement_text, completion_start);
+    let tokenization_result = lex_for_completion(stmt_text, completion_start);
     match &tokenization_result {
         Ok(tokenization) => {
             if let Some(error) = tokenization.recovered_error() {
@@ -291,8 +293,7 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
                     range,
                 });
             }
-            if let Some(range) =
-                scope::incomplete_range(statement_range.start(), tokenization.tokens())
+            if let Some(range) = scope::incomplete_range(stmt_range.start(), tokenization.tokens())
                 && !diagnostics.iter().any(|diagnostic| {
                     diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete
                         && diagnostic.range == range
@@ -310,9 +311,9 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
         }),
     }
     let expectation_result = if site.supports_grammar_completion() {
-        collect_expectations(statement_text, completion_start)
+        collect_expectations(stmt_text, completion_start)
     } else {
-        Ok(pg_parser::ParserExpectations::default())
+        Ok(ParserExpectations::default())
     };
     let mut expectations = match expectation_result {
         Ok(expectations) => ExpectationSet {
@@ -330,24 +331,23 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
     };
     filter_token_prefix(&mut expectations, &site.prefix);
     let point_in_statement = TextSize::try_from(
-        usize::from(normalized.point).saturating_sub(usize::from(statement_range.start())),
+        usize::from(normalized.point).saturating_sub(usize::from(stmt_range.start())),
     )
     .expect("point in statement fits TextSize");
     let scope = match &tokenization_result {
         Ok(tokenization) => scope::collect_tokens(
-            statement_text,
-            statement_range.start(),
+            stmt_text,
+            stmt_range.start(),
             point_in_statement,
             tokenization.tokens(),
         ),
         Err(_) => ScopeSnapshot::default(),
     };
-    let mut intent =
-        intent::from_expectations(&expectations, statement_text, statement_range.start());
+    let mut intent = intent::from_expectations(&expectations, stmt_text, stmt_range.start());
     intent.qualifier = site.qualifier;
 
     CompletionContext {
-        statement_range,
+        statement_range: stmt_range,
         point: normalized.point,
         replacement_range: site.replacement_range,
         prefix: site.prefix,
