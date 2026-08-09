@@ -7,11 +7,11 @@ use std::fmt;
 use std::ops::Add;
 use std::ops::Sub;
 
-/// A UTF-8 byte offset into a SQL source string.
+/// A UTF-8 byte quantity used as a source offset, text length, or range shift.
 ///
-/// Values are deliberately limited to `i32::MAX`: PostgreSQL parse locations
-/// use signed 32-bit integers. Inputs that do not fit are rejected instead of
-/// being truncated.
+/// Values are deliberately limited to `i32::MAX` so that source offsets remain
+/// compatible with PostgreSQL's signed 32-bit parse locations. Inputs that do
+/// not fit are rejected instead of being truncated.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TextSize(u32);
 
@@ -23,11 +23,11 @@ impl TextSize {
         Self(value)
     }
 
-    /// Converts a validated byte offset into a text size.
+    /// Converts a validated UTF-8 byte quantity into a text size.
     ///
     /// # Panics
     ///
-    /// Panics if `value` exceeds PostgreSQL's supported text offset range.
+    /// Panics if `value` exceeds the supported text size range.
     #[track_caller]
     pub fn from_usize(value: usize) -> Self {
         match Self::try_from(value) {
