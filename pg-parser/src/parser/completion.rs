@@ -1285,6 +1285,19 @@ mod tests {
         let create_expectations = expectations_at_end("CREATE ");
         assert!(create_expectations.tokens.contains(&TokenKind::Table));
         assert!(create_expectations.tokens.contains(&TokenKind::Function));
+        assert!(!create_expectations.tokens.contains(&TokenKind::Assertion));
+
+        let temporary = expectations_at_end("CREATE TEMP ");
+        assert!(temporary.tokens.contains(&TokenKind::Table));
+        assert!(!temporary.tokens.contains(&TokenKind::Materialized));
+        assert!(!temporary.tokens.contains(&TokenKind::Trusted));
+
+        let replaced_temporary = expectations_at_end("CREATE OR REPLACE TEMP ");
+        assert!(replaced_temporary.tokens.contains(&TokenKind::View));
+        assert!(!replaced_temporary.tokens.contains(&TokenKind::Function));
+
+        let replaced = expectations_at_end("CREATE OR REPLACE ");
+        assert!(!replaced.tokens.contains(&TokenKind::Constraint));
 
         let alter_expectations = expectations_at_end("ALTER ");
         assert!(alter_expectations.tokens.contains(&TokenKind::Table));

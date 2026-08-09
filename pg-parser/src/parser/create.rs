@@ -15,34 +15,29 @@ impl Parser {
             false
         };
         let relpersistence = self.parse_create_relpersistence()?;
-        let trusted = self.consume(TokenKind::Trusted);
-        let procedural = self.consume(TokenKind::Procedural);
-        if trusted || procedural {
-            self.record_completion_tokens(&[TokenKind::Language]);
+        if relpersistence == b'p' {
+            self.record_completion_tokens(&[TokenKind::Trusted, TokenKind::Procedural]);
         }
-        if replace {
-            self.record_completion_tokens(&[
-                TokenKind::Aggregate,
-                TokenKind::Function,
-                TokenKind::Procedure,
-                TokenKind::Language,
-                TokenKind::Transform,
-                TokenKind::Rule,
-                TokenKind::Trigger,
-                TokenKind::Constraint,
-                TokenKind::View,
-                TokenKind::Recursive,
-            ]);
-        } else if relpersistence != b'p' {
-            self.record_completion_tokens(&[
-                TokenKind::Table,
-                TokenKind::View,
-                TokenKind::Recursive,
-                TokenKind::Materialized,
-                TokenKind::Sequence,
-                TokenKind::Property,
-            ]);
+        let trusted = if self.peek_kind() == TokenKind::Trusted {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        if relpersistence == b'p' {
+            self.record_completion_tokens(&[TokenKind::Procedural]);
         }
+        let procedural = if self.peek_kind() == TokenKind::Procedural {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        self.record_completion_tokens(Self::create_object_candidates(
+            replace,
+            relpersistence,
+            trusted || procedural,
+        ));
         if (trusted || procedural) && self.peek_kind() != TokenKind::Language {
             return Err(self.error_here("TRUSTED/PROCEDURAL is only valid for CREATE LANGUAGE"));
         }
@@ -78,48 +73,6 @@ impl Parser {
         {
             return Err(self.error_here("OR REPLACE is not allowed for this CREATE statement"));
         }
-        self.record_completion_tokens(&[
-            TokenKind::Table,
-            TokenKind::Foreign,
-            TokenKind::Unique,
-            TokenKind::Index,
-            TokenKind::Schema,
-            TokenKind::Database,
-            TokenKind::Recursive,
-            TokenKind::View,
-            TokenKind::Materialized,
-            TokenKind::Extension,
-            TokenKind::Function,
-            TokenKind::Procedure,
-            TokenKind::User,
-            TokenKind::Role,
-            TokenKind::GroupP,
-            TokenKind::Sequence,
-            TokenKind::DomainP,
-            TokenKind::TypeP,
-            TokenKind::Publication,
-            TokenKind::Subscription,
-            TokenKind::Policy,
-            TokenKind::Trigger,
-            TokenKind::Constraint,
-            TokenKind::Event,
-            TokenKind::Language,
-            TokenKind::Server,
-            TokenKind::Tablespace,
-            TokenKind::Access,
-            TokenKind::Cast,
-            TokenKind::Default,
-            TokenKind::ConversionP,
-            TokenKind::Transform,
-            TokenKind::Statistics,
-            TokenKind::Operator,
-            TokenKind::Property,
-            TokenKind::Rule,
-            TokenKind::Assertion,
-            TokenKind::Aggregate,
-            TokenKind::Collation,
-            TokenKind::TextP,
-        ]);
         let node = match self.peek_kind() {
             TokenKind::Table => self.parse_create_table(false, relpersistence)?,
             TokenKind::Foreign => {
@@ -211,6 +164,95 @@ impl Parser {
             other => return Err(self.error_here(format!("unsupported CREATE form {:?}", other))),
         };
         Ok(node)
+    }
+
+    fn create_object_candidates(
+        replace: bool,
+        relpersistence: u8,
+        language_modifiers: bool,
+    ) -> &'static [TokenKind] {
+        if language_modifiers {
+            return if relpersistence == b'p' {
+                &[TokenKind::Language]
+            } else {
+                &[]
+            };
+        }
+        if replace {
+            return if relpersistence == b'p' {
+                &[
+                    TokenKind::Aggregate,
+                    TokenKind::Function,
+                    TokenKind::Procedure,
+                    TokenKind::Language,
+                    TokenKind::Transform,
+                    TokenKind::Rule,
+                    TokenKind::Trigger,
+                    TokenKind::View,
+                    TokenKind::Recursive,
+                ]
+            } else {
+                &[TokenKind::View, TokenKind::Recursive]
+            };
+        }
+        match relpersistence {
+            b't' => &[
+                TokenKind::Table,
+                TokenKind::View,
+                TokenKind::Recursive,
+                TokenKind::Sequence,
+                TokenKind::Property,
+            ],
+            b'u' => &[
+                TokenKind::Table,
+                TokenKind::View,
+                TokenKind::Recursive,
+                TokenKind::Materialized,
+                TokenKind::Sequence,
+                TokenKind::Property,
+            ],
+            _ => &[
+                TokenKind::Table,
+                TokenKind::Foreign,
+                TokenKind::Unique,
+                TokenKind::Index,
+                TokenKind::Schema,
+                TokenKind::Database,
+                TokenKind::Recursive,
+                TokenKind::View,
+                TokenKind::Materialized,
+                TokenKind::Extension,
+                TokenKind::Function,
+                TokenKind::Procedure,
+                TokenKind::User,
+                TokenKind::Role,
+                TokenKind::GroupP,
+                TokenKind::Sequence,
+                TokenKind::DomainP,
+                TokenKind::TypeP,
+                TokenKind::Publication,
+                TokenKind::Subscription,
+                TokenKind::Policy,
+                TokenKind::Trigger,
+                TokenKind::Constraint,
+                TokenKind::Event,
+                TokenKind::Language,
+                TokenKind::Server,
+                TokenKind::Tablespace,
+                TokenKind::Access,
+                TokenKind::Cast,
+                TokenKind::Default,
+                TokenKind::ConversionP,
+                TokenKind::Transform,
+                TokenKind::Statistics,
+                TokenKind::Operator,
+                TokenKind::Property,
+                TokenKind::Rule,
+                TokenKind::Aggregate,
+                TokenKind::Collation,
+                TokenKind::TextP,
+            ],
+        }
     }
 
     fn parse_create_relpersistence(&mut self) -> PResult<u8> {
