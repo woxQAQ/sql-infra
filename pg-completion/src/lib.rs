@@ -273,17 +273,15 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
     let site = prefix::analyze(source, stmt_range, normalized.point);
     let mut diagnostics = normalized.diagnostics;
 
-    let statement_start = usize::from(stmt_range.start());
+    let statement_base = stmt_range.start();
+    let statement_start = usize::from(statement_base);
     let stmt_text = &source[statement_start..usize::from(stmt_range.end())];
-    let completion_start = TextSize::try_from(
-        usize::from(site.replacement_range.start()).saturating_sub(statement_start),
-    )
-    .expect("completion start fits TextSize");
+    let completion_start = site.replacement_range.start() - statement_base;
     let tokenization_result = lex_for_completion(stmt_text, completion_start);
     match &tokenization_result {
         Ok(tokenization) => {
             if let Some(error) = tokenization.recovered_error() {
-                let range = absolute_lex_range(statement_start, error.range);
+                let range = error.range + statement_base;
                 diagnostics.push(CompletionDiagnostic {
                     kind: CompletionDiagnosticKind::TokenizationRecovered,
                     range,
@@ -293,7 +291,7 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
                     range,
                 });
             }
-            if let Some(range) = scope::incomplete_range(stmt_range.start(), tokenization.tokens())
+            if let Some(range) = scope::incomplete_range(statement_base, tokenization.tokens())
                 && !diagnostics.iter().any(|diagnostic| {
                     diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete
                         && diagnostic.range == range
@@ -307,7 +305,7 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
         }
         Err(error) => diagnostics.push(CompletionDiagnostic {
             kind: CompletionDiagnosticKind::LexErrorBeforePoint,
-            range: absolute_lex_range(statement_start, error.range),
+            range: error.range + statement_base,
         }),
     }
     let expectation_result = if site.supports_grammar_completion() {
@@ -330,20 +328,17 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
         Err(_) => ExpectationSet::default(),
     };
     filter_token_prefix(&mut expectations, &site.prefix);
-    let point_in_statement = TextSize::try_from(
-        usize::from(normalized.point).saturating_sub(usize::from(stmt_range.start())),
-    )
-    .expect("point in statement fits TextSize");
+    let point_in_statement = normalized.point - statement_base;
     let scope = match &tokenization_result {
         Ok(tokenization) => scope::collect_tokens(
             stmt_text,
-            stmt_range.start(),
+            statement_base,
             point_in_statement,
             tokenization.tokens(),
         ),
         Err(_) => ScopeSnapshot::default(),
     };
-    let mut intent = intent::from_expectations(&expectations, stmt_text, stmt_range.start());
+    let mut intent = intent::from_expectations(&expectations, stmt_text, statement_base);
     intent.qualifier = site.qualifier;
 
     CompletionContext {
@@ -356,15 +351,6 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
         scope,
         diagnostics,
     }
-}
-
-fn absolute_lex_range(base: usize, range: TextRange) -> TextRange {
-    TextRange::new(
-        TextSize::try_from(base + usize::from(range.start()))
-            .expect("lexical range start belongs to source"),
-        TextSize::try_from(base + usize::from(range.end()))
-            .expect("lexical range end belongs to source"),
-    )
 }
 
 fn filter_token_prefix(expectations: &mut ExpectationSet, prefix: &CompletionPrefix) {

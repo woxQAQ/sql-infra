@@ -1320,6 +1320,25 @@ fn distinguishes_an_active_unterminated_token_from_an_earlier_lex_error() {
 }
 
 #[test]
+fn lexical_diagnostic_ranges_are_absolute_in_later_statements() {
+    let source = "SELECT 1; SELECT schema.\"Mi";
+    let context = collect(source, TextSize::from_usize(source.len()));
+    let diagnostic = context
+        .diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.kind == CompletionDiagnosticKind::TokenizationRecovered)
+        .expect("unterminated identifier produces a recovery diagnostic");
+
+    assert_eq!(
+        diagnostic.range,
+        TextRange::new(
+            TextSize::from_usize(source.find('"').unwrap()),
+            TextSize::from_usize(source.len()),
+        )
+    );
+}
+
+#[test]
 fn scope_recovery_does_not_discard_parser_expectations() {
     let source = "SELECT  FROM \"unfinished";
     let context = collect(source, TextSize::from_usize(7));

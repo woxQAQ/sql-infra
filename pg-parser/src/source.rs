@@ -198,25 +198,32 @@ impl From<SourceTooLarge> for SourceError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LineIndex<'a> {
     text: &'a str,
+    len: TextSize,
     line_starts: Vec<TextSize>,
 }
 
 impl<'a> LineIndex<'a> {
     pub fn new(text: &'a str) -> Result<Self, SourceTooLarge> {
-        TextSize::try_from(text.len())?;
+        let len = TextSize::try_from(text.len())?;
         let mut line_starts = vec![TextSize::ZERO];
         for (index, byte) in text.bytes().enumerate() {
             if byte == b'\n' {
                 line_starts.push(TextSize::try_from(index + 1)?);
             }
         }
-        Ok(Self { text, line_starts })
+        Ok(Self {
+            text,
+            len,
+            line_starts,
+        })
     }
 
     pub fn line_column(&self, offset: TextSize) -> Result<LineColumn, SourceError> {
-        let len = TextSize::try_from(self.text.len())?;
-        if offset > len {
-            return Err(SourceError::OutOfBounds { offset, len });
+        if offset > self.len {
+            return Err(SourceError::OutOfBounds {
+                offset,
+                len: self.len,
+            });
         }
         let offset_usize = usize::from(offset);
         if !self.text.is_char_boundary(offset_usize) {
@@ -237,7 +244,6 @@ impl<'a> LineIndex<'a> {
 #[derive(Clone, Debug)]
 pub struct SourceText<'a> {
     text: &'a str,
-    len: TextSize,
     line_index: LineIndex<'a>,
 }
 
@@ -245,7 +251,6 @@ impl<'a> SourceText<'a> {
     pub fn new(text: &'a str) -> Result<Self, SourceTooLarge> {
         Ok(Self {
             text,
-            len: TextSize::try_from(text.len())?,
             line_index: LineIndex::new(text)?,
         })
     }
@@ -255,11 +260,11 @@ impl<'a> SourceText<'a> {
     }
 
     pub const fn len(&self) -> TextSize {
-        self.len
+        self.line_index.len
     }
 
     pub const fn is_empty(&self) -> bool {
-        self.len.get() == 0
+        self.len().get() == 0
     }
 
     pub fn line_column(&self, offset: TextSize) -> Result<LineColumn, SourceError> {
@@ -277,10 +282,10 @@ impl<'a> SourceText<'a> {
     }
 
     pub fn slice(&self, range: TextRange) -> Result<&'a str, SourceError> {
-        if range.end() > self.len {
+        if range.end() > self.len() {
             return Err(SourceError::OutOfBounds {
                 offset: range.end(),
-                len: self.len,
+                len: self.len(),
             });
         }
         let start = usize::from(range.start());
