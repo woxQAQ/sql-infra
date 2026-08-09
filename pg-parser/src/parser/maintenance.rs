@@ -147,7 +147,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Node::CopyStmt(CopyStmt {
+        Ok(node!(CopyStmt {
             relation,
             query,
             attlist,
@@ -189,7 +189,7 @@ impl Parser {
             } else {
                 Vec::new()
             };
-            rels.push(Node::VacuumRelation(VacuumRelation {
+            rels.push(node!(VacuumRelation {
                 relation: Some(Box::new(relation)),
                 va_cols,
                 ..VacuumRelation::default()
@@ -254,11 +254,11 @@ impl Parser {
                 }
                 TokenKind::Freeze => {
                     self.advance();
-                    ("freeze", Some(Node::Boolean(Boolean::new(true))))
+                    ("freeze", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::HeaderP => {
                     self.advance();
-                    ("header", Some(Node::Boolean(Boolean::new(true))))
+                    ("header", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::Delimiter
                 | TokenKind::NullP
@@ -292,7 +292,7 @@ impl Parser {
                         "force_null"
                     };
                     let value = if self.consume(TokenKind::Char('*')) {
-                        Node::AStar(AStar {})
+                        Node::AStar
                     } else {
                         let mut columns = Vec::new();
                         loop {
@@ -318,7 +318,7 @@ impl Parser {
                                 break;
                             }
                         }
-                        Node::AArrayExpr(AArrayExpr {
+                        node!(AArrayExpr {
                             elements: columns,
                             location: -1,
                             ..AArrayExpr::default()
@@ -413,7 +413,7 @@ impl Parser {
             options.push(make_def_elem("verbose", None, token.location()));
         }
         let rels = self.parse_vacuum_relation_list()?;
-        Ok(Node::VacuumStmt(VacuumStmt {
+        Ok(node!(VacuumStmt {
             options,
             rels,
             is_vacuumcmd,
@@ -430,7 +430,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CheckPointStmt(CheckPointStmt { options }))
+        Ok(node!(CheckPointStmt { options }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -452,7 +452,7 @@ impl Parser {
             TokenKind::Temp | TokenKind::Temporary => DiscardMode::Temp,
             _ => return Err(self.error_here("DISCARD requires ALL, PLANS, SEQUENCES, or TEMP")),
         };
-        Ok(Node::DiscardStmt(DiscardStmt { target }))
+        Ok(node!(DiscardStmt { target }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -484,7 +484,7 @@ impl Parser {
             8
         };
         let nowait = self.consume(TokenKind::Nowait);
-        Ok(Node::LockStmt(LockStmt {
+        Ok(node!(LockStmt {
             relations,
             mode,
             nowait,
@@ -565,7 +565,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("LISTEN requires a channel name"))?,
         );
-        Ok(Node::ListenStmt(ListenStmt { conditionname }))
+        Ok(node!(ListenStmt { conditionname }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -582,7 +582,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("UNLISTEN requires a channel name or '*'"))?,
             )
         };
-        Ok(Node::UnlistenStmt(UnlistenStmt { conditionname }))
+        Ok(node!(UnlistenStmt { conditionname }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -600,7 +600,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Node::NotifyStmt(NotifyStmt {
+        Ok(node!(NotifyStmt {
             conditionname,
             payload,
         }))
@@ -612,7 +612,7 @@ impl Parser {
     pub(super) fn parse_load(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Load)?;
         let filename = Some(self.consume_required_string("LOAD requires a string filename")?);
-        Ok(Node::LoadStmt(LoadStmt { filename }))
+        Ok(node!(LoadStmt { filename }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -637,7 +637,7 @@ impl Parser {
         } else {
             false
         };
-        Ok(Node::RefreshMatViewStmt(RefreshMatViewStmt {
+        Ok(node!(RefreshMatViewStmt {
             concurrent,
             skip_data,
             relation,
@@ -722,7 +722,7 @@ impl Parser {
                 (None, self.consume_col_id())
             }
         };
-        Ok(Node::ReindexStmt(ReindexStmt {
+        Ok(node!(ReindexStmt {
             kind,
             relation,
             name,
@@ -778,7 +778,7 @@ impl Parser {
                 (relation, false, None)
             }
         };
-        Ok(Node::RepackStmt(RepackStmt {
+        Ok(node!(RepackStmt {
             command: RepackCommand::Repack,
             relation,
             indexname,
@@ -798,7 +798,7 @@ impl Parser {
             params.push(make_def_elem("verbose", None, self.previous_location()));
         }
         if self.at_statement_end() {
-            return Ok(Node::RepackStmt(RepackStmt {
+            return Ok(node!(RepackStmt {
                 command: RepackCommand::Cluster,
                 usingindex: true,
                 params,
@@ -814,7 +814,7 @@ impl Parser {
             let relation = self
                 .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CLUSTER ON requires a relation"))?;
-            return Ok(Node::RepackStmt(RepackStmt {
+            return Ok(node!(RepackStmt {
                 command: RepackCommand::Cluster,
                 relation: Some(Box::new(VacuumRelation {
                     relation: Some(Box::new(relation)),
@@ -839,7 +839,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Node::RepackStmt(RepackStmt {
+        Ok(node!(RepackStmt {
             command: RepackCommand::Cluster,
             relation: Some(Box::new(VacuumRelation {
                 relation: Some(Box::new(relation)),
@@ -878,7 +878,7 @@ impl Parser {
             false
         };
         let behavior = self.parse_drop_behavior();
-        Ok(Node::TruncateStmt(TruncateStmt {
+        Ok(node!(TruncateStmt {
             relations,
             restart_seqs,
             behavior,
@@ -952,13 +952,13 @@ fn parse_copy_generic_option(
             }
         }
         parser.expect(TokenKind::Char(')'))?;
-        Some(Node::AArrayExpr(AArrayExpr {
+        Some(node!(AArrayExpr {
             elements: values,
             location: -1,
             ..AArrayExpr::default()
         }))
     } else if parser.consume(TokenKind::Char('*')) {
-        Some(Node::AStar(AStar {}))
+        Some(Node::AStar)
     } else if parser.consume(TokenKind::Default) {
         Some(make_string_node("default"))
     } else if parser.at_any(&[

@@ -1,4 +1,4 @@
-//! Shared token, keyword, node-tag, and PostgreSQL enum discriminants.
+//! Shared token, keyword, and PostgreSQL enum discriminants.
 //!
 //! These enums connect the lexer, parser, completion collector, and raw AST;
 //! changes therefore need to preserve the mappings between those layers.

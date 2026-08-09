@@ -99,7 +99,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Node::IndexStmt(IndexStmt {
+        Ok(node!(IndexStmt {
             idxname,
             relation,
             access_method,
@@ -159,9 +159,11 @@ impl Parser {
 }
 pub(super) fn node_to_index_elem(node: Node) -> Node {
     match node {
-        Node::ColumnRef(ColumnRef {
-            fields, location, ..
-        }) if fields.len() == 1 => Node::IndexElem(IndexElem {
+        node!(ColumnRef {
+            fields,
+            location,
+            ..
+        }) if fields.len() == 1 => node!(IndexElem {
             name: fields.first().and_then(|field| match field {
                 Node::String(value) => value.sval.clone(),
                 _ => None,
@@ -169,7 +171,7 @@ pub(super) fn node_to_index_elem(node: Node) -> Node {
             location,
             ..IndexElem::default()
         }),
-        expr => Node::IndexElem(IndexElem {
+        expr => node!(IndexElem {
             expr: Some(Box::new(expr)),
             ..IndexElem::default()
         }),

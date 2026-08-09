@@ -32,7 +32,7 @@ impl Parser {
         if handler_name.is_empty() {
             return Err(self.error_here("access method HANDLER requires a function name"));
         }
-        Ok(Node::CreateAmStmt(CreateAmStmt {
+        Ok(node!(CreateAmStmt {
             amname,
             handler_name,
             amtype,

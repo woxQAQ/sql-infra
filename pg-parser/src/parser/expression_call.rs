@@ -60,7 +60,7 @@ impl ExprParser {
             self.parse_function_decorations(&mut call)?;
             Some(Node::FuncCall(call))
         } else {
-            Some(Node::ColumnRef(ColumnRef {
+            Some(node!(ColumnRef {
                 fields,
                 location: location as ParseLoc,
             }))
@@ -90,7 +90,7 @@ impl ExprParser {
             }
         }
         let list_end = self.expect(TokenKind::Char(']'))?.location();
-        Some(Node::AArrayExpr(AArrayExpr {
+        Some(node!(AArrayExpr {
             elements,
             list_start: list_start as ParseLoc,
             list_end: list_end as ParseLoc,
@@ -103,7 +103,7 @@ impl ExprParser {
             let name_token = self.advance().clone();
             let location = name_token.location();
             self.advance();
-            return Some(Node::NamedArgExpr(NamedArgExpr {
+            return Some(node!(NamedArgExpr {
                 arg: Some(Box::new(self.parse_expr(0)?)),
                 name: token_name(&name_token),
                 argnumber: -1,
@@ -202,7 +202,7 @@ impl ExprParser {
             } else {
                 SortByNulls::Default
             };
-            items.push(Node::SortBy(SortBy {
+            items.push(node!(SortBy {
                 node: Some(Box::new(expression)),
                 sortby_dir,
                 sortby_nulls,

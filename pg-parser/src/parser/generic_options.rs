@@ -72,7 +72,7 @@ impl Parser {
                     "option value must be a string literal",
                 )?)))
             };
-            options.push(Node::DefElem(DefElem {
+            options.push(node!(DefElem {
                 defname: Some(name),
                 arg,
                 defaction: action,

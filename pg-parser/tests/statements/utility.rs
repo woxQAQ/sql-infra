@@ -133,7 +133,7 @@ fn copy_generic_options_preserve_every_raw_argument_shape() {
     ));
     assert!(matches!(
         def(&copy.options[5]).arg.as_deref(),
-        Some(Node::AStar(_))
+        Some(Node::AStar)
     ));
     assert!(matches!(
         def(&copy.options[6]).arg.as_deref(),
@@ -180,7 +180,7 @@ fn copy_generic_options_preserve_every_raw_argument_shape() {
     ));
     assert!(matches!(
         def(&force.options[2]).arg.as_deref(),
-        Some(Node::AStar(_))
+        Some(Node::AStar)
     ));
     assert!(matches!(
         def(&force.options[3]).arg.as_deref(),

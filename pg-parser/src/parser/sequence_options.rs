@@ -25,7 +25,7 @@ impl Parser {
         sequence_node.relpersistence = relpersistence;
         let sequence = Some(Box::new(sequence_node));
         let options = self.parse_sequence_options()?;
-        Ok(Node::CreateSeqStmt(CreateSeqStmt {
+        Ok(node!(CreateSeqStmt {
             sequence,
             options,
             if_not_exists,
@@ -60,7 +60,7 @@ impl Parser {
         if options.is_empty() {
             return Err(self.error_here("ALTER SEQUENCE requires at least one option"));
         }
-        Ok(Node::AlterSeqStmt(AlterSeqStmt {
+        Ok(node!(AlterSeqStmt {
             sequence,
             options,
             missing_ok,
@@ -113,7 +113,7 @@ impl Parser {
                 }
                 TokenKind::Cycle => {
                     self.advance();
-                    ("cycle", Some(Node::Boolean(Boolean::new(true))))
+                    ("cycle", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::No => {
                     self.advance();
@@ -123,7 +123,7 @@ impl Parser {
                         TokenKind::Minvalue,
                     ]);
                     let option = match self.peek_kind() {
-                        TokenKind::Cycle => ("cycle", Some(Node::Boolean(Boolean::new(false)))),
+                        TokenKind::Cycle => ("cycle", Some(node!(Boolean::new(false)))),
                         TokenKind::Maxvalue => ("maxvalue", None),
                         TokenKind::Minvalue => ("minvalue", None),
                         _ => {
@@ -167,7 +167,7 @@ impl Parser {
                     }
                     (
                         "owned_by",
-                        Some(Node::AArrayExpr(AArrayExpr {
+                        Some(node!(AArrayExpr {
                             elements: names,
                             ..AArrayExpr::default()
                         })),
@@ -183,7 +183,7 @@ impl Parser {
                     }
                     (
                         "sequence_name",
-                        Some(Node::AArrayExpr(AArrayExpr {
+                        Some(node!(AArrayExpr {
                             elements: names,
                             ..AArrayExpr::default()
                         })),
@@ -288,14 +288,10 @@ impl Parser {
         let location = token.location();
         match (token.kind, token.value) {
             (TokenKind::IConst, Some(TokenValue::Integer(value))) => {
-                Ok(Node::Integer(Integer::new(if negative {
-                    -value
-                } else {
-                    value
-                })))
+                Ok(node!(Integer::new(if negative { -value } else { value })))
             }
             (TokenKind::FConst, Some(TokenValue::String(value))) => {
-                Ok(Node::Float(Float::new(if negative {
+                Ok(node!(Float::new(if negative {
                     format!("-{value}")
                 } else {
                     value
@@ -317,10 +313,6 @@ impl Parser {
         let Some(TokenValue::Integer(value)) = token.value else {
             return Err(ParseError::ranged(token.range, "expected an integer"));
         };
-        Ok(Node::Integer(Integer::new(if negative {
-            -value
-        } else {
-            value
-        })))
+        Ok(node!(Integer::new(if negative { -value } else { value })))
     }
 }

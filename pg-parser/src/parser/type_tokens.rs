@@ -271,14 +271,14 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
                 ));
             }
         };
-        array_bounds.push(Node::Integer(Integer::new(bound)));
+        array_bounds.push(node!(Integer::new(bound)));
         tokens.truncate(open);
     }
     array_bounds.reverse();
     if tokens.last().map(|token| token.kind) == Some(TokenKind::Array) {
         tokens.pop();
         if array_bounds.is_empty() {
-            array_bounds.push(Node::Integer(Integer::new(-1)));
+            array_bounds.push(node!(Integer::new(-1)));
         } else if array_bounds.len() != 1 {
             return Err(ParseError::syntax_exit(
                 location,
@@ -365,7 +365,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
             let name = if typmods.is_empty() {
                 "float8"
             } else if let [
-                Node::AConst(AConst {
+                node!(AConst {
                     val: ValUnion::Integer(value),
                     ..
                 }),
@@ -394,7 +394,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         [TokenKind::Bit] | [TokenKind::Bit, TokenKind::Varying] => {
             let varying = kinds.len() == 2;
             if typmods.is_empty() && !varying {
-                default_typmods.push(Node::AConst(AConst::integer(1, -1)));
+                default_typmods.push(node!(AConst::integer(1, -1)));
             }
             (
                 system_type_names(if varying { "varbit" } else { "bit" }),
@@ -417,7 +417,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         | [TokenKind::National, TokenKind::CharP]
         | [TokenKind::Nchar] => {
             if typmods.is_empty() {
-                default_typmods.push(Node::AConst(AConst::integer(1, -1)));
+                default_typmods.push(node!(AConst::integer(1, -1)));
             }
             (system_type_names("bpchar"), true)
         }
@@ -440,10 +440,10 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         kinds if kinds.first() == Some(&TokenKind::Interval) => {
             if kinds.len() == 1 {
                 if !typmods.is_empty() {
-                    default_typmods.push(Node::AConst(AConst::integer(0x7fff, -1)));
+                    default_typmods.push(node!(AConst::integer(0x7fff, -1)));
                 }
             } else {
-                default_typmods.push(Node::AConst(AConst::integer(
+                default_typmods.push(node!(AConst::integer(
                     parse_interval_mask(&kinds[1..], location)?,
                     base_tokens[1].location() as ParseLoc,
                 )));

@@ -46,7 +46,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
                 ParseError::ranged(name_token.range, "invalid old-style aggregate option name")
             })?;
             let arg = parse_operator_def_arg(&name, tokens[2..].to_vec(), item_location)?;
-            Ok(Node::DefElem(DefElem {
+            Ok(node!(DefElem {
                 defname: Some(name),
                 arg: Some(Box::new(arg)),
                 location: item_location as ParseLoc,
@@ -59,10 +59,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
 pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
     let location = tokens.first().map_or(0, |token| token.location());
     if tokens.len() == 1 && tokens[0].kind == TokenKind::Char('*') {
-        return Ok(vec![
-            name_list_node(Vec::new()),
-            Node::Integer(Integer::new(-1)),
-        ]);
+        return Ok(vec![name_list_node(Vec::new()), node!(Integer::new(-1))]);
     }
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
@@ -170,7 +167,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
     }
     Ok(vec![
         name_list_node(parameters),
-        Node::Integer(Integer::new(direct_count)),
+        node!(Integer::new(direct_count)),
     ])
 }
 

@@ -61,7 +61,7 @@ impl Parser {
             TokenKind::Eof,
         ])?;
         let returning_clause = self.parse_returning_clause()?;
-        Ok(Node::UpdateStmt(UpdateStmt {
+        Ok(node!(UpdateStmt {
             relation,
             target_list,
             from_clause,

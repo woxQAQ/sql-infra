@@ -20,7 +20,7 @@ impl Parser {
                 if self.consume(TokenKind::Default) {
                     let tokens =
                         self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                    namespaces.push(Node::ResTarget(ResTarget {
+                    namespaces.push(node!(ResTarget {
                         val: Some(Box::new(self.parse_b_expression_fragment_tokens(tokens)?)),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
@@ -34,7 +34,7 @@ impl Parser {
                     let name = self
                         .consume_col_label()
                         .ok_or_else(|| self.error_here("XML namespace requires AS alias"))?;
-                    namespaces.push(Node::ResTarget(ResTarget {
+                    namespaces.push(node!(ResTarget {
                         name: Some(name),
                         val: Some(Box::new(value)),
                         location: target_location as ParseLoc,
@@ -247,7 +247,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Node::JoinExpr(JoinExpr {
+        Ok(node!(JoinExpr {
             jointype,
             is_natural,
             larg: Some(Box::new(larg)),

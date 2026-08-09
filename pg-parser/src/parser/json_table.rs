@@ -72,7 +72,7 @@ impl Parser {
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("JSON PASSING argument requires a name"))?;
-            arguments.push(Node::JsonArgument(JsonArgument {
+            arguments.push(node!(JsonArgument {
                 val: Some(Box::new(value)),
                 name: Some(name),
             }));
@@ -237,7 +237,7 @@ impl Parser {
             (None, -1)
         };
         Ok(Some(JsonTablePathSpec {
-            string: Some(Box::new(Node::AConst(AConst::string(
+            string: Some(Box::new(node!(AConst::string(
                 value,
                 token.location() as ParseLoc,
             )))),

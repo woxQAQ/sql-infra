@@ -274,14 +274,14 @@ impl ExprParser {
                     }
                     self.advance();
                     let item = if self.consume(TokenKind::Char('*')) {
-                        Node::AStar(AStar {})
+                        Node::AStar
                     } else {
                         let name = self
                             .consume_column_label()
                             .or_else(|| self.fail("expected a field name after '.'"))?;
                         make_string_node(name)
                     };
-                    indirection_ends_in_star = matches!(item, Node::AStar(_));
+                    indirection_ends_in_star = matches!(item, Node::AStar);
                     append_indirection(lhs, item)
                 }
                 TokenKind::TypeCast => {
@@ -290,7 +290,7 @@ impl ExprParser {
                     }
                     let location = self.advance().location();
                     let type_name = Some(Box::new(self.parse_cast_type_name()?));
-                    Node::TypeCast(TypeCast {
+                    node!(TypeCast {
                         arg: Some(Box::new(lhs)),
                         type_name,
                         location: location as ParseLoc,
@@ -306,7 +306,7 @@ impl ExprParser {
                         &[completion::GrammarSlot::Collation],
                         false,
                     )?;
-                    Node::CollateClause(CollateClause {
+                    node!(CollateClause {
                         arg: Some(Box::new(lhs)),
                         collname,
                         location: location as ParseLoc,
@@ -320,7 +320,7 @@ impl ExprParser {
                         return self.fail("cannot chain IS predicates");
                     }
                     let location = self.advance().location();
-                    Node::NullTest(NullTest {
+                    node!(NullTest {
                         arg: Some(Box::new(lhs)),
                         nulltesttype: if kind == TokenKind::Isnull {
                             NullTestType::Null
@@ -345,7 +345,7 @@ impl ExprParser {
                         self.expect(TokenKind::Local)?;
                         (vec![lhs], -1)
                     };
-                    Node::FuncCall(FuncCall {
+                    node!(FuncCall {
                         funcname: system_type_names("timezone"),
                         args,
                         funcformat: CoercionForm::SqlSyntax,

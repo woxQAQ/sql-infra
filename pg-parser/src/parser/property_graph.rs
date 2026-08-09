@@ -35,7 +35,7 @@ impl Parser {
             Vec::new()
         };
         self.expect_statement_end()?;
-        Ok(Node::CreatePropGraphStmt(CreatePropGraphStmt {
+        Ok(node!(CreatePropGraphStmt {
             pgname,
             vertex_tables,
             edge_tables,
@@ -158,13 +158,11 @@ impl Parser {
                                     .ok_or_else(|| self.error_here("ADD LABEL requires a name"))?,
                             );
                             let properties = Some(Box::new(self.parse_prop_graph_properties()?));
-                            stmt.add_labels.push(Node::PropGraphLabelAndProperties(
-                                PropGraphLabelAndProperties {
-                                    label,
-                                    properties,
-                                    location: location as ParseLoc,
-                                },
-                            ));
+                            stmt.add_labels.push(node!(PropGraphLabelAndProperties {
+                                label,
+                                properties,
+                                location: location as ParseLoc,
+                            }));
                         }
                     }
                     TokenKind::Drop => {
@@ -238,7 +236,7 @@ impl Parser {
             }
             let vkey = self.parse_optional_key_clause()?;
             let labels = self.parse_prop_graph_labels()?;
-            vertices.push(Node::PropGraphVertex(PropGraphVertex {
+            vertices.push(node!(PropGraphVertex {
                 vtable: Some(Box::new(vtable)),
                 vkey,
                 labels,
@@ -281,7 +279,7 @@ impl Parser {
             let (edestkey, edestvertex, edestvertexcols) =
                 self.parse_prop_graph_endpoint(TokenKind::Destination, "DESTINATION")?;
             let labels = self.parse_prop_graph_labels()?;
-            edges.push(Node::PropGraphEdge(PropGraphEdge {
+            edges.push(node!(PropGraphEdge {
                 etable: Some(Box::new(etable)),
                 ekey,
                 esrckey,
@@ -405,13 +403,11 @@ impl Parser {
         if matches!(self.peek_kind(), TokenKind::Properties | TokenKind::No) {
             let location = self.location();
             let properties = Some(Box::new(self.parse_prop_graph_properties()?));
-            labels.push(Node::PropGraphLabelAndProperties(
-                PropGraphLabelAndProperties {
-                    properties,
-                    location: location as ParseLoc,
-                    ..PropGraphLabelAndProperties::default()
-                },
-            ));
+            labels.push(node!(PropGraphLabelAndProperties {
+                properties,
+                location: location as ParseLoc,
+                ..PropGraphLabelAndProperties::default()
+            }));
             return Ok(labels);
         }
         while matches!(self.peek_kind(), TokenKind::Label | TokenKind::Default) {
@@ -436,26 +432,22 @@ impl Parser {
                     ..PropGraphProperties::default()
                 }))
             };
-            labels.push(Node::PropGraphLabelAndProperties(
-                PropGraphLabelAndProperties {
-                    label,
-                    properties,
-                    location: location as ParseLoc,
-                },
-            ));
+            labels.push(node!(PropGraphLabelAndProperties {
+                label,
+                properties,
+                location: location as ParseLoc,
+            }));
         }
         if labels.is_empty() {
-            labels.push(Node::PropGraphLabelAndProperties(
-                PropGraphLabelAndProperties {
-                    properties: Some(Box::new(PropGraphProperties {
-                        all: true,
-                        location: -1,
-                        ..PropGraphProperties::default()
-                    })),
+            labels.push(node!(PropGraphLabelAndProperties {
+                properties: Some(Box::new(PropGraphProperties {
+                    all: true,
                     location: -1,
-                    ..PropGraphLabelAndProperties::default()
-                },
-            ));
+                    ..PropGraphProperties::default()
+                })),
+                location: -1,
+                ..PropGraphLabelAndProperties::default()
+            }));
         }
         Ok(labels)
     }

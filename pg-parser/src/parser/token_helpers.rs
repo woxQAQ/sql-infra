@@ -66,14 +66,13 @@ pub(super) fn is_operator_name_kind(kind: TokenKind) -> bool {
 pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
     match token.kind {
         TokenKind::IConst => match token.value {
-            Some(TokenValue::Integer(value)) => Some(Node::AConst(AConst::integer(
-                value,
-                token.location() as ParseLoc,
-            ))),
+            Some(TokenValue::Integer(value)) => {
+                Some(node!(AConst::integer(value, token.location() as ParseLoc,)))
+            }
             _ => None,
         },
         TokenKind::FConst => match &token.value {
-            Some(TokenValue::String(value)) => Some(Node::AConst(AConst {
+            Some(TokenValue::String(value)) => Some(node!(AConst {
                 val: ValUnion::Float(Float::new(value.clone())),
                 location: token.location() as ParseLoc,
                 ..AConst::default()
@@ -81,9 +80,9 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
             _ => None,
         },
         TokenKind::SConst => token_name(token)
-            .map(|value| Node::AConst(AConst::string(value, token.location() as ParseLoc))),
+            .map(|value| node!(AConst::string(value, token.location() as ParseLoc))),
         TokenKind::BConst | TokenKind::XConst => match &token.value {
-            Some(TokenValue::String(value)) => Some(Node::AConst(AConst {
+            Some(TokenValue::String(value)) => Some(node!(AConst {
                 val: ValUnion::BitString(BitString::new(value.clone())),
                 location: token.location() as ParseLoc,
                 ..AConst::default()
@@ -91,26 +90,26 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
             _ => None,
         },
         TokenKind::Param => match token.value {
-            Some(TokenValue::Integer(number)) => Some(Node::ParamRef(ParamRef {
+            Some(TokenValue::Integer(number)) => Some(node!(ParamRef {
                 number,
                 location: token.location() as ParseLoc,
             })),
             _ => None,
         },
-        TokenKind::NullP => Some(Node::AConst(AConst::null(token.location() as ParseLoc))),
-        TokenKind::TrueP => Some(Node::AConst(AConst {
+        TokenKind::NullP => Some(node!(AConst::null(token.location() as ParseLoc))),
+        TokenKind::TrueP => Some(node!(AConst {
             val: ValUnion::Boolean(Boolean::new(true)),
             location: token.location() as ParseLoc,
             ..AConst::default()
         })),
-        TokenKind::FalseP => Some(Node::AConst(AConst {
+        TokenKind::FalseP => Some(node!(AConst {
             val: ValUnion::Boolean(Boolean::new(false)),
             location: token.location() as ParseLoc,
             ..AConst::default()
         })),
-        TokenKind::Char('*') => Some(Node::AStar(AStar {})),
+        TokenKind::Char('*') => Some(Node::AStar),
         _ => token_name(token).map(|name| {
-            Node::ColumnRef(ColumnRef {
+            node!(ColumnRef {
                 fields: vec![make_string_node(name)],
                 location: token.location() as ParseLoc,
             })
@@ -183,10 +182,10 @@ pub(super) fn parse_operator_def_arg(
         let token = &tokens[0];
         return match (&token.kind, &token.value) {
             (TokenKind::IConst, Some(TokenValue::Integer(value))) => {
-                Ok(Node::Integer(Integer::new(*value)))
+                Ok(node!(Integer::new(*value)))
             }
             (TokenKind::FConst, Some(TokenValue::String(value))) => {
-                Ok(Node::Float(Float::new(value.clone())))
+                Ok(node!(Float::new(value.clone())))
             }
             (TokenKind::SConst, Some(TokenValue::String(value))) => {
                 Ok(make_string_node(value.clone()))

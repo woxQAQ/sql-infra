@@ -646,7 +646,7 @@ fn select_stmt_parses_values_and_table_forms() {
     assert!(matches!(
         target.val.as_deref(),
         Some(Node::ColumnRef(column))
-            if matches!(column.fields.as_slice(), [Node::AStar(_)])
+            if matches!(column.fields.as_slice(), [Node::AStar])
                 && column.location == -1
     ));
 
@@ -1753,7 +1753,7 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
         .collect::<Vec<_>>();
     assert!(matches!(
         values[0],
-        Node::ColumnRef(column) if matches!(column.fields.as_slice(), [Node::AStar(_)])
+        Node::ColumnRef(column) if matches!(column.fields.as_slice(), [Node::AStar])
     ));
     assert!(matches!(
         values[1],

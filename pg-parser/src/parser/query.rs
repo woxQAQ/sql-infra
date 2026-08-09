@@ -90,7 +90,7 @@ impl Parser {
             self.expect(TokenKind::Char(')'))?;
             let search_clause = self.parse_cte_search_clause()?;
             let cycle_clause = self.parse_cte_cycle_clause()?;
-            ctes.push(Node::CommonTableExpr(CommonTableExpr {
+            ctes.push(node!(CommonTableExpr {
                 ctename: Some(name),
                 aliascolnames,
                 ctematerialized,
@@ -168,12 +168,12 @@ impl Parser {
             )
         } else {
             (
-                Some(Box::new(Node::AConst(AConst {
+                Some(Box::new(node!(AConst {
                     val: ValUnion::Boolean(Boolean::new(true)),
                     location: -1,
                     ..AConst::default()
                 }))),
-                Some(Box::new(Node::AConst(AConst {
+                Some(Box::new(node!(AConst {
                     val: ValUnion::Boolean(Boolean::new(false)),
                     location: -1,
                     ..AConst::default()
@@ -356,9 +356,9 @@ impl Parser {
             TokenKind::Table => {
                 self.advance();
                 let range = self.parse_relation_expr()?;
-                stmt.target_list.push(Node::ResTarget(ResTarget {
-                    val: Some(Box::new(Node::ColumnRef(ColumnRef {
-                        fields: vec![Node::AStar(AStar {})],
+                stmt.target_list.push(node!(ResTarget {
+                    val: Some(Box::new(node!(ColumnRef {
+                        fields: vec![Node::AStar],
                         location: -1,
                     }))),
                     location: -1,
@@ -391,8 +391,7 @@ impl Parser {
                     stmt.distinct_clause.clear();
                 } else if self.consume(TokenKind::Distinct) {
                     distinct_requires_target = true;
-                    stmt.distinct_clause
-                        .push(Node::String(String::new("distinct")));
+                    stmt.distinct_clause.push(node!(String::new("distinct")));
                     if self.consume(TokenKind::On) {
                         self.expect(TokenKind::Char('('))?;
                         let expressions =
@@ -627,7 +626,7 @@ impl Parser {
             if stmt.locking_clause.iter().any(|clause| {
                 matches!(
                     clause,
-                    Node::LockingClause(LockingClause {
+                    node!(LockingClause {
                         wait_policy: LockWaitPolicy::Skip,
                         ..
                     })
@@ -650,9 +649,7 @@ impl Parser {
                 }
                 saw_limit = true;
                 stmt.limit_count = Some(if self.consume(TokenKind::All) {
-                    Box::new(Node::AConst(AConst::null(
-                        self.previous_location() as ParseLoc
-                    )))
+                    Box::new(node!(AConst::null(self.previous_location() as ParseLoc)))
                 } else {
                     self.parse_expr_box_strict_until(&[
                         TokenKind::Char(','),
@@ -711,7 +708,7 @@ impl Parser {
                 self.record_completion_tokens(&[TokenKind::Row, TokenKind::Rows]);
                 stmt.limit_count = Some(
                     if matches!(self.peek_kind(), TokenKind::Row | TokenKind::Rows) {
-                        Box::new(Node::AConst(AConst::integer(1, -1)))
+                        Box::new(node!(AConst::integer(1, -1)))
                     } else {
                         let mut tokens =
                             self.take_until_top_level(&[TokenKind::Row, TokenKind::Rows]);

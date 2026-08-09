@@ -61,7 +61,7 @@ impl Parser {
             } else {
                 Vec::new()
             };
-            return Ok(Node::DefineStmt(DefineStmt {
+            return Ok(node!(DefineStmt {
                 kind: ObjectType::Type,
                 defnames: type_name,
                 definition,
@@ -87,12 +87,12 @@ impl Parser {
                     }
                 }
                 self.expect(TokenKind::Char(')'))?;
-                Ok(Node::CreateEnumStmt(CreateEnumStmt { type_name, vals }))
+                Ok(node!(CreateEnumStmt { type_name, vals }))
             }
             TokenKind::Range => {
                 self.advance();
                 let params = self.parse_parenthesized_definition()?;
-                Ok(Node::CreateRangeStmt(CreateRangeStmt { type_name, params }))
+                Ok(node!(CreateRangeStmt { type_name, params }))
             }
             TokenKind::Char('(') => {
                 self.advance();
@@ -110,7 +110,7 @@ impl Parser {
                     }
                 }
                 self.expect(TokenKind::Char(')'))?;
-                Ok(Node::CompositeTypeStmt(CompositeTypeStmt {
+                Ok(node!(CompositeTypeStmt {
                     typevar: Some(Box::new(range_var_from_parts(
                         list_to_names(&type_name),
                         type_location,
@@ -148,7 +148,7 @@ impl Parser {
         self.record_completion_tokens(&[TokenKind::Schema, TokenKind::Char('(')]);
         let options = self.parse_operator_definition_list(ObjectType::Type)?;
         self.expect_statement_end()?;
-        Ok(Node::AlterTypeStmt(AlterTypeStmt { type_name, options }))
+        Ok(node!(AlterTypeStmt { type_name, options }))
     }
 
     // PostgreSQL 18 Synopsis subset — enum values
@@ -274,7 +274,7 @@ impl Parser {
             }
         }
         self.expect_statement_end()?;
-        Ok(Node::AlterTableStmt(AlterTableStmt {
+        Ok(node!(AlterTableStmt {
             relation,
             cmds,
             objtype: ObjectType::Type,
@@ -358,7 +358,7 @@ impl Parser {
                 } else {
                     None
                 };
-                cmd.def = Some(Box::new(Node::ColumnDef(ColumnDef {
+                cmd.def = Some(Box::new(node!(ColumnDef {
                     type_name,
                     coll_clause,
                     location: attribute_location as ParseLoc,

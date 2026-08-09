@@ -39,7 +39,7 @@ impl Parser {
             } else {
                 None
             };
-            options.push(Node::DefElem(DefElem {
+            options.push(node!(DefElem {
                 defname: Some(name),
                 arg,
                 location: location as ParseLoc,
@@ -85,9 +85,6 @@ impl Parser {
         self.record_completion_tokens(&[TokenKind::Schema]);
         let options = self.parse_operator_definition_list(ObjectType::Operator)?;
         self.expect_statement_end()?;
-        Ok(Node::AlterOperatorStmt(AlterOperatorStmt {
-            opername,
-            options,
-        }))
+        Ok(node!(AlterOperatorStmt { opername, options }))
     }
 }

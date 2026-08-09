@@ -41,7 +41,7 @@ impl Parser {
             if elements.is_empty() {
                 return Err(self.error_here("expected a graph path pattern"));
             }
-            paths.push(Node::AArrayExpr(AArrayExpr {
+            paths.push(node!(AArrayExpr {
                 elements,
                 ..AArrayExpr::default()
             }));
@@ -217,7 +217,7 @@ impl Parser {
 
     pub(super) fn parse_graph_label_expression(&mut self) -> PResult<Node> {
         let make_term = |name: std::string::String, location: usize| {
-            Node::ColumnRef(ColumnRef {
+            node!(ColumnRef {
                 fields: vec![make_string_node(name)],
                 location: location as ParseLoc,
             })
@@ -237,7 +237,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("expected a graph label after '|'"))?;
             let term = make_term(name, term_location);
             match expression {
-                Node::BoolExpr(BoolExpr {
+                node!(BoolExpr {
                     boolop: BoolExprType::OrExpr,
                     ref mut args,
                     ..
@@ -276,10 +276,7 @@ impl Parser {
                 (first, second)
             };
             self.expect(TokenKind::Char('}'))?;
-            quantifier = vec![
-                Node::Integer(Integer::new(first)),
-                Node::Integer(Integer::new(second)),
-            ];
+            quantifier = vec![node!(Integer::new(first)), node!(Integer::new(second))];
         }
         Ok(quantifier)
     }

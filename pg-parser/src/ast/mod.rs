@@ -935,7 +935,7 @@ pub enum Node {
     RangeVar(RangeVar),
     TableFunc(TableFunc),
     IntoClause(IntoClause),
-    Expr(Expr),
+    Expr,
     Var(Var),
     Const(Const),
     Param(Param),
@@ -978,7 +978,7 @@ pub enum Node {
     JsonBehavior(JsonBehavior),
     JsonExpr(JsonExpr),
     JsonTablePath(JsonTablePath),
-    JsonTablePlan(JsonTablePlan),
+    JsonTablePlan,
     JsonTablePathScan(JsonTablePathScan),
     JsonTableSiblingJoin(JsonTableSiblingJoin),
     NullTest(NullTest),
@@ -1009,7 +1009,7 @@ pub enum Node {
     CollateClause(CollateClause),
     RoleSpec(RoleSpec),
     FuncCall(FuncCall),
-    AStar(AStar),
+    AStar,
     AIndices(AIndices),
     AIndirection(AIndirection),
     AArrayExpr(AArrayExpr),
@@ -1940,8 +1940,6 @@ pub struct FuncCall {
     pub funcformat: CoercionForm,
     pub location: ParseLoc,
 }
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct AStar {}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AIndices {
     pub is_slice: bool,

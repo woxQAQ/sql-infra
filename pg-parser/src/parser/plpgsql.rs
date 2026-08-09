@@ -34,7 +34,7 @@ pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<Raw
     let assignment_value = Some(Box::new(parse_expression_select(&mut parser)?));
 
     Ok(RawStmt {
-        stmt: Some(Box::new(Node::PlAssignStmt(PlAssignStmt {
+        stmt: Some(Box::new(node!(PlAssignStmt {
             name: Some(name),
             indirection,
             nnames: target_name_count,

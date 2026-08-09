@@ -63,6 +63,12 @@ fn contains_braced_constructor(source: &str, name: &str) -> bool {
     })
 }
 
+fn contains_node_constructor(source: &str, name: &str) -> bool {
+    source.contains(&format!("Node::{name}("))
+        || source.contains(&format!("node!({name} {{"))
+        || source.contains(&format!("node!({name}::"))
+}
+
 #[test]
 fn completion_collection_handles_every_smoke_statement_token_boundary() {
     for case in CASES {
@@ -231,7 +237,7 @@ fn raw_statement_constructors_are_audited() {
         .collect();
     let constructors: BTreeSet<_> = structs
         .iter()
-        .filter(|name| parser.contains(&format!("Node::{name}(")))
+        .filter(|name| contains_node_constructor(&parser, name))
         .cloned()
         .collect();
     let missing: BTreeSet<_> = structs.difference(&constructors).cloned().collect();
@@ -257,7 +263,7 @@ fn every_ast_struct_is_parsed_or_explicitly_classified_as_non_parser_output() {
     let represented: BTreeSet<_> = structs
         .iter()
         .filter(|name| {
-            parser.contains(&format!("Node::{name}("))
+            contains_node_constructor(&parser, name)
                 || contains_braced_constructor(&parser, name)
                 || parser.contains(&format!("{name}::new("))
         })
@@ -344,7 +350,7 @@ fn every_parser_statement_constructor_has_statement_organized_coverage() {
         .collect();
     let constructors: BTreeSet<_> = structs
         .iter()
-        .filter(|name| parser.contains(&format!("Node::{name}(")))
+        .filter(|name| contains_node_constructor(&parser, name))
         .cloned()
         .collect();
     let mut covered: BTreeSet<_> = CASES
@@ -553,7 +559,7 @@ fn every_nested_raw_field_is_exercised_or_analysis_only() {
             continue;
         };
         if name.ends_with("Stmt")
-            || !(parser.contains(&format!("Node::{name}("))
+            || !(contains_node_constructor(&parser, name)
                 || contains_braced_constructor(&parser, name))
         {
             continue;

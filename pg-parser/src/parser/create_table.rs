@@ -312,7 +312,7 @@ impl Parser {
             } else {
                 Vec::new()
             };
-            Ok(Node::CreateForeignTableStmt(CreateForeignTableStmt {
+            Ok(node!(CreateForeignTableStmt {
                 base: create,
                 servername,
                 options: foreign_options,
@@ -366,7 +366,7 @@ impl Parser {
             let query = Some(Box::new(Node::ExecuteStmt(self.parse_execute_core()?)));
             let skip_data = self.parse_optional_with_data()?;
             self.expect_statement_end()?;
-            return Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
+            return Ok(node!(CreateTableAsStmt {
                 query,
                 into: Some(Box::new(IntoClause {
                     rel: relation,
@@ -387,7 +387,7 @@ impl Parser {
         self.record_with_data_suffix_completion(&query_tokens);
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
         let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
-        Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
+        Ok(node!(CreateTableAsStmt {
             query,
             into: Some(Box::new(IntoClause {
                 rel: relation,
@@ -546,7 +546,7 @@ impl Parser {
         self.record_with_data_suffix_completion(&query_tokens);
         let (query_tokens, skip_data) = split_with_data_suffix(query_tokens);
         let query = Some(Box::new(self.parse_select_fragment_tokens(query_tokens)?));
-        Ok(Node::CreateTableAsStmt(CreateTableAsStmt {
+        Ok(node!(CreateTableAsStmt {
             query,
             into: Some(Box::new(IntoClause {
                 rel,

@@ -218,7 +218,7 @@ impl Parser {
             TokenKind::Schema if self.peek_kind_n(1) == TokenKind::SConst => {
                 self.advance();
                 stmt.name = Some("search_path".to_owned());
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     self.consume_required_string("SET SCHEMA requires a string")?,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -234,7 +234,7 @@ impl Parser {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
                     let value = self.consume_required_string("SET NAMES requires an encoding")?;
-                    stmt.args = vec![Node::AConst(AConst::string(
+                    stmt.args = vec![node!(AConst::string(
                         value,
                         self.previous_location() as ParseLoc,
                     ))];
@@ -248,7 +248,7 @@ impl Parser {
                 let value = self
                     .consume_non_reserved_word_or_sconst()
                     .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     value,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -265,7 +265,7 @@ impl Parser {
                     let value = self.consume_non_reserved_word_or_sconst().ok_or_else(|| {
                         self.error_here("SET SESSION AUTHORIZATION requires a role")
                     })?;
-                    stmt.args = vec![Node::AConst(AConst::string(
+                    stmt.args = vec![node!(AConst::string(
                         value,
                         self.previous_location() as ParseLoc,
                     ))];
@@ -282,7 +282,7 @@ impl Parser {
                     _ => return Err(self.error_here("XML OPTION requires DOCUMENT or CONTENT")),
                 };
                 stmt.name = Some("xmloption".to_owned());
-                stmt.args = vec![Node::AConst(AConst::string(value, value_location))];
+                stmt.args = vec![node!(AConst::string(value, value_location))];
                 stmt.jumble_args = true;
             }
             TokenKind::Transaction => {
@@ -290,7 +290,7 @@ impl Parser {
                 self.expect(TokenKind::Snapshot)?;
                 stmt.kind = VariableSetKind::SetMulti;
                 stmt.name = Some("TRANSACTION SNAPSHOT".to_owned());
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     self.consume_required_string("TRANSACTION SNAPSHOT requires a string")?,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -320,7 +320,7 @@ impl Parser {
                         }
                         TokenKind::NullP => {
                             let location = self.advance().location() as ParseLoc;
-                            stmt.args = vec![Node::AConst(AConst::null(location))];
+                            stmt.args = vec![node!(AConst::null(location))];
                             stmt.location = value_location;
                         }
                         _ => {
@@ -405,7 +405,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("SHOW requires a parameter name"))?,
         });
         self.expect_statement_end()?;
-        Ok(Node::VariableShowStmt(VariableShowStmt { name }))
+        Ok(node!(VariableShowStmt { name }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -610,10 +610,7 @@ impl Parser {
                     };
                     make_def_elem(
                         "transaction_isolation",
-                        Some(Node::AConst(AConst::string(
-                            value,
-                            value_location as ParseLoc,
-                        ))),
+                        Some(node!(AConst::string(value, value_location as ParseLoc,))),
                         location,
                     )
                 }
@@ -628,7 +625,7 @@ impl Parser {
                     self.advance();
                     make_def_elem(
                         "transaction_read_only",
-                        Some(Node::AConst(AConst::integer(
+                        Some(node!(AConst::integer(
                             i32::from(read_only),
                             location as ParseLoc,
                         ))),
@@ -639,7 +636,7 @@ impl Parser {
                     self.advance();
                     make_def_elem(
                         "transaction_deferrable",
-                        Some(Node::AConst(AConst::integer(1, location as ParseLoc))),
+                        Some(node!(AConst::integer(1, location as ParseLoc))),
                         location,
                     )
                 }
@@ -648,7 +645,7 @@ impl Parser {
                     self.expect(TokenKind::Deferrable)?;
                     make_def_elem(
                         "transaction_deferrable",
-                        Some(Node::AConst(AConst::integer(0, location as ParseLoc))),
+                        Some(node!(AConst::integer(0, location as ParseLoc))),
                         location,
                     )
                 }
@@ -699,7 +696,7 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
         )
         .is_some();
         if is_setting_word && let Some(value) = token_name(&tokens[0]) {
-            return Ok(Node::AConst(AConst::string(
+            return Ok(node!(AConst::string(
                 value,
                 tokens[0].location() as ParseLoc,
             )));

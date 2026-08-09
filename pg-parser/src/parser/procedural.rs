@@ -54,7 +54,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::ImportForeignSchemaStmt(ImportForeignSchemaStmt {
+        Ok(node!(ImportForeignSchemaStmt {
             server_name,
             remote_schema,
             local_schema,
@@ -103,14 +103,14 @@ impl Parser {
         if args.is_empty() {
             return Err(self.error_here("DO requires a code block or LANGUAGE clause"));
         }
-        Ok(Node::DoStmt(DoStmt { args }))
+        Ok(node!(DoStmt { args }))
     }
 
     pub(super) fn parse_return(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Return)?;
         let returnval =
             Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?);
-        Ok(Node::ReturnStmt(ReturnStmt { returnval }))
+        Ok(node!(ReturnStmt { returnval }))
     }
 
     pub(super) fn parse_wait(&mut self) -> PResult<Node> {
@@ -124,7 +124,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::WaitStmt(WaitStmt {
+        Ok(node!(WaitStmt {
             lsn_literal,
             options,
         }))

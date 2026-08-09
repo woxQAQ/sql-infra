@@ -28,7 +28,7 @@ impl Parser {
         );
         let options = self.parse_alter_generic_options()?;
         self.expect_statement_end()?;
-        Ok(Node::AlterUserMappingStmt(AlterUserMappingStmt {
+        Ok(node!(AlterUserMappingStmt {
             user,
             servername,
             options,
@@ -60,7 +60,7 @@ impl Parser {
             return Err(self.error_here("ALTER FOREIGN DATA WRAPPER requires an option"));
         }
         self.expect_statement_end()?;
-        Ok(Node::AlterFdwStmt(AlterFdwStmt {
+        Ok(node!(AlterFdwStmt {
             fdwname,
             func_options,
             options,
@@ -100,7 +100,7 @@ impl Parser {
             return Err(self.error_here("ALTER SERVER requires VERSION or OPTIONS"));
         }
         self.expect_statement_end()?;
-        Ok(Node::AlterForeignServerStmt(AlterForeignServerStmt {
+        Ok(node!(AlterForeignServerStmt {
             servername,
             version,
             options,
@@ -126,7 +126,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CreateFdwStmt(CreateFdwStmt {
+        Ok(node!(CreateFdwStmt {
             fdwname,
             func_options,
             options,
@@ -229,7 +229,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CreateForeignServerStmt(CreateForeignServerStmt {
+        Ok(node!(CreateForeignServerStmt {
             servername,
             servertype,
             version,
@@ -272,7 +272,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CreateUserMappingStmt(CreateUserMappingStmt {
+        Ok(node!(CreateUserMappingStmt {
             user,
             servername,
             if_not_exists,

@@ -517,7 +517,7 @@ impl Parser {
             identity.object = None;
         }
         self.expect_statement_end()?;
-        Ok(Node::RenameStmt(RenameStmt {
+        Ok(node!(RenameStmt {
             rename_type,
             relation_type,
             relation: identity.relation,
@@ -561,7 +561,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("EXTENSION requires a name"))?,
         )));
         self.expect_statement_end()?;
-        Ok(Node::AlterObjectDependsStmt(AlterObjectDependsStmt {
+        Ok(node!(AlterObjectDependsStmt {
             object_type: identity.object_type,
             relation: identity.relation,
             object: identity.object.take(),
@@ -609,7 +609,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("SET SCHEMA requires a schema name"))?,
         );
         self.expect_statement_end()?;
-        Ok(Node::AlterObjectSchemaStmt(AlterObjectSchemaStmt {
+        Ok(node!(AlterObjectSchemaStmt {
             object_type: identity.object_type,
             relation: identity.relation,
             object: identity.object,
@@ -647,7 +647,7 @@ impl Parser {
                 self.error_here("OWNER TO requires a role")
             })?));
         self.expect_statement_end()?;
-        Ok(Node::AlterOwnerStmt(AlterOwnerStmt {
+        Ok(node!(AlterOwnerStmt {
             object_type: identity.object_type,
             relation: identity.relation,
             object: identity.object,

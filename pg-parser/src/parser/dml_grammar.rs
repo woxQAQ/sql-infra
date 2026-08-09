@@ -20,7 +20,7 @@ impl Parser {
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("CURRENT OF requires a cursor name"))?,
             );
-            return Ok(Some(Box::new(Node::CurrentOfExpr(CurrentOfExpr {
+            return Ok(Some(Box::new(node!(CurrentOfExpr {
                 cursor_name,
                 ..CurrentOfExpr::default()
             }))));
@@ -48,7 +48,7 @@ impl Parser {
                 let value = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("expected a returning option alias"))?;
-                options.push(Node::ReturningOption(ReturningOption {
+                options.push(node!(ReturningOption {
                     option,
                     value: Some(value),
                     location: location as ParseLoc,
@@ -269,10 +269,10 @@ impl Parser {
                     self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
                 let ncolumns = names.len() as i32;
                 for (index, (name, indirection, location)) in names.into_iter().enumerate() {
-                    targets.push(Node::ResTarget(ResTarget {
+                    targets.push(node!(ResTarget {
                         name: Some(name),
                         indirection,
-                        val: Some(Box::new(Node::MultiAssignRef(MultiAssignRef {
+                        val: Some(Box::new(node!(MultiAssignRef {
                             source: Some(source.clone()),
                             colno: index as i32 + 1,
                             ncolumns,
@@ -289,7 +289,7 @@ impl Parser {
                 self.expect(TokenKind::Char('='))?;
                 let assignment_value =
                     self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
-                targets.push(Node::ResTarget(ResTarget {
+                targets.push(node!(ResTarget {
                     name: Some(name),
                     indirection,
                     val: Some(assignment_value),
@@ -354,7 +354,7 @@ impl Parser {
                     )
                 };
                 self.expect(TokenKind::Char(']'))?;
-                indirection.push(Node::AIndices(AIndices {
+                indirection.push(node!(AIndices {
                     is_slice,
                     lidx,
                     uidx,
@@ -460,7 +460,7 @@ impl Parser {
             if !action_allowed {
                 return Err(self.error_here("MERGE action is not valid for this match kind"));
             }
-            clauses.push(Node::MergeWhenClause(MergeWhenClause {
+            clauses.push(node!(MergeWhenClause {
                 match_kind,
                 command_type,
                 override_,

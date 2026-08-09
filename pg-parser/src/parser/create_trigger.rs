@@ -68,7 +68,7 @@ impl Parser {
         }
         self.expect(TokenKind::Char('('))?;
         self.expect(TokenKind::Char(')'))?;
-        Ok(Node::CreateEventTrigStmt(CreateEventTrigStmt {
+        Ok(node!(CreateEventTrigStmt {
             trigname,
             eventname,
             whenclause,
@@ -113,7 +113,7 @@ impl Parser {
             _ => return Err(self.error_here("event trigger requires ENABLE or DISABLE")),
         };
         self.expect_statement_end()?;
-        Ok(Node::AlterEventTrigStmt(AlterEventTrigStmt {
+        Ok(node!(AlterEventTrigStmt {
             trigname,
             tgenabled,
         }))
@@ -230,7 +230,7 @@ impl Parser {
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("trigger transition requires a name"))?,
                 );
-                transition_rels.push(Node::TriggerTransition(TriggerTransition {
+                transition_rels.push(node!(TriggerTransition {
                     name,
                     is_new,
                     is_table,
@@ -372,7 +372,7 @@ impl Parser {
             }
         }
         self.expect(TokenKind::Char(')'))?;
-        Ok(Node::CreateTrigStmt(CreateTrigStmt {
+        Ok(node!(CreateTrigStmt {
             replace,
             isconstraint: is_constraint,
             trigname,

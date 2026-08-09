@@ -21,7 +21,7 @@ impl ExprParser {
             let expr = self.parse_expr(0)?;
             self.expect(TokenKind::Then)?;
             let result = self.parse_expr(0)?;
-            args.push(Node::CaseWhen(CaseWhen {
+            args.push(node!(CaseWhen {
                 expr: Some(Box::new(expr)),
                 result: Some(Box::new(result)),
                 location: when_location as ParseLoc,
@@ -36,7 +36,7 @@ impl ExprParser {
             None
         };
         self.expect(TokenKind::EndP)?;
-        Some(Node::CaseExpr(CaseExpr {
+        Some(node!(CaseExpr {
             arg,
             args,
             defresult,
@@ -53,7 +53,7 @@ impl ExprParser {
         if args.is_empty() {
             return self.fail("GROUPING requires at least one argument");
         }
-        Some(Node::GroupingFunc(GroupingFunc {
+        Some(node!(GroupingFunc {
             args,
             location: location as ParseLoc,
             ..GroupingFunc::default()
@@ -74,7 +74,7 @@ impl ExprParser {
         let type_name = parse_type_name_tokens(type_tokens).ok()?;
         self.expect(TokenKind::Char(')'))?;
         if token.kind == TokenKind::Cast {
-            Some(Node::TypeCast(TypeCast {
+            Some(node!(TypeCast {
                 arg: Some(Box::new(arg)),
                 type_name: Some(Box::new(type_name)),
                 location: token.location() as ParseLoc,
@@ -84,7 +84,7 @@ impl ExprParser {
                 Node::String(value) => value.sval.clone(),
                 _ => None,
             })?;
-            Some(Node::FuncCall(FuncCall {
+            Some(node!(FuncCall {
                 funcname: system_type_names(&function_name),
                 args: vec![arg],
                 location: token.location() as ParseLoc,
@@ -125,10 +125,10 @@ impl ExprParser {
         self.expect(TokenKind::From)?;
         let arg = self.parse_expr(0)?;
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::FuncCall(FuncCall {
+        Some(node!(FuncCall {
             funcname: system_type_names("extract"),
             args: vec![
-                Node::AConst(AConst::string(field, field_token.location() as ParseLoc)),
+                node!(AConst::string(field, field_token.location() as ParseLoc)),
                 arg,
             ],
             funcformat: CoercionForm::SqlSyntax,
@@ -156,13 +156,13 @@ impl ExprParser {
                 TokenKind::Nfkd => "NFKD",
                 _ => return self.fail("NORMALIZE requires NFC, NFD, NFKC, or NFKD"),
             };
-            args.push(Node::AConst(AConst::string(
+            args.push(node!(AConst::string(
                 form,
                 form_token.location() as ParseLoc,
             )));
         }
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::FuncCall(FuncCall {
+        Some(node!(FuncCall {
             funcname: system_type_names("normalize"),
             args,
             funcformat: CoercionForm::SqlSyntax,
@@ -172,7 +172,7 @@ impl ExprParser {
     }
 
     pub(super) fn make_sql_syntax_call(&self, name: &str, args: NodeList, location: usize) -> Node {
-        Node::FuncCall(FuncCall {
+        node!(FuncCall {
             funcname: system_type_names(name),
             args,
             funcformat: CoercionForm::SqlSyntax,
@@ -195,7 +195,7 @@ impl ExprParser {
         let location = self.expect(TokenKind::Overlay)?.location();
         self.expect(TokenKind::Char('('))?;
         if self.consume(TokenKind::Char(')')) {
-            return Some(Node::FuncCall(FuncCall {
+            return Some(node!(FuncCall {
                 funcname: vec![make_string_node("overlay")],
                 location: location as ParseLoc,
                 ..FuncCall::default()
@@ -218,7 +218,7 @@ impl ExprParser {
         } else {
             let args = self.parse_plain_function_arguments_after(first)?;
             self.expect(TokenKind::Char(')'))?;
-            Some(Node::FuncCall(FuncCall {
+            Some(node!(FuncCall {
                 funcname: vec![make_string_node("overlay")],
                 args,
                 location: location as ParseLoc,
@@ -231,7 +231,7 @@ impl ExprParser {
         let location = self.expect(TokenKind::Substring)?.location();
         self.expect(TokenKind::Char('('))?;
         if self.consume(TokenKind::Char(')')) {
-            return Some(Node::FuncCall(FuncCall {
+            return Some(node!(FuncCall {
                 funcname: vec![make_string_node("substring")],
                 location: location as ParseLoc,
                 ..FuncCall::default()
@@ -241,7 +241,7 @@ impl ExprParser {
             let first = self.parse_function_argument()?;
             let args = self.parse_plain_function_arguments_after(first)?;
             self.expect(TokenKind::Char(')'))?;
-            return Some(Node::FuncCall(FuncCall {
+            return Some(node!(FuncCall {
                 funcname: vec![make_string_node("substring")],
                 args,
                 location: location as ParseLoc,
@@ -265,8 +265,8 @@ impl ExprParser {
                 let count = self.parse_expr(0)?;
                 vec![
                     first,
-                    Node::AConst(AConst::integer(1, -1)),
-                    Node::TypeCast(TypeCast {
+                    node!(AConst::integer(1, -1)),
+                    node!(TypeCast {
                         arg: Some(Box::new(count)),
                         type_name: Some(Box::new(TypeName {
                             names: system_type_names("int4"),
@@ -287,7 +287,7 @@ impl ExprParser {
             _ => {
                 let args = self.parse_plain_function_arguments_after(first)?;
                 self.expect(TokenKind::Char(')'))?;
-                return Some(Node::FuncCall(FuncCall {
+                return Some(node!(FuncCall {
                     funcname: vec![make_string_node("substring")],
                     args,
                     location: location as ParseLoc,
@@ -397,7 +397,7 @@ impl ExprParser {
         } else {
             (plain, -1)
         };
-        Some(Node::SqlValueFunction(SqlValueFunction {
+        Some(node!(SqlValueFunction {
             op,
             typmod,
             location: token.location() as ParseLoc,

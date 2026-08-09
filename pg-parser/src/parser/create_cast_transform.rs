@@ -61,7 +61,7 @@ impl Parser {
         } else {
             CoercionContext::Explicit
         };
-        Ok(Node::CreateCastStmt(CreateCastStmt {
+        Ok(node!(CreateCastStmt {
             sourcetype: Some(sourcetype),
             targettype: Some(targettype),
             func,
@@ -103,7 +103,7 @@ impl Parser {
         if func_name.is_empty() {
             return Err(self.error_here("CREATE CONVERSION requires a function"));
         }
-        Ok(Node::CreateConversionStmt(CreateConversionStmt {
+        Ok(node!(CreateConversionStmt {
             conversion_name,
             for_encoding_name,
             to_encoding_name,
@@ -181,7 +181,7 @@ impl Parser {
             return Err(self.error_here("CREATE TRANSFORM requires at least one transform element"));
         }
         self.expect(TokenKind::Char(')'))?;
-        Ok(Node::CreateTransformStmt(CreateTransformStmt {
+        Ok(node!(CreateTransformStmt {
             replace,
             type_name: Some(type_name),
             lang,

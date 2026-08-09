@@ -241,7 +241,7 @@ impl Parser {
             } else {
                 LockWaitPolicy::Block
             };
-            clauses.push(Node::LockingClause(LockingClause {
+            clauses.push(node!(LockingClause {
                 locked_rels,
                 strength,
                 wait_policy,

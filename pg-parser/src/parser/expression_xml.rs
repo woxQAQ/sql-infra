@@ -106,7 +106,7 @@ impl ExprParser {
         };
         expr.args = vec![
             value,
-            Node::AConst(AConst {
+            node!(AConst {
                 val: ValUnion::Boolean(Boolean::new(preserve_whitespace)),
                 location: -1,
                 ..AConst::default()
@@ -121,7 +121,7 @@ impl ExprParser {
         self.expect(TokenKind::VersionP)?;
         if self.consume(TokenKind::No) {
             self.expect(TokenKind::ValueP)?;
-            expr.args.push(Node::AConst(AConst::null(-1)));
+            expr.args.push(node!(AConst::null(-1)));
         } else {
             expr.args.push(self.parse_expr(0)?);
         }
@@ -141,8 +141,7 @@ impl ExprParser {
         } else {
             3
         };
-        expr.args
-            .push(Node::AConst(AConst::integer(standalone, -1)));
+        expr.args.push(node!(AConst::integer(standalone, -1)));
         Some(())
     }
 
@@ -159,7 +158,7 @@ impl ExprParser {
             } else {
                 None
             };
-            targets.push(Node::ResTarget(ResTarget {
+            targets.push(node!(ResTarget {
                 name,
                 val: Some(Box::new(value)),
                 location: location as ParseLoc,
@@ -224,7 +223,7 @@ impl ExprParser {
             false
         };
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::XmlSerialize(XmlSerialize {
+        Some(node!(XmlSerialize {
             xmloption,
             expr: Some(Box::new(expr)),
             type_name: Some(type_name),
@@ -237,7 +236,7 @@ impl ExprParser {
         let location = self.expect(TokenKind::MergeAction)?.location();
         self.expect(TokenKind::Char('('))?;
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::MergeSupportFunc(MergeSupportFunc {
+        Some(node!(MergeSupportFunc {
             msftype: 25,
             location: location as ParseLoc,
             ..MergeSupportFunc::default()

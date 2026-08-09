@@ -43,7 +43,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CreateSubscriptionStmt(CreateSubscriptionStmt {
+        Ok(node!(CreateSubscriptionStmt {
             subname,
             servername,
             conninfo,
@@ -112,7 +112,7 @@ impl Parser {
             }
             (objects, all_tables, all_sequences, Vec::new())
         };
-        Ok(Node::AlterPublicationStmt(AlterPublicationStmt {
+        Ok(node!(AlterPublicationStmt {
             pubname,
             options,
             pubobjects,
@@ -215,7 +215,7 @@ impl Parser {
                 self.advance();
                 stmt.options.push(make_def_elem(
                     "enabled",
-                    Some(Node::Boolean(Boolean::new(true))),
+                    Some(node!(Boolean::new(true))),
                     alter_location,
                 ));
                 AlterSubscriptionType::Enabled
@@ -224,7 +224,7 @@ impl Parser {
                 self.advance();
                 stmt.options.push(make_def_elem(
                     "enabled",
-                    Some(Node::Boolean(Boolean::new(false))),
+                    Some(node!(Boolean::new(false))),
                     alter_location,
                 ));
                 AlterSubscriptionType::Enabled
@@ -263,7 +263,7 @@ impl Parser {
         );
         let behavior = self.parse_drop_behavior();
         self.expect_statement_end()?;
-        Ok(Node::DropSubscriptionStmt(DropSubscriptionStmt {
+        Ok(node!(DropSubscriptionStmt {
             subname,
             missing_ok,
             behavior,
@@ -303,7 +303,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CreatePublicationStmt(CreatePublicationStmt {
+        Ok(node!(CreatePublicationStmt {
             pubname,
             options,
             pubobjects,
@@ -345,7 +345,7 @@ impl Parser {
                                 let relation = self.parse_relation_expr_with_slot(
                                     completion::GrammarSlot::Table,
                                 )?;
-                                tables.push(Node::PublicationObjSpec(PublicationObjSpec {
+                                tables.push(node!(PublicationObjSpec {
                                     pubobjtype: PublicationObjSpecType::ExceptTable,
                                     pubtable: Some(Box::new(PublicationTable {
                                         relation: Some(Box::new(relation)),
@@ -397,7 +397,7 @@ impl Parser {
                         )
                     };
                     continuation = Some(PublicationObjSpecType::TablesInSchema);
-                    objects.push(Node::PublicationObjSpec(PublicationObjSpec {
+                    objects.push(node!(PublicationObjSpec {
                         pubobjtype: if current {
                             PublicationObjSpecType::TablesInCurSchema
                         } else {
@@ -431,7 +431,7 @@ impl Parser {
                                 self.error_here("expected a schema name in publication object list")
                             })?)
                         };
-                        objects.push(Node::PublicationObjSpec(PublicationObjSpec {
+                        objects.push(node!(PublicationObjSpec {
                             pubobjtype: if current {
                                 PublicationObjSpecType::TablesInCurSchema
                             } else {
@@ -459,7 +459,7 @@ impl Parser {
                         None
                     };
                     continuation = Some(PublicationObjSpecType::Table);
-                    objects.push(Node::PublicationObjSpec(PublicationObjSpec {
+                    objects.push(node!(PublicationObjSpec {
                         pubobjtype: PublicationObjSpecType::Table,
                         pubtable: Some(Box::new(PublicationTable {
                             relation: Some(Box::new(relation)),

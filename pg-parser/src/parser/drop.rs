@@ -146,7 +146,7 @@ impl Parser {
             return Err(self.error_here("DROP requires at least one object name"));
         }
         let behavior = self.parse_drop_behavior();
-        Ok(Node::DropStmt(DropStmt {
+        Ok(node!(DropStmt {
             objects,
             remove_type,
             behavior,
@@ -190,7 +190,7 @@ impl Parser {
         };
         let behavior = self.parse_drop_behavior();
         self.expect_statement_end()?;
-        Ok(Node::DropStmt(DropStmt {
+        Ok(node!(DropStmt {
             objects: vec![object],
             remove_type,
             behavior,
@@ -231,7 +231,7 @@ impl Parser {
         let objects = vec![name_list_node(names)];
         let behavior = self.parse_drop_behavior();
         self.expect_statement_end()?;
-        Ok(Node::DropStmt(DropStmt {
+        Ok(node!(DropStmt {
             objects,
             remove_type,
             behavior,
@@ -261,7 +261,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("SERVER requires a name"))?,
         );
         self.expect_statement_end()?;
-        Ok(Node::DropUserMappingStmt(DropUserMappingStmt {
+        Ok(node!(DropUserMappingStmt {
             user,
             servername,
             missing_ok,

@@ -115,7 +115,7 @@ impl Parser {
                     false
                 };
                 let (alias, coldeflist) = self.parse_function_alias_clause()?;
-                Node::RangeFunction(RangeFunction {
+                node!(RangeFunction {
                     lateral,
                     ordinality,
                     functions: vec![name_list_node(vec![function, name_list_node(Vec::new())])],
@@ -154,7 +154,7 @@ impl Parser {
             } else {
                 None
             };
-            base = Node::RangeTableSample(RangeTableSample {
+            base = node!(RangeTableSample {
                 relation: Some(Box::new(base)),
                 method,
                 args,
@@ -245,7 +245,7 @@ impl Parser {
         self.expect(TokenKind::Char(')'))?;
         if starts_subquery {
             let subquery = parse_select_statement_tokens(inner_tokens)?;
-            return Ok(Node::RangeSubselect(RangeSubselect {
+            return Ok(node!(RangeSubselect {
                 lateral,
                 subquery: Some(Box::new(subquery)),
                 alias: self.parse_optional_alias_clause()?,

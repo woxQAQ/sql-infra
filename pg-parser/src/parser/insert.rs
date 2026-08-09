@@ -116,7 +116,7 @@ impl Parser {
         };
         let on_conflict_clause = self.parse_on_conflict_clause()?;
         let returning_clause = self.parse_returning_clause()?;
-        Ok(Node::InsertStmt(InsertStmt {
+        Ok(node!(InsertStmt {
             relation,
             cols,
             select_stmt,

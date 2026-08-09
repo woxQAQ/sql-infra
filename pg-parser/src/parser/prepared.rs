@@ -55,7 +55,7 @@ impl Parser {
             return Err(self.error_here("PREPARE requires a preparable DML statement"));
         }
         let query = Some(Box::new(self.parse_statement(None)?));
-        Ok(Node::PrepareStmt(PrepareStmt {
+        Ok(node!(PrepareStmt {
             name,
             argtypes,
             query,
@@ -121,7 +121,7 @@ impl Parser {
             )
         };
         self.expect_statement_end()?;
-        Ok(Node::DeallocateStmt(DeallocateStmt {
+        Ok(node!(DeallocateStmt {
             name,
             isall,
             location,
@@ -205,7 +205,7 @@ impl Parser {
         ) {
             return Err(self.error_here("statement is not explainable"));
         }
-        Ok(Node::ExplainStmt(ExplainStmt {
+        Ok(node!(ExplainStmt {
             query: Some(Box::new(query)),
             options,
         }))
@@ -224,7 +224,7 @@ impl Parser {
         if self.at_completion()
             && matches!(
                 parse_expression_tokens(tokens.clone()),
-                Ok(Node::FuncCall(FuncCall {
+                Ok(node!(FuncCall {
                     agg_filter: None,
                     over: None,
                     agg_within_group: false,
@@ -249,7 +249,7 @@ impl Parser {
                 }
                 _ => return Err(self.error_here("CALL requires a function application")),
             };
-        Ok(Node::CallStmt(CallStmt {
+        Ok(node!(CallStmt {
             funccall,
             ..CallStmt::default()
         }))

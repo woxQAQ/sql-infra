@@ -38,7 +38,7 @@ impl Parser {
         );
         self.consume(TokenKind::With);
         let options = self.parse_create_role_options()?;
-        Ok(Node::CreateRoleStmt(CreateRoleStmt {
+        Ok(node!(CreateRoleStmt {
             stmt_type,
             role,
             options,
@@ -91,7 +91,7 @@ impl Parser {
             if members.is_empty() {
                 return Err(self.error_here("ALTER GROUP requires at least one member"));
             }
-            return Ok(Node::AlterRoleStmt(AlterRoleStmt {
+            return Ok(node!(AlterRoleStmt {
                 role: Some(role),
                 options: vec![make_def_elem(
                     "rolemembers",
@@ -124,7 +124,7 @@ impl Parser {
         self.record_completion_tokens(&[TokenKind::Set, TokenKind::Reset]);
         if matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
             let setstmt = Some(Box::new(self.parse_variable_set_like(false)?));
-            return Ok(Node::AlterRoleSetStmt(AlterRoleSetStmt {
+            return Ok(node!(AlterRoleSetStmt {
                 role,
                 database,
                 setstmt,
@@ -135,7 +135,7 @@ impl Parser {
         }
         self.consume(TokenKind::With);
         let options = self.parse_alter_role_options()?;
-        Ok(Node::AlterRoleStmt(AlterRoleStmt {
+        Ok(node!(AlterRoleStmt {
             role,
             options,
             action: 1,
@@ -166,7 +166,7 @@ impl Parser {
                 break;
             }
         }
-        Ok(Node::DropRoleStmt(DropRoleStmt { roles, missing_ok }))
+        Ok(node!(DropRoleStmt { roles, missing_ok }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -186,7 +186,7 @@ impl Parser {
             false,
         )?;
         let behavior = self.parse_drop_behavior();
-        Ok(Node::DropOwnedStmt(DropOwnedStmt { roles, behavior }))
+        Ok(node!(DropOwnedStmt { roles, behavior }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -208,10 +208,7 @@ impl Parser {
         let newrole = Some(Box::new(self.consume_role_spec().ok_or_else(|| {
             self.error_here("REASSIGN OWNED requires a destination role")
         })?));
-        Ok(Node::ReassignOwnedStmt(ReassignOwnedStmt {
-            roles,
-            newrole,
-        }))
+        Ok(node!(ReassignOwnedStmt { roles, newrole }))
     }
 
     pub(super) fn parse_create_role_options(&mut self) -> PResult<NodeList> {
@@ -245,7 +242,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "inherit",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -273,7 +270,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "sysid",
-                        Some(Node::Integer(Integer::new(value))),
+                        Some(node!(Integer::new(value))),
                         location,
                     ));
                 }
@@ -300,7 +297,7 @@ impl Parser {
                         .parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
                     options.push(make_def_elem(
                         defname,
-                        Some(Node::AArrayExpr(AArrayExpr {
+                        Some(node!(AArrayExpr {
                             elements: roles,
                             ..AArrayExpr::default()
                         })),
@@ -334,7 +331,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         defname,
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -374,7 +371,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "inherit",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -440,7 +437,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         name,
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -485,9 +482,7 @@ impl Parser {
         } else if self.consume(TokenKind::NullP) {
             (
                 VariableSetKind::SetValue,
-                vec![Node::AConst(AConst::null(
-                    self.previous_location() as ParseLoc
-                ))],
+                vec![node!(AConst::null(self.previous_location() as ParseLoc))],
                 value_location,
             )
         } else {

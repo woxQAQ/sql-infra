@@ -95,7 +95,7 @@ impl Parser {
         } else {
             return Err(self.error_here("CREATE RULE requires an action or NOTHING"));
         };
-        Ok(Node::RuleStmt(RuleStmt {
+        Ok(node!(RuleStmt {
             relation,
             rulename,
             where_clause,
@@ -167,7 +167,7 @@ impl Parser {
         } else {
             query
         };
-        Ok(Node::ViewStmt(ViewStmt {
+        Ok(node!(ViewStmt {
             view: Some(Box::new(view_node)),
             aliases,
             query: Some(Box::new(query)),
@@ -265,7 +265,7 @@ pub(super) fn make_recursive_view_select(
     let relname = view.relname.clone().ok_or_else(|| {
         ParseError::syntax_exit(0, "recursive view requires an unqualified relation name")
     })?;
-    let cte = Node::CommonTableExpr(CommonTableExpr {
+    let cte = node!(CommonTableExpr {
         ctename: Some(relname.clone()),
         aliascolnames: aliases.to_vec(),
         ctequery: Some(Box::new(query)),
@@ -281,8 +281,8 @@ pub(super) fn make_recursive_view_select(
             let alias = alias.sval.clone().ok_or_else(|| {
                 ParseError::syntax_exit(0, "recursive view alias cannot be empty")
             })?;
-            Ok(Node::ResTarget(ResTarget {
-                val: Some(Box::new(Node::ColumnRef(ColumnRef {
+            Ok(node!(ResTarget {
+                val: Some(Box::new(node!(ColumnRef {
                     fields: vec![make_string_node(alias)],
                     location: -1,
                 }))),
@@ -293,7 +293,7 @@ pub(super) fn make_recursive_view_select(
         .collect::<PResult<NodeList>>()?;
     let mut relation = range_var_from_parts(vec![relname], 0);
     relation.location = -1;
-    Ok(Node::SelectStmt(SelectStmt {
+    Ok(node!(SelectStmt {
         target_list,
         from_clause: vec![Node::RangeVar(relation)],
         with_clause: Some(Box::new(WithClause {

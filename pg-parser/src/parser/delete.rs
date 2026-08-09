@@ -44,7 +44,7 @@ impl Parser {
             TokenKind::Eof,
         ])?;
         let returning_clause = self.parse_returning_clause()?;
-        Ok(Node::DeleteStmt(DeleteStmt {
+        Ok(node!(DeleteStmt {
             relation,
             using_clause,
             where_clause,

@@ -22,7 +22,7 @@ impl ExprParser {
                     ]);
                     let args = self.parse_plain_function_arguments_after(first)?;
                     self.expect(TokenKind::Char(')'))?;
-                    Some(Node::FuncCall(FuncCall {
+                    Some(node!(FuncCall {
                         funcname: system_type_names("json_object"),
                         args,
                         location: token.location() as ParseLoc,
@@ -35,7 +35,7 @@ impl ExprParser {
                 let expr = self.parse_json_value_expr()?;
                 let unique_keys = self.parse_json_unique_keys()?;
                 self.expect(TokenKind::Char(')'))?;
-                Some(Node::JsonParseExpr(JsonParseExpr {
+                Some(node!(JsonParseExpr {
                     expr: Some(Box::new(expr)),
                     unique_keys,
                     location: token.location() as ParseLoc,
@@ -45,7 +45,7 @@ impl ExprParser {
             TokenKind::JsonScalar => {
                 let expr = self.parse_expr(0)?;
                 self.expect(TokenKind::Char(')'))?;
-                Some(Node::JsonScalarExpr(JsonScalarExpr {
+                Some(node!(JsonScalarExpr {
                     expr: Some(Box::new(expr)),
                     location: token.location() as ParseLoc,
                     ..JsonScalarExpr::default()
@@ -55,7 +55,7 @@ impl ExprParser {
                 let expr = self.parse_json_value_expr()?;
                 let output = self.parse_json_output()?;
                 self.expect(TokenKind::Char(')'))?;
-                Some(Node::JsonSerializeExpr(JsonSerializeExpr {
+                Some(node!(JsonSerializeExpr {
                     expr: Some(Box::new(expr)),
                     output,
                     location: token.location() as ParseLoc,
@@ -227,7 +227,7 @@ impl ExprParser {
                 self.expect(TokenKind::Char(':'))?;
             }
             let value = self.parse_json_value_expr()?;
-            exprs.push(Node::JsonKeyValue(JsonKeyValue {
+            exprs.push(node!(JsonKeyValue {
                 key: Some(Box::new(key)),
                 value: Some(Box::new(value)),
             }));
@@ -251,7 +251,7 @@ impl ExprParser {
         let unique = self.parse_json_unique_keys()?;
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::JsonObjectConstructor(JsonObjectConstructor {
+        Some(node!(JsonObjectConstructor {
             exprs,
             output,
             absent_on_null,
@@ -319,7 +319,7 @@ impl ExprParser {
             if !suffix.at(TokenKind::Eof) {
                 return self.fail("unexpected token after JSON_ARRAY query clauses");
             }
-            return Some(Node::JsonArrayQueryConstructor(JsonArrayQueryConstructor {
+            return Some(node!(JsonArrayQueryConstructor {
                 query: Some(Box::new(query)),
                 output,
                 format,
@@ -354,7 +354,7 @@ impl ExprParser {
         let absent_on_null = self.parse_json_null_clause(true)?;
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::JsonArrayConstructor(JsonArrayConstructor {
+        Some(node!(JsonArrayConstructor {
             exprs,
             output,
             absent_on_null,

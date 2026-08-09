@@ -719,7 +719,7 @@ impl Parser {
             if !self.at_any(&[TokenKind::Char(','), TokenKind::Char(')')]) {
                 return Err(self.error_here("relation option values require '='"));
             }
-            options.push(Node::DefElem(DefElem {
+            options.push(node!(DefElem {
                 defnamespace,
                 defname: Some(defname),
                 arg,

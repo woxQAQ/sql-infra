@@ -57,7 +57,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "cascade",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -67,7 +67,7 @@ impl Parser {
                 _ => return Err(self.error_here("invalid CREATE EXTENSION option")),
             }
         }
-        Ok(Node::CreateExtensionStmt(CreateExtensionStmt {
+        Ok(node!(CreateExtensionStmt {
             extname,
             if_not_exists,
             options,
@@ -140,14 +140,12 @@ impl Parser {
             };
             let (objtype, object) = self.parse_extension_member_object()?;
             self.expect_statement_end()?;
-            Ok(Node::AlterExtensionContentsStmt(
-                AlterExtensionContentsStmt {
-                    extname,
-                    action,
-                    objtype,
-                    object: Some(Box::new(object)),
-                },
-            ))
+            Ok(node!(AlterExtensionContentsStmt {
+                extname,
+                action,
+                objtype,
+                object: Some(Box::new(object)),
+            }))
         } else {
             self.expect(TokenKind::Update)?;
             let mut options = Vec::new();
@@ -163,10 +161,7 @@ impl Parser {
                 ));
             }
             self.expect_statement_end()?;
-            Ok(Node::AlterExtensionStmt(AlterExtensionStmt {
-                extname,
-                options,
-            }))
+            Ok(node!(AlterExtensionStmt { extname, options }))
         }
     }
 

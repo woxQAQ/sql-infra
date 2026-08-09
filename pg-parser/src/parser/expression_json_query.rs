@@ -38,7 +38,7 @@ impl ExprParser {
         };
         let (on_empty, on_error) = self.parse_json_behaviors(op != JsonExprOp::ExistsOp)?;
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::JsonFuncExpr(JsonFuncExpr {
+        Some(node!(JsonFuncExpr {
             op,
             context_item: Some(Box::new(context_item)),
             pathspec: Some(Box::new(pathspec)),
@@ -64,7 +64,7 @@ impl ExprParser {
             let name = self
                 .consume_column_label()
                 .or_else(|| self.fail("JSON PASSING requires a column label after AS"))?;
-            arguments.push(Node::JsonArgument(JsonArgument {
+            arguments.push(node!(JsonArgument {
                 val: Some(Box::new(value)),
                 name: Some(name),
             }));
@@ -239,7 +239,7 @@ impl ExprParser {
             ..JsonAggConstructor::default()
         };
         self.parse_json_aggregate_decorations(&mut constructor)?;
-        Some(Node::JsonObjectAgg(JsonObjectAgg {
+        Some(node!(JsonObjectAgg {
             constructor: Some(Box::new(constructor)),
             arg: Some(Box::new(JsonKeyValue {
                 key: Some(Box::new(key)),
@@ -317,7 +317,7 @@ impl ExprParser {
             ..JsonAggConstructor::default()
         };
         self.parse_json_aggregate_decorations(&mut constructor)?;
-        Some(Node::JsonArrayAgg(JsonArrayAgg {
+        Some(node!(JsonArrayAgg {
             constructor: Some(Box::new(constructor)),
             arg: Some(Box::new(value)),
             absent_on_null,

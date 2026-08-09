@@ -21,7 +21,7 @@ impl Parser {
                 return Err(self.error_here("VALUES row requires at least one expression"));
             }
             self.expect(TokenKind::Char(')'))?;
-            values.push(Node::AArrayExpr(AArrayExpr {
+            values.push(node!(AArrayExpr {
                 elements,
                 ..AArrayExpr::default()
             }));
@@ -81,14 +81,14 @@ impl Parser {
             }
             self.append_completion_marker(&mut expr_tokens);
             let target_value = if standalone_star {
-                Node::ColumnRef(ColumnRef {
-                    fields: vec![Node::AStar(AStar {})],
+                node!(ColumnRef {
+                    fields: vec![Node::AStar],
                     location: location as ParseLoc,
                 })
             } else {
                 parse_expression_tokens_with_completion(expr_tokens, self.completion.clone())?
             };
-            items.push(Node::ResTarget(ResTarget {
+            items.push(node!(ResTarget {
                 name,
                 val: Some(Box::new(target_value)),
                 location: location as ParseLoc,
@@ -154,7 +154,7 @@ impl Parser {
         if self.at(TokenKind::Char('(')) && self.peek_kind_n(1) == TokenKind::Char(')') {
             let location = self.advance().location();
             self.advance();
-            return Ok(Node::GroupingSet(GroupingSet {
+            return Ok(node!(GroupingSet {
                 kind: GroupingSetKind::Empty,
                 location: location as ParseLoc,
                 ..GroupingSet::default()
@@ -195,7 +195,7 @@ impl Parser {
                 return Err(self.error_here("grouping set requires at least one item"));
             }
             self.expect(TokenKind::Char(')'))?;
-            return Ok(Node::GroupingSet(GroupingSet {
+            return Ok(node!(GroupingSet {
                 kind,
                 content,
                 location: location as ParseLoc,
@@ -320,7 +320,7 @@ impl Parser {
                 sortby_dir = SortByDir::Using;
             }
             let node = self.parse_expression_fragment_tokens(tokens)?;
-            items.push(Node::SortBy(SortBy {
+            items.push(node!(SortBy {
                 node: Some(Box::new(node)),
                 sortby_dir,
                 sortby_nulls,

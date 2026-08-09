@@ -132,7 +132,7 @@ impl Parser {
                     }
                     options.push(make_def_elem(
                         "as",
-                        Some(Node::AArrayExpr(AArrayExpr {
+                        Some(node!(AArrayExpr {
                             elements: bodies,
                             ..AArrayExpr::default()
                         })),
@@ -151,7 +151,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "strict",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -166,7 +166,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "security",
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -195,7 +195,7 @@ impl Parser {
                     }
                     options.push(make_def_elem(
                         "support",
-                        Some(Node::AArrayExpr(AArrayExpr {
+                        Some(node!(AArrayExpr {
                             elements: name,
                             ..AArrayExpr::default()
                         })),
@@ -217,7 +217,7 @@ impl Parser {
                     self.expect(TokenKind::InputP)?;
                     options.push(make_def_elem(
                         "strict",
-                        Some(Node::Boolean(Boolean::new(false))),
+                        Some(node!(Boolean::new(false))),
                         location,
                     ));
                 }
@@ -229,7 +229,7 @@ impl Parser {
                     self.expect(TokenKind::InputP)?;
                     options.push(make_def_elem(
                         "strict",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -245,7 +245,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "security",
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -253,7 +253,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "leakproof",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -262,7 +262,7 @@ impl Parser {
                     self.expect(TokenKind::Leakproof)?;
                     options.push(make_def_elem(
                         "leakproof",
-                        Some(Node::Boolean(Boolean::new(false))),
+                        Some(node!(Boolean::new(false))),
                         location,
                     ));
                 }
@@ -279,7 +279,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "window",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -300,7 +300,7 @@ impl Parser {
                 }
             }
         }
-        Ok(Node::CreateFunctionStmt(CreateFunctionStmt {
+        Ok(node!(CreateFunctionStmt {
             is_procedure: false,
             replace,
             funcname,
@@ -360,7 +360,7 @@ impl Parser {
                     }
                     options.push(make_def_elem(
                         "as",
-                        Some(Node::AArrayExpr(AArrayExpr {
+                        Some(node!(AArrayExpr {
                             elements: bodies,
                             ..AArrayExpr::default()
                         })),
@@ -378,7 +378,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "security",
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -394,7 +394,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "security",
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -428,7 +428,7 @@ impl Parser {
                 }
             }
         }
-        Ok(Node::CreateFunctionStmt(CreateFunctionStmt {
+        Ok(node!(CreateFunctionStmt {
             is_procedure: true,
             replace,
             funcname,
@@ -501,7 +501,7 @@ impl Parser {
                 .map_err(|_| {
                     ParseError::syntax_exit(location, "expected a table function column type")
                 })?;
-            columns.push(Node::FunctionParameter(FunctionParameter {
+            columns.push(node!(FunctionParameter {
                 name: Some(name),
                 arg_type: Some(arg_type),
                 mode: FunctionParameterMode::Table,

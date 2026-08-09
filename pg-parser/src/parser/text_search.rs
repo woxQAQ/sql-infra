@@ -62,7 +62,7 @@ impl Parser {
             return Err(self.error_here("TEXT SEARCH object requires a name"));
         }
         let definition = self.parse_parenthesized_definition_for(Some(kind))?;
-        Ok(Node::DefineStmt(DefineStmt {
+        Ok(node!(DefineStmt {
             kind,
             defnames,
             definition,
@@ -96,10 +96,7 @@ impl Parser {
         }
         let options = self.parse_parenthesized_definition()?;
         self.expect_statement_end()?;
-        Ok(Node::AlterTsDictionaryStmt(AlterTsDictionaryStmt {
-            dictname,
-            options,
-        }))
+        Ok(node!(AlterTsDictionaryStmt { dictname, options }))
     }
 
     // PostgreSQL 18 Synopsis

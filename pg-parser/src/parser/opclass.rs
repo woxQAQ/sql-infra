@@ -63,7 +63,7 @@ impl Parser {
         };
         self.expect(TokenKind::As)?;
         let items = self.parse_opclass_item_list(&[TokenKind::Char(';'), TokenKind::Eof])?;
-        Ok(Node::CreateOpClassStmt(CreateOpClassStmt {
+        Ok(node!(CreateOpClassStmt {
             opclassname,
             opfamilyname,
             amname,
@@ -94,7 +94,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("USING requires an access method"))?,
         );
-        Ok(Node::CreateOpFamilyStmt(CreateOpFamilyStmt {
+        Ok(node!(CreateOpFamilyStmt {
             opfamilyname,
             amname,
         }))
@@ -170,7 +170,7 @@ impl Parser {
             self.parse_opclass_item_list(&[TokenKind::Char(';'), TokenKind::Eof])?
         };
         self.expect_statement_end()?;
-        Ok(Node::AlterOpFamilyStmt(AlterOpFamilyStmt {
+        Ok(node!(AlterOpFamilyStmt {
             opfamilyname,
             amname,
             is_drop,
@@ -207,7 +207,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Box::new(Node::ColumnDef(ColumnDef {
+        Ok(Box::new(node!(ColumnDef {
             colname,
             type_name,
             is_local: true,
@@ -349,7 +349,7 @@ impl Parser {
                 return Err(self.error_here("operator family item requires argument types"));
             }
             self.expect(TokenKind::Char(')'))?;
-            items.push(Node::CreateOpClassItem(CreateOpClassItem {
+            items.push(node!(CreateOpClassItem {
                 itemtype,
                 number,
                 class_args,

@@ -18,7 +18,7 @@ impl Parser {
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a column name"))?;
             let indirection = self.parse_assignment_indirection()?;
-            cols.push(Node::ResTarget(ResTarget {
+            cols.push(node!(ResTarget {
                 name: Some(name),
                 indirection,
                 location: location as ParseLoc,
@@ -90,7 +90,7 @@ impl Parser {
                         TokenKind::Excluding,
                     ]);
                 }
-                elements.push(Node::TableLikeClause(TableLikeClause {
+                elements.push(node!(TableLikeClause {
                     relation: Some(Box::new(relation)),
                     options,
                     ..TableLikeClause::default()

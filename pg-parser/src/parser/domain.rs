@@ -112,7 +112,7 @@ impl Parser {
             };
             constraints.push(Node::Constraint(constraint));
         }
-        Ok(Node::CreateDomainStmt(CreateDomainStmt {
+        Ok(node!(CreateDomainStmt {
             domainname,
             type_name,
             coll_clause,

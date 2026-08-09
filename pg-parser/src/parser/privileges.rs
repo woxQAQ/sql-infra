@@ -171,9 +171,9 @@ impl Parser {
                     if roles.is_empty() {
                         return Err(self.error_here("FOR ROLE/USER requires at least one role"));
                     }
-                    options.push(Node::DefElem(DefElem {
+                    options.push(node!(DefElem {
                         defname: Some("roles".to_owned()),
-                        arg: Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                        arg: Some(Box::new(node!(AArrayExpr {
                             elements: roles,
                             ..AArrayExpr::default()
                         }))),
@@ -197,9 +197,9 @@ impl Parser {
                     if schemas.is_empty() {
                         return Err(self.error_here("IN SCHEMA requires at least one schema"));
                     }
-                    options.push(Node::DefElem(DefElem {
+                    options.push(node!(DefElem {
                         defname: Some("schemas".to_owned()),
-                        arg: Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                        arg: Some(Box::new(node!(AArrayExpr {
                             elements: schemas,
                             ..AArrayExpr::default()
                         }))),
@@ -217,9 +217,7 @@ impl Parser {
         } else {
             return Err(self.error_here("ALTER DEFAULT PRIVILEGES requires GRANT or REVOKE"));
         };
-        Ok(Node::AlterDefaultPrivilegesStmt(
-            AlterDefaultPrivilegesStmt { options, action },
-        ))
+        Ok(node!(AlterDefaultPrivilegesStmt { options, action }))
     }
 
     fn parse_default_privileges_action(&mut self) -> PResult<GrantStmt> {
@@ -571,7 +569,7 @@ impl Parser {
         } else {
             self.parse_drop_behavior()
         };
-        Ok(Node::GrantStmt(GrantStmt {
+        Ok(node!(GrantStmt {
             is_grant: kind.is_grant(),
             targtype,
             objtype,
@@ -603,7 +601,7 @@ impl Parser {
             self.expect(TokenKind::For)?;
             role_options.push(make_def_elem(
                 &name,
-                Some(Node::Boolean(Boolean::new(false))),
+                Some(node!(Boolean::new(false))),
                 location,
             ));
         }
@@ -641,7 +639,7 @@ impl Parser {
                 };
                 role_options.push(make_def_elem(
                     &name,
-                    Some(Node::Boolean(Boolean::new(value))),
+                    Some(node!(Boolean::new(value))),
                     location,
                 ));
                 if !self.consume(TokenKind::Char(',')) {
@@ -663,7 +661,7 @@ impl Parser {
         } else {
             self.parse_drop_behavior()
         };
-        Ok(Node::GrantRoleStmt(GrantRoleStmt {
+        Ok(node!(GrantRoleStmt {
             granted_roles,
             grantee_roles,
             is_grant: kind.is_grant(),
@@ -688,7 +686,7 @@ impl Parser {
             return if cols.is_empty() {
                 Ok(Vec::new())
             } else {
-                Ok(vec![Node::AccessPriv(AccessPriv {
+                Ok(vec![node!(AccessPriv {
                     cols,
                     ..AccessPriv::default()
                 })])
@@ -724,7 +722,7 @@ impl Parser {
             } else {
                 Vec::new()
             };
-            privileges.push(Node::AccessPriv(AccessPriv {
+            privileges.push(node!(AccessPriv {
                 priv_name: Some(name),
                 cols,
             }));

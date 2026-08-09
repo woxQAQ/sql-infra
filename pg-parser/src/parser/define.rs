@@ -134,7 +134,7 @@ impl Parser {
             };
             (defnames, Vec::new(), definition, false)
         };
-        Ok(Node::DefineStmt(DefineStmt {
+        Ok(node!(DefineStmt {
             kind,
             oldstyle,
             defnames,

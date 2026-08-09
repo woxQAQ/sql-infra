@@ -63,7 +63,7 @@ impl Parser {
             return Err(self.error_here("MERGE requires at least one WHEN clause"));
         }
         let returning_clause = self.parse_returning_clause()?;
-        Ok(Node::MergeStmt(MergeStmt {
+        Ok(node!(MergeStmt {
             relation,
             source_relation,
             join_condition: Some(join_condition),

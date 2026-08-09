@@ -110,14 +110,14 @@ impl ExprParser {
                 TokenKind::Char('.') if indirection_allowed && !indirection_ends_in_star => {
                     self.advance();
                     let item = if self.consume(TokenKind::Char('*')) {
-                        Node::AStar(AStar {})
+                        Node::AStar
                     } else {
                         let name = self
                             .consume_column_label()
                             .or_else(|| self.fail("expected a field name after '.'"))?;
                         make_string_node(name)
                     };
-                    indirection_ends_in_star = matches!(item, Node::AStar(_));
+                    indirection_ends_in_star = matches!(item, Node::AStar);
                     append_indirection(lhs, item)
                 }
                 _ => break,
@@ -173,7 +173,7 @@ impl ExprParser {
                 }
                 let location = self.advance().location();
                 let arg = self.parse_expr_mode(AND_BINDING_POWER + 1, restricted)?;
-                Some(Node::BoolExpr(BoolExpr {
+                Some(node!(BoolExpr {
                     boolop: BoolExprType::NotExpr,
                     args: vec![arg],
                     location: location as ParseLoc,
@@ -221,7 +221,7 @@ impl ExprParser {
             TokenKind::Exists => {
                 let location = self.advance().location();
                 let subselect = self.parse_parenthesized_statement()?;
-                Some(Node::SubLink(SubLink {
+                Some(node!(SubLink {
                     sub_link_type: SubLinkType::ExistsSublink,
                     subselect: Some(Box::new(subselect)),
                     location: location as ParseLoc,
@@ -236,7 +236,7 @@ impl ExprParser {
                     self.parse_array_expr_body(location, list_start)
                 } else {
                     self.parse_parenthesized_statement().map(|subselect| {
-                        Node::SubLink(SubLink {
+                        node!(SubLink {
                             sub_link_type: SubLinkType::ArraySublink,
                             subselect: Some(Box::new(subselect)),
                             location: location as ParseLoc,
@@ -251,7 +251,7 @@ impl ExprParser {
                     return self.fail("DEFAULT is not allowed in a restricted expression");
                 }
                 let location = self.advance().location();
-                Some(Node::SetToDefault(SetToDefault {
+                Some(node!(SetToDefault {
                     location: location as ParseLoc,
                     ..SetToDefault::default()
                 }))
@@ -275,7 +275,7 @@ impl ExprParser {
             TokenKind::Xmlexists => self.parse_xmlexists_func(),
             TokenKind::SystemUser => {
                 let location = self.advance().location();
-                Some(Node::FuncCall(FuncCall {
+                Some(node!(FuncCall {
                     funcname: system_type_names("system_user"),
                     funcformat: CoercionForm::SqlSyntax,
                     location: location as ParseLoc,
@@ -317,7 +317,7 @@ impl ExprParser {
                 self.expect(TokenKind::Char('('))?;
                 let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
                 self.expect(TokenKind::Char(')'))?;
-                Some(Node::RowExpr(RowExpr {
+                Some(node!(RowExpr {
                     args,
                     row_format: CoercionForm::ExplicitCall,
                     location: location as ParseLoc,

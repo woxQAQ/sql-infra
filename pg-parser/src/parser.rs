@@ -15,6 +15,16 @@ use crate::lexer::TokenValue;
 use crate::lexer::lex;
 use crate::lexer::lookup_keyword;
 
+// Construct or destructure a `Node` variant whose payload type has the same name.
+macro_rules! node {
+    ($kind:ident { $($fields:tt)* } $(,)?) => {
+        $crate::Node::$kind($crate::$kind { $($fields)* })
+    };
+    ($kind:ident::$constructor:ident($($args:tt)*) $(,)?) => {
+        $crate::Node::$kind($crate::$kind::$constructor($($args)*))
+    };
+}
+
 mod access_method;
 mod aggregate_signatures;
 mod alter;
@@ -1302,8 +1312,8 @@ mod tests {
         ));
         assert!(matches!(
             first_node("alter table t owner to r"),
-            Node::AlterTableStmt(AlterTableStmt { cmds, .. })
-                if matches!(cmds.first(), Some(Node::AlterTableCmd(AlterTableCmd {
+            node!(AlterTableStmt { cmds, .. })
+                if matches!(cmds.first(), Some(node!(AlterTableCmd {
                     subtype: AlterTableType::ChangeOwner,
                     ..
                 })))
@@ -1314,14 +1324,14 @@ mod tests {
         ));
         assert!(matches!(
             first_node("alter type ct add attribute a int"),
-            Node::AlterTableStmt(AlterTableStmt {
+            node!(AlterTableStmt {
                 objtype: ObjectType::Type,
                 ..
             })
         ));
         assert!(matches!(
             first_node("drop cast (int as text)"),
-            Node::DropStmt(DropStmt {
+            node!(DropStmt {
                 remove_type: ObjectType::Cast,
                 ..
             })
@@ -1398,7 +1408,7 @@ mod tests {
         assert_eq!(alter.cmds.len(), 3);
         assert!(matches!(
             alter.cmds.first(),
-            Some(Node::AlterTableCmd(AlterTableCmd {
+            Some(node!(AlterTableCmd {
                 subtype: AlterTableType::AddColumn,
                 ..
             }))

@@ -36,7 +36,7 @@ impl ExprParser {
                 };
                 fields.push(make_string_node(token_name(&hole)?));
             } else if allow_star && !fields.is_empty() && self.consume(TokenKind::Char('*')) {
-                fields.push(Node::AStar(AStar {}));
+                fields.push(Node::AStar);
             } else {
                 let token = self.peek().clone();
                 let categories: &[KeywordCategory] = if fields.is_empty() {
@@ -72,7 +72,7 @@ impl ExprParser {
             if !self.consume(TokenKind::Char('.')) {
                 break;
             }
-            if matches!(fields.last(), Some(Node::AStar(_))) {
+            if matches!(fields.last(), Some(Node::AStar)) {
                 return self.fail("'*' must be the last indirection element");
             }
         }
@@ -105,7 +105,7 @@ impl ExprParser {
             }
         };
         self.expect(TokenKind::Char(']'))?;
-        Some(Node::AIndices(AIndices {
+        Some(node!(AIndices {
             is_slice,
             lidx,
             uidx,
@@ -119,7 +119,7 @@ impl ExprParser {
             let subselect = self.parse_nested_select(tokens)?;
             self.expect(TokenKind::Char(')'))?;
             return Some((
-                Node::SubLink(SubLink {
+                node!(SubLink {
                     sub_link_type: SubLinkType::ExprSublink,
                     subselect: Some(Box::new(subselect)),
                     location: location as ParseLoc,
@@ -137,7 +137,7 @@ impl ExprParser {
             args.into_iter().next().map(|node| (node, false))
         } else {
             Some((
-                Node::RowExpr(RowExpr {
+                node!(RowExpr {
                     args,
                     row_format: CoercionForm::ImplicitCast,
                     location: location as ParseLoc,
@@ -167,7 +167,7 @@ impl ExprParser {
         if args.is_empty() {
             return self.fail("COALESCE requires at least one argument");
         }
-        Some(Node::CoalesceExpr(CoalesceExpr {
+        Some(node!(CoalesceExpr {
             args,
             location: location as ParseLoc,
             ..CoalesceExpr::default()
@@ -182,7 +182,7 @@ impl ExprParser {
         if args.is_empty() {
             return self.fail("GREATEST/LEAST requires at least one argument");
         }
-        Some(Node::MinMaxExpr(MinMaxExpr {
+        Some(node!(MinMaxExpr {
             op: if token.kind == TokenKind::Least {
                 MinMaxOp::Least
             } else {
@@ -222,7 +222,7 @@ impl ExprParser {
                 if let Some(tokens) = self.take_parenthesized_select_tokens() {
                     let subselect = self.parse_nested_select(tokens)?;
                     self.expect(TokenKind::Char(')'))?;
-                    let sublink = Node::SubLink(SubLink {
+                    let sublink = node!(SubLink {
                         sub_link_type: SubLinkType::AnySublink,
                         testexpr: Some(Box::new(lhs)),
                         subselect: Some(Box::new(subselect)),
@@ -244,7 +244,7 @@ impl ExprParser {
                         AExprKind::In,
                         vec![if negated { "<>" } else { "=" }],
                         Some(lhs),
-                        Some(Node::AArrayExpr(AArrayExpr {
+                        Some(node!(AArrayExpr {
                             elements,
                             location: location as ParseLoc,
                             ..AArrayExpr::default()
@@ -297,7 +297,7 @@ impl ExprParser {
                     if let Some(escape) = escape {
                         args.push(escape);
                     }
-                    Node::FuncCall(FuncCall {
+                    node!(FuncCall {
                         funcname: system_type_names(if op == TokenKind::Similar {
                             "similar_to_escape"
                         } else {
@@ -372,7 +372,7 @@ impl ExprParser {
         if let Some(tokens) = self.take_parenthesized_select_tokens() {
             let subselect = self.parse_nested_select(tokens)?;
             self.expect(TokenKind::Char(')'))?;
-            Some(Node::SubLink(SubLink {
+            Some(node!(SubLink {
                 sub_link_type,
                 testexpr: Some(Box::new(lhs)),
                 oper_name: operator_name,
@@ -423,7 +423,7 @@ impl ExprParser {
                 (false, false) => "BETWEEN",
             }],
             Some(lhs),
-            Some(Node::AArrayExpr(AArrayExpr {
+            Some(node!(AArrayExpr {
                 elements: vec![lower, upper],
                 location: location as ParseLoc,
                 ..AArrayExpr::default()
@@ -453,7 +453,7 @@ impl ExprParser {
 
         let mut args = left_row.args;
         args.extend(right_row.args);
-        Some(Node::FuncCall(FuncCall {
+        Some(node!(FuncCall {
             funcname: system_type_names("overlaps"),
             args,
             funcformat: CoercionForm::SqlSyntax,
@@ -486,7 +486,7 @@ impl ExprParser {
             ]);
         }
         if self.consume(TokenKind::DocumentP) {
-            let document = Node::XmlExpr(XmlExpr {
+            let document = node!(XmlExpr {
                 op: XmlExprOp::Document,
                 args: vec![lhs],
                 location: location as ParseLoc,
@@ -512,13 +512,10 @@ impl ExprParser {
             let mut args = vec![lhs];
             if let Some(form) = normalization_form {
                 let form_location = self.advance().location();
-                args.push(Node::AConst(AConst::string(
-                    form,
-                    form_location as ParseLoc,
-                )));
+                args.push(node!(AConst::string(form, form_location as ParseLoc,)));
             }
             self.expect(TokenKind::Normalized)?;
-            let normalized = Node::FuncCall(FuncCall {
+            let normalized = node!(FuncCall {
                 funcname: system_type_names("is_normalized"),
                 args,
                 funcformat: CoercionForm::SqlSyntax,
@@ -564,7 +561,7 @@ impl ExprParser {
             } else {
                 false
             };
-            let predicate = Node::JsonIsPredicate(JsonIsPredicate {
+            let predicate = node!(JsonIsPredicate {
                 expr: Some(Box::new(lhs)),
                 format: Some(Box::new(default_json_format())),
                 item_type,
@@ -594,7 +591,7 @@ impl ExprParser {
             ));
         }
         if self.consume(TokenKind::NullP) {
-            return Some(Node::NullTest(NullTest {
+            return Some(node!(NullTest {
                 arg: Some(Box::new(lhs)),
                 nulltesttype: if negated {
                     NullTestType::NotNull
@@ -625,7 +622,7 @@ impl ExprParser {
         };
         if let Some(booltesttype) = booltesttype {
             self.advance();
-            return Some(Node::BooleanTest(BooleanTest {
+            return Some(node!(BooleanTest {
                 arg: Some(Box::new(lhs)),
                 booltesttype,
                 location: location as ParseLoc,

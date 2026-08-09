@@ -49,7 +49,7 @@ impl Parser {
             false
         };
         self.expect_statement_end()?;
-        Ok(Node::ConstraintsSetStmt(ConstraintsSetStmt {
+        Ok(node!(ConstraintsSetStmt {
             constraints,
             deferred,
         }))
@@ -375,7 +375,7 @@ impl Parser {
                         operator_tokens,
                         operator_location,
                     )?);
-                    constraint.exclusions.push(Node::AArrayExpr(AArrayExpr {
+                    constraint.exclusions.push(node!(AArrayExpr {
                         elements: vec![Node::IndexElem(index_elem), operator],
                         ..AArrayExpr::default()
                     }));

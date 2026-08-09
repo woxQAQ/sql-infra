@@ -1,6 +1,6 @@
 //! Small constructors and projections for recurring raw-AST shapes.
 //!
-//! Keeping these constructors here centralizes node tags, default fields, and
+//! Keeping these constructors here centralizes `Node` construction, default fields, and
 //! PostgreSQL name-list conventions used by otherwise unrelated parsers.
 
 use super::*;

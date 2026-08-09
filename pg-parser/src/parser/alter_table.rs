@@ -52,7 +52,7 @@ impl Parser {
             .consume_col_id()
             .ok_or_else(|| self.error_here("expected the destination tablespace name"))?;
         let nowait = self.consume(TokenKind::Nowait);
-        Ok(Node::AlterTableMoveAllStmt(AlterTableMoveAllStmt {
+        Ok(node!(AlterTableMoveAllStmt {
             orig_tablespacename: Some(orig_tablespacename),
             objtype,
             roles,
@@ -77,7 +77,7 @@ impl Parser {
             owner_end,
         );
         let cmds = self.parse_alter_table_cmds(objtype)?;
-        Ok(Node::AlterTableStmt(AlterTableStmt {
+        Ok(node!(AlterTableStmt {
             relation,
             cmds,
             objtype,
@@ -216,7 +216,7 @@ impl Parser {
             }
             TokenKind::Char('(') => {
                 cmd.subtype = AlterTableType::SetRelOptions;
-                cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                cmd.def = Some(Box::new(node!(AArrayExpr {
                     elements: self.parse_parenthesized_reloptions()?,
                     ..AArrayExpr::default()
                 })));
@@ -230,7 +230,7 @@ impl Parser {
         self.expect(TokenKind::Reset)?;
         Ok(AlterTableCmd {
             subtype: AlterTableType::ResetRelOptions,
-            def: Some(Box::new(Node::AArrayExpr(AArrayExpr {
+            def: Some(Box::new(node!(AArrayExpr {
                 elements: self.parse_parenthesized_reloptions()?,
                 ..AArrayExpr::default()
             }))),
@@ -567,7 +567,7 @@ impl Parser {
                     } else {
                         None
                     };
-                    cmd.def = Some(Box::new(Node::ColumnDef(ColumnDef {
+                    cmd.def = Some(Box::new(node!(ColumnDef {
                         type_name: Some(Box::new(type_name)),
                         coll_clause,
                         raw_default,
@@ -647,7 +647,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::SetOptions;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_parenthesized_reloptions()?,
                                 ..AArrayExpr::default()
                             })));
@@ -703,10 +703,10 @@ impl Parser {
                                 );
                             };
                             cmd.subtype = AlterTableType::SetIdentity;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: vec![make_def_elem(
                                     "generated",
-                                    Some(Node::Integer(Integer::new(i32::from(generated_when)))),
+                                    Some(node!(Integer::new(i32::from(generated_when)))),
                                     self.previous_location(),
                                 )],
                                 ..AArrayExpr::default()
@@ -727,7 +727,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::SetIdentity;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_sequence_options()?,
                                 ..AArrayExpr::default()
                             })));
@@ -772,7 +772,7 @@ impl Parser {
                                 Vec::new()
                             };
                             cmd.subtype = AlterTableType::AddIdentity;
-                            cmd.def = Some(Box::new(Node::Constraint(Constraint {
+                            cmd.def = Some(Box::new(node!(Constraint {
                                 contype: ConstrType::Identity,
                                 generated_when,
                                 options,
@@ -787,7 +787,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::SetIdentity;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_sequence_options()?,
                                 ..AArrayExpr::default()
                             })));
@@ -800,7 +800,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::ResetOptions;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_parenthesized_reloptions()?,
                                 ..AArrayExpr::default()
                             })));
@@ -852,7 +852,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::AlterColumnGenericOptions;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_alter_generic_options()?,
                                 ..AArrayExpr::default()
                             })));
@@ -929,7 +929,7 @@ impl Parser {
                     }
                 };
                 cmd.subtype = AlterTableType::ReplicaIdentity;
-                cmd.def = Some(Box::new(Node::ReplicaIdentityStmt(ReplicaIdentityStmt {
+                cmd.def = Some(Box::new(node!(ReplicaIdentityStmt {
                     identity_type,
                     name,
                 })));
@@ -985,7 +985,7 @@ impl Parser {
                     return Err(self.error_here("OF requires a type name"));
                 }
                 cmd.subtype = AlterTableType::AddOf;
-                cmd.def = Some(Box::new(Node::TypeName(TypeName {
+                cmd.def = Some(Box::new(node!(TypeName {
                     names,
                     location: location as ParseLoc,
                     ..TypeName::default()
@@ -1005,7 +1005,7 @@ impl Parser {
             }
             TokenKind::Options => {
                 cmd.subtype = AlterTableType::GenericOptions;
-                cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
+                cmd.def = Some(Box::new(node!(AArrayExpr {
                     elements: self.parse_alter_generic_options()?,
                     ..AArrayExpr::default()
                 })));

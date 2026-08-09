@@ -26,7 +26,7 @@ pub(super) fn is_function_expression_node(node: &Node) -> bool {
             | Node::JsonArrayQueryConstructor(_)
             | Node::JsonObjectAgg(_)
             | Node::JsonArrayAgg(_)
-            | Node::AExpr(AExpr {
+            | node!(AExpr {
                 kind: AExprKind::Nullif,
                 ..
             })
@@ -66,7 +66,7 @@ pub(super) fn make_aexpr_with_name(
     rexpr: Option<Node>,
     location: usize,
 ) -> Node {
-    Node::AExpr(AExpr {
+    node!(AExpr {
         kind,
         name,
         lexpr: lexpr.map(Box::new),
@@ -82,7 +82,7 @@ pub(super) fn make_bool_expr(kind: BoolExprType, lhs: Node, rhs: Node, location:
             expression.args.push(rhs);
             Node::BoolExpr(expression)
         }
-        lhs => Node::BoolExpr(BoolExpr {
+        lhs => node!(BoolExpr {
             boolop: kind,
             args: vec![lhs, rhs],
             location: location as ParseLoc,
@@ -91,7 +91,7 @@ pub(super) fn make_bool_expr(kind: BoolExprType, lhs: Node, rhs: Node, location:
 }
 
 pub(super) fn make_not_expr(arg: Node, location: usize) -> Node {
-    Node::BoolExpr(BoolExpr {
+    node!(BoolExpr {
         boolop: BoolExprType::NotExpr,
         args: vec![arg],
         location: location as ParseLoc,
@@ -138,7 +138,7 @@ pub(super) fn append_indirection(arg: Node, item: Node) -> Node {
             indirection.indirection.push(item);
             Node::AIndirection(indirection)
         }
-        arg => Node::AIndirection(AIndirection {
+        arg => node!(AIndirection {
             arg: Some(Box::new(arg)),
             indirection: vec![item],
         }),
@@ -147,9 +147,9 @@ pub(super) fn append_indirection(arg: Node, item: Node) -> Node {
 
 pub(super) fn node_ends_in_star_indirection(node: &Node) -> bool {
     match node {
-        Node::ColumnRef(reference) => matches!(reference.fields.last(), Some(Node::AStar(_))),
+        Node::ColumnRef(reference) => matches!(reference.fields.last(), Some(Node::AStar)),
         Node::AIndirection(indirection) => {
-            matches!(indirection.indirection.last(), Some(Node::AStar(_)))
+            matches!(indirection.indirection.last(), Some(Node::AStar))
         }
         _ => false,
     }
@@ -405,8 +405,8 @@ pub(super) fn parse_aexpr_const_tokens(tokens: Vec<Token>) -> PResult<Node> {
             .map_err(|_| ParseError::syntax_exit(location, "invalid typed constant"))?;
         let value = token_name(string_token)
             .ok_or_else(|| ParseError::ranged(string_token.range, "invalid string constant"))?;
-        return Ok(Node::TypeCast(TypeCast {
-            arg: Some(Box::new(Node::AConst(AConst::string(
+        return Ok(node!(TypeCast {
+            arg: Some(Box::new(node!(AConst::string(
                 value,
                 string_token.location() as ParseLoc,
             )))),

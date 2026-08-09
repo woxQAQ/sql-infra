@@ -35,7 +35,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CreateTableSpaceStmt(CreateTableSpaceStmt {
+        Ok(node!(CreateTableSpaceStmt {
             tablespacename,
             owner,
             location,
@@ -63,7 +63,7 @@ impl Parser {
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("RENAME TO requires a new name"))?,
             );
-            return Ok(Node::RenameStmt(RenameStmt {
+            return Ok(node!(RenameStmt {
                 rename_type: ObjectType::Tablespace,
                 subname: tablespacename,
                 newname,
@@ -78,13 +78,11 @@ impl Parser {
             return Err(self.error_here("ALTER TABLESPACE requires SET or RESET"));
         };
         let options = self.parse_parenthesized_reloptions()?;
-        Ok(Node::AlterTableSpaceOptionsStmt(
-            AlterTableSpaceOptionsStmt {
-                tablespacename,
-                options,
-                is_reset,
-            },
-        ))
+        Ok(node!(AlterTableSpaceOptionsStmt {
+            tablespacename,
+            options,
+            is_reset,
+        }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -99,7 +97,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("DROP TABLESPACE requires a name"))?,
         );
         self.expect_statement_end()?;
-        Ok(Node::DropTableSpaceStmt(DropTableSpaceStmt {
+        Ok(node!(DropTableSpaceStmt {
             tablespacename,
             missing_ok,
         }))

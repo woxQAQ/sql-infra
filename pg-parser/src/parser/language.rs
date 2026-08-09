@@ -23,7 +23,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("CREATE LANGUAGE requires a name"))?,
         );
         if !self.consume(TokenKind::Handler) {
-            return Ok(Node::CreateExtensionStmt(CreateExtensionStmt {
+            return Ok(node!(CreateExtensionStmt {
                 extname: plname,
                 if_not_exists: replace,
                 options: Vec::new(),
@@ -57,7 +57,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CreatePLangStmt(CreatePLangStmt {
+        Ok(node!(CreatePLangStmt {
             replace,
             plname,
             plhandler,

@@ -45,7 +45,7 @@ impl Parser {
         }
         self.consume(TokenKind::Restrict);
         self.expect_statement_end()?;
-        Ok(Node::AlterFunctionStmt(AlterFunctionStmt {
+        Ok(node!(AlterFunctionStmt {
             objtype,
             func,
             actions,
@@ -115,7 +115,7 @@ impl Parser {
                     self.expect(TokenKind::On)?;
                     self.expect(TokenKind::NullP)?;
                     self.expect(TokenKind::InputP)?;
-                    ("strict", Some(Node::Boolean(Boolean::new(false))))
+                    ("strict", Some(node!(Boolean::new(false))))
                 }
                 TokenKind::Returns => {
                     self.advance();
@@ -123,11 +123,11 @@ impl Parser {
                     self.expect(TokenKind::On)?;
                     self.expect(TokenKind::NullP)?;
                     self.expect(TokenKind::InputP)?;
-                    ("strict", Some(Node::Boolean(Boolean::new(true))))
+                    ("strict", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::StrictP => {
                     self.advance();
-                    ("strict", Some(Node::Boolean(Boolean::new(true))))
+                    ("strict", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::Immutable | TokenKind::Stable | TokenKind::Volatile => {
                     let value = match self.advance().kind {
@@ -142,21 +142,21 @@ impl Parser {
                     self.advance();
                     self.expect(TokenKind::Security)?;
                     let value = self.parse_routine_security()?;
-                    ("security", Some(Node::Boolean(Boolean::new(value))))
+                    ("security", Some(node!(Boolean::new(value))))
                 }
                 TokenKind::Security => {
                     self.advance();
                     let value = self.parse_routine_security()?;
-                    ("security", Some(Node::Boolean(Boolean::new(value))))
+                    ("security", Some(node!(Boolean::new(value))))
                 }
                 TokenKind::Leakproof => {
                     self.advance();
-                    ("leakproof", Some(Node::Boolean(Boolean::new(true))))
+                    ("leakproof", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::Not => {
                     self.advance();
                     self.expect(TokenKind::Leakproof)?;
-                    ("leakproof", Some(Node::Boolean(Boolean::new(false))))
+                    ("leakproof", Some(node!(Boolean::new(false))))
                 }
                 TokenKind::Cost => {
                     self.advance();
@@ -286,7 +286,7 @@ impl Parser {
             self.advance();
             stmt.name = Some("search_path".to_owned());
             let value = self.consume_required_string("SET SCHEMA requires a string")?;
-            stmt.args = vec![Node::AConst(AConst::string(
+            stmt.args = vec![node!(AConst::string(
                 value,
                 self.previous_location() as ParseLoc,
             ))];
@@ -304,7 +304,7 @@ impl Parser {
                 let value = self
                     .consume_string_like()
                     .ok_or_else(|| self.error_here("SET NAMES requires an encoding"))?;
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     value,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -318,7 +318,7 @@ impl Parser {
             let value = self
                 .consume_string_like()
                 .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
-            stmt.args = vec![Node::AConst(AConst::string(
+            stmt.args = vec![node!(AConst::string(
                 value,
                 self.previous_location() as ParseLoc,
             ))];
@@ -334,7 +334,7 @@ impl Parser {
                 let value = self
                     .consume_string_like()
                     .ok_or_else(|| self.error_here("SET SESSION AUTHORIZATION requires a role"))?;
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     value,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -351,7 +351,7 @@ impl Parser {
                 ("CONTENT", self.previous_location() as ParseLoc)
             };
             stmt.name = Some("xmloption".to_owned());
-            stmt.args = vec![Node::AConst(AConst::string(value, value_location))];
+            stmt.args = vec![node!(AConst::string(value, value_location))];
             stmt.jumble_args = true;
             return Ok(stmt);
         }
@@ -360,7 +360,7 @@ impl Parser {
             stmt.kind = VariableSetKind::SetMulti;
             stmt.name = Some("TRANSACTION SNAPSHOT".to_owned());
             let value = self.consume_required_string("TRANSACTION SNAPSHOT requires a string")?;
-            stmt.args = vec![Node::AConst(AConst::string(
+            stmt.args = vec![node!(AConst::string(
                 value,
                 self.previous_location() as ParseLoc,
             ))];
@@ -390,9 +390,7 @@ impl Parser {
         } else if self.consume(TokenKind::NullP) {
             (
                 VariableSetKind::SetValue,
-                vec![Node::AConst(AConst::null(
-                    self.previous_location() as ParseLoc
-                ))],
+                vec![node!(AConst::null(self.previous_location() as ParseLoc))],
                 value_location,
             )
         } else {
