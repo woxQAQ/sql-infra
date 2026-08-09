@@ -95,7 +95,7 @@ impl ExprParser {
         mut tokens: Vec<Token>,
         completion: Option<completion::SharedCollector>,
     ) -> Self {
-        let location = tokens.last().map_or(0, Token::end_location);
+        let location = tokens.last().end_location_or(0);
         tokens.push(Token::synthetic(TokenKind::Eof, location));
         Self {
             tokens,

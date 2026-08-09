@@ -7,6 +7,7 @@
     nodejs_22
     nushell
     pnpm
+    ast-grep
   ];
 
   languages.rust = {

@@ -66,7 +66,7 @@ impl Parser {
         }
         let mut doc_tokens = self.take_until_top_level(&[TokenKind::Columns]);
         if self.at_completion()
-            && doc_tokens.last().map(|token| token.kind) == Some(TokenKind::By)
+            && doc_tokens.last().has_kind(TokenKind::By)
             && parse_c_expression_tokens_with_completion(
                 doc_tokens[..doc_tokens.len() - 1].to_vec(),
                 None,

@@ -30,9 +30,8 @@ impl Parser {
                 self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
             }
             self.append_completion_marker(&mut tokens);
-            let starts_parenthesized =
-                tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
-            let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
+            let starts_parenthesized = tokens.first().has_kind(TokenKind::Char('('));
+            let starts_with_cast = tokens.first().has_kind(TokenKind::Cast);
             let parsed = parse_index_elem_tokens_with_completion(tokens, self.completion.clone())?;
             if !parsed.opclassopts.is_empty()
                 || parsed.ordering != SortByDir::Default

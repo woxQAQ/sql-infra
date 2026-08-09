@@ -836,10 +836,7 @@ impl ExprParser {
     }
 
     pub(super) fn peek_kind_n(&self, n: usize) -> TokenKind {
-        self.tokens
-            .get(self.pos + n)
-            .map(|token| token.kind)
-            .unwrap_or(TokenKind::Eof)
+        self.tokens.get(self.pos + n).kind_or_eof()
     }
 
     pub(super) fn location(&self) -> usize {
@@ -849,8 +846,7 @@ impl ExprParser {
     pub(super) fn previous_location(&self) -> usize {
         self.tokens
             .get(self.pos.saturating_sub(1))
-            .map(|token| token.location())
-            .unwrap_or_else(|| self.location())
+            .location_or_else(|| self.location())
     }
 
     pub(super) fn at_completion(&self) -> bool {

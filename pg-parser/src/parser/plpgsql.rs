@@ -59,9 +59,7 @@ pub(super) fn parse_expression(sql: &str) -> PResult<RawStmt> {
 
 fn parse_expression_select(parser: &mut Parser) -> PResult<SelectStmt> {
     let mut tokens = parser.take_until_top_level(&[TokenKind::Eof]);
-    let location = tokens
-        .first()
-        .map_or_else(|| parser.location(), |token| token.location());
+    let location = tokens.first().location_or_else(|| parser.location());
     tokens.insert(0, Token::synthetic(TokenKind::Select, location));
     match parse_statement_node_tokens(tokens)? {
         Node::SelectStmt(select) => Ok(select),

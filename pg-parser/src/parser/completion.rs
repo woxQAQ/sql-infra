@@ -1560,7 +1560,7 @@ mod tests {
                 panic!("failed to lex {:?} sample {sql:?}: {error}", family)
             });
             let first_kind = tokens[0].kind;
-            let second_kind = tokens.get(1).map_or(TokenKind::Eof, |token| token.kind);
+            let second_kind = tokens.get(1).kind_or_eof();
             assert_eq!(
                 classify_statement(first_kind, second_kind),
                 Some(*family),

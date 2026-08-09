@@ -51,7 +51,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
     completion: Option<completion::SharedCollector>,
 ) -> PResult<FunctionParameter> {
     record_type_name_completion(&tokens, completion.as_ref());
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
             location,
@@ -88,9 +88,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
                 TokenKind::Inout,
                 TokenKind::Variadic,
             ]);
-        } else if tokens.first().map(|token| token.kind) == Some(TokenKind::InP)
-            && completion_index == 1
-        {
+        } else if tokens.first().has_kind(TokenKind::InP) && completion_index == 1 {
             collector.record_lookahead_tokens(&[TokenKind::OutP]);
         }
         if function_parameter_from_tokens(tokens[..completion_index].to_vec()).is_ok() {
@@ -131,9 +129,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
     {
         mode = parameter_mode;
         tokens.remove(0);
-        if mode == FunctionParameterMode::In
-            && tokens.first().map(|token| token.kind) == Some(TokenKind::OutP)
-        {
+        if mode == FunctionParameterMode::In && tokens.first().has_kind(TokenKind::OutP) {
             mode = FunctionParameterMode::Inout;
             tokens.remove(0);
         }
@@ -147,9 +143,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
         name = Some(parameter_name);
         mode = parameter_mode;
         tokens.drain(0..2);
-        if mode == FunctionParameterMode::In
-            && tokens.first().map(|token| token.kind) == Some(TokenKind::OutP)
-        {
+        if mode == FunctionParameterMode::In && tokens.first().has_kind(TokenKind::OutP) {
             mode = FunctionParameterMode::Inout;
             tokens.remove(0);
         }

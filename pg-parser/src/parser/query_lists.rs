@@ -48,7 +48,7 @@ impl Parser {
                 return Err(self.error_here("expected an expression"));
             }
             if self.at_completion()
-                && tokens.last().map(|token| token.kind) == Some(TokenKind::As)
+                && tokens.last().has_kind(TokenKind::As)
                 && parse_expression_tokens(tokens[..tokens.len() - 1].to_vec()).is_ok()
             {
                 self.record_completion_slot(completion::GrammarSlot::Alias);
@@ -304,10 +304,9 @@ impl Parser {
                     .map_or(missing_operator_location as ParseLoc, |token| {
                         token.location() as ParseLoc
                     });
-                if operator_tokens.first().map(|token| token.kind) == Some(TokenKind::Operator) {
-                    if operator_tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('('))
-                        || operator_tokens.last().map(|token| token.kind)
-                            != Some(TokenKind::Char(')'))
+                if operator_tokens.first().has_kind(TokenKind::Operator) {
+                    if !operator_tokens.get(1).has_kind(TokenKind::Char('('))
+                        || !operator_tokens.last().has_kind(TokenKind::Char(')'))
                     {
                         return Err(ParseError::syntax_exit(
                             location as usize,
@@ -350,9 +349,9 @@ impl Parser {
                 self.record_completion_tokens(&[TokenKind::Char('(')]);
                 return;
             }
-            if decoration.first().map(|token| token.kind) == Some(TokenKind::Operator)
-                && decoration.get(1).map(|token| token.kind) == Some(TokenKind::Char('('))
-                && decoration.last().map(|token| token.kind) != Some(TokenKind::Char(')'))
+            if decoration.first().has_kind(TokenKind::Operator)
+                && decoration.get(1).has_kind(TokenKind::Char('('))
+                && !decoration.last().has_kind(TokenKind::Char(')'))
             {
                 if matches!(
                     decoration.last().map(|token| token.kind),
@@ -365,11 +364,11 @@ impl Parser {
                 return;
             }
         }
-        if tokens.last().map(|token| token.kind) == Some(TokenKind::NullsP) {
+        if tokens.last().has_kind(TokenKind::NullsP) {
             self.record_completion_tokens(&[TokenKind::FirstP, TokenKind::LastP]);
             return;
         }
-        if tokens.last().map(|token| token.kind) == Some(TokenKind::Using) {
+        if tokens.last().has_kind(TokenKind::Using) {
             self.record_completion_tokens(&[TokenKind::Op, TokenKind::Operator]);
             self.record_completion_slot(completion::GrammarSlot::Operator);
             return;

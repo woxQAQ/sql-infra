@@ -281,10 +281,8 @@ impl ExprParser {
                         kind,
                         TokenKind::Returning | TokenKind::Char(')') | TokenKind::Eof
                     ) || (matches!(kind, TokenKind::Absent | TokenKind::NullP)
-                        && (self.tokens.get(end + 1).map(|token| token.kind)
-                            == Some(TokenKind::On)
-                            || (self.tokens.get(end + 1).map(|token| token.kind)
-                                == Some(TokenKind::Completion)
+                        && (self.tokens.get(end + 1).has_kind(TokenKind::On)
+                            || (self.tokens.get(end + 1).has_kind(TokenKind::Completion)
                                 && parse_sort_list_tokens(
                                     self.tokens[start..end].to_vec(),
                                     None,
@@ -342,7 +340,7 @@ pub(super) fn parse_sort_list_tokens(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<NodeList> {
-    let location = tokens.last().map_or(0, Token::end_location);
+    let location = tokens.last().end_location_or(0);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
     let mut parser = Parser {
         tokens,

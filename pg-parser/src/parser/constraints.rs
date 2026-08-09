@@ -335,13 +335,9 @@ impl Parser {
                         self.record_completion_tokens(&[TokenKind::With]);
                     }
                     self.append_completion_marker(&mut expr_tokens);
-                    let expr_location = expr_tokens
-                        .first()
-                        .map_or(self.location(), |token| token.location());
-                    let starts_parenthesized =
-                        expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
-                    let starts_with_cast =
-                        expr_tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
+                    let expr_location = expr_tokens.first().location_or(self.location());
+                    let starts_parenthesized = expr_tokens.first().has_kind(TokenKind::Char('('));
+                    let starts_with_cast = expr_tokens.first().has_kind(TokenKind::Cast);
                     let index_elem = parse_index_elem_tokens_with_completion(
                         expr_tokens,
                         self.completion.clone(),

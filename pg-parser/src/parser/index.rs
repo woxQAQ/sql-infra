@@ -130,12 +130,9 @@ impl Parser {
                 self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(')')]);
             }
             self.append_completion_marker(&mut tokens);
-            let location = tokens
-                .first()
-                .map_or(self.location(), |token| token.location());
-            let starts_parenthesized =
-                tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
-            let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
+            let location = tokens.first().location_or(self.location());
+            let starts_parenthesized = tokens.first().has_kind(TokenKind::Char('('));
+            let starts_with_cast = tokens.first().has_kind(TokenKind::Cast);
             let element = parse_index_elem_tokens_with_completion(tokens, self.completion.clone())?;
             if let Some(expression) = element.expr.as_deref()
                 && !starts_parenthesized
@@ -182,7 +179,7 @@ pub(super) fn parse_index_elem_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<IndexElem> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
             location,
@@ -217,7 +214,7 @@ pub(super) fn parse_index_elem_tokens_with_completion(
     element.location = location as ParseLoc;
 
     let mut suffix_tokens = tokens[suffix_start..].to_vec();
-    let end_location = suffix_tokens.last().map_or(location, Token::end_location);
+    let end_location = suffix_tokens.last().end_location_or(location);
     suffix_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
     let mut suffix = Parser {
         tokens: suffix_tokens,

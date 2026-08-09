@@ -228,9 +228,7 @@ impl Parser {
                     self.completion.clone(),
                 )?;
             } else {
-                let end_location = inner_tokens
-                    .last()
-                    .map_or(self.location(), Token::end_location);
+                let end_location = inner_tokens.last().end_location_or(self.location());
                 inner_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
                 let mut nested = Parser {
                     tokens: inner_tokens,
@@ -252,12 +250,8 @@ impl Parser {
             }));
         }
 
-        let item_location = inner_tokens
-            .first()
-            .map_or(self.location(), |token| token.location());
-        let end_location = inner_tokens
-            .last()
-            .map_or(self.location(), Token::end_location);
+        let item_location = inner_tokens.first().location_or(self.location());
+        let end_location = inner_tokens.last().end_location_or(self.location());
         inner_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
         let mut nested = Parser {
             tokens: inner_tokens,

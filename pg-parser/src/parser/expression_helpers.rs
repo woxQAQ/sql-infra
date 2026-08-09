@@ -296,7 +296,7 @@ pub(super) fn parse_expression_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(location, "expected an expression"));
     }
@@ -318,7 +318,7 @@ pub(super) fn parse_b_expression_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
             location,
@@ -339,7 +339,7 @@ pub(super) fn parse_c_expression_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
             location,
@@ -384,7 +384,7 @@ pub(super) fn parse_select_fetch_first_value_tokens_with_completion(
 }
 
 pub(super) fn parse_aexpr_const_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.len() == 1
         && let Some(node) = token_to_leaf(&tokens[0])
         && matches!(node, Node::AConst(_))

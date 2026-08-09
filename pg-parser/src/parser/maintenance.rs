@@ -891,7 +891,7 @@ fn parse_copy_generic_option(
     location: usize,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<DefElem> {
-    let eof_location = tokens.last().map_or(location, Token::end_location);
+    let eof_location = tokens.last().end_location_or(location);
     tokens.push(Token::synthetic(TokenKind::Eof, eof_location));
     let mut parser = Parser {
         tokens,

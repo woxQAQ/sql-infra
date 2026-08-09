@@ -611,10 +611,7 @@ impl Parser {
     /// Returns `Eof` on overflow.  For the few productions that need extra
     /// lookahead to disambiguate.
     pub(super) fn peek_kind_n(&self, n: usize) -> TokenKind {
-        self.tokens
-            .get(self.pos + n)
-            .map(|token| token.kind)
-            .unwrap_or(TokenKind::Eof)
+        self.tokens.get(self.pos + n).kind_or_eof()
     }
 
     /// Byte offset of the current token in the source text.  Commonly used as
@@ -629,8 +626,7 @@ impl Parser {
     pub(super) fn previous_location(&self) -> usize {
         self.tokens
             .get(self.pos.saturating_sub(1))
-            .map(|token| token.location())
-            .unwrap_or(self.location())
+            .location_or(self.location())
     }
 
     /// Construct parser control flow anchored at the current token position.

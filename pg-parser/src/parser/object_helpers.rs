@@ -48,13 +48,9 @@ pub(super) fn parse_aggregate_with_args_tokens(
     let objargs = parameters
         .iter()
         .map(|parameter| match parameter {
-            Node::FunctionParameter(parameter) => parameter
-                .arg_type
-                .as_deref()
-                .cloned()
-                .map(Node::TypeName)
-                .map(Some)
-                .unwrap_or(None),
+            Node::FunctionParameter(parameter) => {
+                parameter.arg_type.as_deref().cloned().map(Node::TypeName)
+            }
             _ => unreachable!("aggregate argument parser returned a non-parameter"),
         })
         .collect();
@@ -101,8 +97,8 @@ pub(super) fn parse_qualified_all_operator_tokens(
     tokens: Vec<Token>,
     location: usize,
 ) -> PResult<NodeList> {
-    if tokens.first().map(|token| token.kind) != Some(TokenKind::Operator)
-        || tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('('))
+    if !tokens.first().has_kind(TokenKind::Operator)
+        || !tokens.get(1).has_kind(TokenKind::Char('('))
     {
         return Err(ParseError::syntax_exit(location, "expected OPERATOR(...)"));
     }
@@ -224,8 +220,7 @@ fn parse_object_with_args_tokens_impl(
         ));
     }
     if !arg_tokens.is_empty() {
-        let trailing_comma =
-            arg_tokens.last().map(|token| token.kind) == Some(TokenKind::Char(','));
+        let trailing_comma = arg_tokens.last().has_kind(TokenKind::Char(','));
         let chunks = split_top_level_commas(arg_tokens);
         if trailing_comma || chunks.iter().any(Vec::is_empty) {
             return Err(ParseError::syntax_exit(
@@ -241,7 +236,7 @@ fn parse_object_with_args_tokens_impl(
                 ));
             }
             for chunk in chunks {
-                let arg_location = chunk.first().map_or(location, |token| token.location());
+                let arg_location = chunk.first().location_or(location);
                 if chunk.len() == 1 && chunk[0].kind == TokenKind::None {
                     objargs.push(None);
                 } else {
@@ -259,7 +254,7 @@ fn parse_object_with_args_tokens_impl(
             }
         } else {
             for chunk in chunks {
-                let arg_location = chunk.first().map_or(location, |token| token.location());
+                let arg_location = chunk.first().location_or(location);
                 let parameter = function_parameter_from_tokens(chunk).map_err(|_| {
                     ParseError::syntax_exit(arg_location, "invalid function argument")
                 })?;
@@ -525,15 +520,13 @@ impl Parser {
                     );
                 }
             }
-            if depth == 1 && tokens.last().map(|token| token.kind) != Some(TokenKind::Char(',')) {
+            if depth == 1 && !tokens.last().has_kind(TokenKind::Char(',')) {
                 self.record_completion_tokens(&[TokenKind::Char(')')]);
-                if tokens.last().map(|token| token.kind) != Some(TokenKind::Char('(')) {
+                if !tokens.last().has_kind(TokenKind::Char('(')) {
                     self.record_completion_tokens(&[TokenKind::Char(',')]);
                 }
             }
-        } else if tokens.is_empty()
-            || tokens.last().map(|token| token.kind) == Some(TokenKind::Char('.'))
-        {
+        } else if tokens.is_empty() || tokens.last().has_kind(TokenKind::Char('.')) {
             self.record_completion_slot(name_slot);
         } else if !saw_open {
             self.record_completion_tokens(&[TokenKind::Char('(')]);
@@ -585,7 +578,7 @@ impl Parser {
     ) {
         if !self.at_completion()
             || value_grammar == DefElemValueGrammar::Generic
-            || tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('='))
+            || !tokens.get(1).has_kind(TokenKind::Char('='))
             || tokens.len() != 2
         {
             return;

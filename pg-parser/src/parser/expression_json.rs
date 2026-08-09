@@ -366,7 +366,7 @@ pub(super) fn parse_json_value_expr_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<JsonValueExpr> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
             location,

@@ -255,7 +255,7 @@ impl Parser {
             if depth == 0
                 && !tokens.is_empty()
                 && starts_option
-                && tokens.last().map(|token| token.kind) != Some(TokenKind::Char('.'))
+                && !tokens.last().has_kind(TokenKind::Char('.'))
             {
                 break;
             }

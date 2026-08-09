@@ -9,14 +9,14 @@ fn parse_stats_params_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
             location,
             "CREATE STATISTICS requires an ON item",
         ));
     }
-    if tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
+    if tokens.last().has_kind(TokenKind::Char(',')) {
         return Err(ParseError::syntax_exit(
             location,
             "statistics parameter list cannot end with ','",
@@ -25,7 +25,7 @@ fn parse_stats_params_with_completion(
     split_top_level_commas(tokens)
         .into_iter()
         .map(|tokens| {
-            let item_location = tokens.first().map_or(location, |token| token.location());
+            let item_location = tokens.first().location_or(location);
             if tokens.len() == 1
                 && token_name_in_categories(
                     &tokens[0],
@@ -39,14 +39,12 @@ fn parse_stats_params_with_completion(
                 }));
             }
 
-            let expression = if tokens.first().map(|token| token.kind)
-                == Some(TokenKind::Char('('))
+            let expression = if tokens.first().has_kind(TokenKind::Char('('))
             {
                 let close = match find_matching_close(&tokens, 0) {
                     Some(close) => close,
                     None
-                        if tokens.last().map(|token| token.kind)
-                            == Some(TokenKind::Completion) =>
+                        if tokens.last().has_kind(TokenKind::Completion) =>
                     {
                         tokens.len()
                     }
@@ -80,7 +78,7 @@ fn parse_stats_params_with_completion(
                     completion.clone(),
                 )?
             } else {
-                let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
+                let starts_with_cast = tokens.first().has_kind(TokenKind::Cast);
                 let expression =
                     parse_expression_tokens_with_completion(tokens, completion.clone())?;
                 if !is_windowless_function_expression_node(&expression, starts_with_cast) {

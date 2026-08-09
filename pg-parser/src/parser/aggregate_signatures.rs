@@ -6,8 +6,8 @@
 use super::*;
 
 pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location());
-    if tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
+    let location = tokens.first().location_or(0);
+    if tokens.last().has_kind(TokenKind::Char(',')) {
         return Err(ParseError::syntax_exit(
             location,
             "aggregate definition cannot end with ','",
@@ -23,7 +23,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
     chunks
         .into_iter()
         .map(|tokens| {
-            let item_location = tokens.first().map_or(location, |token| token.location());
+            let item_location = tokens.first().location_or(location);
             let Some(name_token) = tokens.first() else {
                 return Err(ParseError::syntax_exit(
                     item_location,
@@ -36,7 +36,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
                     "old-style aggregate option name must be an identifier",
                 ));
             }
-            if tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('=')) {
+            if !tokens.get(1).has_kind(TokenKind::Char('=')) {
                 return Err(ParseError::syntax_exit(
                     item_location,
                     "old-style aggregate definition requires name = value",
@@ -57,7 +57,7 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
 }
 
 pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.len() == 1 && tokens[0].kind == TokenKind::Char('*') {
         return Ok(vec![name_list_node(Vec::new()), node!(Integer::new(-1))]);
     }
@@ -74,10 +74,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
         match token.kind {
             TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
             TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
-            TokenKind::Order
-                if depth == 0
-                    && tokens.get(index + 1).map(|token| token.kind) == Some(TokenKind::By) =>
-            {
+            TokenKind::Order if depth == 0 && tokens.get(index + 1).has_kind(TokenKind::By) => {
                 order_index = Some(index);
                 break;
             }
@@ -92,11 +89,9 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
     let direct_chunks = if direct_tokens.is_empty() {
         Vec::new()
     } else {
-        if direct_tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
+        if direct_tokens.last().has_kind(TokenKind::Char(',')) {
             return Err(ParseError::syntax_exit(
-                direct_tokens
-                    .last()
-                    .map_or(location, |token| token.location()),
+                direct_tokens.last().location_or(location),
                 "aggregate argument list cannot end with ','",
             ));
         }
@@ -118,11 +113,9 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
         parameters.push(Node::FunctionParameter(parse_aggregate_parameter(chunk)?));
     }
     if order_index.is_some() {
-        if ordered_tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
+        if ordered_tokens.last().has_kind(TokenKind::Char(',')) {
             return Err(ParseError::syntax_exit(
-                ordered_tokens
-                    .last()
-                    .map_or(location, |token| token.location()),
+                ordered_tokens.last().location_or(location),
                 "ordered aggregate argument list cannot end with ','",
             ));
         }
@@ -192,7 +185,7 @@ fn type_names_equal_ignoring_locations(left: &TypeName, right: &TypeName) -> boo
 }
 
 fn parse_aggregate_parameter(tokens: Vec<Token>) -> PResult<FunctionParameter> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     let parameter = function_parameter_from_tokens(tokens)?;
     if !matches!(
         parameter.mode,

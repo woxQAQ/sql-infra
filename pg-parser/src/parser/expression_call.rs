@@ -340,7 +340,7 @@ pub(super) fn parse_window_specification_tokens(
     location: usize,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<WindowDef> {
-    let end_location = tokens.last().map_or(location, Token::end_location);
+    let end_location = tokens.last().end_location_or(location);
     tokens.push(Token::synthetic(TokenKind::Char(')'), end_location));
     tokens.push(Token::synthetic(TokenKind::Eof, end_location));
     let mut parser = Parser {

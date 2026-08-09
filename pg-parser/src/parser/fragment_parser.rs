@@ -30,7 +30,7 @@ pub(super) fn parse_statement_node_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.last().map_or(0, Token::end_location);
+    let location = tokens.last().end_location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(location, "expected a statement"));
     }
@@ -55,7 +55,7 @@ pub(super) fn parse_select_statement_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     let node = parse_statement_node_tokens_with_completion(tokens, completion)?;
     if matches!(node, Node::SelectStmt(_)) {
         Ok(node)
@@ -75,7 +75,7 @@ pub(super) fn parse_preparable_statement_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     let node = parse_statement_node_tokens_with_completion(tokens, completion)?;
     if matches!(
         node,
@@ -95,8 +95,8 @@ pub(super) fn parse_preparable_statement_tokens_with_completion(
 }
 
 pub(super) fn parse_type_node_list(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location());
-    if tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
+    let location = tokens.first().location_or(0);
+    if tokens.last().has_kind(TokenKind::Char(',')) {
         return Err(ParseError::syntax_exit(
             location,
             "type list cannot end with ','",

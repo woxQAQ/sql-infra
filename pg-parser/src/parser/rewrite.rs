@@ -308,7 +308,7 @@ pub(super) fn parse_statement_list_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<NodeList> {
-    let location = tokens.last().map_or(0, Token::end_location);
+    let location = tokens.last().end_location_or(0);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
     let mut parser = Parser {
         tokens,

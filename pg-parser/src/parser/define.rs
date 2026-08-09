@@ -51,9 +51,7 @@ impl Parser {
                             depth = depth.saturating_sub(1)
                         }
                         TokenKind::Order
-                            if depth == 0
-                                && first.get(index + 1).map(|token| token.kind)
-                                    == Some(TokenKind::By) =>
+                            if depth == 0 && first.get(index + 1).has_kind(TokenKind::By) =>
                         {
                             saw_order_by = true;
                             active_start = index + 2;

@@ -75,9 +75,7 @@ impl Parser {
                     depth = depth.saturating_sub(1);
                 }
                 TokenKind::BeginP
-                    if depth == 0
-                        && self.tokens.get(end + 1).map(|token| token.kind)
-                            == Some(TokenKind::Atomic) =>
+                    if depth == 0 && self.tokens.get(end + 1).has_kind(TokenKind::Atomic) =>
                 {
                     atomic_depth += 1;
                 }

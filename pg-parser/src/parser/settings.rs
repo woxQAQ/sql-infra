@@ -181,9 +181,7 @@ impl Parser {
                     ]);
                     self.record_completion_slot(completion::GrammarSlot::AnyName);
                     let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
-                    if self.at_completion()
-                        && tokens.first().map(|token| token.kind) == Some(TokenKind::Interval)
-                    {
+                    if self.at_completion() && tokens.first().has_kind(TokenKind::Interval) {
                         let qualifier = tokens
                             .iter()
                             .position(|token| token.kind == TokenKind::SConst)
@@ -675,7 +673,7 @@ impl Parser {
     }
 }
 pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(location, "SET requires a value"));
     }
@@ -721,7 +719,7 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
 }
 
 pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.len() == 1 {
         if matches!(
             tokens[0].kind,
@@ -735,10 +733,10 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
         }
         return Err(ParseError::syntax_exit(location, "invalid time zone value"));
     }
-    if tokens.first().map(|token| token.kind) != Some(TokenKind::Interval) {
+    if !tokens.first().has_kind(TokenKind::Interval) {
         return Err(ParseError::syntax_exit(location, "invalid time zone value"));
     }
-    if tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('(')) {
+    if !tokens.get(1).has_kind(TokenKind::Char('(')) {
         let string_index = tokens
             .iter()
             .position(|token| token.kind == TokenKind::SConst)
@@ -767,7 +765,7 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
             ]
         ) {
             return Err(ParseError::syntax_exit(
-                qualifier.first().map_or(location, |token| token.location()),
+                qualifier.first().location_or(location),
                 "time zone interval must be HOUR or HOUR TO MINUTE",
             ));
         }

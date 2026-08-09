@@ -5,6 +5,48 @@
 
 use super::*;
 
+pub(super) trait TokenOptionExt {
+    fn has_kind(self, kind: TokenKind) -> bool;
+    fn kind_or_eof(self) -> TokenKind;
+    fn location_or(self, default: usize) -> usize;
+    fn location_or_else(self, default: impl FnOnce() -> usize) -> usize;
+    fn end_location_or(self, default: usize) -> usize;
+}
+
+impl TokenOptionExt for Option<&Token> {
+    fn has_kind(self, kind: TokenKind) -> bool {
+        matches!(self, Some(token) if token.kind == kind)
+    }
+
+    fn kind_or_eof(self) -> TokenKind {
+        match self {
+            Some(token) => token.kind,
+            None => TokenKind::Eof,
+        }
+    }
+
+    fn location_or(self, default: usize) -> usize {
+        match self {
+            Some(token) => token.location(),
+            None => default,
+        }
+    }
+
+    fn location_or_else(self, default: impl FnOnce() -> usize) -> usize {
+        match self {
+            Some(token) => token.location(),
+            None => default(),
+        }
+    }
+
+    fn end_location_or(self, default: usize) -> usize {
+        match self {
+            Some(token) => token.end_location(),
+            None => default,
+        }
+    }
+}
+
 pub(super) fn token_name(token: &Token) -> Option<std::string::String> {
     match &token.value {
         Some(TokenValue::String(value)) => Some(value.clone()),
@@ -28,7 +70,7 @@ pub(super) fn token_name_in_categories(
             }
             _ => false,
         };
-    accepted.then(|| token_name(token)).flatten()
+    if accepted { token_name(token) } else { None }
 }
 
 pub(super) fn token_text(token: &Token) -> std::string::String {
@@ -127,7 +169,7 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
     }
     let first = token_name(&tokens[0])
         .ok_or_else(|| ParseError::syntax_exit(location, "expected an option name"))?;
-    if tokens.get(1).map(|token| token.kind) == Some(TokenKind::Char('.')) {
+    if tokens.get(1).has_kind(TokenKind::Char('.')) {
         return Err(ParseError::ranged(
             tokens[1].range,
             "definition option names cannot be qualified",
@@ -205,7 +247,7 @@ pub(super) fn parse_operator_def_arg(
             _ => Err(ParseError::ranged(token.range, "invalid option value")),
         };
     }
-    if tokens.first().map(|token| token.kind) == Some(TokenKind::Operator) {
+    if tokens.first().has_kind(TokenKind::Operator) {
         return parse_qualified_all_operator_tokens(tokens, location).map(name_list_node);
     }
     if tokens.iter().any(|token| is_operator_name_kind(token.kind)) {

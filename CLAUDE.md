@@ -50,6 +50,7 @@ Inside `pg-parser/`:
 - **Raw expression children use `Box<Node>`, not `Box<Expr>`** (see `docs/adr/0001-raw-expression-children-use-node.md`). A grammar `Expr *` field is polymorphic (`AExpr`, `AConst`, `ColumnRef`, `FuncCall`, …), so it holds `Box<Node>`. Use a typed box only where the grammar fixes the concrete child type. Do not introduce a second expression enum parallel to `Node`.
 - Raw-parse-tree fidelity is the goal. `ast/mod.rs` also contains **analysis-tree** nodes (`Query`, `Var`, `Const`, `OpExpr`) that the text parser never produces — don't emit them from parser code. `CONTEXT.md` is the source of truth for this vocabulary (raw parse tree vs. analysis tree, syntax node, statement node).
 - Parser code uses the private `node!(Type { ... })` and `node!(Type::constructor(...))` forms when a `Node` variant and its inline payload type have the same name. Existing payload values continue to use `Node::Variant(value)`.
+- Repeated `Option<&Token>` kind and location queries use the private `TokenOptionExt` methods.
 - When adding a node, add its `Node` variant and parser construction path together. Coverage tests fail when parser-produced statement structs lack a corresponding variant or test (see below).
 
 ## Tests

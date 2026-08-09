@@ -470,9 +470,7 @@ impl Parser {
             let stops = [TokenKind::Char(','), TokenKind::Char(')')];
             let mut tokens = self.take_until_top_level(&stops);
             self.append_completion_marker(&mut tokens);
-            let location = tokens
-                .first()
-                .map_or(self.location(), |token| token.location());
+            let location = tokens.first().location_or(self.location());
             if let Some(completion_index) = tokens
                 .iter()
                 .position(|token| token.kind == TokenKind::Completion)

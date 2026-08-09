@@ -9,8 +9,8 @@ pub(super) fn xmltable_column_from_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<RangeTableFuncCol> {
-    let location = tokens.first().map_or(0, |token| token.location());
-    let eof_location = tokens.last().map_or(location, Token::end_location);
+    let location = tokens.first().location_or(0);
+    let eof_location = tokens.last().end_location_or(location);
     tokens.push(Token::synthetic(TokenKind::Eof, eof_location));
     let mut parser = Parser {
         tokens,

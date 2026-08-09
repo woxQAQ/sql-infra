@@ -185,7 +185,7 @@ pub(super) fn parse_const_type_name_tokens(tokens: Vec<Token>) -> PResult<TypeNa
 }
 
 pub(super) fn parse_simple_type_name_tokens(tokens: Vec<Token>) -> PResult<TypeName> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     let type_name = parse_type_name_tokens(tokens)?;
     if type_name.setof || !type_name.array_bounds.is_empty() {
         return Err(ParseError::syntax_exit(
@@ -197,14 +197,14 @@ pub(super) fn parse_simple_type_name_tokens(tokens: Vec<Token>) -> PResult<TypeN
 }
 
 pub(super) fn parse_func_type_tokens(mut tokens: Vec<Token>) -> PResult<TypeName> {
-    let location = tokens.first().map_or(0, |token| token.location());
-    let setof = if tokens.first().map(|token| token.kind) == Some(TokenKind::Setof) {
+    let location = tokens.first().location_or(0);
+    let setof = if tokens.first().has_kind(TokenKind::Setof) {
         tokens.remove(0);
         true
     } else {
         false
     };
-    let type_location = tokens.first().map_or(location, |token| token.location());
+    let type_location = tokens.first().location_or(location);
     if tokens.len() >= 3
         && tokens[tokens.len() - 2].kind == TokenKind::Char('%')
         && tokens[tokens.len() - 1].kind == TokenKind::TypeP
@@ -230,11 +230,11 @@ pub(super) fn parse_func_type_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
 }
 
 pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(location, "expected a type name"));
     }
-    let setof = if tokens.first().map(|token| token.kind) == Some(TokenKind::Setof) {
+    let setof = if tokens.first().has_kind(TokenKind::Setof) {
         tokens.remove(0);
         true
     } else {
@@ -249,7 +249,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
     let type_location = tokens[0].location();
 
     let mut array_bounds = Vec::new();
-    while tokens.last().map(|token| token.kind) == Some(TokenKind::Char(']')) {
+    while tokens.last().has_kind(TokenKind::Char(']')) {
         let close = tokens.len() - 1;
         let open = (0..close)
             .rev()
@@ -275,7 +275,7 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
         tokens.truncate(open);
     }
     array_bounds.reverse();
-    if tokens.last().map(|token| token.kind) == Some(TokenKind::Array) {
+    if tokens.last().has_kind(TokenKind::Array) {
         tokens.pop();
         if array_bounds.is_empty() {
             array_bounds.push(node!(Integer::new(-1)));
@@ -324,11 +324,9 @@ pub(super) fn parse_type_name_tokens(mut tokens: Vec<Token>) -> PResult<TypeName
                 "type modifier list cannot be empty",
             ));
         }
-        if modifier_tokens.last().map(|token| token.kind) == Some(TokenKind::Char(',')) {
+        if modifier_tokens.last().has_kind(TokenKind::Char(',')) {
             return Err(ParseError::syntax_exit(
-                modifier_tokens
-                    .last()
-                    .map_or(location, |token| token.location()),
+                modifier_tokens.last().location_or(location),
                 "type modifier list cannot end with ','",
             ));
         }
@@ -528,7 +526,7 @@ fn parse_interval_mask(kinds: &[TokenKind], location: usize) -> PResult<i32> {
 }
 
 pub(super) fn parse_qualified_type_names(tokens: &[Token]) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     let mut names = Vec::new();
     let mut expect_name = true;
     for token in tokens {
@@ -582,7 +580,7 @@ pub(super) fn parse_qualified_type_names(tokens: &[Token]) -> PResult<NodeList> 
     Ok(names)
 }
 pub(super) fn parse_any_name_tokens(tokens: &[Token]) -> PResult<NodeList> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     let mut names = Vec::new();
     let mut expect_name = true;
     for token in tokens {
