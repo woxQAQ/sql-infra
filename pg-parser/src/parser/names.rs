@@ -94,6 +94,31 @@ impl Parser {
         }
     }
 
+    pub(super) fn parse_name_list_until_keywords_allow_initial_stop(
+        &mut self,
+        stops: &[TokenKind],
+    ) -> NodeList {
+        if self.at_completion() || !self.at_any(stops) {
+            return self.parse_name_list_until_keywords(stops);
+        }
+        let Some(first) = self.consume_col_id() else {
+            return Vec::new();
+        };
+        let mut parts = vec![first];
+        while self.at(TokenKind::Char('.')) {
+            let separator_position = self.pos;
+            self.advance();
+            if let Some(name) = self.consume_col_label() {
+                parts.push(name);
+            } else {
+                self.pos = separator_position;
+                break;
+            }
+        }
+        self.record_completion_tokens(&[TokenKind::Char('.')]);
+        parts.into_iter().map(make_string_node).collect()
+    }
+
     pub(super) fn try_parse_range_var_with_slot(
         &mut self,
         allow_set_alias: bool,
@@ -245,6 +270,7 @@ impl Parser {
             return parts;
         };
         parts.push(first);
+        self.record_completion_tokens(&[TokenKind::Char('.')]);
         while self.at(TokenKind::Char('.')) {
             let separator_position = self.pos;
             self.advance();
@@ -266,6 +292,7 @@ impl Parser {
             return parts;
         };
         parts.push(first);
+        self.record_completion_tokens(&[TokenKind::Char('.')]);
         while parts.len() < 3 && self.at(TokenKind::Char('.')) {
             let separator_position = self.pos;
             self.advance();

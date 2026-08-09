@@ -81,7 +81,9 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ])?));
+        self.record_completion_tokens(&[TokenKind::Owner]);
         self.expect(TokenKind::Set)?;
+        self.record_completion_tokens(&[TokenKind::Schema]);
         let options = self.parse_operator_definition_list(ObjectType::Operator)?;
         self.expect_statement_end()?;
         Ok(Node::AlterOperatorStmt(AlterOperatorStmt {

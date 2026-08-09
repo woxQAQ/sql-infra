@@ -70,6 +70,9 @@ impl Parser {
         } else {
             self.consume_role_spec().map(Box::new)
         };
+        if role.is_some() {
+            self.record_completion_tokens(&[TokenKind::Rename]);
+        }
         if self.at_completion() && role.is_none() && !all_roles {
             return Err(self.error_here("expected an ALTER ROLE target"));
         }

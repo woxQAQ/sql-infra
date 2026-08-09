@@ -90,6 +90,11 @@ impl Parser {
         if dictname.is_empty() {
             return Err(self.error_here("text search dictionary requires a name"));
         }
+        self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Set, TokenKind::Owner]);
+        if self.at_completion() {
+            self.record_completion_tokens(&[TokenKind::Char('(')]);
+            return Err(self.error_here("expected a dictionary action"));
+        }
         let options = self.parse_parenthesized_definition()?;
         self.expect_statement_end()?;
         Ok(Node::AlterTsDictionaryStmt(AlterTsDictionaryStmt {
@@ -127,10 +132,11 @@ impl Parser {
             completion::GrammarSlot::TextSearchConfiguration,
             &name_stops,
         );
-        let cfgname = self.parse_name_list_until_keywords(&name_stops);
+        let cfgname = self.parse_name_list_until_keywords_allow_initial_stop(&name_stops);
         if cfgname.is_empty() {
             return Err(self.error_here("text search configuration requires a name"));
         }
+        self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Set, TokenKind::Owner]);
         let mut stmt = AlterTsConfigurationStmt {
             node_tag: NodeTag::AlterTsConfigurationStmt,
             cfgname,

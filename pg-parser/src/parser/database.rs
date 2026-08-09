@@ -123,6 +123,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER DATABASE requires a database name"))?,
         );
+        self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Owner]);
         if self.consume(TokenKind::Refresh) {
             self.expect(TokenKind::Collation)?;
             self.expect(TokenKind::VersionP)?;

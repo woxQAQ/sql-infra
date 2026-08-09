@@ -45,7 +45,7 @@ impl Parser {
     //     [ RESTART [ [ WITH ] restart ] ]
     //     [ CACHE cache ]
     //     [ OWNED BY { table_name.column_name | NONE } ]
-    // ALTER SEQUENCE [ IF EXISTS ] name SET { LOGGED | UNLOGGED }
+    // ALTER SEQUENCE [ IF EXISTS ] name { LOGGED | UNLOGGED }
     // ALTER SEQUENCE [ IF EXISTS ] name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER |
     // SESSION_USER } ALTER SEQUENCE [ IF EXISTS ] name RENAME TO new_name
     // ALTER SEQUENCE [ IF EXISTS ] name SET SCHEMA new_schema
@@ -56,6 +56,7 @@ impl Parser {
             self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Sequence)
                 .ok_or_else(|| self.error_here("ALTER SEQUENCE requires a sequence name"))?,
         ));
+        self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Set]);
         let options = self.parse_sequence_options()?;
         if options.is_empty() {
             return Err(self.error_here("ALTER SEQUENCE requires at least one option"));
@@ -86,6 +87,7 @@ impl Parser {
                 TokenKind::Maxvalue,
                 TokenKind::Minvalue,
                 TokenKind::Owned,
+                TokenKind::Owner,
                 TokenKind::Sequence,
                 TokenKind::Start,
                 TokenKind::Restart,

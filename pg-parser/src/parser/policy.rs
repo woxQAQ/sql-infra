@@ -127,6 +127,7 @@ impl Parser {
             self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("ALTER POLICY requires a table"))?,
         ));
+        self.record_completion_tokens(&[TokenKind::Rename]);
         let roles = if self.consume(TokenKind::To) {
             let roles = self.parse_role_specs_until(
                 &[

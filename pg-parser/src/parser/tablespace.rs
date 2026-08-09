@@ -57,6 +57,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER TABLESPACE requires a tablespace name"))?,
         );
+        self.record_completion_tokens(&[TokenKind::Owner]);
         if self.consume(TokenKind::Rename) {
             self.expect(TokenKind::To)?;
             let newname = Some(

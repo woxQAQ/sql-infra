@@ -36,9 +36,7 @@ impl Parser {
             }
             _ => ObjectType::Function,
         };
-        let action_starts = Self::alter_function_action_starts();
-        let func = Some(Box::new(self.parse_object_with_args_until_with_slot(
-            &action_starts,
+        let func = Some(Box::new(self.parse_routine_with_args_with_slot(
             completion::object_type_slot(objtype),
         )?));
         let actions = self.parse_alter_function_actions()?;
@@ -172,8 +170,7 @@ impl Parser {
                 TokenKind::Support => {
                     self.advance();
                     self.record_completion_slot(completion::GrammarSlot::Function);
-                    let names =
-                        self.parse_name_list_until_keywords(&Self::alter_function_action_starts());
+                    let names = self.parse_name_list();
                     if names.is_empty() {
                         return Err(self.error_here("SUPPORT requires a function name"));
                     }
@@ -288,7 +285,8 @@ impl Parser {
         if self.consume(TokenKind::CatalogP) {
             return Err(self.error_here("current database cannot be changed"));
         }
-        if self.consume(TokenKind::Schema) {
+        if self.at(TokenKind::Schema) && self.peek_kind_n(1) == TokenKind::SConst {
+            self.advance();
             stmt.name = Some("search_path".to_owned());
             let value = self.consume_required_string("SET SCHEMA requires a string")?;
             stmt.args = vec![Node::AConst(AConst::string(
@@ -376,6 +374,7 @@ impl Parser {
             self.consume_setting_name()
                 .ok_or_else(|| self.error_here("SET requires a parameter name"))?,
         );
+        self.record_completion_tokens(&[TokenKind::To, TokenKind::Char('=')]);
         if self.consume(TokenKind::From) {
             self.expect(TokenKind::CurrentP)?;
             return Ok(VariableSetStmt {
@@ -401,7 +400,7 @@ impl Parser {
                 value_location,
             )
         } else {
-            let args = self.parse_setting_value_list_until(stops)?;
+            let args = self.parse_function_setting_value_list()?;
             if args.is_empty() {
                 return Err(self.error_here("SET parameter requires a value"));
             }
@@ -417,21 +416,37 @@ impl Parser {
         })
     }
 
-    fn parse_setting_value_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+    fn parse_function_setting_value_list(&mut self) -> PResult<NodeList> {
         let mut args = Vec::new();
         loop {
-            let chunk_stops = extend_stops(stops, TokenKind::Char(','));
-            let tokens = self.take_until_top_level(&chunk_stops);
             if self.at_completion() {
                 self.record_completion_tokens(&[TokenKind::Default]);
                 self.record_completion_slot(completion::GrammarSlot::AnyName);
             }
-            args.push(parse_setting_value_tokens(tokens)?);
+            let value_start = self.pos;
+            match self.peek_kind() {
+                TokenKind::Char('+') | TokenKind::Char('-')
+                    if matches!(self.peek_kind_n(1), TokenKind::IConst | TokenKind::FConst) =>
+                {
+                    self.advance();
+                    self.advance();
+                }
+                TokenKind::IConst
+                | TokenKind::FConst
+                | TokenKind::SConst
+                | TokenKind::TrueP
+                | TokenKind::FalseP
+                | TokenKind::On => {
+                    self.advance();
+                }
+                _ if self.consume_non_reserved_word().is_some() => {}
+                _ => return Err(self.error_here("SET requires a value")),
+            }
+            args.push(parse_setting_value_tokens(
+                self.tokens[value_start..self.pos].to_vec(),
+            )?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
-            }
-            if self.at_any(stops) {
-                return Err(self.error_here("expected a SET value after ','"));
             }
         }
         Ok(args)

@@ -148,6 +148,17 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("USING requires an access method"))?,
         );
+        self.record_completion_tokens(&[
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Rename,
+            TokenKind::Set,
+            TokenKind::Owner,
+        ]);
+        if self.consume(TokenKind::Set) {
+            self.record_completion_tokens(&[TokenKind::Schema]);
+            return Err(self.error_here("expected SET SCHEMA"));
+        }
         let is_drop = if self.consume(TokenKind::AddP) {
             false
         } else if self.consume(TokenKind::Drop) {

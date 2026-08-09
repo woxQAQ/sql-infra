@@ -138,7 +138,7 @@ impl Parser {
     pub(super) fn parse_alter_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         self.record_completion_slot(completion::GrammarSlot::Type);
-        let type_name = self.parse_name_list_until_keywords(&[
+        let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::Set,
             TokenKind::Char(';'),
             TokenKind::Eof,
@@ -155,6 +155,7 @@ impl Parser {
             TokenKind::Owner,
         ]);
         self.expect(TokenKind::Set)?;
+        self.record_completion_tokens(&[TokenKind::Schema, TokenKind::Char('(')]);
         let options = self.parse_operator_definition_list(ObjectType::Type)?;
         self.expect_statement_end()?;
         Ok(Node::AlterTypeStmt(AlterTypeStmt {
@@ -173,7 +174,7 @@ impl Parser {
     pub(super) fn parse_alter_enum(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         self.record_completion_slot(completion::GrammarSlot::Type);
-        let type_name = self.parse_name_list_until_keywords(&[
+        let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::AddP,
             TokenKind::Rename,
             TokenKind::Drop,
@@ -255,7 +256,7 @@ impl Parser {
         self.record_completion_slot(completion::GrammarSlot::Type);
         let type_location = self.location();
         let owner_start = self.pos;
-        let names = self.parse_name_list_until_keywords(&[
+        let names = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::AddP,
             TokenKind::Drop,
             TokenKind::Alter,

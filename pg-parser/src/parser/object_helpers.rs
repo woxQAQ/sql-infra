@@ -322,6 +322,46 @@ impl Parser {
         parse_object_with_args_tokens(tokens, location)
     }
 
+    pub(super) fn parse_routine_with_args_with_slot(
+        &mut self,
+        slot: completion::GrammarSlot,
+    ) -> PResult<ObjectWithArgs> {
+        let (tokens, location) = self.take_structured_routine_signature(slot, false)?;
+        parse_object_with_args_tokens(tokens, location)
+    }
+
+    pub(super) fn parse_aggregate_with_args_structured(&mut self) -> PResult<ObjectWithArgs> {
+        let (tokens, location) =
+            self.take_structured_routine_signature(completion::GrammarSlot::Aggregate, true)?;
+        parse_aggregate_with_args_tokens(tokens, location)
+    }
+
+    fn take_structured_routine_signature(
+        &mut self,
+        slot: completion::GrammarSlot,
+        require_arguments: bool,
+    ) -> PResult<(Vec<Token>, usize)> {
+        self.record_completion_slot(slot);
+        let location = self.location();
+        let name_start = self.pos;
+        if self.consume_func_name_parts().is_empty() {
+            return Err(self.error_here("expected a routine name"));
+        }
+        let mut tokens = self.tokens[name_start..self.pos].to_vec();
+        self.record_completion_tokens(&[TokenKind::Char('(')]);
+        if self.consume(TokenKind::Char('(')) {
+            tokens.push(self.tokens[self.pos - 1].clone());
+            tokens.extend(self.take_until_top_level(&[TokenKind::Char(')')]));
+            self.record_signature_fragment_slot(slot, &tokens);
+            self.expect(TokenKind::Char(')'))?;
+            tokens.push(self.tokens[self.pos - 1].clone());
+        } else if require_arguments {
+            return Err(self.error_here("aggregate requires argument types"));
+        }
+        self.record_signature_fragment_slot(slot, &tokens);
+        Ok((tokens, location))
+    }
+
     pub(super) fn parse_operator_with_args_until(
         &mut self,
         stops: &[TokenKind],

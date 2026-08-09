@@ -31,9 +31,16 @@ impl Parser {
         }
     }
 
+    pub(super) fn record_alter_identity_action_continuation(&mut self, identity: &AlterIdentity) {
+        if supports_set_schema(identity.object_type) && self.consume(TokenKind::Set) {
+            self.record_completion_tokens(&[TokenKind::Schema]);
+        } else if supports_depends(identity.object_type) && self.consume(TokenKind::No) {
+            self.record_completion_tokens(&[TokenKind::Depends]);
+        }
+    }
+
     fn parse_alter_object_kind(&mut self) -> PResult<ObjectType> {
         self.record_completion_lookahead_tokens(&[
-            TokenKind::Access,
             TokenKind::Aggregate,
             TokenKind::Collation,
             TokenKind::ConversionP,
@@ -212,6 +219,18 @@ impl Parser {
         action_stops: &[TokenKind],
     ) -> PResult<AlterIdentity> {
         let object_type = self.parse_alter_object_kind()?;
+        let action_stops = action_stops
+            .iter()
+            .copied()
+            .filter(|stop| match stop {
+                TokenKind::Rename => supports_rename(object_type),
+                TokenKind::Depends | TokenKind::No => supports_depends(object_type),
+                TokenKind::Set => supports_set_schema(object_type),
+                TokenKind::Owner => supports_owner(object_type),
+                TokenKind::Completion => true,
+                _ => true,
+            })
+            .collect::<Vec<_>>();
         let missing_ok = if matches!(
             object_type,
             ObjectType::Table
@@ -229,7 +248,7 @@ impl Parser {
         };
         let object_slot = completion::object_type_slot(object_type);
         self.record_completion_slot(object_slot);
-        self.record_completion_qualified_name_slot(object_slot, action_stops);
+        self.record_completion_qualified_name_slot(object_slot, &action_stops);
         let mut identity = AlterIdentity {
             object_type,
             missing_ok,
@@ -271,14 +290,11 @@ impl Parser {
                 | ObjectType::Operator
         ) {
             let object = if object_type == ObjectType::Operator {
-                self.parse_operator_with_args_until(action_stops)?
+                self.parse_operator_with_args_until(&action_stops)?
             } else if object_type == ObjectType::Aggregate {
-                self.parse_aggregate_with_args_until(action_stops)?
+                self.parse_aggregate_with_args_structured()?
             } else {
-                self.parse_object_with_args_until_with_slot(
-                    action_stops,
-                    completion::object_type_slot(object_type),
-                )?
+                self.parse_routine_with_args_with_slot(completion::object_type_slot(object_type))?
             };
             identity.object = Some(Box::new(Node::ObjectWithArgs(object)));
             return Ok(identity);
@@ -321,7 +337,7 @@ impl Parser {
                 | ObjectType::Tsconfiguration
                 | ObjectType::Type
         ) {
-            let names = self.parse_name_list_until_keywords(action_stops);
+            let names = self.parse_name_list_until_keywords_allow_initial_stop(&action_stops);
             if names.is_empty() {
                 return Err(self.error_here("ALTER object requires a qualified name"));
             }

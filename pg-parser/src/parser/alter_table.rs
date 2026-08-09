@@ -393,6 +393,9 @@ impl Parser {
             TokenKind::Options,
             TokenKind::Rename,
         ]);
+        if matches!(objtype, ObjectType::Index | ObjectType::Matview) {
+            self.record_completion_tokens(&[TokenKind::Depends]);
+        }
         let mut cmd = AlterTableCmd {
             node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
@@ -976,6 +979,9 @@ impl Parser {
             }
             TokenKind::No => {
                 self.advance();
+                if matches!(objtype, ObjectType::Index | ObjectType::Matview) {
+                    self.record_completion_tokens(&[TokenKind::Depends]);
+                }
                 if self.consume(TokenKind::Inherit) {
                     cmd.subtype = AlterTableType::DropInherit;
                     cmd.def = Some(Box::new(Node::RangeVar(

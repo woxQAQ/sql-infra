@@ -217,7 +217,7 @@ impl Parser {
                 }
                 stmt.jumble_args = true;
             }
-            TokenKind::Schema => {
+            TokenKind::Schema if self.peek_kind_n(1) == TokenKind::SConst => {
                 self.advance();
                 stmt.name = Some("search_path".to_owned());
                 stmt.args = vec![Node::AConst(AConst::string(
@@ -303,6 +303,7 @@ impl Parser {
                     self.consume_setting_name()
                         .ok_or_else(|| self.error_here("SET requires a parameter name"))?,
                 );
+                self.record_completion_tokens(&[TokenKind::To, TokenKind::Char('=')]);
                 if self.consume(TokenKind::From) {
                     self.expect(TokenKind::CurrentP)?;
                     stmt.kind = VariableSetKind::SetCurrent;

@@ -126,7 +126,12 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER EXTENSION requires a name"))?,
         );
-        self.record_completion_tokens(&[TokenKind::Update, TokenKind::AddP, TokenKind::Drop]);
+        self.record_completion_tokens(&[
+            TokenKind::Update,
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Set,
+        ]);
         if matches!(self.peek_kind(), TokenKind::AddP | TokenKind::Drop) {
             let action = if self.consume(TokenKind::AddP) {
                 1

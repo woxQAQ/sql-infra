@@ -50,6 +50,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER FOREIGN DATA WRAPPER requires a name"))?,
         );
+        self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Owner]);
         let func_options = self.parse_fdw_function_options()?;
         let options = if self.at(TokenKind::Options) {
             self.parse_alter_generic_options()?
@@ -81,6 +82,7 @@ impl Parser {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER SERVER requires a server name"))?,
         );
+        self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Owner]);
         let mut version = None;
         let mut has_version = false;
         if self.consume(TokenKind::VersionP) {

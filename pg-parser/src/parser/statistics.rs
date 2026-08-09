@@ -200,11 +200,13 @@ impl Parser {
             completion::GrammarSlot::Statistics,
             &name_stops,
         );
-        let defnames = self.parse_name_list_until_keywords(&name_stops);
+        let defnames = self.parse_name_list_until_keywords_allow_initial_stop(&name_stops);
         if defnames.is_empty() {
             return Err(self.error_here("ALTER STATISTICS requires a statistics object name"));
         }
+        self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Owner]);
         self.expect(TokenKind::Set)?;
+        self.record_completion_tokens(&[TokenKind::Schema, TokenKind::Statistics]);
         self.expect(TokenKind::Statistics)?;
         let stxstattarget = if self.consume(TokenKind::Default) {
             None

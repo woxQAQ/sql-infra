@@ -152,7 +152,7 @@ impl Parser {
         self.expect(TokenKind::DomainP)?;
         self.record_completion_slot(completion::GrammarSlot::Domain);
         let owner_start = self.pos;
-        let type_name = self.parse_name_list_until_keywords(&[
+        let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::Set,
             TokenKind::Drop,
             TokenKind::AddP,
@@ -188,7 +188,11 @@ impl Parser {
         match self.peek_kind() {
             TokenKind::Set => {
                 self.advance();
-                self.record_completion_tokens(&[TokenKind::Default, TokenKind::Not]);
+                self.record_completion_tokens(&[
+                    TokenKind::Schema,
+                    TokenKind::Default,
+                    TokenKind::Not,
+                ]);
                 if self.consume(TokenKind::Default) {
                     stmt.subtype = AlterDomainType::AlterDefault;
                     stmt.def =

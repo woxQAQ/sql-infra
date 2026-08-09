@@ -206,6 +206,11 @@ impl Parser {
                     }
                 }
             }
+            TokenKind::Set => {
+                self.advance();
+                self.record_completion_tokens(&[TokenKind::Schema]);
+                return Err(self.error_here("expected SET SCHEMA"));
+            }
             _ => {
                 return Err(self.error_here("ALTER PROPERTY GRAPH requires ADD, DROP, or ALTER"));
             }
