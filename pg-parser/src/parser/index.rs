@@ -21,7 +21,7 @@ impl Parser {
         self.expect(TokenKind::Index)?;
         let concurrent = self.consume(TokenKind::Concurrently);
         let if_not_exists = self.consume_if_not_exists()?;
-        self.record_completion_slot(completion::GrammarSlot::Index);
+        self.record_completion_slot(GrammarSlot::Index);
         let idxname = if self.peek_kind() != TokenKind::On {
             self.consume_col_id()
         } else {
@@ -31,14 +31,14 @@ impl Parser {
             return Err(self.error_here("CREATE INDEX IF NOT EXISTS requires an index name"));
         }
         self.expect(TokenKind::On)?;
-        self.record_completion_slot(completion::GrammarSlot::MaterializedView);
+        self.record_completion_slot(GrammarSlot::MaterializedView);
         let owner_start = self.pos;
         let relation = Some(Box::new(
-            self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?,
+            self.parse_relation_expr_with_slot(GrammarSlot::Table)?,
         ));
         let owner_end = self.pos;
         self.push_completion_membership_owner_from_tokens(
-            &[completion::GrammarSlot::Column],
+            &[GrammarSlot::Column],
             &[
                 ObjectType::Table,
                 ObjectType::View,
@@ -206,7 +206,7 @@ pub(super) fn parse_index_elem_tokens_with_completion(
         completion,
     };
     if suffix.consume(TokenKind::Collate) {
-        suffix.record_completion_slot(completion::GrammarSlot::Collation);
+        suffix.record_completion_slot(GrammarSlot::Collation);
         element.collation = suffix.parse_name_list();
         if element.collation.is_empty() {
             return Err(suffix.error_here("COLLATE requires a collation name"));
@@ -218,7 +218,7 @@ pub(super) fn parse_index_elem_tokens_with_completion(
         TokenKind::NullsP,
         TokenKind::Eof,
     ]) {
-        suffix.record_completion_slot(completion::GrammarSlot::OperatorClass);
+        suffix.record_completion_slot(GrammarSlot::OperatorClass);
         element.opclass = suffix.parse_name_list();
         if element.opclass.is_empty() {
             return Err(suffix.error_here("expected an operator class name"));

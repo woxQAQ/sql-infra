@@ -45,7 +45,7 @@ impl Parser {
         ]);
         self.record_completion_phrase(&[TokenKind::Partition, TokenKind::By]);
         self.record_completion_phrase(&[TokenKind::Order, TokenKind::By]);
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let mut window = WindowDef {
             location: location as ParseLoc,
             frame_options: FRAMEOPTION_DEFAULTS,

@@ -301,11 +301,9 @@ impl ExprParser {
                         break;
                     }
                     let location = self.advance().location();
-                    self.record_completion_slot(completion::GrammarSlot::Collation);
-                    let collname = self.parse_name_nodes_with_slots(
-                        &[completion::GrammarSlot::Collation],
-                        false,
-                    )?;
+                    self.record_completion_slot(GrammarSlot::Collation);
+                    let collname =
+                        self.parse_name_nodes_with_slots(&[GrammarSlot::Collation], false)?;
                     node!(CollateClause {
                         arg: Some(Box::new(lhs)),
                         collname,

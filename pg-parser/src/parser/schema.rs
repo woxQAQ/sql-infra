@@ -22,7 +22,7 @@ impl Parser {
     pub(super) fn parse_create_schema(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Schema)?;
         let if_not_exists = self.consume_if_not_exists()?;
-        self.record_completion_slot(completion::GrammarSlot::Schema);
+        self.record_completion_slot(GrammarSlot::Schema);
         let schemaname = if self.at(TokenKind::Authorization) {
             None
         } else {

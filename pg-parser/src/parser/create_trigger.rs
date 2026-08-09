@@ -20,13 +20,13 @@ impl Parser {
     //     EXECUTE { FUNCTION | PROCEDURE } function_name()
     pub(super) fn parse_create_event_trigger(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Trigger)?;
-        self.record_completion_slot(completion::GrammarSlot::EventTrigger);
+        self.record_completion_slot(GrammarSlot::EventTrigger);
         let trigname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE EVENT TRIGGER requires a name"))?,
         );
         self.expect(TokenKind::On)?;
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let eventname = Some(
             self.consume_col_label()
                 .ok_or_else(|| self.error_here("event trigger requires an event name"))?,
@@ -35,7 +35,7 @@ impl Parser {
         if self.consume(TokenKind::When) {
             loop {
                 let location = self.location();
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let name = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("event trigger WHEN requires a variable"))?;
@@ -61,7 +61,7 @@ impl Parser {
         if !self.consume(TokenKind::Function) {
             self.expect(TokenKind::Procedure)?;
         }
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Function);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("event trigger function requires a name"));
@@ -84,7 +84,7 @@ impl Parser {
     // ALTER EVENT TRIGGER name RENAME TO new_name
     pub(super) fn parse_alter_event_trigger(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Trigger)?;
-        self.record_completion_slot(completion::GrammarSlot::EventTrigger);
+        self.record_completion_slot(GrammarSlot::EventTrigger);
         let trigname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER EVENT TRIGGER requires a name"))?,
@@ -146,7 +146,7 @@ impl Parser {
         if is_constraint && replace {
             return Err(self.error_here("OR REPLACE is not supported for constraint triggers"));
         }
-        self.record_completion_slot(completion::GrammarSlot::Trigger);
+        self.record_completion_slot(GrammarSlot::Trigger);
         let trigname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE TRIGGER requires a name"))?,
@@ -185,12 +185,12 @@ impl Parser {
         self.expect(TokenKind::On)?;
         let owner_start = self.pos;
         let relation = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CREATE TRIGGER requires a relation"))?,
         ));
         let owner_end = self.pos;
         self.push_completion_membership_owner_from_tokens(
-            &[completion::GrammarSlot::Column],
+            &[GrammarSlot::Column],
             &[
                 ObjectType::Table,
                 ObjectType::View,
@@ -201,7 +201,7 @@ impl Parser {
         );
         let constrrel = if is_constraint && self.consume(TokenKind::From) {
             Some(Box::new(
-                self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("FROM requires a relation"))?,
             ))
         } else {
@@ -327,7 +327,7 @@ impl Parser {
         if !self.consume(TokenKind::Function) {
             self.expect(TokenKind::Procedure)?;
         }
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Function);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("trigger function requires a name"));
@@ -342,7 +342,7 @@ impl Parser {
                     TokenKind::SConst,
                     TokenKind::Char(')'),
                 ]);
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let token = self.peek().clone();
                 let value = match (&token.kind, &token.value) {
                     (TokenKind::IConst, Some(TokenValue::Integer(value))) => {

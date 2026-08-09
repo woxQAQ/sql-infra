@@ -71,8 +71,8 @@ impl ExprParser {
     pub(super) fn parse_c_expr(&mut self) -> Option<Node> {
         if self.at_completion() {
             self.record_completion_expression_start_tokens(COMMON_EXPRESSION_START_TOKENS);
-            self.record_completion_slot(completion::GrammarSlot::Column);
-            self.record_completion_slot(completion::GrammarSlot::Function);
+            self.record_completion_slot(GrammarSlot::Column);
+            self.record_completion_slot(GrammarSlot::Function);
             if let Some(hole) = self.recover_completion_hole() {
                 return token_to_leaf(&hole);
             }
@@ -143,8 +143,8 @@ impl ExprParser {
                     TokenKind::Default,
                 ]);
             }
-            self.record_completion_slot(completion::GrammarSlot::Column);
-            self.record_completion_slot(completion::GrammarSlot::Function);
+            self.record_completion_slot(GrammarSlot::Column);
+            self.record_completion_slot(GrammarSlot::Function);
             if let Some(hole) = self.recover_completion_hole() {
                 return token_to_leaf(&hole).map(|node| PrefixExpression {
                     node,

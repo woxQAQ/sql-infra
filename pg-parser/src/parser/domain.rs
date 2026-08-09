@@ -16,7 +16,7 @@ impl Parser {
     // { NOT NULL | NULL | CHECK (expression) }
     pub(super) fn parse_create_domain(&mut self) -> PResult<Node> {
         self.expect(TokenKind::DomainP)?;
-        self.record_completion_slot(completion::GrammarSlot::Domain);
+        self.record_completion_slot(GrammarSlot::Domain);
         let domainname = self.parse_name_list();
         if domainname.is_empty() {
             return Err(self.error_here("CREATE DOMAIN requires a domain name"));
@@ -47,7 +47,7 @@ impl Parser {
                 TokenKind::Check,
             ]);
             if self.consume(TokenKind::Collate) {
-                self.record_completion_slot(completion::GrammarSlot::Collation);
+                self.record_completion_slot(GrammarSlot::Collation);
                 let location = self.previous_location();
                 let collname = self.parse_name_list();
                 if collname.is_empty() {
@@ -139,7 +139,7 @@ impl Parser {
     // { NOT NULL | CHECK (expression) }
     pub(super) fn parse_alter_domain(&mut self) -> PResult<Node> {
         self.expect(TokenKind::DomainP)?;
-        self.record_completion_slot(completion::GrammarSlot::Domain);
+        self.record_completion_slot(GrammarSlot::Domain);
         let owner_start = self.pos;
         let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::Set,
@@ -160,7 +160,7 @@ impl Parser {
             return Err(self.error_here("ALTER DOMAIN requires a domain name"));
         }
         self.push_completion_membership_owner_from_tokens(
-            &[completion::GrammarSlot::Constraint],
+            &[GrammarSlot::Constraint],
             &[ObjectType::Domain],
             owner_start,
             owner_end,
@@ -212,7 +212,7 @@ impl Parser {
                         self.advance();
                         stmt.subtype = AlterDomainType::DropConstraint;
                         stmt.missing_ok = self.consume_if_exists()?;
-                        self.record_completion_slot(completion::GrammarSlot::Constraint);
+                        self.record_completion_slot(GrammarSlot::Constraint);
                         stmt.name =
                             Some(self.consume_col_id().ok_or_else(|| {
                                 self.error_here("DROP CONSTRAINT requires a name")
@@ -235,7 +235,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::Constraint)?;
                 stmt.subtype = AlterDomainType::ValidateConstraint;
-                self.record_completion_slot(completion::GrammarSlot::Constraint);
+                self.record_completion_slot(GrammarSlot::Constraint);
                 stmt.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("VALIDATE CONSTRAINT requires a name"))?,

@@ -96,7 +96,7 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
-        let object_slot = completion::object_type_slot(remove_type);
+        let object_slot = object_type_slot(remove_type);
         self.record_completion_slot(object_slot);
         if matches!(
             remove_type,
@@ -112,7 +112,7 @@ impl Parser {
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("DROP requires an object name"))?;
                 self.expect(TokenKind::On)?;
-                self.record_completion_slot(completion::GrammarSlot::Table);
+                self.record_completion_slot(GrammarSlot::Table);
                 let mut parts = self.consume_name_parts();
                 if parts.is_empty() {
                     return Err(self.error_here("ON requires an object name"));
@@ -182,7 +182,7 @@ impl Parser {
                 .parse_type_name_until(&[TokenKind::Language])
                 .ok_or_else(|| self.error_here("DROP TRANSFORM FOR requires a type"))?;
             self.expect(TokenKind::Language)?;
-            self.record_completion_slot(completion::GrammarSlot::Language);
+            self.record_completion_slot(GrammarSlot::Language);
             let language = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("LANGUAGE requires a name"))?;
@@ -215,7 +215,7 @@ impl Parser {
         }
         let missing_ok = self.consume_if_exists()?;
         let name_stops = [TokenKind::Using];
-        let slot = completion::object_type_slot(remove_type);
+        let slot = object_type_slot(remove_type);
         self.record_completion_slot(slot);
         self.record_completion_qualified_name_slot(slot, &name_stops);
         let mut names = self.parse_name_list_until_keywords(&name_stops);
@@ -246,13 +246,13 @@ impl Parser {
         self.expect(TokenKind::Mapping)?;
         let missing_ok = self.consume_if_exists()?;
         self.expect(TokenKind::For)?;
-        self.record_completion_slot(completion::GrammarSlot::Role);
+        self.record_completion_slot(GrammarSlot::Role);
         let user =
             Some(Box::new(self.consume_auth_ident().ok_or_else(|| {
                 self.error_here("DROP USER MAPPING requires a user")
             })?));
         self.expect(TokenKind::Server)?;
-        self.record_completion_slot(completion::GrammarSlot::ForeignServer);
+        self.record_completion_slot(GrammarSlot::ForeignServer);
         let servername = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("SERVER requires a name"))?,

@@ -15,7 +15,7 @@ impl Parser {
         }
         if self.consume(TokenKind::CurrentP) {
             self.expect(TokenKind::Of)?;
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             let cursor_name = Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("CURRENT OF requires a cursor name"))?,
@@ -152,7 +152,7 @@ impl Parser {
         } else if self.consume(TokenKind::On) {
             let infer_location = self.previous_location();
             self.expect(TokenKind::Constraint)?;
-            self.record_completion_slot(completion::GrammarSlot::Constraint);
+            self.record_completion_slot(GrammarSlot::Constraint);
             let conname = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a constraint name"))?;
@@ -231,8 +231,8 @@ impl Parser {
     }
 
     pub(super) fn parse_set_clause_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
-        self.record_completion_slot(completion::GrammarSlot::Column);
-        self.record_completion_qualified_name_slot(completion::GrammarSlot::Column, stops);
+        self.record_completion_slot(GrammarSlot::Column);
+        self.record_completion_qualified_name_slot(GrammarSlot::Column, stops);
         let mut targets = Vec::new();
         while self.at_completion() || !self.at_any(stops) {
             if self.consume(TokenKind::Char('(')) {

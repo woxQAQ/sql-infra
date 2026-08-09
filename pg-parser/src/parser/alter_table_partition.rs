@@ -11,9 +11,9 @@ impl Parser {
         objtype: ObjectType,
     ) -> PResult<AlterTableCmd> {
         let partition_slot = if objtype == ObjectType::Index {
-            completion::GrammarSlot::Index
+            GrammarSlot::Index
         } else {
-            completion::GrammarSlot::Table
+            GrammarSlot::Table
         };
         let mut cmd = AlterTableCmd {
             ..AlterTableCmd::default()

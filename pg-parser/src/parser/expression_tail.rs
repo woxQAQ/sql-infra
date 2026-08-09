@@ -8,18 +8,12 @@ use super::*;
 
 impl ExprParser {
     pub(super) fn parse_name_nodes(&mut self) -> Option<NodeList> {
-        self.parse_name_nodes_with_slots(
-            &[
-                completion::GrammarSlot::Column,
-                completion::GrammarSlot::Function,
-            ],
-            true,
-        )
+        self.parse_name_nodes_with_slots(&[GrammarSlot::Column, GrammarSlot::Function], true)
     }
 
     pub(super) fn parse_name_nodes_with_slots(
         &mut self,
-        slots: &[completion::GrammarSlot],
+        slots: &[GrammarSlot],
         allow_star: bool,
     ) -> Option<NodeList> {
         let mut fields = Vec::new();
@@ -341,7 +335,7 @@ impl ExprParser {
         self.expect(TokenKind::Char('('))?;
         let tokens = self.take_until_balanced(TokenKind::Char(')'));
         if self.at_completion() {
-            self.record_completion_slot(completion::GrammarSlot::Operator);
+            self.record_completion_slot(GrammarSlot::Operator);
         }
         self.expect(TokenKind::Char(')'))?;
         match parse_operator_name_tokens(tokens, location) {
@@ -755,7 +749,7 @@ impl ExprParser {
         categories: &[KeywordCategory],
     ) -> Option<std::string::String> {
         if self.at_completion() {
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             return self
                 .recover_completion_hole()
                 .and_then(|token| token_name(&token));
@@ -921,7 +915,7 @@ impl ExprParser {
         }
     }
 
-    pub(super) fn record_completion_slot(&self, slot: completion::GrammarSlot) {
+    pub(super) fn record_completion_slot(&self, slot: GrammarSlot) {
         if !self.at_completion() {
             return;
         }

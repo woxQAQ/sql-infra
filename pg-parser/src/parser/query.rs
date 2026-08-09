@@ -126,7 +126,7 @@ impl Parser {
         self.expect(TokenKind::FirstP)?;
         self.expect(TokenKind::By)?;
         let search_col_list =
-            self.parse_simple_name_list_until(&[TokenKind::Set], completion::GrammarSlot::Column)?;
+            self.parse_simple_name_list_until(&[TokenKind::Set], GrammarSlot::Column)?;
         self.expect(TokenKind::Set)?;
         let search_seq_column = Some(
             self.consume_col_id()
@@ -146,7 +146,7 @@ impl Parser {
         }
         let location = self.previous_location();
         let cycle_col_list =
-            self.parse_simple_name_list_until(&[TokenKind::Set], completion::GrammarSlot::Column)?;
+            self.parse_simple_name_list_until(&[TokenKind::Set], GrammarSlot::Column)?;
         self.expect(TokenKind::Set)?;
         let cycle_mark_column = Some(
             self.consume_col_id()
@@ -155,12 +155,12 @@ impl Parser {
         let (cycle_mark_value, cycle_mark_default) = if self.consume(TokenKind::To) {
             let value_tokens = self.take_until_top_level(&[TokenKind::Default]);
             if self.at_completion() && value_tokens.is_empty() {
-                self.record_completion_slot(completion::GrammarSlot::Type);
+                self.record_completion_slot(GrammarSlot::Type);
             }
             self.expect(TokenKind::Default)?;
             let default_tokens = self.take_until_top_level(&[TokenKind::Using]);
             if self.at_completion() && default_tokens.is_empty() {
-                self.record_completion_slot(completion::GrammarSlot::Type);
+                self.record_completion_slot(GrammarSlot::Type);
             }
             (
                 Some(Box::new(parse_aexpr_const_tokens(value_tokens)?)),
@@ -572,7 +572,7 @@ impl Parser {
         };
         self.consume(TokenKind::Table);
         let mut relation = self
-            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+            .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
             .ok_or_else(|| self.error_here("SELECT INTO requires a relation name"))?;
         relation.relpersistence = relpersistence;
         Ok(IntoClause {

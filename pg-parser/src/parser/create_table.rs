@@ -162,9 +162,9 @@ impl Parser {
         self.expect(TokenKind::Table)?;
         let if_not_exists = self.consume_if_not_exists()?;
         let target_slot = if foreign {
-            completion::GrammarSlot::ForeignTable
+            GrammarSlot::ForeignTable
         } else {
-            completion::GrammarSlot::Table
+            GrammarSlot::Table
         };
         let mut relation_node = self
             .try_parse_qualified_range_var_with_slot(target_slot)
@@ -189,7 +189,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::Of)?;
                 let parent = self
-                    .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                    .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("expected a partitioned parent table"))?;
                 inh_relations.push(Node::RangeVar(parent));
                 let elements = if self.consume(TokenKind::Char('(')) {
@@ -235,7 +235,7 @@ impl Parser {
             }
             while !self.at(TokenKind::Char(')')) {
                 let parent = self
-                    .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                    .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("expected an inherited relation"))?;
                 inh_relations.push(Node::RangeVar(parent));
                 if !self.consume(TokenKind::Char(',')) {
@@ -257,7 +257,7 @@ impl Parser {
                 None
             };
             let access_method = if self.consume_follow(TokenKind::Using) {
-                self.record_completion_slot(completion::GrammarSlot::AccessMethod);
+                self.record_completion_slot(GrammarSlot::AccessMethod);
                 Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("expected an access method"))?,
@@ -275,7 +275,7 @@ impl Parser {
             };
             let oncommit = self.parse_on_commit_option()?;
             let tablespacename = if self.consume_follow(TokenKind::Tablespace) {
-                self.record_completion_slot(completion::GrammarSlot::Tablespace);
+                self.record_completion_slot(GrammarSlot::Tablespace);
                 Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("expected a tablespace name"))?,
@@ -301,7 +301,7 @@ impl Parser {
         };
         if foreign {
             self.expect(TokenKind::Server)?;
-            self.record_completion_slot(completion::GrammarSlot::ForeignServer);
+            self.record_completion_slot(GrammarSlot::ForeignServer);
             let servername = Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("expected a foreign server name"))?,
@@ -493,7 +493,7 @@ impl Parser {
         self.expect(TokenKind::View)?;
         let if_not_exists = self.consume_if_not_exists()?;
         let mut relation = self
-            .try_parse_qualified_range_var_with_slot(completion::object_type_slot(objtype))
+            .try_parse_qualified_range_var_with_slot(object_type_slot(objtype))
             .ok_or_else(|| self.error_here("CREATE MATERIALIZED VIEW requires a name"))?;
         relation.relpersistence = relpersistence;
         let rel = Some(Box::new(relation));

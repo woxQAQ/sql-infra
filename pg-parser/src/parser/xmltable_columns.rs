@@ -27,7 +27,7 @@ pub(super) fn xmltable_column_from_tokens_with_completion(
 impl Parser {
     fn parse_xmltable_column_body(&mut self) -> PResult<RangeTableFuncCol> {
         let location = self.location();
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let colname = self
             .consume_col_id()
             .ok_or_else(|| self.error_here("expected an XMLTABLE column name"))?;

@@ -16,14 +16,14 @@ impl Parser {
     //     [ WITH CHECK ( check_expression ) ]
     pub(super) fn parse_create_policy(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Policy)?;
-        self.record_completion_slot(completion::GrammarSlot::Policy);
+        self.record_completion_slot(GrammarSlot::Policy);
         let policy_name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE POLICY requires a name"))?,
         );
         self.expect(TokenKind::On)?;
         let table = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CREATE POLICY requires a table"))?,
         ));
         let permissive = if self.consume(TokenKind::As) {
@@ -109,14 +109,14 @@ impl Parser {
     //     [ WITH CHECK ( check_expression ) ]
     pub(super) fn parse_alter_policy(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Policy)?;
-        self.record_completion_slot(completion::GrammarSlot::Policy);
+        self.record_completion_slot(GrammarSlot::Policy);
         let policy_name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER POLICY requires a policy name"))?,
         );
         self.expect(TokenKind::On)?;
         let table = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("ALTER POLICY requires a table"))?,
         ));
         self.record_completion_tokens(&[TokenKind::Rename]);

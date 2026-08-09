@@ -29,7 +29,7 @@ impl Parser {
                     self.record_expression_follow_tokens(&expr_tokens, &[TokenKind::As], true);
                     let value = self.parse_b_expression_fragment_tokens(expr_tokens)?;
                     self.expect(TokenKind::As)?;
-                    self.record_completion_slot(completion::GrammarSlot::Alias);
+                    self.record_completion_slot(GrammarSlot::Alias);
                     let name = self
                         .consume_col_label()
                         .ok_or_else(|| self.error_here("XML namespace requires AS alias"))?;
@@ -227,7 +227,7 @@ impl Parser {
                 return Err(self.error_here("this JOIN form does not accept USING"));
             }
             self.expect(TokenKind::Char('('))?;
-            self.record_completion_slot(completion::GrammarSlot::Column);
+            self.record_completion_slot(GrammarSlot::Column);
             using_clause = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             if self.consume(TokenKind::As) {

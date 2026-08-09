@@ -9,7 +9,7 @@ impl Parser {
     pub(super) fn parse_create_prop_graph(&mut self, relpersistence: u8) -> PResult<Node> {
         self.expect(TokenKind::Graph)?;
         let mut pgname = self
-            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::PropertyGraph)
+            .try_parse_qualified_range_var_with_slot(GrammarSlot::PropertyGraph)
             .ok_or_else(|| self.error_here("CREATE PROPERTY GRAPH requires a name"))?;
         pgname.relpersistence = relpersistence;
         let pgname = Some(Box::new(pgname));
@@ -45,7 +45,7 @@ impl Parser {
     pub(super) fn parse_alter_prop_graph(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Graph)?;
         let pgname = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::PropertyGraph)
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::PropertyGraph)
                 .ok_or_else(|| self.error_here("ALTER PROPERTY GRAPH requires a name"))?,
         ));
         let mut stmt = AlterPropGraphStmt {
@@ -223,7 +223,7 @@ impl Parser {
         loop {
             let location = self.location();
             let mut vtable = self
-                .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("expected a vertex table name"))?;
             if self.consume(TokenKind::As) {
                 let aliasname = self
@@ -262,7 +262,7 @@ impl Parser {
         loop {
             let location = self.location();
             let mut etable = self
-                .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("expected an edge table name"))?;
             if self.consume(TokenKind::As) {
                 let aliasname = self
@@ -310,7 +310,7 @@ impl Parser {
         self.expect(keyword)?;
         if self.consume(TokenKind::Key) {
             self.expect(TokenKind::Char('('))?;
-            self.record_completion_slot(completion::GrammarSlot::Column);
+            self.record_completion_slot(GrammarSlot::Column);
             let key = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             self.expect(TokenKind::References)?;
@@ -319,7 +319,7 @@ impl Parser {
                     self.error_here(format!("{label} REFERENCES requires an alias"))
                 })?);
             self.expect(TokenKind::Char('('))?;
-            self.record_completion_slot(completion::GrammarSlot::Column);
+            self.record_completion_slot(GrammarSlot::Column);
             let columns = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             Ok((key, vertex, columns))
@@ -335,7 +335,7 @@ impl Parser {
     pub(super) fn parse_optional_key_clause(&mut self) -> PResult<NodeList> {
         if self.consume(TokenKind::Key) {
             self.expect(TokenKind::Char('('))?;
-            self.record_completion_slot(completion::GrammarSlot::Column);
+            self.record_completion_slot(GrammarSlot::Column);
             let columns = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             Ok(columns)

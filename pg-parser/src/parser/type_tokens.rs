@@ -41,7 +41,7 @@ fn record_type_name_completion_impl(
         || kinds.as_slice() == [TokenKind::Setof]
         || kinds.last() == Some(&TokenKind::Char('.'))
     {
-        collector.record_slot(completion::GrammarSlot::Type);
+        collector.record_slot(GrammarSlot::Type);
         return;
     }
     if kinds.last() == Some(&TokenKind::Char('%')) {
@@ -154,7 +154,7 @@ fn record_type_name_completion_impl(
         [TokenKind::Interval, TokenKind::HourP, TokenKind::To] => {
             collector.record_tokens(&[TokenKind::MinuteP, TokenKind::SecondP]);
         }
-        [] => collector.record_slot(completion::GrammarSlot::Type),
+        [] => collector.record_slot(GrammarSlot::Type),
         _ if !simple => collector.record_tokens(&[TokenKind::Array]),
         _ => {}
     }

@@ -28,7 +28,7 @@ impl Parser {
     //            [ OID [=] oid ]
     pub(super) fn parse_createdb(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
-        self.record_completion_slot(completion::GrammarSlot::Database);
+        self.record_completion_slot(GrammarSlot::Database);
         let dbname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE DATABASE requires a database name"))?,
@@ -61,9 +61,9 @@ impl Parser {
             };
             self.consume(TokenKind::Char('='));
             match name.as_str() {
-                "owner" => self.record_completion_slot(completion::GrammarSlot::Role),
-                "tablespace" => self.record_completion_slot(completion::GrammarSlot::Tablespace),
-                "template" => self.record_completion_slot(completion::GrammarSlot::Database),
+                "owner" => self.record_completion_slot(GrammarSlot::Role),
+                "tablespace" => self.record_completion_slot(GrammarSlot::Tablespace),
+                "template" => self.record_completion_slot(GrammarSlot::Database),
                 _ => {}
             }
             let arg = if self.consume(TokenKind::Default) {
@@ -113,7 +113,7 @@ impl Parser {
     // ALTER DATABASE name RESET ALL
     pub(super) fn parse_alter_database(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
-        self.record_completion_slot(completion::GrammarSlot::Database);
+        self.record_completion_slot(GrammarSlot::Database);
         let dbname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER DATABASE requires a database name"))?,
@@ -127,7 +127,7 @@ impl Parser {
         {
             self.expect(TokenKind::Set)?;
             self.expect(TokenKind::Tablespace)?;
-            self.record_completion_slot(completion::GrammarSlot::Tablespace);
+            self.record_completion_slot(GrammarSlot::Tablespace);
             let location = self.location();
             let tablespace = self
                 .consume_col_id()
@@ -179,7 +179,7 @@ impl Parser {
     pub(super) fn parse_drop_database(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
         let missing_ok = self.consume_if_exists()?;
-        self.record_completion_slot(completion::GrammarSlot::Database);
+        self.record_completion_slot(GrammarSlot::Database);
         let dbname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("DROP DATABASE requires a database name"))?,

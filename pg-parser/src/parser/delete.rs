@@ -15,7 +15,7 @@ impl Parser {
         self.expect(TokenKind::DeleteP)?;
         self.expect(TokenKind::From)?;
         let mut relation = Some(Box::new(
-            self.try_parse_range_var_with_slot(true, completion::GrammarSlot::Table)?
+            self.try_parse_range_var_with_slot(true, GrammarSlot::Table)?
                 .ok_or_else(|| self.error_here("DELETE FROM requires a relation name"))?,
         ));
         let for_portion_of = self.parse_for_portion_of_clause()?;

@@ -77,11 +77,8 @@ impl Parser {
     pub(super) fn parse_create_conversion(&mut self, is_default: bool) -> PResult<Node> {
         self.expect(TokenKind::ConversionP)?;
         let name_stops = [TokenKind::For, TokenKind::Char(';'), TokenKind::Eof];
-        self.record_completion_slot(completion::GrammarSlot::Conversion);
-        self.record_completion_qualified_name_slot(
-            completion::GrammarSlot::Conversion,
-            &name_stops,
-        );
+        self.record_completion_slot(GrammarSlot::Conversion);
+        self.record_completion_qualified_name_slot(GrammarSlot::Conversion, &name_stops);
         let conversion_name = self.parse_name_list_until_keywords(&name_stops);
         if conversion_name.is_empty() {
             return Err(self.error_here("CREATE CONVERSION requires a name"));
@@ -94,11 +91,8 @@ impl Parser {
             Some(self.consume_required_string("target encoding must be a string")?);
         self.expect(TokenKind::From)?;
         let function_stops = [TokenKind::Char(';'), TokenKind::Eof];
-        self.record_completion_slot(completion::GrammarSlot::Function);
-        self.record_completion_qualified_name_slot(
-            completion::GrammarSlot::Function,
-            &function_stops,
-        );
+        self.record_completion_slot(GrammarSlot::Function);
+        self.record_completion_qualified_name_slot(GrammarSlot::Function, &function_stops);
         let func_name = self.parse_name_list_until_keywords(&function_stops);
         if func_name.is_empty() {
             return Err(self.error_here("CREATE CONVERSION requires a function"));
@@ -126,11 +120,8 @@ impl Parser {
             .map(Box::new)
             .ok_or_else(|| self.error_here("CREATE TRANSFORM requires a type"))?;
         self.expect(TokenKind::Language)?;
-        self.record_completion_slot(completion::GrammarSlot::Language);
-        self.record_completion_qualified_name_slot(
-            completion::GrammarSlot::Language,
-            &[TokenKind::Char('(')],
-        );
+        self.record_completion_slot(GrammarSlot::Language);
+        self.record_completion_qualified_name_slot(GrammarSlot::Language, &[TokenKind::Char('(')]);
         let lang = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE TRANSFORM requires a language"))?,

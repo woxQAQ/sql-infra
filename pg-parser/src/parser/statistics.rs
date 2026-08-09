@@ -118,11 +118,8 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
-        self.record_completion_slot(completion::GrammarSlot::Statistics);
-        self.record_completion_qualified_name_slot(
-            completion::GrammarSlot::Statistics,
-            &name_stops,
-        );
+        self.record_completion_slot(GrammarSlot::Statistics);
+        self.record_completion_qualified_name_slot(GrammarSlot::Statistics, &name_stops);
         let defnames = self.parse_name_list_until_keywords(&name_stops);
         if if_not_exists && defnames.is_empty() {
             return Err(self.error_here("IF NOT EXISTS requires a statistics object name"));
@@ -154,10 +151,10 @@ impl Parser {
         let exprs = parse_stats_params_with_completion(stats_tokens, self.completion.clone())?;
         self.expect(TokenKind::From)?;
         let owner_start = self.pos;
-        let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
+        let relation = self.parse_relation_expr_with_slot(GrammarSlot::Table)?;
         let owner_end = self.pos;
         self.push_completion_membership_owner_from_tokens(
-            &[completion::GrammarSlot::Column],
+            &[GrammarSlot::Column],
             &[
                 ObjectType::Table,
                 ObjectType::View,
@@ -189,11 +186,8 @@ impl Parser {
         self.expect(TokenKind::Statistics)?;
         let missing_ok = self.consume_if_exists()?;
         let name_stops = [TokenKind::Set, TokenKind::Char(';'), TokenKind::Eof];
-        self.record_completion_slot(completion::GrammarSlot::Statistics);
-        self.record_completion_qualified_name_slot(
-            completion::GrammarSlot::Statistics,
-            &name_stops,
-        );
+        self.record_completion_slot(GrammarSlot::Statistics);
+        self.record_completion_qualified_name_slot(GrammarSlot::Statistics, &name_stops);
         let defnames = self.parse_name_list_until_keywords_allow_initial_stop(&name_stops);
         if defnames.is_empty() {
             return Err(self.error_here("ALTER STATISTICS requires a statistics object name"));

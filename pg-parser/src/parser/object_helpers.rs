@@ -282,7 +282,7 @@ fn parse_object_with_args_tokens_impl(
 
 impl Parser {
     pub(super) fn parse_type_name_until(&mut self, stops: &[TokenKind]) -> Option<TypeName> {
-        self.record_completion_slot_within_fragment(completion::GrammarSlot::Type, stops);
+        self.record_completion_slot_within_fragment(GrammarSlot::Type, stops);
         let location = self.location();
         let tokens = self.take_until_top_level(stops);
         if self.at_completion() {
@@ -300,13 +300,13 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<ObjectWithArgs> {
-        self.parse_object_with_args_until_with_slot(stops, completion::GrammarSlot::Function)
+        self.parse_object_with_args_until_with_slot(stops, GrammarSlot::Function)
     }
 
     pub(super) fn parse_object_with_args_until_with_slot(
         &mut self,
         stops: &[TokenKind],
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<ObjectWithArgs> {
         self.record_completion_slot(slot);
         let location = self.location();
@@ -317,7 +317,7 @@ impl Parser {
 
     pub(super) fn parse_routine_with_args_with_slot(
         &mut self,
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<ObjectWithArgs> {
         let (tokens, location) = self.take_structured_routine_signature(slot, false)?;
         parse_object_with_args_tokens(tokens, location)
@@ -325,13 +325,13 @@ impl Parser {
 
     pub(super) fn parse_aggregate_with_args_structured(&mut self) -> PResult<ObjectWithArgs> {
         let (tokens, location) =
-            self.take_structured_routine_signature(completion::GrammarSlot::Aggregate, true)?;
+            self.take_structured_routine_signature(GrammarSlot::Aggregate, true)?;
         parse_aggregate_with_args_tokens(tokens, location)
     }
 
     fn take_structured_routine_signature(
         &mut self,
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
         require_arguments: bool,
     ) -> PResult<(Vec<Token>, usize)> {
         self.record_completion_slot(slot);
@@ -359,10 +359,10 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<ObjectWithArgs> {
-        self.record_completion_slot(completion::GrammarSlot::Operator);
+        self.record_completion_slot(GrammarSlot::Operator);
         let location = self.location();
         let tokens = self.take_until_top_level(stops);
-        self.record_signature_fragment_slot(completion::GrammarSlot::Operator, &tokens);
+        self.record_signature_fragment_slot(GrammarSlot::Operator, &tokens);
         parse_operator_with_args_tokens(tokens, location)
     }
 
@@ -370,10 +370,10 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<ObjectWithArgs> {
-        self.record_completion_slot(completion::GrammarSlot::Aggregate);
+        self.record_completion_slot(GrammarSlot::Aggregate);
         let location = self.location();
         let tokens = self.take_until_top_level(stops);
-        self.record_signature_fragment_slot(completion::GrammarSlot::Aggregate, &tokens);
+        self.record_signature_fragment_slot(GrammarSlot::Aggregate, &tokens);
         parse_aggregate_with_args_tokens(tokens, location)
     }
 
@@ -381,7 +381,7 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
-        self.record_completion_slot(completion::GrammarSlot::Aggregate);
+        self.record_completion_slot(GrammarSlot::Aggregate);
         if self.at_completion() {
             return Err(self.error_here("expected an aggregate signature"));
         }
@@ -389,7 +389,7 @@ impl Parser {
         while !self.at_any(stops) {
             let location = self.location();
             let tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
-            self.record_signature_fragment_slot(completion::GrammarSlot::Aggregate, &tokens);
+            self.record_signature_fragment_slot(GrammarSlot::Aggregate, &tokens);
             objects.push(Node::ObjectWithArgs(parse_aggregate_with_args_tokens(
                 tokens, location,
             )?));
@@ -407,7 +407,7 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
-        self.record_completion_slot(completion::GrammarSlot::Operator);
+        self.record_completion_slot(GrammarSlot::Operator);
         if self.at_completion() {
             return Err(self.error_here("expected an operator signature"));
         }
@@ -415,7 +415,7 @@ impl Parser {
         while !self.at_any(stops) {
             let location = self.location();
             let tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
-            self.record_signature_fragment_slot(completion::GrammarSlot::Operator, &tokens);
+            self.record_signature_fragment_slot(GrammarSlot::Operator, &tokens);
             objects.push(Node::ObjectWithArgs(parse_operator_with_args_tokens(
                 tokens, location,
             )?));
@@ -435,7 +435,7 @@ impl Parser {
     ) -> PResult<ObjectWithArgs> {
         let location = self.location();
         let tokens = self.take_until_top_level(stops);
-        self.record_signature_fragment_slot(completion::GrammarSlot::Operator, &tokens);
+        self.record_signature_fragment_slot(GrammarSlot::Operator, &tokens);
         if find_top_level_token(&tokens, TokenKind::Char('(')).is_some() {
             parse_operator_with_args_tokens(tokens, location)
         } else {
@@ -449,7 +449,7 @@ impl Parser {
     pub(super) fn parse_object_with_args_list_until_with_slot(
         &mut self,
         stops: &[TokenKind],
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<NodeList> {
         self.record_completion_slot(slot);
         if self.at_completion() {
@@ -473,7 +473,7 @@ impl Parser {
         Ok(objects)
     }
 
-    fn record_signature_fragment_slot(&self, name_slot: completion::GrammarSlot, tokens: &[Token]) {
+    fn record_signature_fragment_slot(&self, name_slot: GrammarSlot, tokens: &[Token]) {
         if !self.at_completion() {
             return;
         }
@@ -490,16 +490,16 @@ impl Parser {
             }
         }
         if depth != 0 {
-            self.record_completion_slot(completion::GrammarSlot::Type);
+            self.record_completion_slot(GrammarSlot::Type);
             if let Some(open) = find_top_level_token(tokens, TokenKind::Char('(')) {
                 let arguments = &tokens[open + 1..];
-                if name_slot == completion::GrammarSlot::Aggregate
+                if name_slot == GrammarSlot::Aggregate
                     && !arguments.iter().any(|token| token.kind == TokenKind::Order)
                     && parse_aggregate_args(arguments.to_vec()).is_ok()
                 {
                     self.record_completion_phrase(&[TokenKind::Order, TokenKind::By]);
                 }
-                if name_slot != completion::GrammarSlot::Operator {
+                if name_slot != GrammarSlot::Operator {
                     let mut nested_depth = 0usize;
                     let mut active_start = 0usize;
                     for (index, token) in arguments.iter().enumerate() {
@@ -552,7 +552,7 @@ impl Parser {
         let mut defs = Vec::new();
         loop {
             let location = self.location();
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
             self.record_def_elem_value_candidates(value_grammar, &tokens);
             if self.at_completion() && tokens.len() == 1 && token_name(&tokens[0]).is_some() {
@@ -609,7 +609,7 @@ impl Parser {
         let mut options = Vec::new();
         loop {
             self.record_completion_tokens(&[TokenKind::Analyze, TokenKind::Format]);
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             let location = self.location();
             let name = if matches!(self.peek_kind(), TokenKind::Analyze | TokenKind::Analyse) {
                 self.advance();
@@ -672,12 +672,12 @@ impl Parser {
         let mut options = Vec::new();
         loop {
             let location = self.location();
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             let first = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("expected a relation option name"))?;
             let (defnamespace, defname) = if self.consume(TokenKind::Char('.')) {
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let second = self
                     .consume_col_label()
                     .ok_or_else(|| self.error_here("expected a relation option name after '.'"))?;
@@ -695,7 +695,7 @@ impl Parser {
                     TokenKind::On,
                     TokenKind::Default,
                 ]);
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                 if tokens.is_empty() {
                     return Err(self.error_here("relation option '=' requires a value"));
@@ -743,7 +743,7 @@ impl Parser {
         let mut definition = Vec::new();
         loop {
             let location = self.location();
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("expected a definition name"))?;
@@ -763,7 +763,7 @@ impl Parser {
                         TokenKind::On,
                         TokenKind::Default,
                     ]);
-                    self.record_completion_slot(completion::GrammarSlot::AnyName);
+                    self.record_completion_slot(GrammarSlot::AnyName);
                 }
                 let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                 if let Some(slot) = value_slot
@@ -848,7 +848,7 @@ impl Parser {
                     self.advance();
                     if self.consume(TokenKind::Of) {
                         loop {
-                            self.record_completion_slot(completion::GrammarSlot::Column);
+                            self.record_completion_slot(GrammarSlot::Column);
                             self.request_completion_membership_recovery();
                             let column = self.consume_col_id().ok_or_else(|| {
                                 self.error_here("UPDATE OF requires a column name")

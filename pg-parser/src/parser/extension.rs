@@ -15,7 +15,7 @@ impl Parser {
     pub(super) fn parse_create_extension(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Extension)?;
         let if_not_exists = self.consume_if_not_exists()?;
-        self.record_completion_slot(completion::GrammarSlot::Extension);
+        self.record_completion_slot(GrammarSlot::Extension);
         let extname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE EXTENSION requires a name"))?,
@@ -32,7 +32,7 @@ impl Parser {
             match self.peek_kind() {
                 TokenKind::Schema => {
                     self.advance();
-                    self.record_completion_slot(completion::GrammarSlot::Schema);
+                    self.record_completion_slot(GrammarSlot::Schema);
                     let schema = self
                         .consume_col_id()
                         .ok_or_else(|| self.error_here("SCHEMA requires a name"))?;
@@ -120,7 +120,7 @@ impl Parser {
     // ... ]
     pub(super) fn parse_alter_extension(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Extension)?;
-        self.record_completion_slot(completion::GrammarSlot::Extension);
+        self.record_completion_slot(GrammarSlot::Extension);
         let extname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER EXTENSION requires a name"))?,
@@ -205,7 +205,7 @@ impl Parser {
         {
             self.advance();
             self.record_completion_tokens(&[TokenKind::Class, TokenKind::Family]);
-            self.record_completion_slot(completion::GrammarSlot::Operator);
+            self.record_completion_slot(GrammarSlot::Operator);
             let object = self.parse_operator_with_args_until(STATEMENT_END_TOKENS)?;
             return Ok((ObjectType::Operator, Node::ObjectWithArgs(object)));
         }
@@ -225,7 +225,7 @@ impl Parser {
             } else {
                 self.parse_object_with_args_until_with_slot(
                     STATEMENT_END_TOKENS,
-                    completion::object_type_slot(objtype),
+                    object_type_slot(objtype),
                 )?
             };
             return Ok((objtype, Node::ObjectWithArgs(object)));
@@ -263,7 +263,7 @@ impl Parser {
                 .parse_type_name_until(&[TokenKind::Language])
                 .ok_or_else(|| self.error_here("TRANSFORM FOR requires a type"))?;
             self.expect(TokenKind::Language)?;
-            self.record_completion_slot(completion::GrammarSlot::Language);
+            self.record_completion_slot(GrammarSlot::Language);
             let language = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("LANGUAGE requires a name"))?;
@@ -384,7 +384,7 @@ impl Parser {
             }
         };
 
-        self.record_completion_slot(completion::object_type_slot(objtype));
+        self.record_completion_slot(object_type_slot(objtype));
         let uses_any_name = matches!(
             objtype,
             ObjectType::Table

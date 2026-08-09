@@ -24,11 +24,8 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
-        self.record_completion_slot(completion::GrammarSlot::OperatorClass);
-        self.record_completion_qualified_name_slot(
-            completion::GrammarSlot::OperatorClass,
-            &name_stops,
-        );
+        self.record_completion_slot(GrammarSlot::OperatorClass);
+        self.record_completion_qualified_name_slot(GrammarSlot::OperatorClass, &name_stops);
         let opclassname = self.parse_name_list_until_keywords(&name_stops);
         if opclassname.is_empty() {
             return Err(self.error_here("CREATE OPERATOR CLASS requires a name"));
@@ -44,11 +41,8 @@ impl Parser {
         let amname = Some(self.parse_access_method_name()?);
         let opfamilyname = if self.consume(TokenKind::Family) {
             let family_stops = [TokenKind::As, TokenKind::Char(';'), TokenKind::Eof];
-            self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
-            self.record_completion_qualified_name_slot(
-                completion::GrammarSlot::OperatorFamily,
-                &family_stops,
-            );
+            self.record_completion_slot(GrammarSlot::OperatorFamily);
+            self.record_completion_qualified_name_slot(GrammarSlot::OperatorFamily, &family_stops);
             let family = self.parse_name_list_until_keywords(&family_stops);
             if family.is_empty() {
                 return Err(self.error_here("FAMILY requires a name"));
@@ -75,11 +69,8 @@ impl Parser {
     pub(super) fn parse_create_op_family(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Family)?;
         let name_stops = [TokenKind::Using, TokenKind::Char(';'), TokenKind::Eof];
-        self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
-        self.record_completion_qualified_name_slot(
-            completion::GrammarSlot::OperatorFamily,
-            &name_stops,
-        );
+        self.record_completion_slot(GrammarSlot::OperatorFamily);
+        self.record_completion_qualified_name_slot(GrammarSlot::OperatorFamily, &name_stops);
         let opfamilyname = self.parse_name_list_until_keywords(&name_stops);
         if opfamilyname.is_empty() {
             return Err(self.error_here("CREATE OPERATOR FAMILY requires a name"));
@@ -123,11 +114,8 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
-        self.record_completion_slot(completion::GrammarSlot::OperatorFamily);
-        self.record_completion_qualified_name_slot(
-            completion::GrammarSlot::OperatorFamily,
-            &name_stops,
-        );
+        self.record_completion_slot(GrammarSlot::OperatorFamily);
+        self.record_completion_qualified_name_slot(GrammarSlot::OperatorFamily, &name_stops);
         let opfamilyname = self.parse_name_list_until_keywords(&name_stops);
         if opfamilyname.is_empty() {
             return Err(self.error_here("ALTER OPERATOR FAMILY requires a name"));
@@ -171,7 +159,7 @@ impl Parser {
         stops: &[TokenKind],
     ) -> PResult<Box<Node>> {
         let location = self.location();
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let colname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("expected an attribute name"))?,
@@ -181,7 +169,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("attribute requires a data type"))?,
         ));
         let coll_clause = if self.consume(TokenKind::Collate) {
-            self.record_completion_slot(completion::GrammarSlot::Collation);
+            self.record_completion_slot(GrammarSlot::Collation);
             let coll_location = self.previous_location();
             let collname = self.parse_name_list_until_keywords(stops);
             if collname.is_empty() {
@@ -250,7 +238,7 @@ impl Parser {
             } else {
                 if itemtype == 2 && self.consume(TokenKind::Char('(')) {
                     self.record_completion_slot_within_fragment(
-                        completion::GrammarSlot::Type,
+                        GrammarSlot::Type,
                         &[TokenKind::Char(')')],
                     );
                     let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
@@ -320,10 +308,7 @@ impl Parser {
                 _ => return Err(self.error_here("expected an operator family item number")),
             };
             self.expect(TokenKind::Char('('))?;
-            self.record_completion_slot_within_fragment(
-                completion::GrammarSlot::Type,
-                &[TokenKind::Char(')')],
-            );
+            self.record_completion_slot_within_fragment(GrammarSlot::Type, &[TokenKind::Char(')')]);
             let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
             let class_args = parse_type_node_list(tokens)?;
             if class_args.is_empty() {

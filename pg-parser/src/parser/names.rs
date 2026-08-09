@@ -7,7 +7,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_access_method_name(&mut self) -> PResult<std::string::String> {
-        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
+        self.record_completion_slot(GrammarSlot::AccessMethod);
         self.consume_col_id()
             .ok_or_else(|| self.error_here("USING requires an access method"))
     }
@@ -18,7 +18,7 @@ impl Parser {
         if !self.consume(TokenKind::Constraint) {
             return Ok(None);
         }
-        self.record_completion_slot(completion::GrammarSlot::Constraint);
+        self.record_completion_slot(GrammarSlot::Constraint);
         self.consume_col_id()
             .map(Some)
             .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))
@@ -30,7 +30,7 @@ impl Parser {
         if !self.consume(TokenKind::Tablespace) {
             return Ok(None);
         }
-        self.record_completion_slot(completion::GrammarSlot::Tablespace);
+        self.record_completion_slot(GrammarSlot::Tablespace);
         self.consume_col_id()
             .map(Some)
             .ok_or_else(|| self.error_here("TABLESPACE requires a name"))
@@ -39,7 +39,7 @@ impl Parser {
     pub(super) fn parse_simple_name_list_until(
         &mut self,
         stops: &[TokenKind],
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<NodeList> {
         let mut names = Vec::new();
         loop {
@@ -67,7 +67,7 @@ impl Parser {
     pub(super) fn parse_one_any_name_with_slot(
         &mut self,
         stops: &[TokenKind],
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<Node> {
         self.record_completion_slot(slot);
         self.record_completion_qualified_name_slot(slot, stops);
@@ -86,7 +86,7 @@ impl Parser {
     pub(super) fn parse_any_name_list_until_with_slot(
         &mut self,
         stops: &[TokenKind],
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<NodeList> {
         let mut names = Vec::new();
         loop {
@@ -152,7 +152,7 @@ impl Parser {
     pub(super) fn try_parse_range_var_with_slot(
         &mut self,
         allow_set_alias: bool,
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<Option<RangeVar>> {
         self.record_completion_slot(slot);
         let location = self.location();
@@ -166,24 +166,21 @@ impl Parser {
     }
 
     pub(super) fn parse_relation_expr(&mut self) -> PResult<RangeVar> {
-        self.parse_relation_expr_with_alias_and_slot(false, completion::GrammarSlot::Relation)
+        self.parse_relation_expr_with_alias_and_slot(false, GrammarSlot::Relation)
     }
 
     pub(super) fn parse_relation_expr_with_alias(&mut self) -> PResult<RangeVar> {
-        self.parse_relation_expr_with_alias_and_slot(true, completion::GrammarSlot::Relation)
+        self.parse_relation_expr_with_alias_and_slot(true, GrammarSlot::Relation)
     }
 
-    pub(super) fn parse_relation_expr_with_slot(
-        &mut self,
-        slot: completion::GrammarSlot,
-    ) -> PResult<RangeVar> {
+    pub(super) fn parse_relation_expr_with_slot(&mut self, slot: GrammarSlot) -> PResult<RangeVar> {
         self.parse_relation_expr_with_alias_and_slot(false, slot)
     }
 
     fn parse_relation_expr_with_alias_and_slot(
         &mut self,
         allow_alias: bool,
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<RangeVar> {
         self.record_completion_tokens(&[TokenKind::Only]);
         self.record_completion_slot(slot);
@@ -216,7 +213,7 @@ impl Parser {
         allow_set_alias: bool,
     ) -> PResult<Option<Box<Alias>>> {
         let has_as = self.consume(TokenKind::As);
-        self.record_completion_slot(completion::GrammarSlot::Alias);
+        self.record_completion_slot(GrammarSlot::Alias);
         let aliasname = if has_as {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("AS requires an alias"))?
@@ -246,12 +243,12 @@ impl Parser {
     }
 
     pub(super) fn try_parse_qualified_range_var(&mut self) -> Option<RangeVar> {
-        self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Relation)
+        self.try_parse_qualified_range_var_with_slot(GrammarSlot::Relation)
     }
 
     pub(super) fn try_parse_qualified_range_var_with_slot(
         &mut self,
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> Option<RangeVar> {
         self.record_completion_slot(slot);
         let location = self.location();
@@ -314,7 +311,7 @@ impl Parser {
 
     pub(super) fn consume_qualified_name_parts(
         &mut self,
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> Vec<std::string::String> {
         let mut parts = Vec::new();
         let Some(first) = self.consume_col_id() else {
@@ -352,7 +349,7 @@ impl Parser {
 
     pub(super) fn consume_identifier(&mut self) -> Option<std::string::String> {
         if self.at_completion() {
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             return self
                 .recover_completion_hole()
                 .and_then(|token| token_name(&token));
@@ -394,7 +391,7 @@ impl Parser {
         categories: &[KeywordCategory],
     ) -> Option<std::string::String> {
         if self.at_completion() {
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             return self
                 .recover_completion_hole()
                 .and_then(|token| token_name(&token));
@@ -423,7 +420,7 @@ impl Parser {
             })
         } else {
             self.consume_role_spec_with_slot_and_specials(
-                completion::GrammarSlot::Role,
+                GrammarSlot::Role,
                 &[TokenKind::CurrentRole, TokenKind::CurrentUser],
             )
             .filter(|role| role.roletype != RoleSpecType::SessionUser)
@@ -431,14 +428,14 @@ impl Parser {
     }
 
     pub(super) fn consume_role_spec(&mut self) -> Option<RoleSpec> {
-        self.consume_role_spec_with_slot(completion::GrammarSlot::Role)
+        self.consume_role_spec_with_slot(GrammarSlot::Role)
     }
 
     pub(super) fn consume_role_spec_without_special_suggestions(&mut self) -> Option<RoleSpec> {
-        self.consume_role_spec_with_slot_and_specials(completion::GrammarSlot::Role, &[])
+        self.consume_role_spec_with_slot_and_specials(GrammarSlot::Role, &[])
     }
 
-    fn consume_role_spec_with_slot(&mut self, slot: completion::GrammarSlot) -> Option<RoleSpec> {
+    fn consume_role_spec_with_slot(&mut self, slot: GrammarSlot) -> Option<RoleSpec> {
         self.consume_role_spec_with_slot_and_specials(
             slot,
             &[
@@ -451,7 +448,7 @@ impl Parser {
 
     fn consume_role_spec_with_slot_and_specials(
         &mut self,
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
         suggested_specials: &[TokenKind],
     ) -> Option<RoleSpec> {
         self.record_completion_slot(slot);
@@ -503,16 +500,16 @@ impl Parser {
     }
 
     pub(super) fn consume_role_id(&mut self) -> PResult<Option<std::string::String>> {
-        self.consume_role_id_with_slot(completion::GrammarSlot::Role)
+        self.consume_role_id_with_slot(GrammarSlot::Role)
     }
 
     pub(super) fn consume_new_role_id(&mut self) -> PResult<Option<std::string::String>> {
-        self.consume_role_id_with_slot(completion::GrammarSlot::AnyName)
+        self.consume_role_id_with_slot(GrammarSlot::AnyName)
     }
 
     fn consume_role_id_with_slot(
         &mut self,
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<Option<std::string::String>> {
         let location = self.location();
         let Some(role) = self.consume_role_spec_with_slot_and_specials(slot, &[]) else {
@@ -538,7 +535,7 @@ impl Parser {
     }
 
     pub(super) fn consume_setting_name(&mut self) -> Option<std::string::String> {
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let setting_start = self.pos;
         let mut parts = vec![self.consume_col_id()?];
         while self.consume(TokenKind::Char('.')) {

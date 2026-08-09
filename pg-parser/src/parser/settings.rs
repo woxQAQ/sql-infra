@@ -51,7 +51,7 @@ impl Parser {
                     TokenKind::Transaction,
                     TokenKind::Session,
                 ]);
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let (kind, name) =
                     match self.peek_kind() {
                         TokenKind::All => {
@@ -111,7 +111,7 @@ impl Parser {
             TokenKind::Role,
             TokenKind::XmlP,
         ]);
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let is_local = allow_scope && self.consume(TokenKind::Local);
         if allow_scope
             && self.at(TokenKind::Session)
@@ -179,7 +179,7 @@ impl Parser {
                         TokenKind::Local,
                         TokenKind::Interval,
                     ]);
-                    self.record_completion_slot(completion::GrammarSlot::AnyName);
+                    self.record_completion_slot(GrammarSlot::AnyName);
                     let tokens = self.take_until_top_level(STATEMENT_END_TOKENS);
                     if self.at_completion() && tokens.first().has_kind(TokenKind::Interval) {
                         let qualifier = tokens
@@ -242,7 +242,7 @@ impl Parser {
             TokenKind::Role => {
                 self.advance();
                 stmt.name = Some("role".to_owned());
-                self.record_completion_slot(completion::GrammarSlot::Role);
+                self.record_completion_slot(GrammarSlot::Role);
                 let value = self
                     .consume_non_reserved_word_or_sconst()
                     .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
@@ -259,7 +259,7 @@ impl Parser {
                 if self.consume(TokenKind::Default) {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
-                    self.record_completion_slot(completion::GrammarSlot::Role);
+                    self.record_completion_slot(GrammarSlot::Role);
                     let value = self.consume_non_reserved_word_or_sconst().ok_or_else(|| {
                         self.error_here("SET SESSION AUTHORIZATION requires a role")
                     })?;
@@ -339,7 +339,7 @@ impl Parser {
             let tokens = self.take_until_top_level(COMMA_OR_STATEMENT_END_TOKENS);
             if self.at_completion() && tokens.is_empty() {
                 self.record_completion_tokens(&[TokenKind::Default]);
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
             }
             args.push(parse_setting_value_tokens(tokens)?);
             if !self.consume(TokenKind::Char(',')) {
@@ -372,7 +372,7 @@ impl Parser {
             TokenKind::Transaction,
             TokenKind::Session,
         ]);
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let name = Some(match self.peek_kind() {
             TokenKind::All => {
                 self.advance();
@@ -508,7 +508,7 @@ impl Parser {
                     if self.consume(TokenKind::To) {
                         stmt.kind = TransactionStmtKind::RollbackTo;
                         self.consume(TokenKind::Savepoint);
-                        self.record_completion_slot(completion::GrammarSlot::AnyName);
+                        self.record_completion_slot(GrammarSlot::AnyName);
                         let location = self.location();
                         stmt.savepoint_name =
                             Some(self.consume_col_id().ok_or_else(|| {
@@ -528,7 +528,7 @@ impl Parser {
             }
             TokenKind::Savepoint => {
                 stmt.kind = TransactionStmtKind::Savepoint;
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let location = self.location();
                 stmt.savepoint_name = Some(
                     self.consume_col_id()
@@ -539,7 +539,7 @@ impl Parser {
             TokenKind::Release => {
                 stmt.kind = TransactionStmtKind::Release;
                 self.consume(TokenKind::Savepoint);
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let location = self.location();
                 stmt.savepoint_name = Some(
                     self.consume_col_id()

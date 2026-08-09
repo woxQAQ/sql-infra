@@ -30,7 +30,7 @@ impl Parser {
     //   } ...
     pub(super) fn parse_create_function(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Function)?;
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Function);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("CREATE FUNCTION requires a function name"));
@@ -80,9 +80,9 @@ impl Parser {
                 Some(Box::new(table_type))
             } else {
                 let location = self.location();
-                self.record_completion_slot(completion::GrammarSlot::Type);
+                self.record_completion_slot(GrammarSlot::Type);
                 self.record_completion_qualified_name_slot(
-                    completion::GrammarSlot::Type,
+                    GrammarSlot::Type,
                     Self::create_function_option_starts(),
                 );
                 let tokens = self.take_until_top_level(Self::create_function_option_starts());
@@ -111,7 +111,7 @@ impl Parser {
             match self.peek_kind() {
                 TokenKind::Language => {
                     self.advance();
-                    self.record_completion_slot(completion::GrammarSlot::Language);
+                    self.record_completion_slot(GrammarSlot::Language);
                     let language = self
                         .consume_non_reserved_word_or_sconst()
                         .ok_or_else(|| self.error_here("expected a language name"))?;
@@ -188,7 +188,7 @@ impl Parser {
                 }
                 TokenKind::Support => {
                     self.advance();
-                    self.record_completion_slot(completion::GrammarSlot::Function);
+                    self.record_completion_slot(GrammarSlot::Function);
                     let name = self.parse_name_list();
                     if name.is_empty() {
                         return Err(self.error_here("SUPPORT requires a function name"));
@@ -325,7 +325,7 @@ impl Parser {
     //   } ...
     pub(super) fn parse_create_procedure(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Procedure)?;
-        self.record_completion_slot(completion::GrammarSlot::Procedure);
+        self.record_completion_slot(GrammarSlot::Procedure);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("CREATE PROCEDURE requires a procedure name"));
@@ -339,7 +339,7 @@ impl Parser {
             match self.peek_kind() {
                 TokenKind::Language => {
                     self.advance();
-                    self.record_completion_slot(completion::GrammarSlot::Language);
+                    self.record_completion_slot(GrammarSlot::Language);
                     let language = self
                         .consume_non_reserved_word_or_sconst()
                         .ok_or_else(|| self.error_here("expected a language name"))?;
@@ -477,9 +477,9 @@ impl Parser {
             {
                 let mut collector = collector.borrow_mut();
                 if completion_index == 0 {
-                    collector.record_slot(completion::GrammarSlot::AnyName);
+                    collector.record_slot(GrammarSlot::AnyName);
                 } else {
-                    collector.record_slot(completion::GrammarSlot::Type);
+                    collector.record_slot(GrammarSlot::Type);
                 }
             }
             let name = tokens

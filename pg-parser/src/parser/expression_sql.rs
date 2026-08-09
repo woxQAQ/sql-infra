@@ -104,7 +104,7 @@ impl ExprParser {
             TokenKind::MinuteP,
             TokenKind::SecondP,
         ]);
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let field_token = self.peek().clone();
         if !matches!(
             field_token.kind,

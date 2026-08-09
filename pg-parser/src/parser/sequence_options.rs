@@ -20,7 +20,7 @@ impl Parser {
         self.expect(TokenKind::Sequence)?;
         let if_not_exists = self.consume_if_not_exists()?;
         let mut sequence_node = self
-            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Sequence)
+            .try_parse_qualified_range_var_with_slot(GrammarSlot::Sequence)
             .ok_or_else(|| self.error_here("CREATE SEQUENCE requires a name"))?;
         sequence_node.relpersistence = relpersistence;
         let sequence = Some(Box::new(sequence_node));
@@ -52,7 +52,7 @@ impl Parser {
         self.expect(TokenKind::Sequence)?;
         let missing_ok = self.consume_if_exists()?;
         let sequence = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Sequence)
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::Sequence)
                 .ok_or_else(|| self.error_here("ALTER SEQUENCE requires a sequence name"))?,
         ));
         self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Set]);
@@ -94,7 +94,7 @@ impl Parser {
             let (name, arg) = match self.peek_kind() {
                 TokenKind::As => {
                     self.advance();
-                    self.record_completion_slot(completion::GrammarSlot::Type);
+                    self.record_completion_slot(GrammarSlot::Type);
                     let type_tokens = self.take_sequence_type_tokens();
                     if self.at_completion() {
                         let mut completion_tokens = type_tokens.clone();
@@ -160,7 +160,7 @@ impl Parser {
                     self.advance();
                     self.expect(TokenKind::By)?;
                     self.record_completion_tokens(&[TokenKind::None]);
-                    self.record_completion_slot(completion::GrammarSlot::Column);
+                    self.record_completion_slot(GrammarSlot::Column);
                     let names = self.parse_name_list();
                     if names.is_empty() {
                         return Err(self.error_here("OWNED BY requires a name"));
@@ -176,7 +176,7 @@ impl Parser {
                 TokenKind::Sequence => {
                     self.advance();
                     self.expect(TokenKind::NameP)?;
-                    self.record_completion_slot(completion::GrammarSlot::Sequence);
+                    self.record_completion_slot(GrammarSlot::Sequence);
                     let names = self.parse_name_list();
                     if names.is_empty() {
                         return Err(self.error_here("SEQUENCE NAME requires a name"));

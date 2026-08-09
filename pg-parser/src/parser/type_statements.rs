@@ -48,7 +48,7 @@ impl Parser {
     // CREATE TYPE name
     pub(super) fn parse_create_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
-        self.record_completion_slot(completion::GrammarSlot::Type);
+        self.record_completion_slot(GrammarSlot::Type);
         let type_location = self.location();
         let type_name = self.parse_name_list();
         if type_name.is_empty() {
@@ -125,7 +125,7 @@ impl Parser {
     // ALTER TYPE name SET ( property = value [, ... ] )
     pub(super) fn parse_alter_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
-        self.record_completion_slot(completion::GrammarSlot::Type);
+        self.record_completion_slot(GrammarSlot::Type);
         let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::Set,
             TokenKind::Char(';'),
@@ -157,7 +157,7 @@ impl Parser {
     // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
     pub(super) fn parse_alter_enum(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
-        self.record_completion_slot(completion::GrammarSlot::Type);
+        self.record_completion_slot(GrammarSlot::Type);
         let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::AddP,
             TokenKind::Rename,
@@ -236,7 +236,7 @@ impl Parser {
     //         [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_composite_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
-        self.record_completion_slot(completion::GrammarSlot::Type);
+        self.record_completion_slot(GrammarSlot::Type);
         let type_location = self.location();
         let owner_start = self.pos;
         let names = self.parse_name_list_until_keywords_allow_initial_stop(&[
@@ -251,7 +251,7 @@ impl Parser {
             return Err(self.error_here("ALTER TYPE requires a composite type name"));
         }
         self.push_completion_membership_owner_from_tokens(
-            &[completion::GrammarSlot::Attribute],
+            &[GrammarSlot::Attribute],
             &[ObjectType::Type],
             owner_start,
             owner_end,
@@ -303,7 +303,7 @@ impl Parser {
                 self.expect(TokenKind::Attribute)?;
                 cmd.subtype = AlterTableType::DropColumn;
                 cmd.missing_ok = self.consume_if_exists()?;
-                self.record_completion_slot(completion::GrammarSlot::Attribute);
+                self.record_completion_slot(GrammarSlot::Attribute);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("DROP ATTRIBUTE requires a name"))?,
@@ -315,7 +315,7 @@ impl Parser {
                 self.expect(TokenKind::Attribute)?;
                 cmd.subtype = AlterTableType::AlterColumnType;
                 let attribute_location = self.location();
-                self.record_completion_slot(completion::GrammarSlot::Attribute);
+                self.record_completion_slot(GrammarSlot::Attribute);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("ALTER ATTRIBUTE requires a name"))?,
@@ -336,7 +336,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("ALTER ATTRIBUTE TYPE requires a data type"))?,
                 ));
                 let coll_clause = if self.consume(TokenKind::Collate) {
-                    self.record_completion_slot(completion::GrammarSlot::Collation);
+                    self.record_completion_slot(GrammarSlot::Collation);
                     let location = self.previous_location();
                     let collname = self.parse_name_list_until_keywords(&[
                         TokenKind::Cascade,

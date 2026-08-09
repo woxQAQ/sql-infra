@@ -159,7 +159,7 @@ impl ExprParser {
                 TokenKind::Using => {
                     self.advance();
                     self.record_completion_tokens(&[TokenKind::Op, TokenKind::Operator]);
-                    self.record_completion_slot(completion::GrammarSlot::Operator);
+                    self.record_completion_slot(GrammarSlot::Operator);
                     sortby_dir = SortByDir::Using;
                     location = self.location() as ParseLoc;
                     if self.at(TokenKind::Operator) {

@@ -17,7 +17,7 @@ impl Parser {
     //     SELECT | INSERT | UPDATE | DELETE
     pub(super) fn parse_rule(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Rule)?;
-        self.record_completion_slot(completion::GrammarSlot::Rule);
+        self.record_completion_slot(GrammarSlot::Rule);
         let rulename = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE RULE requires a name"))?,
@@ -41,7 +41,7 @@ impl Parser {
         };
         self.expect(TokenKind::To)?;
         let relation = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CREATE RULE requires a target relation"))?,
         ));
         let where_clause = self.parse_optional_expr_clause(
@@ -115,7 +115,7 @@ impl Parser {
     ) -> PResult<Node> {
         self.expect(TokenKind::View)?;
         let mut view_node = self
-            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::View)
+            .try_parse_qualified_range_var_with_slot(GrammarSlot::View)
             .ok_or_else(|| self.error_here("CREATE VIEW requires a view name"))?;
         view_node.relpersistence = relpersistence;
         let aliases = if self.consume(TokenKind::Char('(')) {

@@ -13,7 +13,7 @@ impl Parser {
     //     HANDLER handler_function
     pub(super) fn parse_create_am(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Method)?;
-        self.record_completion_slot(completion::GrammarSlot::AccessMethod);
+        self.record_completion_slot(GrammarSlot::AccessMethod);
         let amname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE ACCESS METHOD requires a name"))?,
@@ -27,7 +27,7 @@ impl Parser {
             return Err(self.error_here("access method TYPE must be INDEX or TABLE"));
         };
         self.expect(TokenKind::Handler)?;
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Function);
         let handler_name = self.parse_name_list();
         if handler_name.is_empty() {
             return Err(self.error_here("access method HANDLER requires a function name"));

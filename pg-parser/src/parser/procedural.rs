@@ -17,7 +17,7 @@ impl Parser {
         self.expect(TokenKind::ImportP)?;
         self.expect(TokenKind::Foreign)?;
         self.expect(TokenKind::Schema)?;
-        self.record_completion_slot(completion::GrammarSlot::Schema);
+        self.record_completion_slot(GrammarSlot::Schema);
         let remote_schema =
             Some(self.consume_col_id().ok_or_else(|| {
                 self.error_here("IMPORT FOREIGN SCHEMA requires a remote schema")
@@ -38,13 +38,13 @@ impl Parser {
         };
         self.expect(TokenKind::From)?;
         self.expect(TokenKind::Server)?;
-        self.record_completion_slot(completion::GrammarSlot::ForeignServer);
+        self.record_completion_slot(GrammarSlot::ForeignServer);
         let server_name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("IMPORT FOREIGN SCHEMA requires a server"))?,
         );
         self.expect(TokenKind::Into)?;
-        self.record_completion_slot(completion::GrammarSlot::Schema);
+        self.record_completion_slot(GrammarSlot::Schema);
         let local_schema = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("IMPORT FOREIGN SCHEMA requires a local schema"))?,
@@ -86,7 +86,7 @@ impl Parser {
                 saw_body = true;
             } else if self.at(TokenKind::Language) {
                 self.advance();
-                self.record_completion_slot(completion::GrammarSlot::Language);
+                self.record_completion_slot(GrammarSlot::Language);
                 let language = self
                     .consume_non_reserved_word_or_sconst()
                     .ok_or_else(|| self.error_here("DO LANGUAGE requires a language name"))?;

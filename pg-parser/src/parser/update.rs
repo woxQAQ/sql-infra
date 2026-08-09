@@ -21,7 +21,7 @@ impl Parser {
     pub(super) fn parse_update(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::Update)?;
         let mut relation = Some(Box::new(
-            self.try_parse_range_var_with_slot(false, completion::GrammarSlot::Table)?
+            self.try_parse_range_var_with_slot(false, GrammarSlot::Table)?
                 .ok_or_else(|| self.error_here("UPDATE requires a relation name"))?,
         ));
         let for_portion_of = self.parse_for_portion_of_clause()?;

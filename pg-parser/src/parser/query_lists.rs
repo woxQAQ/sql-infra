@@ -51,7 +51,7 @@ impl Parser {
                 && tokens.last().has_kind(TokenKind::As)
                 && parse_expression_tokens(tokens[..tokens.len() - 1].to_vec()).is_ok()
             {
-                self.record_completion_slot(completion::GrammarSlot::Alias);
+                self.record_completion_slot(GrammarSlot::Alias);
                 return Err(self.error_here("expected an output alias after AS"));
             }
             let (name, mut expr_tokens) = if tokens.is_empty() {
@@ -69,7 +69,7 @@ impl Parser {
                 && parse_expression_tokens(expr_tokens.clone()).is_ok()
             {
                 self.record_completion_follow_tokens(&[TokenKind::As]);
-                self.record_completion_slot(completion::GrammarSlot::Alias);
+                self.record_completion_slot(GrammarSlot::Alias);
             }
             self.record_expression_follow_tokens(
                 &expr_tokens,
@@ -135,8 +135,8 @@ impl Parser {
     }
 
     pub(super) fn parse_group_by_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
-        self.record_completion_slot(completion::GrammarSlot::Column);
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Column);
+        self.record_completion_slot(GrammarSlot::Function);
         let mut items = Vec::new();
         while self.at_completion() || !self.at_any(stops) {
             items.push(self.parse_group_by_item(stops)?);
@@ -278,8 +278,8 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<NodeList> {
-        self.record_completion_slot(completion::GrammarSlot::Column);
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Column);
+        self.record_completion_slot(GrammarSlot::Function);
         let mut items = Vec::new();
         while !self.at_any(stops) {
             let mut tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
@@ -375,7 +375,7 @@ impl Parser {
                     decoration.last().map(|token| token.kind),
                     Some(TokenKind::Char('(') | TokenKind::Char('.'))
                 ) {
-                    self.record_completion_slot(completion::GrammarSlot::Operator);
+                    self.record_completion_slot(GrammarSlot::Operator);
                 } else {
                     self.record_completion_tokens(&[TokenKind::Char(')')]);
                 }
@@ -388,7 +388,7 @@ impl Parser {
         }
         if tokens.last().has_kind(TokenKind::Using) {
             self.record_completion_tokens(&[TokenKind::Op, TokenKind::Operator]);
-            self.record_completion_slot(completion::GrammarSlot::Operator);
+            self.record_completion_slot(GrammarSlot::Operator);
             return;
         }
 

@@ -69,7 +69,7 @@ pub(super) fn function_parameter_from_tokens_with_completion(
         && let Some(collector) = &completion
     {
         let mut collector = collector.borrow_mut();
-        collector.record_slot(completion::GrammarSlot::Type);
+        collector.record_slot(GrammarSlot::Type);
         let can_start_parameter_mode = completion_index == 0
             || (completion_index == 1
                 && tokens.first().is_some_and(|token| {

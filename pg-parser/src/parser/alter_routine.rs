@@ -36,9 +36,9 @@ impl Parser {
             }
             _ => ObjectType::Function,
         };
-        let func = Some(Box::new(self.parse_routine_with_args_with_slot(
-            completion::object_type_slot(objtype),
-        )?));
+        let func = Some(Box::new(
+            self.parse_routine_with_args_with_slot(object_type_slot(objtype))?,
+        ));
         let actions = self.parse_alter_function_actions()?;
         if actions.is_empty() {
             return Err(self.error_here("ALTER FUNCTION requires at least one option"));
@@ -168,7 +168,7 @@ impl Parser {
                 }
                 TokenKind::Support => {
                     self.advance();
-                    self.record_completion_slot(completion::GrammarSlot::Function);
+                    self.record_completion_slot(GrammarSlot::Function);
                     let names = self.parse_name_list();
                     if names.is_empty() {
                         return Err(self.error_here("SUPPORT requires a function name"));
@@ -314,7 +314,7 @@ impl Parser {
         }
         if self.consume(TokenKind::Role) {
             stmt.name = Some("role".to_owned());
-            self.record_completion_slot(completion::GrammarSlot::Role);
+            self.record_completion_slot(GrammarSlot::Role);
             let value = self
                 .consume_string_like()
                 .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
@@ -414,7 +414,7 @@ impl Parser {
         loop {
             if self.at_completion() {
                 self.record_completion_tokens(&[TokenKind::Default]);
-                self.record_completion_slot(completion::GrammarSlot::AnyName);
+                self.record_completion_slot(GrammarSlot::AnyName);
             }
             let value_start = self.pos;
             match self.peek_kind() {

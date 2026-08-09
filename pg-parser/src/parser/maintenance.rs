@@ -51,7 +51,7 @@ impl Parser {
     pub(super) fn parse_copy(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Copy)?;
         self.record_completion_tokens(&[TokenKind::Binary, TokenKind::Char('(')]);
-        self.record_completion_slot(completion::GrammarSlot::Relation);
+        self.record_completion_slot(GrammarSlot::Relation);
         let mut options = Vec::new();
         let leading_binary = self.consume(TokenKind::Binary);
         if leading_binary {
@@ -79,12 +79,12 @@ impl Parser {
             let owner_end = self.pos;
             let attlist = if self.consume(TokenKind::Char('(')) {
                 self.push_completion_membership_owner_from_tokens(
-                    &[completion::GrammarSlot::Column],
+                    &[GrammarSlot::Column],
                     &[ObjectType::Table, ObjectType::ForeignTable],
                     owner_start,
                     owner_end,
                 );
-                self.record_completion_slot(completion::GrammarSlot::Column);
+                self.record_completion_slot(GrammarSlot::Column);
                 let columns = self.parse_parenthesized_name_list_body()?;
                 self.expect(TokenKind::Char(')'))?;
                 self.pop_completion_membership_owner();
@@ -165,13 +165,13 @@ impl Parser {
             return Ok(rels);
         }
         loop {
-            self.record_completion_slot(completion::GrammarSlot::MaterializedView);
+            self.record_completion_slot(GrammarSlot::MaterializedView);
             let owner_start = self.pos;
-            let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
+            let relation = self.parse_relation_expr_with_slot(GrammarSlot::Table)?;
             let owner_end = self.pos;
             let va_cols = if self.consume(TokenKind::Char('(')) {
                 self.push_completion_membership_owner_from_tokens(
-                    &[completion::GrammarSlot::Column],
+                    &[GrammarSlot::Column],
                     &[
                         ObjectType::Table,
                         ObjectType::View,
@@ -181,7 +181,7 @@ impl Parser {
                     owner_start,
                     owner_end,
                 );
-                self.record_completion_slot(completion::GrammarSlot::Column);
+                self.record_completion_slot(GrammarSlot::Column);
                 let columns = self.parse_parenthesized_name_list_body()?;
                 self.expect(TokenKind::Char(')'))?;
                 self.pop_completion_membership_owner();
@@ -387,8 +387,8 @@ impl Parser {
         } else {
             self.record_completion_tokens(&[TokenKind::Char('('), TokenKind::Verbose]);
         }
-        self.record_completion_slot(completion::GrammarSlot::Table);
-        self.record_completion_slot(completion::GrammarSlot::MaterializedView);
+        self.record_completion_slot(GrammarSlot::Table);
+        self.record_completion_slot(GrammarSlot::MaterializedView);
         let mut options = if self.at(TokenKind::Char('(')) {
             self.parse_parenthesized_utility_option_list()?
         } else {
@@ -465,11 +465,11 @@ impl Parser {
     pub(super) fn parse_lock(&mut self) -> PResult<Node> {
         self.expect(TokenKind::LockP)?;
         self.record_completion_tokens(&[TokenKind::Table, TokenKind::Only]);
-        self.record_completion_slot(completion::GrammarSlot::Table);
+        self.record_completion_slot(GrammarSlot::Table);
         self.consume(TokenKind::Table);
         let mut relations = Vec::new();
         loop {
-            let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
+            let relation = self.parse_relation_expr_with_slot(GrammarSlot::Table)?;
             relations.push(Node::RangeVar(relation));
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -559,7 +559,7 @@ impl Parser {
     // LISTEN channel
     pub(super) fn parse_listen(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Listen)?;
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let conditionname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("LISTEN requires a channel name"))?,
@@ -575,7 +575,7 @@ impl Parser {
         let conditionname = if self.consume(TokenKind::Char('*')) {
             None
         } else {
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("UNLISTEN requires a channel name or '*'"))?,
@@ -589,7 +589,7 @@ impl Parser {
     // NOTIFY channel [ , payload ]
     pub(super) fn parse_notify(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Notify)?;
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let conditionname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("NOTIFY requires a channel name"))?,
@@ -623,10 +623,10 @@ impl Parser {
         self.expect(TokenKind::Materialized)?;
         self.expect(TokenKind::View)?;
         self.record_completion_tokens(&[TokenKind::Concurrently]);
-        self.record_completion_slot(completion::GrammarSlot::MaterializedView);
+        self.record_completion_slot(GrammarSlot::MaterializedView);
         let concurrent = self.consume(TokenKind::Concurrently);
         let relation = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::MaterializedView)
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::MaterializedView)
                 .ok_or_else(|| self.error_here("REFRESH MATERIALIZED VIEW requires a relation"))?,
         ));
         let skip_data = if self.consume(TokenKind::With) {
@@ -693,7 +693,7 @@ impl Parser {
         let (relation, name) = match kind {
             ReindexObjectType::Index => (
                 Some(Box::new(
-                    self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Index)
+                    self.try_parse_qualified_range_var_with_slot(GrammarSlot::Index)
                         .ok_or_else(|| self.error_here("REINDEX requires an index name"))?,
                 )),
                 None,
@@ -701,8 +701,8 @@ impl Parser {
             ReindexObjectType::Table => (
                 Some(Box::new(
                     {
-                        self.record_completion_slot(completion::GrammarSlot::MaterializedView);
-                        self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                        self.record_completion_slot(GrammarSlot::MaterializedView);
+                        self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                     }
                     .ok_or_else(|| self.error_here("REINDEX requires a relation name"))?,
                 )),
@@ -711,13 +711,13 @@ impl Parser {
             ReindexObjectType::Schema => (
                 None,
                 Some({
-                    self.record_completion_slot(completion::GrammarSlot::Schema);
+                    self.record_completion_slot(GrammarSlot::Schema);
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("REINDEX SCHEMA requires a name"))?
                 }),
             ),
             ReindexObjectType::System | ReindexObjectType::Database => {
-                self.record_completion_slot(completion::GrammarSlot::Database);
+                self.record_completion_slot(GrammarSlot::Database);
                 (None, self.consume_col_id())
             }
         };
@@ -742,7 +742,7 @@ impl Parser {
         }
         self.expect(TokenKind::Repack)?;
         self.record_completion_tokens(&[TokenKind::Char('('), TokenKind::Using]);
-        self.record_completion_slot(completion::GrammarSlot::Table);
+        self.record_completion_slot(GrammarSlot::Table);
         let params = if self.at(TokenKind::Char('(')) {
             self.parse_parenthesized_utility_option_list()?
         } else {
@@ -755,9 +755,9 @@ impl Parser {
             self.expect_statement_end()?;
             (None, true, None)
         } else {
-            let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
+            let relation = self.parse_relation_expr_with_slot(GrammarSlot::Table)?;
             let va_cols = if self.consume(TokenKind::Char('(')) {
-                self.record_completion_slot(completion::GrammarSlot::Column);
+                self.record_completion_slot(GrammarSlot::Column);
                 let columns = self.parse_parenthesized_name_list_body()?;
                 self.expect(TokenKind::Char(')'))?;
                 columns
@@ -771,7 +771,7 @@ impl Parser {
             }));
             if self.consume(TokenKind::Using) {
                 self.expect(TokenKind::Index)?;
-                self.record_completion_slot(completion::GrammarSlot::Index);
+                self.record_completion_slot(GrammarSlot::Index);
                 (relation, true, self.consume_col_id())
             } else {
                 (relation, false, None)
@@ -806,12 +806,12 @@ impl Parser {
         }
 
         let cluster_target_start = self.pos;
-        self.record_completion_slot(completion::GrammarSlot::Index);
+        self.record_completion_slot(GrammarSlot::Index);
         if let Some(indexname) = self.consume_col_id()
             && self.consume(TokenKind::On)
         {
             let relation = self
-                .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CLUSTER ON requires a relation"))?;
             return Ok(node!(RepackStmt {
                 command: RepackCommand::Cluster,
@@ -827,10 +827,10 @@ impl Parser {
         self.pos = cluster_target_start;
 
         let relation = self
-            .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+            .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
             .ok_or_else(|| self.error_here("CLUSTER requires a relation"))?;
         let indexname = if self.consume(TokenKind::Using) {
-            self.record_completion_slot(completion::GrammarSlot::Index);
+            self.record_completion_slot(GrammarSlot::Index);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("USING requires an index name"))?,
@@ -857,11 +857,11 @@ impl Parser {
     pub(super) fn parse_truncate(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Truncate)?;
         self.record_completion_tokens(&[TokenKind::Table, TokenKind::Only]);
-        self.record_completion_slot(completion::GrammarSlot::Table);
+        self.record_completion_slot(GrammarSlot::Table);
         self.consume(TokenKind::Table);
         let mut relations = Vec::new();
         loop {
-            let relation = self.parse_relation_expr_with_slot(completion::GrammarSlot::Table)?;
+            let relation = self.parse_relation_expr_with_slot(GrammarSlot::Table)?;
             relations.push(Node::RangeVar(relation));
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -898,7 +898,7 @@ fn parse_copy_generic_option(
         completion,
     };
     parser.record_completion_tokens(&[TokenKind::Format]);
-    parser.record_completion_slot(completion::GrammarSlot::AnyName);
+    parser.record_completion_slot(GrammarSlot::AnyName);
     let name = if parser.consume(TokenKind::Format) {
         "format".to_owned()
     } else {
@@ -918,7 +918,7 @@ fn parse_copy_generic_option(
         TokenKind::FalseP,
         TokenKind::On,
     ]);
-    parser.record_completion_slot(completion::GrammarSlot::AnyName);
+    parser.record_completion_slot(GrammarSlot::AnyName);
     let arg = if parser.at(TokenKind::Eof) {
         None
     } else if parser.consume(TokenKind::Char('(')) {
@@ -933,9 +933,9 @@ fn parse_copy_generic_option(
                     name.as_str(),
                     "force_quote" | "force_not_null" | "force_null"
                 ) {
-                    completion::GrammarSlot::Column
+                    GrammarSlot::Column
                 } else {
-                    completion::GrammarSlot::AnyName
+                    GrammarSlot::AnyName
                 },
             );
             let value = parser

@@ -29,7 +29,7 @@ impl Parser {
         if kind == ObjectType::Collation {
             if_not_exists = self.consume_if_not_exists()?;
         }
-        let name_slot = completion::object_type_slot(kind);
+        let name_slot = object_type_slot(kind);
         self.record_completion_slot(name_slot);
         let (defnames, args, definition, oldstyle) = if kind == ObjectType::Aggregate {
             self.record_completion_qualified_name_slot(name_slot, &[TokenKind::Char('(')]);
@@ -40,7 +40,7 @@ impl Parser {
             self.expect(TokenKind::Char('('))?;
             let first = self.take_until_top_level(&[TokenKind::Char(')')]);
             if self.at_completion() {
-                self.record_completion_slot(completion::GrammarSlot::Type);
+                self.record_completion_slot(GrammarSlot::Type);
                 let mut active_start = 0usize;
                 let mut depth = 0usize;
                 let mut saw_order_by = false;
@@ -117,7 +117,7 @@ impl Parser {
             }
             let definition = if self.consume(TokenKind::From) {
                 let from_location = self.location();
-                self.record_completion_slot(completion::GrammarSlot::Collation);
+                self.record_completion_slot(GrammarSlot::Collation);
                 let from = self.parse_name_list();
                 if from.is_empty() {
                     return Err(self.error_here("COLLATION FROM requires a source collation"));

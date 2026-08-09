@@ -46,7 +46,7 @@ impl Parser {
         self.expect(TokenKind::Merge)?;
         self.expect(TokenKind::Into)?;
         let relation = Some(Box::new(
-            self.try_parse_range_var_with_slot(true, completion::GrammarSlot::Table)?
+            self.try_parse_range_var_with_slot(true, GrammarSlot::Table)?
                 .ok_or_else(|| self.error_here("MERGE INTO requires a relation name"))?,
         ));
         self.expect(TokenKind::Using)?;

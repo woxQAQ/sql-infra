@@ -12,7 +12,7 @@ impl Parser {
     //     CURSOR [ { WITH | WITHOUT } HOLD ] FOR query
     pub(super) fn parse_declare_cursor(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Declare)?;
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let portalname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("DECLARE requires a cursor name"))?,
@@ -84,7 +84,7 @@ impl Parser {
         let portalname = if self.consume(TokenKind::All) {
             None
         } else {
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("CLOSE requires a cursor name or ALL"))?,
@@ -141,7 +141,7 @@ impl Parser {
         }
         let (direction, how_many, direction_keyword, location) = self.parse_fetch_direction()?;
         let _ = self.consume(TokenKind::From) || self.consume(TokenKind::InP);
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let portalname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("FETCH/MOVE requires a cursor name"))?,

@@ -15,7 +15,7 @@ impl Parser {
         let mut options = Vec::new();
         loop {
             let location = self.location();
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("expected an option name"))?;
@@ -61,7 +61,7 @@ impl Parser {
                 _ => DefElemAction::Unspec,
             };
             let location = self.location();
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("expected an option name"))?;

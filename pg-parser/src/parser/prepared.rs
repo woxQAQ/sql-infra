@@ -11,16 +11,13 @@ impl Parser {
     // PREPARE name [ ( data_type [, ...] ) ] AS statement
     pub(super) fn parse_prepare(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Prepare)?;
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("PREPARE requires a statement name"))?,
         );
         let argtypes = if self.consume(TokenKind::Char('(')) {
-            self.record_completion_slot_within_fragment(
-                completion::GrammarSlot::Type,
-                &[TokenKind::Char(')')],
-            );
+            self.record_completion_slot_within_fragment(GrammarSlot::Type, &[TokenKind::Char(')')]);
             let tokens = self.take_until_top_level(&[TokenKind::Char(')')]);
             let types = parse_type_node_list(tokens)?;
             self.expect(TokenKind::Char(')'))?;
@@ -73,7 +70,7 @@ impl Parser {
 
     pub(super) fn parse_execute_core(&mut self) -> PResult<ExecuteStmt> {
         self.expect(TokenKind::Execute)?;
-        self.record_completion_slot(completion::GrammarSlot::AnyName);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("EXECUTE requires a statement name"))?,
@@ -111,7 +108,7 @@ impl Parser {
         let (name, location) = if isall {
             (None, -1)
         } else {
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             let location = self.location() as ParseLoc;
             (
                 Some(self.consume_col_id().ok_or_else(|| {
@@ -216,7 +213,7 @@ impl Parser {
     // CALL name ( [ argument ] [, ...] )
     pub(super) fn parse_call(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Call)?;
-        self.record_completion_slot(completion::GrammarSlot::Procedure);
+        self.record_completion_slot(GrammarSlot::Procedure);
         if self.at_completion() {
             return Err(self.error_here("completion point at CALL routine name"));
         }

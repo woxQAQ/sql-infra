@@ -7,8 +7,8 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_from_clause_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
-        self.record_completion_slot(completion::GrammarSlot::Relation);
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Relation);
+        self.record_completion_slot(GrammarSlot::Function);
         self.record_completion_tokens(&[
             TokenKind::LateralP,
             TokenKind::Only,
@@ -35,8 +35,8 @@ impl Parser {
     }
 
     pub(super) fn parse_from_item(&mut self, stops: &[TokenKind]) -> PResult<Node> {
-        self.record_completion_slot(completion::GrammarSlot::Relation);
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Relation);
+        self.record_completion_slot(GrammarSlot::Function);
         self.record_completion_tokens(&[
             TokenKind::LateralP,
             TokenKind::Only,
@@ -48,7 +48,7 @@ impl Parser {
         ]);
         let lateral = self.consume(TokenKind::LateralP);
         if lateral {
-            self.record_completion_slot(completion::GrammarSlot::Function);
+            self.record_completion_slot(GrammarSlot::Function);
             self.record_completion_tokens(&[
                 TokenKind::Char('('),
                 TokenKind::Rows,
@@ -130,7 +130,7 @@ impl Parser {
                 return Err(self.error_here("TABLESAMPLE requires a relation"));
             }
             let location = self.location();
-            self.record_completion_slot(completion::GrammarSlot::Function);
+            self.record_completion_slot(GrammarSlot::Function);
             let method = self.parse_name_list();
             if method.is_empty() {
                 return Err(self.error_here("TABLESAMPLE requires a sampling method"));
@@ -204,8 +204,8 @@ impl Parser {
                 TokenKind::JsonTable,
                 TokenKind::GraphTable,
             ]);
-            self.record_completion_slot(completion::GrammarSlot::Relation);
-            self.record_completion_slot(completion::GrammarSlot::Function);
+            self.record_completion_slot(GrammarSlot::Relation);
+            self.record_completion_slot(GrammarSlot::Function);
             return Err(self.error_here("completion point in parenthesized FROM item"));
         }
 
@@ -340,7 +340,7 @@ impl Parser {
             self.expect(TokenKind::Char(')'))?;
             return Ok((None, coldeflist));
         }
-        self.record_completion_slot(completion::GrammarSlot::Alias);
+        self.record_completion_slot(GrammarSlot::Alias);
         let aliasname = if has_as {
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("expected a function alias"))?
@@ -379,7 +379,7 @@ impl Parser {
             // an alias column list, or it may begin `column type` in a table
             // function definition. Preserve both productions until a comma,
             // closing parenthesis, or type token resolves the branch.
-            self.record_completion_slot(completion::GrammarSlot::Type);
+            self.record_completion_slot(GrammarSlot::Type);
         }
         self.pos = alias_suffix_start;
         let is_alias_column_list = !chunks.is_empty()
@@ -422,7 +422,7 @@ impl Parser {
         Ok(definitions)
     }
     fn parse_function_expression(&mut self) -> PResult<Node> {
-        self.record_completion_slot(completion::GrammarSlot::Function);
+        self.record_completion_slot(GrammarSlot::Function);
         let start = self.pos;
         let remaining = &self.tokens[start..];
         let open = find_top_level_token(remaining, TokenKind::Char('('))

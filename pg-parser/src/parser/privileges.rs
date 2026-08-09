@@ -184,7 +184,7 @@ impl Parser {
                 TokenKind::InP => {
                     self.advance();
                     self.expect(TokenKind::Schema)?;
-                    self.record_completion_slot(completion::GrammarSlot::Schema);
+                    self.record_completion_slot(GrammarSlot::Schema);
                     let schemas = self.parse_simple_name_list_until(
                         &[
                             TokenKind::Grant,
@@ -192,7 +192,7 @@ impl Parser {
                             TokenKind::Char(';'),
                             TokenKind::Eof,
                         ],
-                        completion::GrammarSlot::Schema,
+                        GrammarSlot::Schema,
                     )?;
                     if schemas.is_empty() {
                         return Err(self.error_here("IN SCHEMA requires at least one schema"));
@@ -507,8 +507,8 @@ impl Parser {
     pub(super) fn parse_grant(&mut self, kind: GrantKind) -> PResult<Node> {
         self.advance();
         self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
-        self.record_completion_slot(completion::GrammarSlot::Privilege);
-        self.record_completion_slot(completion::GrammarSlot::Role);
+        self.record_completion_slot(GrammarSlot::Privilege);
+        self.record_completion_slot(GrammarSlot::Role);
         let mut revoke_grant_option = false;
         if kind == GrantKind::Revoke && self.consume(TokenKind::Grant) {
             self.expect(TokenKind::Option)?;
@@ -527,7 +527,7 @@ impl Parser {
 
     fn parse_object_grant(&mut self, kind: GrantKind, revoke_grant_option: bool) -> PResult<Node> {
         self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
-        self.record_completion_slot(completion::GrammarSlot::Privilege);
+        self.record_completion_slot(GrammarSlot::Privilege);
         let privileges = self.parse_access_privileges()?;
         self.expect(TokenKind::On)?;
         let (targtype, objtype, objects) = self.parse_privilege_target()?;
@@ -604,7 +604,7 @@ impl Parser {
         if self.peek_kind() == TokenKind::All && !self.top_level_contains(TokenKind::Completion) {
             return Err(self.error_here("GRANT/REVOKE ROLE requires an explicit role list"));
         }
-        self.record_completion_slot(completion::GrammarSlot::Role);
+        self.record_completion_slot(GrammarSlot::Role);
         let granted_roles = self.parse_access_privileges_until(separator)?;
         self.record_completion_tokens(&[TokenKind::On]);
         self.expect(separator)?;
@@ -671,9 +671,9 @@ impl Parser {
     }
 
     fn parse_access_privileges_until(&mut self, stop: TokenKind) -> PResult<NodeList> {
-        self.record_completion_slot(completion::GrammarSlot::Privilege);
+        self.record_completion_slot(GrammarSlot::Privilege);
         if stop != TokenKind::On {
-            self.record_completion_slot(completion::GrammarSlot::Role);
+            self.record_completion_slot(GrammarSlot::Role);
         }
         if self.consume(TokenKind::All) {
             self.consume(TokenKind::Privileges);
@@ -689,9 +689,9 @@ impl Parser {
         }
         let mut privileges = Vec::new();
         while self.at_completion() || !self.at(stop) {
-            self.record_completion_slot(completion::GrammarSlot::Privilege);
+            self.record_completion_slot(GrammarSlot::Privilege);
             if stop != TokenKind::On {
-                self.record_completion_slot(completion::GrammarSlot::Role);
+                self.record_completion_slot(GrammarSlot::Role);
             }
             let (name, allow_columns) = if self.consume(TokenKind::Alter) {
                 self.expect(TokenKind::SystemP)?;
@@ -738,7 +738,7 @@ impl Parser {
         if !self.consume(TokenKind::Char('(')) {
             return Ok(Vec::new());
         }
-        self.record_completion_slot(completion::GrammarSlot::Column);
+        self.record_completion_slot(GrammarSlot::Column);
         self.request_completion_membership_recovery();
         let mut columns = Vec::new();
         loop {
@@ -775,7 +775,7 @@ impl Parser {
             self.advance();
             self.expect(TokenKind::InP)?;
             self.expect(TokenKind::Schema)?;
-            self.record_completion_slot(completion::GrammarSlot::Schema);
+            self.record_completion_slot(GrammarSlot::Schema);
             let objects = self.parse_simple_name_list_until(
                 &[
                     TokenKind::To,
@@ -783,7 +783,7 @@ impl Parser {
                     TokenKind::Char(';'),
                     TokenKind::Eof,
                 ],
-                completion::GrammarSlot::Schema,
+                GrammarSlot::Schema,
             )?;
             if objects.is_empty() {
                 return Err(self.error_here("IN SCHEMA requires at least one schema"));
@@ -870,7 +870,7 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
-        let object_slot = completion::object_type_slot(objtype);
+        let object_slot = object_type_slot(objtype);
         self.record_completion_slot(object_slot);
         self.record_completion_qualified_name_slot(object_slot, &stops);
         let owner_start = self.pos;
@@ -894,7 +894,7 @@ impl Parser {
         let owner_end = self.pos;
         if objtype == ObjectType::Table && objects.len() == 1 {
             self.push_completion_membership_owner_from_tokens(
-                &[completion::GrammarSlot::Column],
+                &[GrammarSlot::Column],
                 &[
                     ObjectType::Table,
                     ObjectType::View,
@@ -911,7 +911,7 @@ impl Parser {
     fn parse_privilege_qualified_name_list_with_slot(
         &mut self,
         stops: &[TokenKind],
-        slot: completion::GrammarSlot,
+        slot: GrammarSlot,
     ) -> PResult<NodeList> {
         let mut objects = Vec::new();
         loop {

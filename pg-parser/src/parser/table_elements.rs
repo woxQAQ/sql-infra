@@ -7,7 +7,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_insert_column_list(&mut self) -> PResult<NodeList> {
-        self.record_completion_slot(completion::GrammarSlot::Column);
+        self.record_completion_slot(GrammarSlot::Column);
         let mut cols = Vec::new();
         if self.at(TokenKind::Char(')')) {
             return Err(self.error_here("column list cannot be empty"));
@@ -39,7 +39,7 @@ impl Parser {
         while !self.at(TokenKind::Char(')')) {
             if self.consume(TokenKind::Like) {
                 let relation = self
-                    .try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                    .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("expected a relation after LIKE"))?;
                 let mut options = 0u32;
                 self.record_completion_follow_tokens(&[TokenKind::Including, TokenKind::Excluding]);
@@ -279,7 +279,7 @@ impl Parser {
 
     pub(super) fn parse_typed_column_options(&mut self) -> PResult<ColumnDef> {
         let location = self.location();
-        self.record_completion_slot(completion::GrammarSlot::Column);
+        self.record_completion_slot(GrammarSlot::Column);
         let colname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("expected a typed table column name"))?,
@@ -305,7 +305,7 @@ impl Parser {
         let mut coll_clause = None;
         while !self.at(TokenKind::Eof) {
             if self.consume(TokenKind::Collate) {
-                self.record_completion_slot(completion::GrammarSlot::Collation);
+                self.record_completion_slot(GrammarSlot::Collation);
                 let coll_location = self.previous_location();
                 let collname = self.parse_name_list();
                 if collname.is_empty() {

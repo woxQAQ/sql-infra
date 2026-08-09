@@ -246,7 +246,7 @@ impl Parser {
         } else {
             false
         };
-        let object_slot = completion::object_type_slot(object_type);
+        let object_slot = object_type_slot(object_type);
         self.record_completion_slot(object_slot);
         self.record_completion_qualified_name_slot(object_slot, &action_stops);
         let mut identity = AlterIdentity {
@@ -274,7 +274,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("ALTER object requires a name"))?;
             self.expect(TokenKind::On)?;
             identity.relation = Some(Box::new(
-                self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::Table)
+                self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("ON requires a relation name"))?,
             ));
             identity.subname = Some(name.clone());
@@ -294,7 +294,7 @@ impl Parser {
             } else if object_type == ObjectType::Aggregate {
                 self.parse_aggregate_with_args_structured()?
             } else {
-                self.parse_routine_with_args_with_slot(completion::object_type_slot(object_type))?
+                self.parse_routine_with_args_with_slot(object_type_slot(object_type))?
             };
             identity.object = Some(Box::new(Node::ObjectWithArgs(object)));
             return Ok(identity);
@@ -396,7 +396,7 @@ impl Parser {
             | ObjectType::Matview
             | ObjectType::ForeignTable => {
                 self.record_completion_tokens(&[TokenKind::Column]);
-                self.record_completion_slot(completion::GrammarSlot::Column);
+                self.record_completion_slot(GrammarSlot::Column);
                 if identity.object_type == ObjectType::Table {
                     self.record_completion_tokens(&[TokenKind::Constraint]);
                 }
@@ -426,7 +426,7 @@ impl Parser {
                 }
                 rename_type = ObjectType::Column;
                 relation_type = identity.object_type;
-                self.record_completion_slot(completion::GrammarSlot::Column);
+                self.record_completion_slot(GrammarSlot::Column);
                 identity.subname = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("RENAME COLUMN requires a column name"))?,
@@ -443,7 +443,7 @@ impl Parser {
                         self.error_here("RENAME CONSTRAINT is only valid for a table or domain")
                     );
                 };
-                self.record_completion_slot(completion::GrammarSlot::Constraint);
+                self.record_completion_slot(GrammarSlot::Constraint);
                 identity.subname = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("RENAME CONSTRAINT requires a name"))?,
@@ -456,7 +456,7 @@ impl Parser {
                 }
                 rename_type = ObjectType::Attribute;
                 relation_type = ObjectType::Type;
-                self.record_completion_slot(completion::GrammarSlot::Attribute);
+                self.record_completion_slot(GrammarSlot::Attribute);
                 identity.subname = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("RENAME ATTRIBUTE requires a name"))?,
@@ -481,7 +481,7 @@ impl Parser {
                 // COLUMN is optional in PostgreSQL's RENAME [COLUMN] syntax.
                 rename_type = ObjectType::Column;
                 relation_type = identity.object_type;
-                self.record_completion_slot(completion::GrammarSlot::Column);
+                self.record_completion_slot(GrammarSlot::Column);
                 identity.subname = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("RENAME requires a column name or TO"))?,
@@ -494,7 +494,7 @@ impl Parser {
             self.consume_new_role_id()?
                 .ok_or_else(|| self.error_here("RENAME TO requires a new role name"))?
         } else {
-            self.record_completion_slot(completion::GrammarSlot::AnyName);
+            self.record_completion_slot(GrammarSlot::AnyName);
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("RENAME TO requires a new name"))?
         });
@@ -552,7 +552,7 @@ impl Parser {
         self.expect(TokenKind::Depends)?;
         self.expect(TokenKind::On)?;
         self.expect(TokenKind::Extension)?;
-        self.record_completion_slot(completion::GrammarSlot::Extension);
+        self.record_completion_slot(GrammarSlot::Extension);
         let extname = Some(Box::new(String::new(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("EXTENSION requires a name"))?,
@@ -600,7 +600,7 @@ impl Parser {
         }
         self.expect(TokenKind::Set)?;
         self.expect(TokenKind::Schema)?;
-        self.record_completion_slot(completion::GrammarSlot::Schema);
+        self.record_completion_slot(GrammarSlot::Schema);
         let newschema = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("SET SCHEMA requires a schema name"))?,
@@ -638,7 +638,7 @@ impl Parser {
         }
         self.expect(TokenKind::Owner)?;
         self.expect(TokenKind::To)?;
-        self.record_completion_slot(completion::GrammarSlot::Role);
+        self.record_completion_slot(GrammarSlot::Role);
         let newowner =
             Some(Box::new(self.consume_role_spec().ok_or_else(|| {
                 self.error_here("OWNER TO requires a role")

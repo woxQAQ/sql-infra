@@ -10,7 +10,7 @@ impl Parser {
         let location = self.expect(TokenKind::GraphTable)?.location();
         self.expect(TokenKind::Char('('))?;
         let graph_name = Some(Box::new(
-            self.try_parse_qualified_range_var_with_slot(completion::GrammarSlot::PropertyGraph)
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::PropertyGraph)
                 .ok_or_else(|| self.error_here("GRAPH_TABLE requires a graph name"))?,
         ));
         self.expect(TokenKind::Match)?;
