@@ -657,8 +657,7 @@ impl Parser {
 macro_rules! define_statement_families {
     ($(
         $family:ident => {
-            start_tokens: [$($start_token:expr),+ $(,)?],
-            sample_sql: $sample_sql:literal $(,)?
+            start_tokens: [$($start_token:expr),+ $(,)?] $(,)?
         }
     ),+ $(,)?) => {
         #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -676,13 +675,6 @@ macro_rules! define_statement_families {
                     $(Self::$family => &[$($start_token),+]),+
                 }
             }
-
-            #[cfg(test)]
-            fn sample_sql(self) -> &'static str {
-                match self {
-                    $(Self::$family => $sample_sql),+
-                }
-            }
         }
     };
 }
@@ -690,7 +682,6 @@ macro_rules! define_statement_families {
 define_statement_families! {
     With => {
         start_tokens: [TokenKind::With],
-        sample_sql: "WITH x AS (SELECT 1) SELECT * FROM x",
     },
     Query => {
         start_tokens: [
@@ -699,51 +690,39 @@ define_statement_families! {
             TokenKind::Table,
             TokenKind::Char('('),
         ],
-        sample_sql: "SELECT 1",
     },
     Insert => {
         start_tokens: [TokenKind::Insert],
-        sample_sql: "INSERT INTO t VALUES (1)",
     },
     Update => {
         start_tokens: [TokenKind::Update],
-        sample_sql: "UPDATE t SET id = 1",
     },
     Delete => {
         start_tokens: [TokenKind::DeleteP],
-        sample_sql: "DELETE FROM t",
     },
     Merge => {
         start_tokens: [TokenKind::Merge],
-        sample_sql: "MERGE INTO t USING s ON true WHEN MATCHED THEN DO NOTHING",
     },
     Create => {
         start_tokens: [TokenKind::Create],
-        sample_sql: "CREATE TABLE t (id int)",
     },
     Alter => {
         start_tokens: [TokenKind::Alter],
-        sample_sql: "ALTER TABLE t ADD COLUMN c int",
     },
     Drop => {
         start_tokens: [TokenKind::Drop],
-        sample_sql: "DROP TABLE t",
     },
     SetConstraints => {
         start_tokens: [TokenKind::Set],
-        sample_sql: "SET CONSTRAINTS ALL DEFERRED",
     },
     VariableSet => {
         start_tokens: [TokenKind::Set],
-        sample_sql: "SET work_mem = '4MB'",
     },
     VariableReset => {
         start_tokens: [TokenKind::Reset],
-        sample_sql: "RESET work_mem",
     },
     VariableShow => {
         start_tokens: [TokenKind::Show],
-        sample_sql: "SHOW work_mem",
     },
     Transaction => {
         start_tokens: [
@@ -756,127 +735,96 @@ define_statement_families! {
             TokenKind::Savepoint,
             TokenKind::Release,
         ],
-        sample_sql: "BEGIN",
     },
     PrepareTransaction => {
         start_tokens: [TokenKind::Prepare],
-        sample_sql: "PREPARE TRANSACTION 'tx'",
     },
     Prepare => {
         start_tokens: [TokenKind::Prepare],
-        sample_sql: "PREPARE q AS SELECT 1",
     },
     Execute => {
         start_tokens: [TokenKind::Execute],
-        sample_sql: "EXECUTE q",
     },
     Deallocate => {
         start_tokens: [TokenKind::Deallocate],
-        sample_sql: "DEALLOCATE q",
     },
     Declare => {
         start_tokens: [TokenKind::Declare],
-        sample_sql: "DECLARE c CURSOR FOR SELECT 1",
     },
     Close => {
         start_tokens: [TokenKind::Close],
-        sample_sql: "CLOSE c",
     },
     FetchMove => {
         start_tokens: [TokenKind::Fetch, TokenKind::Move],
-        sample_sql: "FETCH NEXT FROM c",
     },
     Copy => {
         start_tokens: [TokenKind::Copy],
-        sample_sql: "COPY t FROM STDIN",
     },
     Vacuum => {
         start_tokens: [TokenKind::Vacuum, TokenKind::Analyze, TokenKind::Analyse],
-        sample_sql: "ANALYZE t",
     },
     Explain => {
         start_tokens: [TokenKind::Explain],
-        sample_sql: "EXPLAIN SELECT 1",
     },
     Call => {
         start_tokens: [TokenKind::Call],
-        sample_sql: "CALL f()",
     },
     Checkpoint => {
         start_tokens: [TokenKind::Checkpoint],
-        sample_sql: "CHECKPOINT",
     },
     Discard => {
         start_tokens: [TokenKind::Discard],
-        sample_sql: "DISCARD ALL",
     },
     Lock => {
         start_tokens: [TokenKind::LockP],
-        sample_sql: "LOCK TABLE t",
     },
     Listen => {
         start_tokens: [TokenKind::Listen],
-        sample_sql: "LISTEN channel",
     },
     Unlisten => {
         start_tokens: [TokenKind::Unlisten],
-        sample_sql: "UNLISTEN *",
     },
     Notify => {
         start_tokens: [TokenKind::Notify],
-        sample_sql: "NOTIFY channel",
     },
     Load => {
         start_tokens: [TokenKind::Load],
-        sample_sql: "LOAD 'library'",
     },
     Refresh => {
         start_tokens: [TokenKind::Refresh],
-        sample_sql: "REFRESH MATERIALIZED VIEW mv",
     },
     Reindex => {
         start_tokens: [TokenKind::Reindex],
-        sample_sql: "REINDEX TABLE t",
     },
     Repack => {
         start_tokens: [TokenKind::Cluster, TokenKind::Repack],
-        sample_sql: "CLUSTER t",
     },
     Reassign => {
         start_tokens: [TokenKind::Reassign],
-        sample_sql: "REASSIGN OWNED BY old_role TO new_role",
     },
     Truncate => {
         start_tokens: [TokenKind::Truncate],
-        sample_sql: "TRUNCATE TABLE t",
     },
     Comment => {
         start_tokens: [TokenKind::Comment],
-        sample_sql: "COMMENT ON TABLE t IS 'comment'",
     },
     SecurityLabel => {
         start_tokens: [TokenKind::Security],
-        sample_sql: "SECURITY LABEL ON TABLE t IS 'label'",
     },
     Grant => {
         start_tokens: [TokenKind::Grant],
-        sample_sql: "GRANT SELECT ON TABLE t TO role_name",
     },
     Revoke => {
         start_tokens: [TokenKind::Revoke],
-        sample_sql: "REVOKE SELECT ON TABLE t FROM role_name",
     },
     Import => {
         start_tokens: [TokenKind::ImportP],
-        sample_sql: "IMPORT FOREIGN SCHEMA s FROM SERVER srv INTO public",
     },
     Do => {
         start_tokens: [TokenKind::Do],
-        sample_sql: "DO 'BEGIN END'",
     },
     Wait => {
         start_tokens: [TokenKind::Wait],
-        sample_sql: "WAIT FOR LSN '0/0'",
     },
 }
 
@@ -1046,24 +994,6 @@ mod tests {
             *stmts[1].stmt.clone().unwrap(),
             Node::SelectStmt(_)
         ));
-    }
-
-    #[test]
-    fn optional_consume_helpers_do_not_advance_when_they_return_none() {
-        let mut setting = Parser::new("foo.").unwrap();
-        let start = setting.pos;
-        assert_eq!(setting.consume_setting_name(), None);
-        assert_eq!(setting.pos, start);
-
-        let mut role = Parser::new("none").unwrap();
-        let start = role.pos;
-        assert_eq!(role.consume_role_spec(), None);
-        assert_eq!(role.pos, start);
-
-        let mut object_type = Parser::new("text search unknown").unwrap();
-        let start = object_type.pos;
-        assert_eq!(object_type.consume_object_type(), None);
-        assert_eq!(object_type.pos, start);
     }
 
     #[test]

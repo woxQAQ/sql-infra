@@ -12,7 +12,6 @@ use pg_parser::parse_one;
 
 #[derive(Clone, Copy)]
 pub struct StatementCase {
-    pub expected_name: &'static str,
     pub expected: fn(&Node) -> bool,
     pub sql: &'static str,
 }

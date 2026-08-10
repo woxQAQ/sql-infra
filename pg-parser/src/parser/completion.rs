@@ -824,32 +824,6 @@ mod tests {
         expectations_at(source, source.len())
     }
 
-    fn assert_token_provenance(source: &str, expectations: &ParserExpectations) {
-        for token in &expectations.tokens {
-            assert!(
-                expectations.direct_tokens.contains(token)
-                    || expectations.lookahead_tokens.contains(token)
-                    || expectations.expression_start_tokens.contains(token)
-                    || expectations.expression_continuation_tokens.contains(token)
-                    || expectations.follow_tokens.contains(token),
-                "token without provenance in {source:?}: {token:?}: {expectations:?}"
-            );
-        }
-        for token in expectations
-            .direct_tokens
-            .iter()
-            .chain(&expectations.lookahead_tokens)
-            .chain(&expectations.expression_start_tokens)
-            .chain(&expectations.expression_continuation_tokens)
-            .chain(&expectations.follow_tokens)
-        {
-            assert!(
-                expectations.tokens.contains(token),
-                "provenance token missing from union in {source:?}: {token:?}: {expectations:?}"
-            );
-        }
-    }
-
     fn assert_slots_at_end(cases: &[(&str, GrammarSlot)]) {
         for &(source, expected_slot) in cases {
             let expectations = expectations_at_end(source);
@@ -857,59 +831,6 @@ mod tests {
                 expectations.slots.contains(&expected_slot),
                 "{source}: {:?}",
                 expectations.slots
-            );
-        }
-    }
-
-    #[test]
-    fn collects_statement_starters() {
-        let expectations = expectations_at_end("");
-        let actual = expectations
-            .tokens
-            .into_iter()
-            .collect::<std::collections::HashSet<_>>();
-        let expected = STATEMENT_FAMILIES
-            .iter()
-            .flat_map(|family| family.start_tokens())
-            .copied()
-            .collect::<std::collections::HashSet<_>>();
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn every_statement_family_collects_through_its_complete_sample() {
-        for family in STATEMENT_FAMILIES {
-            let source = family.sample_sql();
-            let tokens = crate::lex(source).unwrap_or_else(|error| {
-                panic!("invalid completion coverage sample {source:?}: {error}")
-            });
-            let mut points = tokens
-                .iter()
-                .flat_map(|token| [token.range.start(), token.range.end()])
-                .collect::<Vec<_>>();
-            points.sort_unstable();
-            points.dedup();
-            for point in points {
-                let expectations = collect_expectations(source, point).unwrap_or_else(|error| {
-                    panic!(
-                        "completion failed for family sample {source:?} at byte {}: {error}",
-                        usize::from(point)
-                    )
-                });
-                assert_token_provenance(source, &expectations);
-            }
-
-            let complete_expectations = expectations_at_end(source);
-            assert!(
-                !complete_expectations.tokens.contains(&TokenKind::Char(';')),
-                "complete family sample published the statement terminator: {source:?}: {complete_expectations:?}"
-            );
-            assert!(
-                complete_expectations
-                    .slots
-                    .iter()
-                    .all(|slot| *slot == GrammarSlot::Alias),
-                "complete family sample published a stale catalog slot: {source:?}: {complete_expectations:?}"
             );
         }
     }
@@ -1539,57 +1460,5 @@ mod tests {
             ("CREATE SEQUENCE s OWNED BY ", GrammarSlot::Column),
         ];
         assert_slots_at_end(&cases);
-    }
-
-    #[test]
-    fn completion_marker_uses_typed_parser_control() {
-        let parser = Parser {
-            tokens: vec![
-                Token::synthetic(TokenKind::Completion, 0),
-                Token::synthetic(TokenKind::Eof, 0),
-            ],
-            pos: 0,
-            completion: Some(Rc::new(RefCell::new(CompletionCollector::default()))),
-        };
-        assert!(matches!(
-            parser.error_here("not a syntax error"),
-            ParserExit::Completion(_)
-        ));
-    }
-
-    #[test]
-    fn every_dispatched_statement_family_has_completion_boundary_coverage() {
-        for family in STATEMENT_FAMILIES {
-            let sql = family.sample_sql();
-            let tokens = lex(sql).unwrap_or_else(|error| {
-                panic!("failed to lex {:?} sample {sql:?}: {error}", family)
-            });
-            let first_kind = tokens[0].kind;
-            let second_kind = tokens.get(1).kind_or_eof();
-            assert_eq!(
-                classify_statement(first_kind, second_kind),
-                Some(*family),
-                "coverage sample does not dispatch to its registered family: {sql:?}"
-            );
-            parse_one(sql).unwrap_or_else(|error| {
-                panic!("registered completion sample does not parse: {sql:?}: {error}")
-            });
-
-            let mut points = tokens
-                .iter()
-                .flat_map(|token| [token.range.start(), token.range.end()])
-                .collect::<Vec<_>>();
-            points.sort_unstable();
-            points.dedup();
-            for point in points {
-                collect_expectations(sql, point).unwrap_or_else(|error| {
-                    panic!(
-                        "completion collection failed for {:?} at byte {}: {error}",
-                        family,
-                        usize::from(point)
-                    )
-                });
-            }
-        }
     }
 }

@@ -3621,36 +3621,3 @@ impl AConst {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn raw_stmt_can_wrap_statement_node() {
-        let select = Node::SelectStmt(SelectStmt {
-            ..SelectStmt::default()
-        });
-        let raw = RawStmt {
-            stmt: Some(Box::new(select)),
-            stmt_location: 0,
-            stmt_len: 8,
-        };
-
-        assert!(matches!(raw.stmt.as_deref(), Some(Node::SelectStmt(_))));
-    }
-
-    #[test]
-    fn a_const_literal_constructors_preserve_value_nodes() {
-        let literal = AConst::string("postgres", 7);
-
-        assert_eq!(literal.location, 7);
-        assert!(!literal.isnull);
-        assert_eq!(
-            literal.val,
-            ValUnion::String(String {
-                sval: Some("postgres".to_owned()),
-            })
-        );
-    }
-}

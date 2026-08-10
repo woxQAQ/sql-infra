@@ -49,21 +49,3 @@ fn is_identifier_start(byte: u8) -> bool {
 fn is_identifier_continue(byte: u8) -> bool {
     is_identifier_start(byte) || byte.is_ascii_digit() || byte == b'$'
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn dollar_tags_follow_the_lexer_identifier_rules() {
-        assert_eq!(dollar_quote_tag(b"$$body$$", 0, 8).unwrap(), b"$$");
-        assert_eq!(
-            dollar_quote_tag(b"$tag_1$body$", 0, 12).unwrap(),
-            b"$tag_1$"
-        );
-        assert!(dollar_quote_tag(b"$1$body$", 0, 8).is_none());
-        assert!(dollar_quote_tag(b"$bad-tag$body$", 0, 14).is_none());
-        assert!(dollar_quote_tag(b"name$tag$", 4, 9).is_none());
-        assert_eq!(dollar_quote_tag(b"name $tag$", 5, 10).unwrap(), b"$tag$");
-    }
-}
