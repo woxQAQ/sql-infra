@@ -1,20 +1,27 @@
+//! Index declarations and index-element parsing.
+//!
+//! Expressions, columns, collations, operator classes, ordering, null treatment,
+//! and completion-aware element fragments converge here.
+
 use super::*;
 
 impl Parser {
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-createindex.html
-    // CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] [ [ IF NOT EXISTS ] name ] ON [ ONLY ] table_name [ USING method ]
-    //     ( { column_name | ( expression ) } [ COLLATE collation ] [ opclass [ ( opclass_parameter = value [, ... ] ) ] ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ] [, ...] )
+    // CREATE [ UNIQUE ] INDEX [ CONCURRENTLY ] [ [ IF NOT EXISTS ] name ] ON [ ONLY ] table_name [
+    // USING method ]     ( { column_name | ( expression ) } [ COLLATE collation ] [ opclass [ (
+    // opclass_parameter = value [, ... ] ) ] ] [ ASC | DESC ] [ NULLS { FIRST | LAST } ] [, ...] )
     //     [ INCLUDE ( column_name [, ...] ) ]
     //     [ NULLS [ NOT ] DISTINCT ]
     //     [ WITH ( storage_parameter [= value] [, ... ] ) ]
     //     [ TABLESPACE tablespace_name ]
     //     [ WHERE predicate ]
-    pub(super) fn parse_index(&mut self, unique_seen: bool) -> PResult<Node> {
-        let unique = unique_seen || self.consume(TokenKind::Unique);
+    pub(super) fn parse_index(&mut self) -> PResult<Node> {
+        let unique = self.consume(TokenKind::Unique);
         self.expect(TokenKind::Index)?;
         let concurrent = self.consume(TokenKind::Concurrently);
         let if_not_exists = self.consume_if_not_exists()?;
+        self.record_completion_slot(GrammarSlot::Index);
         let idxname = if self.peek_kind() != TokenKind::On {
             self.consume_col_id()
         } else {
@@ -24,15 +31,25 @@ impl Parser {
             return Err(self.error_here("CREATE INDEX IF NOT EXISTS requires an index name"));
         }
         self.expect(TokenKind::On)?;
+        self.record_completion_slot(GrammarSlot::MaterializedView);
+        let owner_start = self.pos;
         let relation = Some(Box::new(
-            self.try_parse_qualified_range_var()
-                .ok_or_else(|| self.error_here("CREATE INDEX requires a relation"))?,
+            self.parse_relation_expr_with_slot(GrammarSlot::Table)?,
         ));
+        let owner_end = self.pos;
+        self.push_completion_membership_owner_from_tokens(
+            &[GrammarSlot::Column],
+            &[
+                ObjectType::Table,
+                ObjectType::View,
+                ObjectType::Matview,
+                ObjectType::ForeignTable,
+            ],
+            owner_start,
+            owner_end,
+        );
         let access_method = if self.consume(TokenKind::Using) {
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("USING requires an access method"))?,
-            )
+            Some(self.parse_access_method_name()?)
         } else {
             Some("btree".to_owned())
         };
@@ -64,21 +81,10 @@ impl Parser {
         } else {
             Vec::new()
         };
-        let table_space = if self.consume(TokenKind::Tablespace) {
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("TABLESPACE requires a name"))?,
-            )
-        } else {
-            None
-        };
-        let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?)
-        } else {
-            None
-        };
-        Ok(Node::IndexStmt(IndexStmt {
-            node_tag: NodeTag::IndexStmt,
+        let table_space = self.parse_optional_tablespace_name()?;
+        let where_clause =
+            self.parse_optional_expr_clause(TokenKind::Where, STATEMENT_END_TOKENS)?;
+        Ok(node!(IndexStmt {
             idxname,
             relation,
             access_method,
@@ -101,19 +107,22 @@ impl Parser {
         }
         let mut elements = Vec::new();
         loop {
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            let location = tokens
-                .first()
-                .map_or(self.location(), |token| token.location());
-            let starts_parenthesized =
-                tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
-            let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-            let element = parse_index_elem_tokens(tokens)?;
+            let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+            if tokens_end_at_top_level(&tokens)
+                && parse_index_elem_tokens_with_completion(tokens.clone(), None).is_ok()
+            {
+                self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
+            }
+            self.append_completion_marker(&mut tokens);
+            let location = tokens.first().location_or(self.location());
+            let starts_parenthesized = tokens.first().has_kind(TokenKind::Char('('));
+            let starts_with_cast = tokens.first().has_kind(TokenKind::Cast);
+            let element = parse_index_elem_tokens_with_completion(tokens, self.completion.clone())?;
             if let Some(expression) = element.expr.as_deref()
                 && !starts_parenthesized
                 && !is_windowless_function_expression_node(expression, starts_with_cast)
             {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     location,
                     "index expressions must be parenthesized unless they are function calls",
                 ));
@@ -131,10 +140,11 @@ impl Parser {
 }
 pub(super) fn node_to_index_elem(node: Node) -> Node {
     match node {
-        Node::ColumnRef(ColumnRef {
-            fields, location, ..
-        }) if fields.len() == 1 => Node::IndexElem(IndexElem {
-            node_tag: NodeTag::IndexElem,
+        node!(ColumnRef {
+            fields,
+            location,
+            ..
+        }) if fields.len() == 1 => node!(IndexElem {
             name: fields.first().and_then(|field| match field {
                 Node::String(value) => value.sval.clone(),
                 _ => None,
@@ -142,35 +152,43 @@ pub(super) fn node_to_index_elem(node: Node) -> Node {
             location,
             ..IndexElem::default()
         }),
-        expr => Node::IndexElem(IndexElem {
-            node_tag: NodeTag::IndexElem,
+        expr => node!(IndexElem {
             expr: Some(Box::new(expr)),
             ..IndexElem::default()
         }),
     }
 }
 
-pub(super) fn parse_index_elem_tokens(tokens: Vec<Token>) -> PResult<IndexElem> {
-    let location = tokens.first().map_or(0, |token| token.location());
+pub(super) fn parse_index_elem_tokens_with_completion(
+    tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<IndexElem> {
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected an index element"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "expected an index element",
+        ));
     }
     let collate_index = find_top_level_token(&tokens, TokenKind::Collate);
     let (expression, suffix_start) = if let Some(index) = collate_index {
         if index == 0 {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 "COLLATE requires an index expression",
             ));
         }
-        (parse_expression_tokens(tokens[..index].to_vec())?, index)
+        (
+            parse_expression_tokens_with_completion(tokens[..index].to_vec(), completion.clone())?,
+            index,
+        )
     } else {
-        let mut parser = ExprParser::new(tokens.clone());
+        let mut parser = ExprParser::with_completion(tokens.clone(), completion.clone());
         let expression = parser.parse_expr(0).ok_or_else(|| {
             parser
                 .error
                 .take()
-                .unwrap_or_else(|| ParseError::new(location, "invalid index expression"))
+                .unwrap_or_else(|| ParseError::syntax_exit(location, "invalid index expression"))
         })?;
         (expression, parser.pos)
     };
@@ -180,13 +198,15 @@ pub(super) fn parse_index_elem_tokens(tokens: Vec<Token>) -> PResult<IndexElem> 
     element.location = location as ParseLoc;
 
     let mut suffix_tokens = tokens[suffix_start..].to_vec();
-    let end_location = suffix_tokens.last().map_or(location, Token::end_location);
+    let end_location = suffix_tokens.last().end_location_or(location);
     suffix_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
     let mut suffix = Parser {
         tokens: suffix_tokens,
         pos: 0,
+        completion,
     };
     if suffix.consume(TokenKind::Collate) {
+        suffix.record_completion_slot(GrammarSlot::Collation);
         element.collation = suffix.parse_name_list();
         if element.collation.is_empty() {
             return Err(suffix.error_here("COLLATE requires a collation name"));
@@ -198,10 +218,12 @@ pub(super) fn parse_index_elem_tokens(tokens: Vec<Token>) -> PResult<IndexElem> 
         TokenKind::NullsP,
         TokenKind::Eof,
     ]) {
+        suffix.record_completion_slot(GrammarSlot::OperatorClass);
         element.opclass = suffix.parse_name_list();
         if element.opclass.is_empty() {
             return Err(suffix.error_here("expected an operator class name"));
         }
+        suffix.record_completion_follow_tokens(&[TokenKind::Char('(')]);
         if suffix.at(TokenKind::Char('(')) {
             element.opclassopts = suffix.parse_parenthesized_reloptions()?;
         }

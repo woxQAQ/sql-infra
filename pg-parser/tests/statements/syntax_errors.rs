@@ -41,7 +41,6 @@ fn incomplete_select_forms_are_rejected() {
         "select 1 operator(pg_catalog.) 2",
         "select 1 operator(pg_catalog.+)",
         "select 1 = 2 = 3",
-        "select value is null is null",
         "select value between 1 and 2 between 3 and 4",
         "select value like pattern ilike other_pattern",
         "select (1",

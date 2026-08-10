@@ -1,4 +1,64 @@
+//! Object and role privilege statements.
+//!
+//! Grant/revoke mode, privilege names, target identity grammars, grantees,
+//! grantors, options, and default-privilege scope are parsed here.
+
 use super::*;
+
+const ACCESS_PRIVILEGE_STARTS: &[TokenKind] = &[
+    TokenKind::All,
+    TokenKind::Alter,
+    TokenKind::Create,
+    TokenKind::DeleteP,
+    TokenKind::Execute,
+    TokenKind::Insert,
+    TokenKind::References,
+    TokenKind::Select,
+    TokenKind::Set,
+    TokenKind::Temp,
+    TokenKind::Temporary,
+    TokenKind::Trigger,
+    TokenKind::Truncate,
+    TokenKind::Update,
+];
+
+const PRIVILEGE_TARGET_STARTS: &[TokenKind] = &[
+    TokenKind::All,
+    TokenKind::Table,
+    TokenKind::Sequence,
+    TokenKind::Function,
+    TokenKind::Procedure,
+    TokenKind::Routine,
+    TokenKind::Database,
+    TokenKind::DomainP,
+    TokenKind::Language,
+    TokenKind::Schema,
+    TokenKind::Tablespace,
+    TokenKind::TypeP,
+    TokenKind::Parameter,
+    TokenKind::Foreign,
+    TokenKind::Property,
+    TokenKind::LargeP,
+];
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum GrantKind {
+    Grant,
+    Revoke,
+}
+
+impl GrantKind {
+    fn is_grant(self) -> bool {
+        self == Self::Grant
+    }
+
+    fn grantee_separator(self) -> TokenKind {
+        match self {
+            Self::Grant => TokenKind::To,
+            Self::Revoke => TokenKind::From,
+        }
+    }
+}
 
 impl Parser {
     // PostgreSQL 18 Synopsis
@@ -85,6 +145,12 @@ impl Parser {
             self.peek_kind(),
             TokenKind::Grant | TokenKind::Revoke | TokenKind::Eof
         ) {
+            self.record_completion_tokens(&[
+                TokenKind::For,
+                TokenKind::InP,
+                TokenKind::Grant,
+                TokenKind::Revoke,
+            ]);
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::For => {
@@ -105,11 +171,9 @@ impl Parser {
                     if roles.is_empty() {
                         return Err(self.error_here("FOR ROLE/USER requires at least one role"));
                     }
-                    options.push(Node::DefElem(DefElem {
-                        node_tag: NodeTag::DefElem,
+                    options.push(node!(DefElem {
                         defname: Some("roles".to_owned()),
-                        arg: Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
+                        arg: Some(Box::new(node!(AArrayExpr {
                             elements: roles,
                             ..AArrayExpr::default()
                         }))),
@@ -120,20 +184,22 @@ impl Parser {
                 TokenKind::InP => {
                     self.advance();
                     self.expect(TokenKind::Schema)?;
-                    let schemas = self.parse_simple_name_list_until(&[
-                        TokenKind::Grant,
-                        TokenKind::Revoke,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?;
+                    self.record_completion_slot(GrammarSlot::Schema);
+                    let schemas = self.parse_simple_name_list_until(
+                        &[
+                            TokenKind::Grant,
+                            TokenKind::Revoke,
+                            TokenKind::Char(';'),
+                            TokenKind::Eof,
+                        ],
+                        GrammarSlot::Schema,
+                    )?;
                     if schemas.is_empty() {
                         return Err(self.error_here("IN SCHEMA requires at least one schema"));
                     }
-                    options.push(Node::DefElem(DefElem {
-                        node_tag: NodeTag::DefElem,
+                    options.push(node!(DefElem {
                         defname: Some("schemas".to_owned()),
-                        arg: Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
+                        arg: Some(Box::new(node!(AArrayExpr {
                             elements: schemas,
                             ..AArrayExpr::default()
                         }))),
@@ -151,13 +217,7 @@ impl Parser {
         } else {
             return Err(self.error_here("ALTER DEFAULT PRIVILEGES requires GRANT or REVOKE"));
         };
-        Ok(Node::AlterDefaultPrivilegesStmt(
-            AlterDefaultPrivilegesStmt {
-                node_tag: NodeTag::AlterDefaultPrivilegesStmt,
-                options,
-                action,
-            },
-        ))
+        Ok(node!(AlterDefaultPrivilegesStmt { options, action }))
     }
 
     fn parse_default_privileges_action(&mut self) -> PResult<GrantStmt> {
@@ -172,8 +232,18 @@ impl Parser {
         } else {
             false
         };
+        self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
         let privileges = self.parse_access_privileges()?;
         self.expect(TokenKind::On)?;
+        self.record_completion_tokens(&[
+            TokenKind::Tables,
+            TokenKind::Functions,
+            TokenKind::Routines,
+            TokenKind::Sequences,
+            TokenKind::TypesP,
+            TokenKind::Schemas,
+            TokenKind::LargeP,
+        ]);
         let objtype = match self.peek_kind() {
             TokenKind::Tables => ObjectType::Table,
             TokenKind::Functions | TokenKind::Routines => ObjectType::Function,
@@ -206,20 +276,14 @@ impl Parser {
             true,
         )?;
         let (grant_option, behavior) = if is_grant {
-            let with_grant_option = if self.consume(TokenKind::With) {
-                self.expect(TokenKind::Grant)?;
-                self.expect(TokenKind::Option)?;
-                true
-            } else {
-                false
-            };
+            let with_grant_option =
+                self.consume_phrase(&[TokenKind::With, TokenKind::Grant, TokenKind::Option])?;
             (with_grant_option, DropBehavior::Restrict)
         } else {
             (grant_option, self.parse_drop_behavior())
         };
         self.expect_statement_end()?;
         Ok(GrantStmt {
-            node_tag: NodeTag::GrantStmt,
             is_grant,
             targtype: GrantTargetType::Defaults,
             objtype,
@@ -275,8 +339,8 @@ impl Parser {
     //     [ GRANTED BY role_specification ]
     //
     // GRANT { EXECUTE | ALL [ PRIVILEGES ] }
-    //     ON { { FUNCTION | PROCEDURE | ROUTINE } routine_name [ ( [ [ argmode ] [ arg_name ] arg_type [, ...] ] ) ] [, ...]
-    //          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
+    //     ON { { FUNCTION | PROCEDURE | ROUTINE } routine_name [ ( [ [ argmode ] [ arg_name ]
+    // arg_type [, ...] ] ) ] [, ...]          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
     //     TO role_specification [, ...] [ WITH GRANT OPTION ]
     //     [ GRANTED BY role_specification ]
     //
@@ -380,8 +444,8 @@ impl Parser {
     //
     // REVOKE [ GRANT OPTION FOR ]
     //     { EXECUTE | ALL [ PRIVILEGES ] }
-    //     ON { { FUNCTION | PROCEDURE | ROUTINE } function_name [ ( [ [ argmode ] [ arg_name ] arg_type [, ...] ] ) ] [, ...]
-    //          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
+    //     ON { { FUNCTION | PROCEDURE | ROUTINE } function_name [ ( [ [ argmode ] [ arg_name ]
+    // arg_type [, ...] ] ) ] [, ...]          | ALL { FUNCTIONS | PROCEDURES | ROUTINES } IN SCHEMA schema_name [, ...] }
     //     FROM role_specification [, ...]
     //     [ GRANTED BY role_specification ]
     //     [ CASCADE | RESTRICT ]
@@ -440,10 +504,13 @@ impl Parser {
     //   | CURRENT_ROLE
     //   | CURRENT_USER
     //   | SESSION_USER
-    pub(super) fn parse_grant(&mut self, is_grant: bool) -> PResult<Node> {
+    pub(super) fn parse_grant(&mut self, kind: GrantKind) -> PResult<Node> {
         self.advance();
+        self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
+        self.record_completion_slot(GrammarSlot::Privilege);
+        self.record_completion_slot(GrammarSlot::Role);
         let mut revoke_grant_option = false;
-        if !is_grant && self.consume(TokenKind::Grant) {
+        if kind == GrantKind::Revoke && self.consume(TokenKind::Grant) {
             self.expect(TokenKind::Option)?;
             self.expect(TokenKind::For)?;
             revoke_grant_option = true;
@@ -453,20 +520,18 @@ impl Parser {
             TokenKind::On,
             &[TokenKind::To, TokenKind::From, TokenKind::Eof],
         ) {
-            return self.parse_object_grant(is_grant, revoke_grant_option);
+            return self.parse_object_grant(kind, revoke_grant_option);
         }
-        self.parse_role_grant(is_grant)
+        self.parse_role_grant(kind)
     }
 
-    fn parse_object_grant(&mut self, is_grant: bool, revoke_grant_option: bool) -> PResult<Node> {
+    fn parse_object_grant(&mut self, kind: GrantKind, revoke_grant_option: bool) -> PResult<Node> {
+        self.record_completion_tokens(ACCESS_PRIVILEGE_STARTS);
+        self.record_completion_slot(GrammarSlot::Privilege);
         let privileges = self.parse_access_privileges()?;
         self.expect(TokenKind::On)?;
         let (targtype, objtype, objects) = self.parse_privilege_target()?;
-        self.expect(if is_grant {
-            TokenKind::To
-        } else {
-            TokenKind::From
-        })?;
+        self.expect(kind.grantee_separator())?;
         let grantees = self.parse_role_specs_until(
             &[
                 TokenKind::With,
@@ -478,7 +543,7 @@ impl Parser {
             ],
             true,
         )?;
-        let grant_option = if is_grant && self.consume(TokenKind::With) {
+        let grant_option = if kind.is_grant() && self.consume(TokenKind::With) {
             self.expect(TokenKind::Grant)?;
             self.expect(TokenKind::Option)?;
             true
@@ -494,14 +559,13 @@ impl Parser {
         } else {
             None
         };
-        let behavior = if is_grant {
+        let behavior = if kind.is_grant() {
             DropBehavior::Restrict
         } else {
             self.parse_drop_behavior()
         };
-        Ok(Node::GrantStmt(GrantStmt {
-            node_tag: NodeTag::GrantStmt,
-            is_grant,
+        Ok(node!(GrantStmt {
+            is_grant: kind.is_grant(),
             targtype,
             objtype,
             objects,
@@ -513,11 +577,16 @@ impl Parser {
         }))
     }
 
-    fn parse_role_grant(&mut self, is_grant: bool) -> PResult<Node> {
-        let mut opt = Vec::new();
-        if !is_grant
+    fn parse_role_grant(&mut self, kind: GrantKind) -> PResult<Node> {
+        let mut role_options = Vec::new();
+        if kind == GrantKind::Revoke && self.peek_kind_n(1) == TokenKind::Completion {
+            self.advance();
+            self.record_completion_tokens(&[TokenKind::Option, TokenKind::On, TokenKind::From]);
+            return Err(self.error_here("expected a REVOKE continuation"));
+        }
+        if kind == GrantKind::Revoke
             && self.peek_kind_n(1) == TokenKind::Option
-            && self.peek_kind_n(2) == TokenKind::For
+            && matches!(self.peek_kind_n(2), TokenKind::For | TokenKind::Completion)
         {
             let location = self.location();
             let name = self
@@ -525,21 +594,19 @@ impl Parser {
                 .ok_or_else(|| self.error_here("expected a role option name"))?;
             self.expect(TokenKind::Option)?;
             self.expect(TokenKind::For)?;
-            opt.push(make_def_elem(
+            role_options.push(make_def_elem(
                 &name,
-                Some(Node::Boolean(Boolean::new(false))),
+                Some(node!(Boolean::new(false))),
                 location,
             ));
         }
-        let separator = if is_grant {
-            TokenKind::To
-        } else {
-            TokenKind::From
-        };
-        if self.at(TokenKind::All) {
+        let separator = kind.grantee_separator();
+        if self.peek_kind() == TokenKind::All && !self.top_level_contains(TokenKind::Completion) {
             return Err(self.error_here("GRANT/REVOKE ROLE requires an explicit role list"));
         }
+        self.record_completion_slot(GrammarSlot::Role);
         let granted_roles = self.parse_access_privileges_until(separator)?;
+        self.record_completion_tokens(&[TokenKind::On]);
         self.expect(separator)?;
         let grantee_roles = self.parse_role_specs_until(
             &[
@@ -552,7 +619,7 @@ impl Parser {
             ],
             false,
         )?;
-        if is_grant && self.consume(TokenKind::With) {
+        if kind.is_grant() && self.consume(TokenKind::With) {
             loop {
                 let location = self.location();
                 let name = self
@@ -565,9 +632,9 @@ impl Parser {
                 } else {
                     return Err(self.error_here("expected OPTION, TRUE, or FALSE"));
                 };
-                opt.push(make_def_elem(
+                role_options.push(make_def_elem(
                     &name,
-                    Some(Node::Boolean(Boolean::new(value))),
+                    Some(node!(Boolean::new(value))),
                     location,
                 ));
                 if !self.consume(TokenKind::Char(',')) {
@@ -584,17 +651,16 @@ impl Parser {
         } else {
             None
         };
-        let behavior = if is_grant {
+        let behavior = if kind.is_grant() {
             DropBehavior::Restrict
         } else {
             self.parse_drop_behavior()
         };
-        Ok(Node::GrantRoleStmt(GrantRoleStmt {
-            node_tag: NodeTag::GrantRoleStmt,
+        Ok(node!(GrantRoleStmt {
             granted_roles,
             grantee_roles,
-            is_grant,
-            opt,
+            is_grant: kind.is_grant(),
+            opt: role_options,
             grantor,
             behavior,
         }))
@@ -605,21 +671,28 @@ impl Parser {
     }
 
     fn parse_access_privileges_until(&mut self, stop: TokenKind) -> PResult<NodeList> {
+        self.record_completion_slot(GrammarSlot::Privilege);
+        if stop != TokenKind::On {
+            self.record_completion_slot(GrammarSlot::Role);
+        }
         if self.consume(TokenKind::All) {
             self.consume(TokenKind::Privileges);
             let cols = self.parse_optional_column_name_list()?;
             return if cols.is_empty() {
                 Ok(Vec::new())
             } else {
-                Ok(vec![Node::AccessPriv(AccessPriv {
-                    node_tag: NodeTag::AccessPriv,
+                Ok(vec![node!(AccessPriv {
                     cols,
                     ..AccessPriv::default()
                 })])
             };
         }
         let mut privileges = Vec::new();
-        while !self.at(stop) {
+        while self.at_completion() || !self.at(stop) {
+            self.record_completion_slot(GrammarSlot::Privilege);
+            if stop != TokenKind::On {
+                self.record_completion_slot(GrammarSlot::Role);
+            }
             let (name, allow_columns) = if self.consume(TokenKind::Alter) {
                 self.expect(TokenKind::SystemP)?;
                 ("alter system".to_owned(), false)
@@ -644,15 +717,14 @@ impl Parser {
             } else {
                 Vec::new()
             };
-            privileges.push(Node::AccessPriv(AccessPriv {
-                node_tag: NodeTag::AccessPriv,
+            privileges.push(node!(AccessPriv {
                 priv_name: Some(name),
                 cols,
             }));
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at(stop) {
+            if self.peek_kind() == stop {
                 return Err(self.error_here("expected a privilege or role after ','"));
             }
         }
@@ -666,6 +738,8 @@ impl Parser {
         if !self.consume(TokenKind::Char('(')) {
             return Ok(Vec::new());
         }
+        self.record_completion_slot(GrammarSlot::Column);
+        self.request_completion_membership_recovery();
         let mut columns = Vec::new();
         loop {
             let column = self
@@ -681,7 +755,15 @@ impl Parser {
     }
 
     fn parse_privilege_target(&mut self) -> PResult<(GrantTargetType, ObjectType, NodeList)> {
+        self.record_completion_tokens(PRIVILEGE_TARGET_STARTS);
         if self.consume(TokenKind::All) {
+            self.record_completion_tokens(&[
+                TokenKind::Tables,
+                TokenKind::Sequences,
+                TokenKind::Functions,
+                TokenKind::Procedures,
+                TokenKind::Routines,
+            ]);
             let objtype = match self.peek_kind() {
                 TokenKind::Tables => ObjectType::Table,
                 TokenKind::Sequences => ObjectType::Sequence,
@@ -693,12 +775,16 @@ impl Parser {
             self.advance();
             self.expect(TokenKind::InP)?;
             self.expect(TokenKind::Schema)?;
-            let objects = self.parse_simple_name_list_until(&[
-                TokenKind::To,
-                TokenKind::From,
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ])?;
+            self.record_completion_slot(GrammarSlot::Schema);
+            let objects = self.parse_simple_name_list_until(
+                &[
+                    TokenKind::To,
+                    TokenKind::From,
+                    TokenKind::Char(';'),
+                    TokenKind::Eof,
+                ],
+                GrammarSlot::Schema,
+            )?;
             if objects.is_empty() {
                 return Err(self.error_here("IN SCHEMA requires at least one schema"));
             }
@@ -754,20 +840,21 @@ impl Parser {
                 self.advance();
                 ObjectType::ParameterAcl
             }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::DataP => {
+            TokenKind::Foreign => {
                 self.advance();
-                self.advance();
-                self.expect(TokenKind::Wrapper)?;
-                ObjectType::Fdw
+                self.record_completion_tokens(&[TokenKind::DataP, TokenKind::Server]);
+                if self.consume(TokenKind::DataP) {
+                    self.expect(TokenKind::Wrapper)?;
+                    ObjectType::Fdw
+                } else if self.consume(TokenKind::Server) {
+                    ObjectType::ForeignServer
+                } else {
+                    return Err(self.error_here("expected DATA WRAPPER or SERVER after FOREIGN"));
+                }
             }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::Server => {
+            TokenKind::Property => {
                 self.advance();
-                self.advance();
-                ObjectType::ForeignServer
-            }
-            TokenKind::Property if self.peek_kind_n(1) == TokenKind::Graph => {
-                self.advance();
-                self.advance();
+                self.expect(TokenKind::Graph)?;
                 ObjectType::Propgraph
             }
             TokenKind::LargeP => {
@@ -783,29 +870,53 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
+        let object_slot = object_type_slot(objtype);
+        self.record_completion_slot(object_slot);
+        self.record_completion_qualified_name_slot(object_slot, &stops);
+        let owner_start = self.pos;
         let objects = match objtype {
             ObjectType::Function | ObjectType::Procedure | ObjectType::Routine => {
-                self.parse_object_with_args_list_until(&stops)?
+                self.parse_object_with_args_list_until_with_slot(&stops, object_slot)?
             }
             ObjectType::Table | ObjectType::Sequence | ObjectType::Propgraph => {
-                self.parse_privilege_qualified_name_list(&stops)?
+                self.parse_privilege_qualified_name_list_with_slot(&stops, object_slot)?
             }
-            ObjectType::Domain | ObjectType::Type => self.parse_any_name_list_until(&stops)?,
+            ObjectType::Domain | ObjectType::Type => {
+                self.parse_any_name_list_until_with_slot(&stops, object_slot)?
+            }
             ObjectType::Largeobject => self.parse_privilege_numeric_list(&stops)?,
             ObjectType::ParameterAcl => self.parse_parameter_name_list_until(&stops)?,
-            _ => self.parse_simple_name_list_until(&stops)?,
+            _ => self.parse_simple_name_list_until(&stops, object_slot)?,
         };
         if objects.is_empty() {
             return Err(self.error_here("expected at least one privilege target"));
         }
+        let owner_end = self.pos;
+        if objtype == ObjectType::Table && objects.len() == 1 {
+            self.push_completion_membership_owner_from_tokens(
+                &[GrammarSlot::Column],
+                &[
+                    ObjectType::Table,
+                    ObjectType::View,
+                    ObjectType::Matview,
+                    ObjectType::ForeignTable,
+                ],
+                owner_start,
+                owner_end,
+            );
+        }
         Ok((GrantTargetType::Object, objtype, objects))
     }
 
-    fn parse_privilege_qualified_name_list(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+    fn parse_privilege_qualified_name_list_with_slot(
+        &mut self,
+        stops: &[TokenKind],
+        slot: GrammarSlot,
+    ) -> PResult<NodeList> {
         let mut objects = Vec::new();
         loop {
             objects.push(Node::RangeVar(
-                self.try_parse_qualified_range_var()
+                self.try_parse_qualified_range_var_with_slot(slot)
                     .ok_or_else(|| self.error_here("expected a qualified relation name"))?,
             ));
             if !self.consume(TokenKind::Char(',')) {
@@ -862,7 +973,7 @@ impl Parser {
         allow_group_prefix: bool,
     ) -> PResult<NodeList> {
         let mut roles = Vec::new();
-        while !self.at_any(stops) {
+        while self.at_completion() || !self.at_any(stops) {
             if allow_group_prefix {
                 self.consume(TokenKind::GroupP);
             }
@@ -873,7 +984,7 @@ impl Parser {
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at_any(stops) {
+            if !self.at_completion() && self.at_any(stops) {
                 return Err(self.error_here("expected a role after ','"));
             }
         }

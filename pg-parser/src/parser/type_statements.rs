@@ -1,3 +1,8 @@
+//! User-defined type and enum alteration statements.
+//!
+//! Base, composite, enum, and range type actions retain their distinct command
+//! payloads while sharing type identities and option shapes.
+
 use super::*;
 
 impl Parser {
@@ -43,19 +48,20 @@ impl Parser {
     // CREATE TYPE name
     pub(super) fn parse_create_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
+        self.record_completion_slot(GrammarSlot::Type);
         let type_location = self.location();
         let type_name = self.parse_name_list();
         if type_name.is_empty() {
             return Err(self.error_here("CREATE TYPE requires a type name"));
         }
+        self.record_completion_tokens(&[TokenKind::As, TokenKind::Char('(')]);
         if !self.consume(TokenKind::As) {
             let definition = if self.at(TokenKind::Char('(')) {
-                self.parse_parenthesized_definition()?
+                self.parse_parenthesized_definition_for(Some(ObjectType::Type))?
             } else {
                 Vec::new()
             };
-            return Ok(Node::DefineStmt(DefineStmt {
-                node_tag: NodeTag::DefineStmt,
+            return Ok(node!(DefineStmt {
                 kind: ObjectType::Type,
                 defnames: type_name,
                 definition,
@@ -63,16 +69,15 @@ impl Parser {
             }));
         }
 
+        self.record_completion_tokens(&[TokenKind::EnumP, TokenKind::Range, TokenKind::Char('(')]);
         match self.peek_kind() {
             TokenKind::EnumP => {
                 self.advance();
                 self.expect(TokenKind::Char('('))?;
                 let mut vals = Vec::new();
                 while !self.at(TokenKind::Char(')')) {
-                    if !self.at(TokenKind::SConst) {
-                        return Err(self.error_here("enum labels must be string literals"));
-                    }
-                    let value = self.consume_string_like().unwrap_or_default();
+                    let value =
+                        self.consume_required_string("enum labels must be string literals")?;
                     vals.push(make_string_node(value));
                     if !self.consume(TokenKind::Char(',')) {
                         break;
@@ -82,29 +87,19 @@ impl Parser {
                     }
                 }
                 self.expect(TokenKind::Char(')'))?;
-                Ok(Node::CreateEnumStmt(CreateEnumStmt {
-                    node_tag: NodeTag::CreateEnumStmt,
-                    type_name,
-                    vals,
-                }))
+                Ok(node!(CreateEnumStmt { type_name, vals }))
             }
             TokenKind::Range => {
                 self.advance();
                 let params = self.parse_parenthesized_definition()?;
-                Ok(Node::CreateRangeStmt(CreateRangeStmt {
-                    node_tag: NodeTag::CreateRangeStmt,
-                    type_name,
-                    params,
-                }))
+                Ok(node!(CreateRangeStmt { type_name, params }))
             }
             TokenKind::Char('(') => {
                 self.advance();
                 let mut coldeflist = Vec::new();
                 while !self.at(TokenKind::Char(')')) {
-                    coldeflist.push(*self.parse_table_func_element_until(&[
-                        TokenKind::Char(','),
-                        TokenKind::Char(')'),
-                    ])?);
+                    coldeflist
+                        .push(*self.parse_table_func_element_until(COMMA_OR_CLOSE_PAREN_TOKENS)?);
                     if !self.consume(TokenKind::Char(',')) {
                         break;
                     }
@@ -113,8 +108,7 @@ impl Parser {
                     }
                 }
                 self.expect(TokenKind::Char(')'))?;
-                Ok(Node::CompositeTypeStmt(CompositeTypeStmt {
-                    node_tag: NodeTag::CompositeTypeStmt,
+                Ok(node!(CompositeTypeStmt {
                     typevar: Some(Box::new(range_var_from_parts(
                         list_to_names(&type_name),
                         type_location,
@@ -131,7 +125,8 @@ impl Parser {
     // ALTER TYPE name SET ( property = value [, ... ] )
     pub(super) fn parse_alter_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
-        let type_name = self.parse_name_list_until_keywords(&[
+        self.record_completion_slot(GrammarSlot::Type);
+        let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::Set,
             TokenKind::Char(';'),
             TokenKind::Eof,
@@ -139,14 +134,19 @@ impl Parser {
         if type_name.is_empty() {
             return Err(self.error_here("ALTER TYPE requires a type name"));
         }
+        self.record_completion_tokens(&[
+            TokenKind::Set,
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Alter,
+            TokenKind::Rename,
+            TokenKind::Owner,
+        ]);
         self.expect(TokenKind::Set)?;
-        let options = self.parse_operator_definition_list()?;
+        self.record_completion_tokens(&[TokenKind::Schema, TokenKind::Char('(')]);
+        let options = self.parse_operator_definition_list(ObjectType::Type)?;
         self.expect_statement_end()?;
-        Ok(Node::AlterTypeStmt(AlterTypeStmt {
-            node_tag: NodeTag::AlterTypeStmt,
-            type_name,
-            options,
-        }))
+        Ok(node!(AlterTypeStmt { type_name, options }))
     }
 
     // PostgreSQL 18 Synopsis subset — enum values
@@ -157,7 +157,8 @@ impl Parser {
     // ALTER TYPE name RENAME VALUE existing_enum_value TO new_enum_value
     pub(super) fn parse_alter_enum(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
-        let type_name = self.parse_name_list_until_keywords(&[
+        self.record_completion_slot(GrammarSlot::Type);
+        let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::AddP,
             TokenKind::Rename,
             TokenKind::Drop,
@@ -165,7 +166,6 @@ impl Parser {
             TokenKind::Eof,
         ]);
         let mut stmt = AlterEnumStmt {
-            node_tag: NodeTag::AlterEnumStmt,
             type_name,
             ..AlterEnumStmt::default()
         };
@@ -173,9 +173,11 @@ impl Parser {
             return Err(self.error_here("ALTER TYPE requires an enum type name"));
         }
 
+        self.record_completion_tokens(&[TokenKind::AddP, TokenKind::Rename, TokenKind::Drop]);
         match self.peek_kind() {
             TokenKind::AddP => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::ValueP, TokenKind::Attribute]);
                 self.expect(TokenKind::ValueP)?;
                 stmt.skip_if_new_val_exists = self.consume_if_not_exists()?;
                 stmt.new_val = Some(self.consume_required_string("ADD VALUE requires a string")?);
@@ -193,6 +195,11 @@ impl Parser {
             }
             TokenKind::Rename => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::ValueP,
+                    TokenKind::Attribute,
+                    TokenKind::To,
+                ]);
                 self.expect(TokenKind::ValueP)?;
                 stmt.old_val =
                     Some(self.consume_required_string("RENAME VALUE requires a string")?);
@@ -201,9 +208,10 @@ impl Parser {
             }
             TokenKind::Drop => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::ValueP, TokenKind::Attribute]);
                 self.expect(TokenKind::ValueP)?;
                 self.consume_required_string("DROP VALUE requires a string")?;
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     self.previous_location(),
                     "dropping an enum value is not implemented",
                 ));
@@ -228,23 +236,33 @@ impl Parser {
     //         [ COLLATE collation ] [ CASCADE | RESTRICT ]
     pub(super) fn parse_alter_composite_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
+        self.record_completion_slot(GrammarSlot::Type);
         let type_location = self.location();
-        let names = self.parse_name_list_until_keywords(&[
+        let owner_start = self.pos;
+        let names = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::AddP,
             TokenKind::Drop,
             TokenKind::Alter,
             TokenKind::Char(';'),
             TokenKind::Eof,
         ]);
+        let owner_end = self.pos;
         if names.is_empty() {
             return Err(self.error_here("ALTER TYPE requires a composite type name"));
         }
+        self.push_completion_membership_owner_from_tokens(
+            &[GrammarSlot::Attribute],
+            &[ObjectType::Type],
+            owner_start,
+            owner_end,
+        );
         let relation = Some(Box::new(range_var_from_parts(
             list_to_names(&names),
             type_location,
         )));
         let mut cmds = Vec::new();
         loop {
+            self.record_completion_tokens(&[TokenKind::AddP, TokenKind::Drop, TokenKind::Alter]);
             cmds.push(Node::AlterTableCmd(self.parse_alter_composite_type_cmd()?));
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -254,8 +272,7 @@ impl Parser {
             }
         }
         self.expect_statement_end()?;
-        Ok(Node::AlterTableStmt(AlterTableStmt {
-            node_tag: NodeTag::AlterTableStmt,
+        Ok(node!(AlterTableStmt {
             relation,
             cmds,
             objtype: ObjectType::Type,
@@ -265,7 +282,6 @@ impl Parser {
 
     fn parse_alter_composite_type_cmd(&mut self) -> PResult<AlterTableCmd> {
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
         match self.peek_kind() {
@@ -287,6 +303,7 @@ impl Parser {
                 self.expect(TokenKind::Attribute)?;
                 cmd.subtype = AlterTableType::DropColumn;
                 cmd.missing_ok = self.consume_if_exists()?;
+                self.record_completion_slot(GrammarSlot::Attribute);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("DROP ATTRIBUTE requires a name"))?,
@@ -298,6 +315,7 @@ impl Parser {
                 self.expect(TokenKind::Attribute)?;
                 cmd.subtype = AlterTableType::AlterColumnType;
                 let attribute_location = self.location();
+                self.record_completion_slot(GrammarSlot::Attribute);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("ALTER ATTRIBUTE requires a name"))?,
@@ -318,6 +336,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("ALTER ATTRIBUTE TYPE requires a data type"))?,
                 ));
                 let coll_clause = if self.consume(TokenKind::Collate) {
+                    self.record_completion_slot(GrammarSlot::Collation);
                     let location = self.previous_location();
                     let collname = self.parse_name_list_until_keywords(&[
                         TokenKind::Cascade,
@@ -330,7 +349,6 @@ impl Parser {
                         return Err(self.error_here("COLLATE requires a collation name"));
                     }
                     Some(Box::new(CollateClause {
-                        node_tag: NodeTag::CollateClause,
                         collname,
                         location: location as ParseLoc,
                         ..CollateClause::default()
@@ -338,8 +356,7 @@ impl Parser {
                 } else {
                     None
                 };
-                cmd.def = Some(Box::new(Node::ColumnDef(ColumnDef {
-                    node_tag: NodeTag::ColumnDef,
+                cmd.def = Some(Box::new(node!(ColumnDef {
                     type_name,
                     coll_clause,
                     location: attribute_location as ParseLoc,

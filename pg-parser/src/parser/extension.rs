@@ -1,3 +1,8 @@
+//! Extension creation, alteration, update, and membership parsing.
+//!
+//! Extension member identities reuse the object-specific identity parsers used by
+//! regular DDL instead of accepting arbitrary token text.
+
 use super::*;
 
 impl Parser {
@@ -10,6 +15,7 @@ impl Parser {
     pub(super) fn parse_create_extension(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Extension)?;
         let if_not_exists = self.consume_if_not_exists()?;
+        self.record_completion_slot(GrammarSlot::Extension);
         let extname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE EXTENSION requires a name"))?,
@@ -17,10 +23,16 @@ impl Parser {
         self.consume(TokenKind::With);
         let mut options = Vec::new();
         while !self.at_statement_end() {
+            self.record_completion_lookahead_tokens(&[
+                TokenKind::Schema,
+                TokenKind::VersionP,
+                TokenKind::Cascade,
+            ]);
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::Schema => {
                     self.advance();
+                    self.record_completion_slot(GrammarSlot::Schema);
                     let schema = self
                         .consume_col_id()
                         .ok_or_else(|| self.error_here("SCHEMA requires a name"))?;
@@ -45,7 +57,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "cascade",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -55,8 +67,7 @@ impl Parser {
                 _ => return Err(self.error_here("invalid CREATE EXTENSION option")),
             }
         }
-        Ok(Node::CreateExtensionStmt(CreateExtensionStmt {
-            node_tag: NodeTag::CreateExtensionStmt,
+        Ok(node!(CreateExtensionStmt {
             extname,
             if_not_exists,
             options,
@@ -105,13 +116,21 @@ impl Parser {
     //
     // * |
     // [ argmode ] [ argname ] argtype [ , ... ] |
-    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ , ... ]
+    // [ [ argmode ] [ argname ] argtype [ , ... ] ] ORDER BY [ argmode ] [ argname ] argtype [ ,
+    // ... ]
     pub(super) fn parse_alter_extension(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Extension)?;
+        self.record_completion_slot(GrammarSlot::Extension);
         let extname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER EXTENSION requires a name"))?,
         );
+        self.record_completion_tokens(&[
+            TokenKind::Update,
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Set,
+        ]);
         if matches!(self.peek_kind(), TokenKind::AddP | TokenKind::Drop) {
             let action = if self.consume(TokenKind::AddP) {
                 1
@@ -121,15 +140,12 @@ impl Parser {
             };
             let (objtype, object) = self.parse_extension_member_object()?;
             self.expect_statement_end()?;
-            Ok(Node::AlterExtensionContentsStmt(
-                AlterExtensionContentsStmt {
-                    node_tag: NodeTag::AlterExtensionContentsStmt,
-                    extname,
-                    action,
-                    objtype,
-                    object: Some(Box::new(object)),
-                },
-            ))
+            Ok(node!(AlterExtensionContentsStmt {
+                extname,
+                action,
+                objtype,
+                object: Some(Box::new(object)),
+            }))
         } else {
             self.expect(TokenKind::Update)?;
             let mut options = Vec::new();
@@ -145,36 +161,72 @@ impl Parser {
                 ));
             }
             self.expect_statement_end()?;
-            Ok(Node::AlterExtensionStmt(AlterExtensionStmt {
-                node_tag: NodeTag::AlterExtensionStmt,
-                extname,
-                options,
-            }))
+            Ok(node!(AlterExtensionStmt { extname, options }))
         }
     }
 
     fn parse_extension_member_object(&mut self) -> PResult<(ObjectType, Node)> {
+        self.record_completion_tokens(&[
+            TokenKind::Access,
+            TokenKind::Aggregate,
+            TokenKind::Cast,
+            TokenKind::Collation,
+            TokenKind::ConversionP,
+            TokenKind::Database,
+            TokenKind::DomainP,
+            TokenKind::Event,
+            TokenKind::Extension,
+            TokenKind::Foreign,
+            TokenKind::Function,
+            TokenKind::Index,
+            TokenKind::Language,
+            TokenKind::Materialized,
+            TokenKind::Operator,
+            TokenKind::Procedure,
+            TokenKind::Procedural,
+            TokenKind::Property,
+            TokenKind::Publication,
+            TokenKind::Role,
+            TokenKind::Routine,
+            TokenKind::Schema,
+            TokenKind::Sequence,
+            TokenKind::Server,
+            TokenKind::Statistics,
+            TokenKind::Subscription,
+            TokenKind::Table,
+            TokenKind::Tablespace,
+            TokenKind::TextP,
+            TokenKind::Transform,
+            TokenKind::TypeP,
+            TokenKind::View,
+        ]);
+        if self.at(TokenKind::Operator)
+            && !matches!(self.peek_kind_n(1), TokenKind::Class | TokenKind::Family)
+        {
+            self.advance();
+            self.record_completion_tokens(&[TokenKind::Class, TokenKind::Family]);
+            self.record_completion_slot(GrammarSlot::Operator);
+            let object = self.parse_operator_with_args_until(STATEMENT_END_TOKENS)?;
+            return Ok((ObjectType::Operator, Node::ObjectWithArgs(object)));
+        }
         let function_type = match self.peek_kind() {
             TokenKind::Aggregate => Some(ObjectType::Aggregate),
             TokenKind::Function => Some(ObjectType::Function),
             TokenKind::Procedure => Some(ObjectType::Procedure),
             TokenKind::Routine => Some(ObjectType::Routine),
-            TokenKind::Operator
-                if self.peek_kind_n(1) != TokenKind::Class
-                    && self.peek_kind_n(1) != TokenKind::Family =>
-            {
-                Some(ObjectType::Operator)
-            }
             _ => None,
         };
         if let Some(objtype) = function_type {
             self.advance();
             let object = if objtype == ObjectType::Operator {
-                self.parse_operator_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?
+                self.parse_operator_with_args_until(STATEMENT_END_TOKENS)?
             } else if objtype == ObjectType::Aggregate {
-                self.parse_aggregate_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?
+                self.parse_aggregate_with_args_until(STATEMENT_END_TOKENS)?
             } else {
-                self.parse_object_with_args_until(&[TokenKind::Char(';'), TokenKind::Eof])?
+                self.parse_object_with_args_until_with_slot(
+                    STATEMENT_END_TOKENS,
+                    object_type_slot(objtype),
+                )?
             };
             return Ok((objtype, Node::ObjectWithArgs(object)));
         }
@@ -201,7 +253,7 @@ impl Parser {
                 ObjectType::Type
             };
             let type_name = self
-                .parse_type_name_until(&[TokenKind::Char(';'), TokenKind::Eof])
+                .parse_type_name_until(STATEMENT_END_TOKENS)
                 .ok_or_else(|| self.error_here("object requires a type name"))?;
             return Ok((objtype, Node::TypeName(type_name)));
         }
@@ -211,6 +263,7 @@ impl Parser {
                 .parse_type_name_until(&[TokenKind::Language])
                 .ok_or_else(|| self.error_here("TRANSFORM FOR requires a type"))?;
             self.expect(TokenKind::Language)?;
+            self.record_completion_slot(GrammarSlot::Language);
             let language = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("LANGUAGE requires a name"))?;
@@ -235,9 +288,7 @@ impl Parser {
                 return Err(self.error_here("operator class or family requires a name"));
             }
             self.expect(TokenKind::Using)?;
-            let amname = self
-                .consume_col_id()
-                .ok_or_else(|| self.error_here("USING requires an access method"))?;
+            let amname = self.parse_access_method_name()?;
             names.insert(0, make_string_node(amname));
             return Ok((objtype, name_list_node(names)));
         }
@@ -255,6 +306,7 @@ impl Parser {
             }
             TokenKind::Foreign => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::DataP, TokenKind::Table]);
                 match self.peek_kind() {
                     TokenKind::DataP => {
                         self.advance();
@@ -290,6 +342,12 @@ impl Parser {
             TokenKind::TextP => {
                 self.advance();
                 self.expect(TokenKind::Search)?;
+                self.record_completion_tokens(&[
+                    TokenKind::Parser,
+                    TokenKind::Dictionary,
+                    TokenKind::Template,
+                    TokenKind::Configuration,
+                ]);
                 match self.advance().kind {
                     TokenKind::Parser => ObjectType::Tsparser,
                     TokenKind::Dictionary => ObjectType::Tsdictionary,
@@ -326,6 +384,7 @@ impl Parser {
             }
         };
 
+        self.record_completion_slot(object_type_slot(objtype));
         let uses_any_name = matches!(
             objtype,
             ObjectType::Table
@@ -344,8 +403,7 @@ impl Parser {
                 | ObjectType::Tsconfiguration
         );
         if uses_any_name {
-            let names =
-                self.parse_name_list_until_keywords(&[TokenKind::Char(';'), TokenKind::Eof]);
+            let names = self.parse_name_list_until_keywords(STATEMENT_END_TOKENS);
             if names.is_empty() {
                 return Err(self.error_here("extension member requires an object name"));
             }

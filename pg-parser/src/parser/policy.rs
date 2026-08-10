@@ -1,3 +1,8 @@
+//! Row-level security policy creation and alteration.
+//!
+//! Commands, roles, `USING`, and `WITH CHECK` expressions are kept with their
+//! policy-specific defaults and raw locations.
+
 use super::*;
 
 impl Parser {
@@ -11,13 +16,14 @@ impl Parser {
     //     [ WITH CHECK ( check_expression ) ]
     pub(super) fn parse_create_policy(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Policy)?;
+        self.record_completion_slot(GrammarSlot::Policy);
         let policy_name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE POLICY requires a name"))?,
         );
         self.expect(TokenKind::On)?;
         let table = Some(Box::new(
-            self.try_parse_qualified_range_var()
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("CREATE POLICY requires a table"))?,
         ));
         let permissive = if self.consume(TokenKind::As) {
@@ -35,6 +41,13 @@ impl Parser {
             true
         };
         let cmd_name = if self.consume(TokenKind::For) {
+            self.record_completion_tokens(&[
+                TokenKind::All,
+                TokenKind::Select,
+                TokenKind::Insert,
+                TokenKind::Update,
+                TokenKind::DeleteP,
+            ]);
             let command = match self.advance().kind {
                 TokenKind::All => "all",
                 TokenKind::Select => "select",
@@ -58,32 +71,24 @@ impl Parser {
                 false,
             )?
         } else {
-            vec![Node::RoleSpec(RoleSpec {
-                node_tag: NodeTag::RoleSpec,
+            vec![node!(RoleSpec {
                 roletype: RoleSpecType::Public,
                 rolename: None,
                 location: -1,
             })]
         };
         let qual = if self.consume(TokenKind::Using) {
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };
         let with_check = if self.consume(TokenKind::With) {
             self.expect(TokenKind::Check)?;
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };
-        Ok(Node::CreatePolicyStmt(CreatePolicyStmt {
-            node_tag: NodeTag::CreatePolicyStmt,
+        Ok(node!(CreatePolicyStmt {
             policy_name,
             table,
             cmd_name,
@@ -104,15 +109,17 @@ impl Parser {
     //     [ WITH CHECK ( check_expression ) ]
     pub(super) fn parse_alter_policy(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Policy)?;
+        self.record_completion_slot(GrammarSlot::Policy);
         let policy_name = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER POLICY requires a policy name"))?,
         );
         self.expect(TokenKind::On)?;
         let table = Some(Box::new(
-            self.try_parse_qualified_range_var()
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("ALTER POLICY requires a table"))?,
         ));
+        self.record_completion_tokens(&[TokenKind::Rename]);
         let roles = if self.consume(TokenKind::To) {
             let roles = self.parse_role_specs_until(
                 &[
@@ -131,25 +138,18 @@ impl Parser {
             Vec::new()
         };
         let qual = if self.consume(TokenKind::Using) {
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };
         let with_check = if self.consume(TokenKind::With) {
             self.expect(TokenKind::Check)?;
-            self.expect(TokenKind::Char('('))?;
-            let expr = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
-            self.expect(TokenKind::Char(')'))?;
-            Some(expr)
+            Some(self.parse_parenthesized_expr_box()?)
         } else {
             None
         };
         self.expect_statement_end()?;
-        Ok(Node::AlterPolicyStmt(AlterPolicyStmt {
-            node_tag: NodeTag::AlterPolicyStmt,
+        Ok(node!(AlterPolicyStmt {
             policy_name,
             table,
             roles,

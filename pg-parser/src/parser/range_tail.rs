@@ -1,3 +1,8 @@
+//! Tails that extend an initial `FROM` item.
+//!
+//! Join trees and `XMLTABLE` range expressions are parsed here after the base
+//! relation shape has been established by `range`.
+
 use super::*;
 
 impl Parser {
@@ -13,25 +18,24 @@ impl Parser {
             while !self.at(TokenKind::Char(')')) {
                 let target_location = self.location();
                 if self.consume(TokenKind::Default) {
-                    let tokens =
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                    namespaces.push(Node::ResTarget(ResTarget {
-                        node_tag: NodeTag::ResTarget,
-                        val: Some(Box::new(parse_b_expression_tokens(tokens)?)),
+                    let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+                    namespaces.push(node!(ResTarget {
+                        val: Some(Box::new(self.parse_b_expression_fragment_tokens(tokens)?)),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
                     }));
                 } else {
-                    let tokens =
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                    let (name, expr_tokens) = split_alias(tokens);
-                    let name = name.ok_or_else(|| {
-                        ParseError::new(target_location, "XML namespace requires AS alias")
-                    })?;
-                    namespaces.push(Node::ResTarget(ResTarget {
-                        node_tag: NodeTag::ResTarget,
+                    let expr_tokens = self.take_until_top_level(&[TokenKind::As]);
+                    self.record_expression_follow_tokens(&expr_tokens, &[TokenKind::As], true);
+                    let value = self.parse_b_expression_fragment_tokens(expr_tokens)?;
+                    self.expect(TokenKind::As)?;
+                    self.record_completion_slot(GrammarSlot::Alias);
+                    let name = self
+                        .consume_col_label()
+                        .ok_or_else(|| self.error_here("XML namespace requires AS alias"))?;
+                    namespaces.push(node!(ResTarget {
                         name: Some(name),
-                        val: Some(Box::new(parse_b_expression_tokens(expr_tokens)?)),
+                        val: Some(Box::new(value)),
                         location: target_location as ParseLoc,
                         ..ResTarget::default()
                     }));
@@ -47,7 +51,12 @@ impl Parser {
             self.expect(TokenKind::Char(','))?;
         }
         let row_tokens = self.take_until_top_level(&[TokenKind::Passing]);
-        let rowexpr = Box::new(parse_c_expression_tokens(row_tokens)?);
+        if self.at_completion()
+            && parse_c_expression_tokens_with_completion(row_tokens.clone(), None).is_ok()
+        {
+            self.record_completion_follow_tokens(&[TokenKind::Passing]);
+        }
+        let rowexpr = Box::new(self.parse_c_expression_fragment_tokens(row_tokens)?);
         self.expect(TokenKind::Passing)?;
         if self.consume(TokenKind::By)
             && !(self.consume(TokenKind::RefP) || self.consume(TokenKind::ValueP))
@@ -55,6 +64,17 @@ impl Parser {
             return Err(self.error_here("BY requires REF or VALUE"));
         }
         let mut doc_tokens = self.take_until_top_level(&[TokenKind::Columns]);
+        if self.at_completion()
+            && doc_tokens.last().has_kind(TokenKind::By)
+            && parse_c_expression_tokens_with_completion(
+                doc_tokens[..doc_tokens.len() - 1].to_vec(),
+                None,
+            )
+            .is_ok()
+        {
+            doc_tokens.pop();
+            self.record_completion_tokens(&[TokenKind::RefP, TokenKind::ValueP]);
+        }
         if doc_tokens.len() >= 2
             && doc_tokens[doc_tokens.len() - 2].kind == TokenKind::By
             && matches!(
@@ -64,17 +84,23 @@ impl Parser {
         {
             doc_tokens.truncate(doc_tokens.len() - 2);
         }
-        let docexpr = parse_c_expression_tokens(doc_tokens)?;
+        if self.at_completion()
+            && parse_c_expression_tokens_with_completion(doc_tokens.clone(), None).is_ok()
+        {
+            self.record_completion_follow_tokens(&[TokenKind::By, TokenKind::Columns]);
+        }
+        let docexpr = self.parse_c_expression_fragment_tokens(doc_tokens)?;
         self.expect(TokenKind::Columns)?;
         let mut columns = Vec::new();
         if self.at(TokenKind::Char(')')) {
             return Err(self.error_here("XMLTABLE COLUMNS requires at least one column"));
         }
         while !self.at(TokenKind::Char(')')) {
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            columns.push(Node::RangeTableFuncCol(xmltable_column_from_tokens(
-                tokens,
-            )?));
+            let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+            self.append_completion_marker(&mut tokens);
+            columns.push(Node::RangeTableFuncCol(
+                xmltable_column_from_tokens_with_completion(tokens, self.completion.clone())?,
+            ));
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
@@ -85,7 +111,6 @@ impl Parser {
         self.expect(TokenKind::Char(')'))?;
         let alias = self.parse_optional_alias_clause()?;
         Ok(RangeTableFunc {
-            node_tag: NodeTag::RangeTableFunc,
             lateral,
             docexpr: Some(Box::new(docexpr)),
             rowexpr: Some(rowexpr),
@@ -202,11 +227,11 @@ impl Parser {
                 return Err(self.error_here("this JOIN form does not accept USING"));
             }
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot(GrammarSlot::Column);
             using_clause = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             if self.consume(TokenKind::As) {
                 join_using_alias = Some(Box::new(Alias {
-                    node_tag: NodeTag::Alias,
                     aliasname: Some(
                         self.consume_col_id()
                             .ok_or_else(|| self.error_here("USING AS requires an alias"))?,
@@ -220,8 +245,7 @@ impl Parser {
         } else {
             None
         };
-        Ok(Node::JoinExpr(JoinExpr {
-            node_tag: NodeTag::JoinExpr,
+        Ok(node!(JoinExpr {
             jointype,
             is_natural,
             larg: Some(Box::new(larg)),

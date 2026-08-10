@@ -1,3 +1,8 @@
+//! SQL cursor statements: `DECLARE`, `CLOSE`, `FETCH`, and `MOVE`.
+//!
+//! Direction and signed-count parsing is kept with the statements that interpret
+//! those values.
+
 use super::*;
 
 impl Parser {
@@ -7,12 +12,21 @@ impl Parser {
     //     CURSOR [ { WITH | WITHOUT } HOLD ] FOR query
     pub(super) fn parse_declare_cursor(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Declare)?;
+        self.record_completion_slot(GrammarSlot::AnyName);
         let portalname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("DECLARE requires a cursor name"))?,
         );
         let mut options = CURSOR_OPT_FAST_PLAN;
         loop {
+            self.record_completion_tokens(&[
+                TokenKind::No,
+                TokenKind::Scroll,
+                TokenKind::Binary,
+                TokenKind::Insensitive,
+                TokenKind::Asensitive,
+                TokenKind::Cursor,
+            ]);
             match self.peek_kind() {
                 TokenKind::No => {
                     self.advance();
@@ -54,8 +68,7 @@ impl Parser {
         if !matches!(query, Node::SelectStmt(_)) {
             return Err(self.error_here("DECLARE CURSOR query must be a SELECT statement"));
         }
-        Ok(Node::DeclareCursorStmt(DeclareCursorStmt {
-            node_tag: NodeTag::DeclareCursorStmt,
+        Ok(node!(DeclareCursorStmt {
             portalname,
             options,
             query: Some(Box::new(query)),
@@ -67,18 +80,17 @@ impl Parser {
     // CLOSE { name | ALL }
     pub(super) fn parse_close(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Close)?;
+        self.record_completion_tokens(&[TokenKind::All]);
         let portalname = if self.consume(TokenKind::All) {
             None
         } else {
+            self.record_completion_slot(GrammarSlot::AnyName);
             Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("CLOSE requires a cursor name or ALL"))?,
             )
         };
-        Ok(Node::ClosePortalStmt(ClosePortalStmt {
-            node_tag: NodeTag::ClosePortalStmt,
-            portalname,
-        }))
+        Ok(node!(ClosePortalStmt { portalname }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -129,12 +141,12 @@ impl Parser {
         }
         let (direction, how_many, direction_keyword, location) = self.parse_fetch_direction()?;
         let _ = self.consume(TokenKind::From) || self.consume(TokenKind::InP);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let portalname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("FETCH/MOVE requires a cursor name"))?,
         );
-        Ok(Node::FetchStmt(FetchStmt {
-            node_tag: NodeTag::FetchStmt,
+        Ok(node!(FetchStmt {
             direction,
             how_many,
             portalname,
@@ -147,6 +159,19 @@ impl Parser {
     pub(super) fn parse_fetch_direction(
         &mut self,
     ) -> PResult<(FetchDirection, i64, FetchDirectionKeywords, ParseLoc)> {
+        self.record_completion_tokens(&[
+            TokenKind::Next,
+            TokenKind::Prior,
+            TokenKind::FirstP,
+            TokenKind::LastP,
+            TokenKind::AbsoluteP,
+            TokenKind::RelativeP,
+            TokenKind::All,
+            TokenKind::Forward,
+            TokenKind::Backward,
+            TokenKind::From,
+            TokenKind::InP,
+        ]);
         if self.consume(TokenKind::Next) {
             return Ok((FetchDirection::Forward, 1, FetchDirectionKeywords::Next, -1));
         }

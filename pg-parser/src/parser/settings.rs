@@ -1,3 +1,8 @@
+//! Session settings and transaction-control statements.
+//!
+//! `SET`, `RESET`, `SHOW`, and transaction modes share value-fragment parsers but
+//! retain statement-specific normalization and completion behavior.
+
 use super::*;
 
 impl Parser {
@@ -40,6 +45,13 @@ impl Parser {
         match self.peek_kind() {
             TokenKind::Reset => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::All,
+                    TokenKind::Time,
+                    TokenKind::Transaction,
+                    TokenKind::Session,
+                ]);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let (kind, name) =
                     match self.peek_kind() {
                         TokenKind::All => {
@@ -77,7 +89,6 @@ impl Parser {
                     };
                 self.expect_statement_end()?;
                 return Ok(VariableSetStmt {
-                    node_tag: NodeTag::VariableSetStmt,
                     kind,
                     name,
                     location: -1,
@@ -90,6 +101,17 @@ impl Parser {
             _ => return Err(self.error_here("expected SET or RESET")),
         }
 
+        self.record_completion_tokens(&[
+            TokenKind::Local,
+            TokenKind::Session,
+            TokenKind::Transaction,
+            TokenKind::Time,
+            TokenKind::Schema,
+            TokenKind::Names,
+            TokenKind::Role,
+            TokenKind::XmlP,
+        ]);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let is_local = allow_scope && self.consume(TokenKind::Local);
         if allow_scope
             && self.at(TokenKind::Session)
@@ -101,12 +123,24 @@ impl Parser {
             self.advance();
         }
         let mut stmt = VariableSetStmt {
-            node_tag: NodeTag::VariableSetStmt,
             kind: VariableSetKind::SetValue,
             is_local,
             location: -1,
             ..VariableSetStmt::default()
         };
+        if self.peek_kind() == TokenKind::Transaction
+            && self.peek_kind_n(1) == TokenKind::Completion
+        {
+            self.advance();
+            self.record_completion_tokens(&[
+                TokenKind::Snapshot,
+                TokenKind::Isolation,
+                TokenKind::Read,
+                TokenKind::Deferrable,
+                TokenKind::Not,
+            ]);
+            return Err(self.error_here("completion point after SET TRANSACTION"));
+        }
         match self.peek_kind() {
             TokenKind::Transaction if self.peek_kind_n(1) != TokenKind::Snapshot => {
                 self.advance();
@@ -140,15 +174,49 @@ impl Parser {
                 if self.consume(TokenKind::Default) || self.consume(TokenKind::Local) {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
-                    let tokens = self.take_until_top_level(&[TokenKind::Char(';'), TokenKind::Eof]);
+                    self.record_completion_tokens(&[
+                        TokenKind::Default,
+                        TokenKind::Local,
+                        TokenKind::Interval,
+                    ]);
+                    self.record_completion_slot(GrammarSlot::AnyName);
+                    let tokens = self.take_until_top_level(STATEMENT_END_TOKENS);
+                    if self.at_completion() && tokens.first().has_kind(TokenKind::Interval) {
+                        let qualifier = tokens
+                            .iter()
+                            .position(|token| token.kind == TokenKind::SConst)
+                            .map_or(&[][..], |string_index| &tokens[string_index + 1..]);
+                        match qualifier {
+                            [] if tokens.iter().any(|token| token.kind == TokenKind::SConst) => {
+                                self.record_completion_lookahead_tokens(&[TokenKind::HourP]);
+                            }
+                            [
+                                Token {
+                                    kind: TokenKind::HourP,
+                                    ..
+                                },
+                            ] => self.record_completion_lookahead_tokens(&[TokenKind::To]),
+                            [
+                                Token {
+                                    kind: TokenKind::HourP,
+                                    ..
+                                },
+                                Token {
+                                    kind: TokenKind::To,
+                                    ..
+                                },
+                            ] => self.record_completion_tokens(&[TokenKind::MinuteP]),
+                            _ => {}
+                        }
+                    }
                     stmt.args = vec![parse_time_zone_value_tokens(tokens)?];
                 }
                 stmt.jumble_args = true;
             }
-            TokenKind::Schema => {
+            TokenKind::Schema if self.peek_kind_n(1) == TokenKind::SConst => {
                 self.advance();
                 stmt.name = Some("search_path".to_owned());
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     self.consume_required_string("SET SCHEMA requires a string")?,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -163,12 +231,8 @@ impl Parser {
                 } else if self.at_statement_end() {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
-                    let value = self
-                        .at(TokenKind::SConst)
-                        .then(|| self.consume_string_like())
-                        .flatten()
-                        .ok_or_else(|| self.error_here("SET NAMES requires an encoding"))?;
-                    stmt.args = vec![Node::AConst(AConst::string(
+                    let value = self.consume_required_string("SET NAMES requires an encoding")?;
+                    stmt.args = vec![node!(AConst::string(
                         value,
                         self.previous_location() as ParseLoc,
                     ))];
@@ -178,10 +242,11 @@ impl Parser {
             TokenKind::Role => {
                 self.advance();
                 stmt.name = Some("role".to_owned());
+                self.record_completion_slot(GrammarSlot::Role);
                 let value = self
                     .consume_non_reserved_word_or_sconst()
                     .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     value,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -194,10 +259,11 @@ impl Parser {
                 if self.consume(TokenKind::Default) {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
+                    self.record_completion_slot(GrammarSlot::Role);
                     let value = self.consume_non_reserved_word_or_sconst().ok_or_else(|| {
                         self.error_here("SET SESSION AUTHORIZATION requires a role")
                     })?;
-                    stmt.args = vec![Node::AConst(AConst::string(
+                    stmt.args = vec![node!(AConst::string(
                         value,
                         self.previous_location() as ParseLoc,
                     ))];
@@ -207,13 +273,14 @@ impl Parser {
             TokenKind::XmlP => {
                 self.advance();
                 self.expect(TokenKind::Option)?;
+                self.record_completion_tokens(&[TokenKind::DocumentP, TokenKind::ContentP]);
                 let (value, value_location) = match self.peek_kind() {
                     TokenKind::DocumentP => ("DOCUMENT", self.advance().location() as ParseLoc),
                     TokenKind::ContentP => ("CONTENT", self.advance().location() as ParseLoc),
                     _ => return Err(self.error_here("XML OPTION requires DOCUMENT or CONTENT")),
                 };
                 stmt.name = Some("xmloption".to_owned());
-                stmt.args = vec![Node::AConst(AConst::string(value, value_location))];
+                stmt.args = vec![node!(AConst::string(value, value_location))];
                 stmt.jumble_args = true;
             }
             TokenKind::Transaction => {
@@ -221,7 +288,7 @@ impl Parser {
                 self.expect(TokenKind::Snapshot)?;
                 stmt.kind = VariableSetKind::SetMulti;
                 stmt.name = Some("TRANSACTION SNAPSHOT".to_owned());
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     self.consume_required_string("TRANSACTION SNAPSHOT requires a string")?,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -232,6 +299,7 @@ impl Parser {
                     self.consume_setting_name()
                         .ok_or_else(|| self.error_here("SET requires a parameter name"))?,
                 );
+                self.record_completion_tokens(&[TokenKind::To, TokenKind::Char('=')]);
                 if self.consume(TokenKind::From) {
                     self.expect(TokenKind::CurrentP)?;
                     stmt.kind = VariableSetKind::SetCurrent;
@@ -250,7 +318,7 @@ impl Parser {
                         }
                         TokenKind::NullP => {
                             let location = self.advance().location() as ParseLoc;
-                            stmt.args = vec![Node::AConst(AConst::null(location))];
+                            stmt.args = vec![node!(AConst::null(location))];
                             stmt.location = value_location;
                         }
                         _ => {
@@ -268,11 +336,11 @@ impl Parser {
     pub(super) fn parse_setting_value_list(&mut self) -> PResult<NodeList> {
         let mut args = Vec::new();
         loop {
-            let tokens = self.take_until_top_level(&[
-                TokenKind::Char(','),
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ]);
+            let tokens = self.take_until_top_level(COMMA_OR_STATEMENT_END_TOKENS);
+            if self.at_completion() && tokens.is_empty() {
+                self.record_completion_tokens(&[TokenKind::Default]);
+                self.record_completion_slot(GrammarSlot::AnyName);
+            }
             args.push(parse_setting_value_tokens(tokens)?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -298,6 +366,13 @@ impl Parser {
     // SHOW ALL
     pub(super) fn parse_variable_show(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Show)?;
+        self.record_completion_tokens(&[
+            TokenKind::All,
+            TokenKind::Time,
+            TokenKind::Transaction,
+            TokenKind::Session,
+        ]);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let name = Some(match self.peek_kind() {
             TokenKind::All => {
                 self.advance();
@@ -324,10 +399,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("SHOW requires a parameter name"))?,
         });
         self.expect_statement_end()?;
-        Ok(Node::VariableShowStmt(VariableShowStmt {
-            node_tag: NodeTag::VariableShowStmt,
-            name,
-        }))
+        Ok(node!(VariableShowStmt { name }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -392,7 +464,6 @@ impl Parser {
     pub(super) fn parse_transaction(&mut self) -> PResult<Node> {
         let first = self.advance().kind;
         let mut stmt = TransactionStmt {
-            node_tag: NodeTag::TransactionStmt,
             location: -1,
             ..TransactionStmt::default()
         };
@@ -437,6 +508,7 @@ impl Parser {
                     if self.consume(TokenKind::To) {
                         stmt.kind = TransactionStmtKind::RollbackTo;
                         self.consume(TokenKind::Savepoint);
+                        self.record_completion_slot(GrammarSlot::AnyName);
                         let location = self.location();
                         stmt.savepoint_name =
                             Some(self.consume_col_id().ok_or_else(|| {
@@ -456,6 +528,7 @@ impl Parser {
             }
             TokenKind::Savepoint => {
                 stmt.kind = TransactionStmtKind::Savepoint;
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let location = self.location();
                 stmt.savepoint_name = Some(
                     self.consume_col_id()
@@ -466,6 +539,7 @@ impl Parser {
             TokenKind::Release => {
                 stmt.kind = TransactionStmtKind::Release;
                 self.consume(TokenKind::Savepoint);
+                self.record_completion_slot(GrammarSlot::AnyName);
                 let location = self.location();
                 stmt.savepoint_name = Some(
                     self.consume_col_id()
@@ -490,11 +564,22 @@ impl Parser {
     fn parse_transaction_modes(&mut self) -> PResult<NodeList> {
         let mut options = Vec::new();
         while !self.at_statement_end() {
+            self.record_completion_tokens(&[
+                TokenKind::Isolation,
+                TokenKind::Read,
+                TokenKind::Deferrable,
+                TokenKind::Not,
+            ]);
             let location = self.location();
             let option = match self.peek_kind() {
                 TokenKind::Isolation => {
                     self.advance();
                     self.expect(TokenKind::Level)?;
+                    self.record_completion_tokens(&[
+                        TokenKind::Read,
+                        TokenKind::Repeatable,
+                        TokenKind::Serializable,
+                    ]);
                     let value_location = self.location();
                     let value = match self.peek_kind() {
                         TokenKind::Read => {
@@ -519,15 +604,13 @@ impl Parser {
                     };
                     make_def_elem(
                         "transaction_isolation",
-                        Some(Node::AConst(AConst::string(
-                            value,
-                            value_location as ParseLoc,
-                        ))),
+                        Some(node!(AConst::string(value, value_location as ParseLoc,))),
                         location,
                     )
                 }
                 TokenKind::Read => {
                     self.advance();
+                    self.record_completion_tokens(&[TokenKind::Only, TokenKind::Write]);
                     let read_only = match self.peek_kind() {
                         TokenKind::Only => true,
                         TokenKind::Write => false,
@@ -536,7 +619,7 @@ impl Parser {
                     self.advance();
                     make_def_elem(
                         "transaction_read_only",
-                        Some(Node::AConst(AConst::integer(
+                        Some(node!(AConst::integer(
                             i32::from(read_only),
                             location as ParseLoc,
                         ))),
@@ -547,7 +630,7 @@ impl Parser {
                     self.advance();
                     make_def_elem(
                         "transaction_deferrable",
-                        Some(Node::AConst(AConst::integer(1, location as ParseLoc))),
+                        Some(node!(AConst::integer(1, location as ParseLoc))),
                         location,
                     )
                 }
@@ -556,7 +639,7 @@ impl Parser {
                     self.expect(TokenKind::Deferrable)?;
                     make_def_elem(
                         "transaction_deferrable",
-                        Some(Node::AConst(AConst::integer(0, location as ParseLoc))),
+                        Some(node!(AConst::integer(0, location as ParseLoc))),
                         location,
                     )
                 }
@@ -586,9 +669,9 @@ impl Parser {
     }
 }
 pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "SET requires a value"));
+        return Err(ParseError::syntax_exit(location, "SET requires a value"));
     }
     if tokens.len() == 1 {
         if matches!(tokens[0].kind, TokenKind::IConst | TokenKind::FConst) {
@@ -607,7 +690,7 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
         )
         .is_some();
         if is_setting_word && let Some(value) = token_name(&tokens[0]) {
-            return Ok(Node::AConst(AConst::string(
+            return Ok(node!(AConst::string(
                 value,
                 tokens[0].location() as ParseLoc,
             )));
@@ -628,11 +711,11 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
     ) {
         return parse_expression_tokens(tokens);
     }
-    Err(ParseError::new(location, "invalid SET value"))
+    Err(ParseError::syntax_exit(location, "invalid SET value"))
 }
 
 pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().map_or(0, |token| token.location());
+    let location = tokens.first().location_or(0);
     if tokens.len() == 1 {
         if matches!(
             tokens[0].kind,
@@ -644,16 +727,18 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
         ) {
             return parse_setting_value_tokens(tokens);
         }
-        return Err(ParseError::new(location, "invalid time zone value"));
+        return Err(ParseError::syntax_exit(location, "invalid time zone value"));
     }
-    if tokens.first().map(|token| token.kind) != Some(TokenKind::Interval) {
-        return Err(ParseError::new(location, "invalid time zone value"));
+    if !tokens.first().has_kind(TokenKind::Interval) {
+        return Err(ParseError::syntax_exit(location, "invalid time zone value"));
     }
-    if tokens.get(1).map(|token| token.kind) != Some(TokenKind::Char('(')) {
+    if !tokens.get(1).has_kind(TokenKind::Char('(')) {
         let string_index = tokens
             .iter()
             .position(|token| token.kind == TokenKind::SConst)
-            .ok_or_else(|| ParseError::new(location, "time zone interval requires a string"))?;
+            .ok_or_else(|| {
+                ParseError::syntax_exit(location, "time zone interval requires a string")
+            })?;
         let qualifier = &tokens[string_index + 1..];
         if !matches!(
             qualifier,
@@ -675,8 +760,8 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
                 }
             ]
         ) {
-            return Err(ParseError::new(
-                qualifier.first().map_or(location, |token| token.location()),
+            return Err(ParseError::syntax_exit(
+                qualifier.first().location_or(location),
                 "time zone interval must be HOUR or HOUR TO MINUTE",
             ));
         }

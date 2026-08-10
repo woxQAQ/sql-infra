@@ -1,0 +1,970 @@
+- input: CREATE |
+  want:
+    candidates:
+      tokens: [ACCESS, AGGREGATE, CAST, COLLATION, CONSTRAINT, CONVERSION, DATABASE, DEFAULT, DOMAIN, EVENT, EXTENSION, FOREIGN, FUNCTION, GLOBAL, GROUP, INDEX, LANGUAGE, LOCAL, MATERIALIZED, OPERATOR, OR, POLICY, PROCEDURAL, PROCEDURE, PROPERTY, PUBLICATION, RECURSIVE, ROLE, RULE, SCHEMA, SEQUENCE, SERVER, STATISTICS, SUBSCRIPTION, TABLE, TABLESPACE, TEMP, TEMPORARY, TEXT, TRANSFORM, TRIGGER, TRUSTED, TYPE, UNIQUE, UNLOGGED, USER, VIEW]
+      slots: []
+
+- input: CREATE TEMP |
+  want:
+    candidates:
+      tokens: [PROPERTY, RECURSIVE, SEQUENCE, TABLE, VIEW]
+      slots: []
+
+- input: CREATE UNLOGGED |
+  want:
+    candidates:
+      tokens: [MATERIALIZED, PROPERTY, RECURSIVE, SEQUENCE, TABLE, VIEW]
+      slots: []
+
+- input: CREATE OR REPLACE |
+  want:
+    candidates:
+      tokens: [AGGREGATE, FUNCTION, GLOBAL, LANGUAGE, LOCAL, PROCEDURAL, PROCEDURE, RECURSIVE, RULE, TEMP, TEMPORARY, TRANSFORM, TRIGGER, TRUSTED, UNLOGGED, VIEW]
+      slots: []
+
+- input: CREATE OR REPLACE TEMP |
+  want:
+    candidates:
+      tokens: [RECURSIVE, VIEW]
+      slots: []
+
+- input: CREATE OR REPLACE TRUSTED |
+  want:
+    candidates:
+      tokens: [LANGUAGE, PROCEDURAL]
+      slots: []
+
+- input: CREATE TABLE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF NOT EXISTS]
+      slots: [Table]
+
+- input: CREATE TABLE t AS |
+  want:
+    candidates:
+      tokens: [(, EXECUTE, SELECT, TABLE, VALUES, WITH]
+      slots: []
+
+- input: CREATE VIEW v AS |
+  want:
+    candidates:
+      tokens: [(, SELECT, TABLE, VALUES, WITH]
+      slots: []
+
+- input: CREATE MATERIALIZED VIEW mv AS |
+  want:
+    candidates:
+      tokens: [(, SELECT, TABLE, VALUES, WITH]
+      slots: []
+
+- input: CREATE TABLE users (id |)
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Type]
+
+- input: ALTER |
+  want:
+    candidates:
+      tokens: [AGGREGATE, COLLATION, CONVERSION, DATABASE, DEFAULT, DOMAIN, EVENT, EXTENSION, FOREIGN, FUNCTION, GROUP, INDEX, LANGUAGE, LARGE, MATERIALIZED, OPERATOR, POLICY, PROCEDURAL, PROCEDURE, PROPERTY, PUBLICATION, ROLE, ROUTINE, RULE, SCHEMA, SEQUENCE, SERVER, STATISTICS, SUBSCRIPTION, SYSTEM, TABLE, TABLESPACE, TEXT, TRIGGER, TYPE, USER, VIEW]
+      slots: []
+
+- input: ALTER TABLE |
+  want:
+    candidates:
+      tokens: [ALL, IF, ONLY]
+      phrases: [IF EXISTS]
+      slots: [Table]
+
+- input: DROP |
+  want:
+    candidates:
+      tokens: [ACCESS, AGGREGATE, CAST, COLLATION, CONVERSION, DATABASE, DOMAIN, EVENT, EXTENSION, FOREIGN, FUNCTION, GROUP, INDEX, LANGUAGE, MATERIALIZED, OPERATOR, OWNED, POLICY, PROCEDURAL, PROCEDURE, PROPERTY, PUBLICATION, ROLE, ROUTINE, RULE, SCHEMA, SEQUENCE, SERVER, STATISTICS, SUBSCRIPTION, TABLE, TABLESPACE, TEXT, TRANSFORM, TRIGGER, TYPE, USER, VIEW]
+      slots: []
+
+- input: DROP FUNCTION |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Function]
+
+- input: DROP FUNCTION f(|
+  want:
+    candidates:
+      tokens: [), IN, INOUT, OUT, VARIADIC]
+      slots: [Type]
+
+- input: CREATE INDEX |
+  want:
+    candidates:
+      tokens: [CONCURRENTLY, IF, ON]
+      phrases: [IF NOT EXISTS]
+      slots: [Index]
+
+- input: CREATE SCHEMA |
+  want:
+    candidates:
+      tokens: [AUTHORIZATION, IF]
+      phrases: [IF NOT EXISTS]
+      slots: [Schema]
+
+- input: CREATE SCHEMA s |
+  want:
+    candidates:
+      tokens: [AUTHORIZATION, CREATE, GRANT]
+      slots: []
+
+- input: CREATE SCHEMA s CREATE TABLE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF NOT EXISTS]
+      slots: [Table]
+
+- input: CREATE SCHEMA s CREATE TABLE t (id |
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Type]
+
+- input: CREATE DATABASE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Database]
+
+- input: CREATE SEQUENCE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF NOT EXISTS]
+      slots: [Sequence]
+
+- input: CREATE TYPE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Type]
+
+- input: CREATE COLLATION |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF NOT EXISTS]
+      slots: [Collation]
+
+- input: CREATE OPERATOR |
+  want:
+    candidates:
+      tokens: [CLASS, FAMILY]
+      slots: [Operator]
+
+- input: CREATE OPERATOR CLASS |
+  want:
+    candidates:
+      tokens: []
+      slots: [OperatorClass]
+
+- input: CREATE ROLE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Role]
+
+- input: ALTER INDEX |
+  want:
+    candidates:
+      tokens: [ALL, IF, ONLY]
+      phrases: [IF EXISTS]
+      slots: [Index]
+
+- input: ALTER SEQUENCE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Sequence]
+
+- input: ALTER DATABASE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Database]
+
+- input: ALTER SCHEMA |
+  want:
+    candidates:
+      tokens: []
+      slots: [Schema]
+
+- input: ALTER COLLATION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Collation]
+
+- input: ALTER ROLE |
+  want:
+    candidates:
+      tokens: [ALL, CURRENT_ROLE, CURRENT_USER, SESSION_USER]
+      slots: [Role]
+
+- input: ALTER TABLE t DROP CONSTRAINT |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Constraint]
+    membership: Constraint in Table t
+
+- input: ALTER TABLE app.users DROP COLUMN |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Column]
+    membership: Column in Table app.users
+
+- input: CREATE TABLE t (c text COLLATE |)
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Collation]
+
+- input: DROP VIEW |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [View]
+
+- input: DROP INDEX |
+  want:
+    candidates:
+      tokens: [CONCURRENTLY, IF]
+      phrases: [IF EXISTS]
+      slots: [Index]
+
+- input: DROP SCHEMA |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Schema]
+
+- input: DROP SEQUENCE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Sequence]
+
+- input: DROP TYPE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Type]
+
+- input: DROP COLLATION |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Collation]
+
+- input: DROP OPERATOR |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Operator]
+
+- input: DROP OPERATOR CLASS |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [OperatorClass]
+
+- input: DROP ROLE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Role]
+
+- input: CREATE INDEX i ON |
+  want:
+    candidates:
+      tokens: [ONLY]
+      slots: [MaterializedView, Table]
+
+- input: CREATE INDEX i ON t (c COLLATE |)
+  want:
+    candidates:
+      tokens: []
+      slots: [Collation]
+
+- input: CREATE TABLE t (c int REFERENCES |)
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Table]
+
+- input: CREATE TABLE t (c int CONSTRAINT |)
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Constraint]
+
+- input: ALTER TABLE t ALTER COLUMN c TYPE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Type]
+
+- input: ALTER TABLE t ALTER COLUMN c TYPE text COLLATE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Collation]
+
+- input: COMMENT ON TYPE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Type]
+
+- input: COMMENT ON OPERATOR CLASS |
+  want:
+    candidates:
+      tokens: []
+      slots: [OperatorClass]
+
+- input: CREATE POLICY p ON |
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: CREATE POLICY p ON t FOR UPDATE USING (|
+  want:
+    candidates:
+      tokens: [(, '*', +, '-', ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+    scope: {}
+
+- input: CREATE POLICY |
+  want:
+    candidates:
+      tokens: []
+      slots: [Policy]
+
+- input: ALTER POLICY |
+  want:
+    candidates:
+      tokens: []
+      slots: [Policy]
+
+- input: CREATE PROPERTY GRAPH |
+  want:
+    candidates:
+      tokens: []
+      slots: [PropertyGraph]
+
+- input: ALTER PROPERTY GRAPH |
+  want:
+    candidates:
+      tokens: []
+      slots: [PropertyGraph]
+
+- input: CREATE PROPERTY GRAPH g VERTEX TABLES (|
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: CREATE SUBSCRIPTION s CONNECTION 'host=x' PUBLICATION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Publication]
+
+- input: ALTER SUBSCRIPTION s SET PUBLICATION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Publication]
+
+- input: CREATE EVENT TRIGGER |
+  want:
+    candidates:
+      tokens: []
+      slots: [EventTrigger]
+
+- input: CREATE EVENT TRIGGER trg ON ddl_command_start EXECUTE FUNCTION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE TRIGGER |
+  want:
+    candidates:
+      tokens: []
+      slots: [Trigger]
+
+- input: CREATE TRIGGER trg BEFORE UPDATE OF |
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]
+
+- input: CREATE TRIGGER trg BEFORE UPDATE OF | ON accounts
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]
+    membership: Column in Table|View|ForeignTable accounts
+
+- input: CREATE TRIGGER trg BEFORE UPDATE ON accounts WHEN (|
+  want:
+    candidates:
+      tokens: [(, '*', +, '-', ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+    membership: Column in Table|View|ForeignTable accounts
+    scope: {}
+
+- input: CREATE TRIGGER trg BEFORE INSERT ON t EXECUTE FUNCTION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE RULE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Rule]
+
+- input: CREATE RULE r AS ON SELECT TO t DO (SELECT |
+  want:
+    candidates:
+      tokens: [(, '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXCEPT, EXISTS, EXTRACT, 'FALSE', FETCH, FOR, FROM, GREATEST, GROUP, GROUPING, HAVING, INTERSECT, INTO, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LIMIT, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OFFSET, OPERATOR, ORDER, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', UNION, USER, WHERE, WINDOW, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+
+- input: CREATE RULE r AS ON UPDATE TO t WHERE |
+  want:
+    candidates:
+      tokens: [(, '*', +, '-', ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+    scope: {}
+
+- input: CREATE TEXT SEARCH PARSER p (START = |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE TEXT SEARCH CONFIGURATION c (PARSER = |
+  want:
+    candidates:
+      tokens: []
+      slots: [TextSearchParser]
+
+- input: CREATE TEXT SEARCH DICTIONARY d (TEMPLATE = |
+  want:
+    candidates:
+      tokens: []
+      slots: [TextSearchTemplate]
+
+- input: CREATE CONVERSION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Conversion]
+
+- input: CREATE CONVERSION c FOR 'UTF8' TO 'LATIN1' FROM |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE TRANSFORM FOR int LANGUAGE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Language]
+
+- input: CREATE TRANSFORM FOR int LANGUAGE sql (FROM SQL WITH FUNCTION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE OPERATOR @@ (PROCEDURE = |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: ALTER OPERATOR @@ (int, int) SET (RESTRICT = |
+  want:
+    candidates:
+      tokens: [NONE]
+      slots: [Function]
+
+- input: ALTER OPERATOR @@ (int, int) SET (COMMUTATOR = |
+  want:
+    candidates:
+      tokens: [NONE]
+      slots: [Operator]
+
+- input: DROP POLICY p ON |
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: CREATE ACCESS METHOD |
+  want:
+    candidates:
+      tokens: []
+      slots: [AccessMethod]
+
+- input: CREATE ACCESS METHOD am TYPE TABLE HANDLER |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE EXTENSION |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF NOT EXISTS]
+      slots: [Extension]
+
+- input: CREATE EXTENSION ext WITH SCHEMA |
+  want:
+    candidates:
+      tokens: []
+      slots: [Schema]
+
+- input: CREATE SERVER |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF NOT EXISTS]
+      slots: [ForeignServer]
+
+- input: CREATE LANGUAGE lang HANDLER |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE PUBLICATION p FOR TABLES IN SCHEMA |
+  want:
+    candidates:
+      tokens: [CURRENT_SCHEMA]
+      slots: [Schema]
+
+- input: CREATE TRIGGER trg BEFORE INSERT ON |
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: CREATE CAST (|
+  want:
+    candidates:
+      tokens: []
+      slots: [Type]
+
+- input: CREATE FUNCTION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE FUNCTION f(arg |
+  want:
+    candidates:
+      tokens: [), ',', ARRAY, DEFAULT, IN, INOUT, OUT, VARIADIC]
+      slots: [Type]
+
+- input: CREATE FUNCTION f(x int DEFAULT |
+  want:
+    candidates:
+      tokens: [(, '*', +, '-', ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+
+- input: CREATE FUNCTION f() RETURNS |
+  want:
+    candidates:
+      tokens: [TABLE]
+      slots: [Type]
+
+- input: CREATE FUNCTION f() RETURNS int LANGUAGE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Language]
+
+- input: CREATE FUNCTION f() RETURNS int SUPPORT |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: CREATE TABLESPACE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Tablespace]
+
+- input: CREATE TABLESPACE ts OWNER |
+  want:
+    candidates:
+      tokens: [CURRENT_ROLE, CURRENT_USER, SESSION_USER]
+      slots: [Role]
+
+- input: CREATE STATISTICS |
+  want:
+    candidates:
+      tokens: [(, IF, ON]
+      phrases: [IF NOT EXISTS]
+      slots: [Statistics]
+
+- input: ALTER STATISTICS |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Statistics]
+
+- input: CREATE TEXT SEARCH DICTIONARY |
+  want:
+    candidates:
+      tokens: []
+      slots: [TextSearchDictionary]
+
+- input: CREATE SEQUENCE s AS |
+  want:
+    candidates:
+      tokens: []
+      slots: [Type]
+
+- input: CREATE SEQUENCE s OWNED BY |
+  want:
+    candidates:
+      tokens: [NONE]
+      slots: [Column]
+
+- input: CREATE INDEX i ON t ((lower(|
+  want:
+    candidates:
+      tokens: [(, ), '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, VARIADIC, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+
+- input: CREATE INDEX i ON t USING |
+  want:
+    candidates:
+      tokens: []
+      slots: [AccessMethod]
+
+- input: CREATE TABLE t (c int) TABLESPACE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Tablespace]
+
+- input: CREATE FOREIGN TABLE t (c int) SERVER |
+  want:
+    candidates:
+      tokens: []
+      slots: [ForeignServer]
+
+- input: ALTER DATABASE db SET TABLESPACE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Tablespace]
+
+- input: CREATE TABLE t (EXCLUDE USING gist (c WITH |
+  want:
+    candidates:
+      tokens: [), ',', OPERATOR]
+      slots: [Operator]
+
+- input: CREATE TABLE t (c int) PARTITION BY RANGE ((lower(|
+  want:
+    candidates:
+      tokens: [(, ), '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, VARIADIC, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+
+- input: ALTER TABLE t ADD COLUMN c int DEFAULT |
+  want:
+    candidates:
+      tokens: [(, '*', +, ',', '-', ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+
+- input: CREATE STATISTICS s ON (lower(|
+  want:
+    candidates:
+      tokens: [(, ), '*', +, '-', ALL, ARRAY, CASE, CAST, COALESCE, COLLATION, CURRENT_CATALOG, CURRENT_DATE, CURRENT_ROLE, CURRENT_SCHEMA, CURRENT_TIME, CURRENT_TIMESTAMP, CURRENT_USER, DEFAULT, DISTINCT, EXISTS, EXTRACT, 'FALSE', GREATEST, GROUPING, JSON, JSON_ARRAY, JSON_ARRAYAGG, JSON_EXISTS, JSON_OBJECT, JSON_OBJECTAGG, JSON_QUERY, JSON_SCALAR, JSON_SERIALIZE, JSON_VALUE, LEAST, LOCALTIME, LOCALTIMESTAMP, MERGE_ACTION, NORMALIZE, NOT, 'NULL', NULLIF, OPERATOR, OVERLAY, Op, POSITION, ROW, SESSION_USER, SUBSTRING, SYSTEM_USER, TREAT, TRIM, 'TRUE', USER, VARIADIC, XMLCONCAT, XMLELEMENT, XMLEXISTS, XMLFOREST, XMLPARSE, XMLPI, XMLROOT, XMLSERIALIZE]
+      slots: [Column, Function]
+
+- input: DROP DATABASE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Database]
+
+- input: ALTER TABLE t RENAME COLUMN |
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]
+
+- input: ALTER TABLE t RENAME CONSTRAINT |
+  want:
+    candidates:
+      tokens: []
+      slots: [Constraint]
+
+- input: ALTER TYPE t RENAME ATTRIBUTE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Attribute]
+
+- input: ALTER FUNCTION f() DEPENDS ON EXTENSION |
+  want:
+    candidates:
+      tokens: []
+      slots: [Extension]
+
+- input: ALTER FUNCTION f() SET SCHEMA |
+  want:
+    candidates:
+      tokens: []
+      slots: [Schema]
+
+- input: ALTER FUNCTION f() OWNER TO |
+  want:
+    candidates:
+      tokens: [CURRENT_ROLE, CURRENT_USER, SESSION_USER]
+      slots: [Role]
+
+- input: ALTER FUNCTION f() SUPPORT |
+  want:
+    candidates:
+      tokens: []
+      slots: [Function]
+
+- input: ALTER TABLE t SET ACCESS METHOD |
+  want:
+    candidates:
+      tokens: [DEFAULT]
+      slots: [AccessMethod]
+
+- input: ALTER TABLE t ENABLE TRIGGER |
+  want:
+    candidates:
+      tokens: [ALL, USER]
+      slots: [Trigger]
+
+- input: ALTER TABLE t DISABLE RULE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Rule]
+
+- input: ALTER TABLE t ALTER COLUMN |
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]
+
+- input: ALTER TABLE t VALIDATE CONSTRAINT |
+  want:
+    candidates:
+      tokens: []
+      slots: [Constraint]
+
+- input: ALTER TABLE t CLUSTER ON |
+  want:
+    candidates:
+      tokens: []
+      slots: [Index]
+
+- input: ALTER TABLE t REPLICA IDENTITY USING INDEX |
+  want:
+    candidates:
+      tokens: []
+      slots: [Index]
+
+- input: ALTER TABLE t OWNER TO |
+  want:
+    candidates:
+      tokens: [CURRENT_ROLE, CURRENT_USER, SESSION_USER]
+      slots: [Role]
+
+- input: ALTER TABLE t INHERIT |
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: ALTER TABLE t NO INHERIT |
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: ALTER TABLE t OF |
+  want:
+    candidates:
+      tokens: []
+      slots: [Type]
+
+- input: CREATE TABLE t (UNIQUE USING INDEX |)
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Index]
+
+- input: CREATE TABLE t (UNIQUE (|))
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Column]
+
+- input: CREATE TABLE t (FOREIGN KEY (|) REFERENCES parent(id))
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Column]
+
+- input: CREATE TABLE t (FOREIGN KEY (id) REFERENCES parent(|))
+  want:
+    candidates:
+      tokens: [), ',']
+      slots: [Column]
+
+- input: GRANT SELECT (|) ON TABLE t TO role_name
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]
+
+- input: ALTER TYPE t DROP ATTRIBUTE |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Attribute]
+
+- input: ALTER TYPE t ALTER ATTRIBUTE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Attribute]
+
+- input: ALTER EXTENSION e ADD TABLE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Table]
+
+- input: REPACK t USING INDEX |
+  want:
+    candidates:
+      tokens: []
+      slots: [Index]
+
+- input: CLUSTER |
+  want:
+    candidates:
+      tokens: [VERBOSE]
+      slots: [Index, Table]
+
+- input: CLUSTER t USING |
+  want:
+    candidates:
+      tokens: []
+      slots: [Index]
+
+- input: ALTER DOMAIN d DROP CONSTRAINT |
+  want:
+    candidates:
+      tokens: [IF]
+      phrases: [IF EXISTS]
+      slots: [Constraint]
+
+- input: ALTER DOMAIN d VALIDATE CONSTRAINT |
+  want:
+    candidates:
+      tokens: []
+      slots: [Constraint]
+
+- input: CREATE TABLE typed OF composite_type (|
+  want:
+    candidates:
+      tokens: [), ',', CHECK, CONSTRAINT, EXCLUDE, FOREIGN, NOT, PRIMARY, UNIQUE]
+      slots: [Column]
+
+- input: CREATE PROPERTY GRAPH g VERTEX TABLES (vertices KEY (|))
+  want:
+    candidates:
+      tokens: []
+      slots: [Column]
+
+- input: ALTER TYPE |
+  want:
+    candidates:
+      tokens: []
+      slots: [Type]
+
+- input: ALTER DEFAULT PRIVILEGES |
+  want:
+    candidates:
+      tokens: [FOR, GRANT, IN, REVOKE]
+      slots: []
+
+- input: ALTER TYPE mood ADD |
+  want:
+    candidates:
+      tokens: [ATTRIBUTE, VALUE]
+      slots: []
+
+- input: ALTER EVENT TRIGGER et |
+  want:
+    candidates:
+      tokens: [DISABLE, ENABLE, OWNER, RENAME]
+      slots: []
+
+- input: ALTER TABLE t SET |
+  want:
+    candidates:
+      tokens: [(, ACCESS, LOGGED, SCHEMA, TABLESPACE, UNLOGGED, WITHOUT]
+      slots: []
+
+- input: ALTER PUBLICATION p |
+  want:
+    candidates:
+      tokens: [ADD, DROP, OWNER, RENAME, SET]
+      slots: []
+
+- input: CREATE ACCESS |
+  want:
+    candidates:
+      tokens: [METHOD]
+      slots: []

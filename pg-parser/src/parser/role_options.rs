@@ -1,3 +1,8 @@
+//! Role lifecycle, ownership, and role-option grammar.
+//!
+//! Create/alter/drop roles, owned-object statements, password and capability
+//! options, and role-scoped setting clauses share this module.
+
 use super::*;
 
 impl Parser {
@@ -24,14 +29,16 @@ impl Parser {
             TokenKind::GroupP => RoleStmtType::Group,
             _ => RoleStmtType::Role,
         };
+        if stmt_type == RoleStmtType::User {
+            self.record_completion_tokens(&[TokenKind::Mapping]);
+        }
         let role = Some(
             self.consume_role_id()?
                 .ok_or_else(|| self.error_here("CREATE ROLE requires a role name"))?,
         );
         self.consume(TokenKind::With);
         let options = self.parse_create_role_options()?;
-        Ok(Node::CreateRoleStmt(CreateRoleStmt {
-            node_tag: NodeTag::CreateRoleStmt,
+        Ok(node!(CreateRoleStmt {
             stmt_type,
             role,
             options,
@@ -52,12 +59,22 @@ impl Parser {
     // RENAME forms are handled by alter_identity.
     pub(super) fn parse_alter_role(&mut self) -> PResult<Node> {
         let role_kind = self.advance().kind;
-        let role = if self.at(TokenKind::All) {
+        if role_kind == TokenKind::User {
+            self.record_completion_tokens(&[TokenKind::Mapping]);
+        }
+        let all_roles = role_kind != TokenKind::GroupP && self.at(TokenKind::All);
+        let role = if all_roles {
             self.advance();
             None
         } else {
             self.consume_role_spec().map(Box::new)
         };
+        if role.is_some() {
+            self.record_completion_tokens(&[TokenKind::Rename]);
+        }
+        if self.at_completion() && role.is_none() && !all_roles {
+            return Err(self.error_here("expected an ALTER ROLE target"));
+        }
         if role_kind == TokenKind::GroupP {
             let role = role.ok_or_else(|| self.error_here("ALTER GROUP requires a group name"))?;
             let action = if self.consume(TokenKind::AddP) {
@@ -69,13 +86,11 @@ impl Parser {
             };
             self.expect(TokenKind::User)?;
             let members_location = self.location();
-            let members =
-                self.parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+            let members = self.parse_role_specs_until(STATEMENT_END_TOKENS, false)?;
             if members.is_empty() {
                 return Err(self.error_here("ALTER GROUP requires at least one member"));
             }
-            return Ok(Node::AlterRoleStmt(AlterRoleStmt {
-                node_tag: NodeTag::AlterRoleStmt,
+            return Ok(node!(AlterRoleStmt {
                 role: Some(role),
                 options: vec![make_def_elem(
                     "rolemembers",
@@ -84,6 +99,9 @@ impl Parser {
                 )],
                 action,
             }));
+        }
+        if role.is_none() {
+            self.record_completion_tokens(&[TokenKind::InP, TokenKind::Set, TokenKind::Reset]);
         }
         if role.is_none()
             && !matches!(
@@ -102,10 +120,10 @@ impl Parser {
         } else {
             None
         };
+        self.record_completion_tokens(&[TokenKind::Set, TokenKind::Reset]);
         if matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
             let setstmt = Some(Box::new(self.parse_variable_set_like(false)?));
-            return Ok(Node::AlterRoleSetStmt(AlterRoleSetStmt {
-                node_tag: NodeTag::AlterRoleSetStmt,
+            return Ok(node!(AlterRoleSetStmt {
                 role,
                 database,
                 setstmt,
@@ -116,8 +134,7 @@ impl Parser {
         }
         self.consume(TokenKind::With);
         let options = self.parse_alter_role_options()?;
-        Ok(Node::AlterRoleStmt(AlterRoleStmt {
-            node_tag: NodeTag::AlterRoleStmt,
+        Ok(node!(AlterRoleStmt {
             role,
             options,
             action: 1,
@@ -138,17 +155,23 @@ impl Parser {
     pub(super) fn parse_drop_role(&mut self) -> PResult<Node> {
         self.advance();
         let missing_ok = self.consume_if_exists()?;
-        let roles = self.parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
-        Ok(Node::DropRoleStmt(DropRoleStmt {
-            node_tag: NodeTag::DropRoleStmt,
-            roles,
-            missing_ok,
-        }))
+        let mut roles = Vec::new();
+        loop {
+            let role = self
+                .consume_role_spec_without_special_suggestions()
+                .ok_or_else(|| self.error_here("DROP ROLE requires a role name"))?;
+            roles.push(Node::RoleSpec(role));
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+        }
+        Ok(node!(DropRoleStmt { roles, missing_ok }))
     }
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-drop-owned.html
-    // DROP OWNED BY { name | CURRENT_ROLE | CURRENT_USER | SESSION_USER } [, ...] [ CASCADE | RESTRICT ]
+    // DROP OWNED BY { name | CURRENT_ROLE | CURRENT_USER | SESSION_USER } [, ...] [ CASCADE |
+    // RESTRICT ]
     pub(super) fn parse_drop_owned(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Owned)?;
         self.expect(TokenKind::By)?;
@@ -162,11 +185,7 @@ impl Parser {
             false,
         )?;
         let behavior = self.parse_drop_behavior();
-        Ok(Node::DropOwnedStmt(DropOwnedStmt {
-            node_tag: NodeTag::DropOwnedStmt,
-            roles,
-            behavior,
-        }))
+        Ok(node!(DropOwnedStmt { roles, behavior }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -188,11 +207,7 @@ impl Parser {
         let newrole = Some(Box::new(self.consume_role_spec().ok_or_else(|| {
             self.error_here("REASSIGN OWNED requires a destination role")
         })?));
-        Ok(Node::ReassignOwnedStmt(ReassignOwnedStmt {
-            node_tag: NodeTag::ReassignOwnedStmt,
-            roles,
-            newrole,
-        }))
+        Ok(node!(ReassignOwnedStmt { roles, newrole }))
     }
 
     pub(super) fn parse_create_role_options(&mut self) -> PResult<NodeList> {
@@ -205,20 +220,17 @@ impl Parser {
                     let arg = if self.consume(TokenKind::NullP) {
                         None
                     } else {
-                        if !self.at(TokenKind::SConst) {
-                            return Err(self.error_here("PASSWORD requires a string or NULL"));
-                        }
-                        self.consume_string_like().map(make_string_node)
+                        Some(make_string_node(self.consume_required_string(
+                            "PASSWORD requires a string or NULL",
+                        )?))
                     };
                     options.push(make_def_elem("password", arg, location));
                 }
                 TokenKind::Encrypted => {
                     self.advance();
                     self.expect(TokenKind::Password)?;
-                    if !self.at(TokenKind::SConst) {
-                        return Err(self.error_here("ENCRYPTED PASSWORD requires a string"));
-                    }
-                    let password = self.consume_string_like().unwrap_or_default();
+                    let password =
+                        self.consume_required_string("ENCRYPTED PASSWORD requires a string")?;
                     options.push(make_def_elem(
                         "password",
                         Some(make_string_node(password)),
@@ -229,7 +241,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "inherit",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -242,10 +254,7 @@ impl Parser {
                 TokenKind::Valid => {
                     self.advance();
                     self.expect(TokenKind::Until)?;
-                    if !self.at(TokenKind::SConst) {
-                        return Err(self.error_here("VALID UNTIL requires a string"));
-                    }
-                    let value = self.consume_string_like().unwrap_or_default();
+                    let value = self.consume_required_string("VALID UNTIL requires a string")?;
                     options.push(make_def_elem(
                         "validUntil",
                         Some(make_string_node(value)),
@@ -260,7 +269,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "sysid",
-                        Some(Node::Integer(Integer::new(value))),
+                        Some(node!(Integer::new(value))),
                         location,
                     ));
                 }
@@ -283,12 +292,10 @@ impl Parser {
                         }
                         _ => unreachable!(),
                     };
-                    let roles = self
-                        .parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+                    let roles = self.parse_role_specs_until(STATEMENT_END_TOKENS, false)?;
                     options.push(make_def_elem(
                         defname,
-                        Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
+                        Some(node!(AArrayExpr {
                             elements: roles,
                             ..AArrayExpr::default()
                         })),
@@ -313,11 +320,16 @@ impl Parser {
                         "bypassrls" => ("bypassrls", true),
                         "nobypassrls" => ("bypassrls", false),
                         "noinherit" => ("inherit", false),
-                        _ => return Err(ParseError::new(location, "invalid CREATE ROLE option")),
+                        _ => {
+                            return Err(ParseError::syntax_exit(
+                                location,
+                                "invalid CREATE ROLE option",
+                            ));
+                        }
                     };
                     options.push(make_def_elem(
                         defname,
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -357,7 +369,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "inherit",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -379,8 +391,7 @@ impl Parser {
                 }
                 TokenKind::User => {
                     self.advance();
-                    let members = self
-                        .parse_role_specs_until(&[TokenKind::Char(';'), TokenKind::Eof], false)?;
+                    let members = self.parse_role_specs_until(STATEMENT_END_TOKENS, false)?;
                     if members.is_empty() {
                         return Err(self.error_here("USER requires at least one role"));
                     }
@@ -409,16 +420,21 @@ impl Parser {
                         "nobypassrls" => ("bypassrls", false),
                         "noinherit" => ("inherit", false),
                         "unencrypted" => {
-                            return Err(ParseError::new(
+                            return Err(ParseError::syntax_exit(
                                 location,
                                 "UNENCRYPTED PASSWORD is not supported",
                             ));
                         }
-                        _ => return Err(ParseError::new(location, "invalid ALTER ROLE option")),
+                        _ => {
+                            return Err(ParseError::syntax_exit(
+                                location,
+                                "invalid ALTER ROLE option",
+                            ));
+                        }
                     };
                     options.push(make_def_elem(
                         name,
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -442,7 +458,6 @@ impl Parser {
             };
             self.expect_statement_end()?;
             return Ok(VariableSetStmt {
-                node_tag: NodeTag::VariableSetStmt,
                 kind,
                 name,
                 location: -1,
@@ -464,9 +479,7 @@ impl Parser {
         } else if self.consume(TokenKind::NullP) {
             (
                 VariableSetKind::SetValue,
-                vec![Node::AConst(AConst::null(
-                    self.previous_location() as ParseLoc
-                ))],
+                vec![node!(AConst::null(self.previous_location() as ParseLoc))],
                 value_location,
             )
         } else {
@@ -478,7 +491,6 @@ impl Parser {
         };
         self.expect_statement_end()?;
         Ok(VariableSetStmt {
-            node_tag: NodeTag::VariableSetStmt,
             kind,
             name,
             args,

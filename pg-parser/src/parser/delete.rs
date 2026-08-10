@@ -1,3 +1,5 @@
+//! `DELETE` statement parsing, including `WITH`, `USING`, filters, and returning.
+
 use super::*;
 
 impl Parser {
@@ -13,14 +15,14 @@ impl Parser {
         self.expect(TokenKind::DeleteP)?;
         self.expect(TokenKind::From)?;
         let mut relation = Some(Box::new(
-            self.try_parse_range_var(true)
+            self.try_parse_range_var_with_slot(true, GrammarSlot::Table)?
                 .ok_or_else(|| self.error_here("DELETE FROM requires a relation name"))?,
         ));
         let for_portion_of = self.parse_for_portion_of_clause()?;
         if for_portion_of.is_some()
             && let Some(relation) = relation.as_mut()
         {
-            relation.alias = self.parse_optional_alias(true);
+            relation.alias = self.parse_optional_alias(true)?;
         }
         let using_clause = if self.consume(TokenKind::Using) {
             let using_clause = self.parse_from_clause_until(&[
@@ -42,8 +44,7 @@ impl Parser {
             TokenKind::Eof,
         ])?;
         let returning_clause = self.parse_returning_clause()?;
-        Ok(Node::DeleteStmt(DeleteStmt {
-            node_tag: NodeTag::DeleteStmt,
+        Ok(node!(DeleteStmt {
             relation,
             using_clause,
             where_clause,

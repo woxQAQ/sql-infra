@@ -1,3 +1,8 @@
+//! `UPDATE` statement parsing.
+//!
+//! Assignment targets, multi-assignments, source relations, filters, aliases,
+//! row portions, and returning clauses are assembled into `UpdateStmt`.
+
 use super::*;
 
 impl Parser {
@@ -16,14 +21,14 @@ impl Parser {
     pub(super) fn parse_update(&mut self, with_clause: Option<WithClause>) -> PResult<Node> {
         self.expect(TokenKind::Update)?;
         let mut relation = Some(Box::new(
-            self.try_parse_range_var(false)
+            self.try_parse_range_var_with_slot(false, GrammarSlot::Table)?
                 .ok_or_else(|| self.error_here("UPDATE requires a relation name"))?,
         ));
         let for_portion_of = self.parse_for_portion_of_clause()?;
         if for_portion_of.is_some()
             && let Some(relation) = relation.as_mut()
         {
-            relation.alias = self.parse_optional_alias(false);
+            relation.alias = self.parse_optional_alias(false)?;
         }
         self.expect(TokenKind::Set)?;
         let target_list = self.parse_set_clause_list_until(&[
@@ -56,8 +61,7 @@ impl Parser {
             TokenKind::Eof,
         ])?;
         let returning_clause = self.parse_returning_clause()?;
-        Ok(Node::UpdateStmt(UpdateStmt {
-            node_tag: NodeTag::UpdateStmt,
+        Ok(node!(UpdateStmt {
             relation,
             target_list,
             from_clause,

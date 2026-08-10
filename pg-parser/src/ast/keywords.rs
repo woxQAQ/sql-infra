@@ -1,4 +1,12 @@
-use crate::{BareLabel, Keyword, KeywordCategory, TokenKind};
+//! PostgreSQL keyword metadata used by lexing and grammar-category checks.
+//!
+//! [`KEYWORDS`] must remain sorted by spelling because lexer lookup uses binary
+//! search, and each entry's category and bare-label flag affect parser decisions.
+
+use crate::BareLabel;
+use crate::Keyword;
+use crate::KeywordCategory;
+use crate::TokenKind;
 
 pub static KEYWORDS: &[Keyword] = &[
     Keyword {

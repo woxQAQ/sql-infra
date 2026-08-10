@@ -1,3 +1,8 @@
+//! Procedural-language creation statements.
+//!
+//! Handler, inline-handler, validator, trust, and replacement clauses are mapped
+//! into PostgreSQL's language statement shape.
+
 use super::*;
 
 impl Parser {
@@ -12,23 +17,25 @@ impl Parser {
         pltrusted: bool,
     ) -> PResult<Node> {
         self.expect(TokenKind::Language)?;
+        self.record_completion_slot(GrammarSlot::Language);
         let plname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE LANGUAGE requires a name"))?,
         );
         if !self.consume(TokenKind::Handler) {
-            return Ok(Node::CreateExtensionStmt(CreateExtensionStmt {
-                node_tag: NodeTag::CreateExtensionStmt,
+            return Ok(node!(CreateExtensionStmt {
                 extname: plname,
                 if_not_exists: replace,
                 options: Vec::new(),
             }));
         }
+        self.record_completion_slot(GrammarSlot::Function);
         let plhandler = self.parse_name_list();
         if plhandler.is_empty() {
             return Err(self.error_here("HANDLER requires a function name"));
         }
         let plinline = if self.consume(TokenKind::InlineP) {
+            self.record_completion_slot(GrammarSlot::Function);
             let name = self.parse_name_list();
             if name.is_empty() {
                 return Err(self.error_here("INLINE requires a function name"));
@@ -38,6 +45,7 @@ impl Parser {
             Vec::new()
         };
         let plvalidator = if self.consume(TokenKind::Validator) {
+            self.record_completion_slot(GrammarSlot::Function);
             let name = self.parse_name_list();
             if name.is_empty() {
                 return Err(self.error_here("VALIDATOR requires a function name"));
@@ -49,8 +57,7 @@ impl Parser {
         } else {
             Vec::new()
         };
-        Ok(Node::CreatePLangStmt(CreatePLangStmt {
-            node_tag: NodeTag::CreatePLangStmt,
+        Ok(node!(CreatePLangStmt {
             replace,
             plname,
             plhandler,

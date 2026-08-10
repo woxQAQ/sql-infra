@@ -1,17 +1,38 @@
+//! Top-level `CREATE` dispatch and grammar shared by relation-like objects.
+//!
+//! Detailed object definitions stay in dedicated modules; this module identifies
+//! the statement family and common persistence modifiers.
+
 use super::*;
 
 impl Parser {
     pub(super) fn parse_create(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Create)?;
-        let replace = if self.consume(TokenKind::Or) {
-            self.expect(TokenKind::Replace)?;
+        let replace = self.consume_phrase(&[TokenKind::Or, TokenKind::Replace])?;
+        let relpersistence = self.parse_create_relpersistence()?;
+        if relpersistence == b'p' {
+            self.record_completion_tokens(&[TokenKind::Trusted, TokenKind::Procedural]);
+        }
+        let trusted = if self.peek_kind() == TokenKind::Trusted {
+            self.advance();
             true
         } else {
             false
         };
-        let relpersistence = self.parse_create_relpersistence()?;
-        let trusted = self.consume(TokenKind::Trusted);
-        let procedural = self.consume(TokenKind::Procedural);
+        if relpersistence == b'p' {
+            self.record_completion_tokens(&[TokenKind::Procedural]);
+        }
+        let procedural = if self.peek_kind() == TokenKind::Procedural {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        self.record_completion_tokens(Self::create_object_candidates(
+            replace,
+            relpersistence,
+            trusted || procedural,
+        ));
         if (trusted || procedural) && self.peek_kind() != TokenKind::Language {
             return Err(self.error_here("TRUSTED/PROCEDURAL is only valid for CREATE LANGUAGE"));
         }
@@ -49,19 +70,26 @@ impl Parser {
         }
         let node = match self.peek_kind() {
             TokenKind::Table => self.parse_create_table(false, relpersistence)?,
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::Table => {
+            TokenKind::Foreign => {
                 self.advance();
-                self.parse_create_table(true, b'p')?
+                self.record_completion_tokens(&[TokenKind::Table, TokenKind::DataP]);
+                if self.at(TokenKind::Table) {
+                    self.parse_create_table(true, b'p')?
+                } else {
+                    self.expect(TokenKind::DataP)?;
+                    self.expect(TokenKind::Wrapper)?;
+                    self.parse_create_fdw()?
+                }
             }
-            TokenKind::Unique | TokenKind::Index => self.parse_index(false)?,
+            TokenKind::Unique | TokenKind::Index => self.parse_index()?,
             TokenKind::Schema => self.parse_create_schema()?,
             TokenKind::Database => self.parse_createdb()?,
-            TokenKind::Recursive if self.peek_kind_n(1) == TokenKind::View => {
+            TokenKind::Recursive => {
                 self.advance();
                 self.parse_view(replace, relpersistence, true)?
             }
             TokenKind::View => self.parse_view(replace, relpersistence, false)?,
-            TokenKind::Materialized if self.peek_kind_n(1) == TokenKind::View => {
+            TokenKind::Materialized => {
                 if relpersistence == b't' {
                     return Err(self.error_here("MATERIALIZED VIEW cannot be temporary"));
                 }
@@ -81,24 +109,26 @@ impl Parser {
             TokenKind::Publication => self.parse_create_publication()?,
             TokenKind::Subscription => self.parse_create_subscription()?,
             TokenKind::Policy => self.parse_create_policy()?,
-            TokenKind::Trigger => self.parse_create_trigger(replace, false)?,
-            TokenKind::Constraint if self.peek_kind_n(1) == TokenKind::Trigger => {
-                self.advance();
-                self.parse_create_trigger(replace, true)?
+            TokenKind::Trigger => {
+                self.parse_create_trigger(replace, create_trigger::TriggerKind::Regular)?
             }
-            TokenKind::Event if self.peek_kind_n(1) == TokenKind::Trigger => {
+            TokenKind::Constraint => {
+                self.advance();
+                self.parse_create_trigger(replace, create_trigger::TriggerKind::Constraint)?
+            }
+            TokenKind::Event => {
                 self.advance();
                 self.parse_create_event_trigger()?
             }
             TokenKind::Language => self.parse_create_language(replace, trusted)?,
             TokenKind::Server => self.parse_create_server()?,
             TokenKind::Tablespace => self.parse_create_tablespace()?,
-            TokenKind::Access if self.peek_kind_n(1) == TokenKind::Method => {
+            TokenKind::Access => {
                 self.advance();
                 self.parse_create_am()?
             }
             TokenKind::Cast => self.parse_create_cast()?,
-            TokenKind::Default if self.peek_kind_n(1) == TokenKind::ConversionP => {
+            TokenKind::Default => {
                 self.advance();
                 self.parse_create_conversion(true)?
             }
@@ -113,7 +143,7 @@ impl Parser {
                 self.advance();
                 self.parse_create_op_family()?
             }
-            TokenKind::Property if self.peek_kind_n(1) == TokenKind::Graph => {
+            TokenKind::Property => {
                 self.advance();
                 self.parse_create_prop_graph(relpersistence)?
             }
@@ -125,18 +155,99 @@ impl Parser {
             TokenKind::Aggregate => self.parse_define(ObjectType::Aggregate, replace)?,
             TokenKind::Operator => self.parse_define(ObjectType::Operator, replace)?,
             TokenKind::Collation => self.parse_define(ObjectType::Collation, replace)?,
-            TokenKind::TextP if self.peek_kind_n(1) == TokenKind::Search => {
-                self.parse_define_text_search()?
-            }
-            TokenKind::Foreign if self.peek_kind_n(1) == TokenKind::DataP => {
-                self.advance();
-                self.expect(TokenKind::DataP)?;
-                self.expect(TokenKind::Wrapper)?;
-                self.parse_create_fdw()?
-            }
+            TokenKind::TextP => self.parse_define_text_search()?,
             other => return Err(self.error_here(format!("unsupported CREATE form {:?}", other))),
         };
         Ok(node)
+    }
+
+    fn create_object_candidates(
+        replace: bool,
+        relpersistence: u8,
+        language_modifiers: bool,
+    ) -> &'static [TokenKind] {
+        if language_modifiers {
+            return if relpersistence == b'p' {
+                &[TokenKind::Language]
+            } else {
+                &[]
+            };
+        }
+        if replace {
+            return if relpersistence == b'p' {
+                &[
+                    TokenKind::Aggregate,
+                    TokenKind::Function,
+                    TokenKind::Procedure,
+                    TokenKind::Language,
+                    TokenKind::Transform,
+                    TokenKind::Rule,
+                    TokenKind::Trigger,
+                    TokenKind::View,
+                    TokenKind::Recursive,
+                ]
+            } else {
+                &[TokenKind::View, TokenKind::Recursive]
+            };
+        }
+        match relpersistence {
+            b't' => &[
+                TokenKind::Table,
+                TokenKind::View,
+                TokenKind::Recursive,
+                TokenKind::Sequence,
+                TokenKind::Property,
+            ],
+            b'u' => &[
+                TokenKind::Table,
+                TokenKind::View,
+                TokenKind::Recursive,
+                TokenKind::Materialized,
+                TokenKind::Sequence,
+                TokenKind::Property,
+            ],
+            _ => &[
+                TokenKind::Table,
+                TokenKind::Foreign,
+                TokenKind::Unique,
+                TokenKind::Index,
+                TokenKind::Schema,
+                TokenKind::Database,
+                TokenKind::Recursive,
+                TokenKind::View,
+                TokenKind::Materialized,
+                TokenKind::Extension,
+                TokenKind::Function,
+                TokenKind::Procedure,
+                TokenKind::User,
+                TokenKind::Role,
+                TokenKind::GroupP,
+                TokenKind::Sequence,
+                TokenKind::DomainP,
+                TokenKind::TypeP,
+                TokenKind::Publication,
+                TokenKind::Subscription,
+                TokenKind::Policy,
+                TokenKind::Trigger,
+                TokenKind::Constraint,
+                TokenKind::Event,
+                TokenKind::Language,
+                TokenKind::Server,
+                TokenKind::Tablespace,
+                TokenKind::Access,
+                TokenKind::Cast,
+                TokenKind::Default,
+                TokenKind::ConversionP,
+                TokenKind::Transform,
+                TokenKind::Statistics,
+                TokenKind::Operator,
+                TokenKind::Property,
+                TokenKind::Rule,
+                TokenKind::Aggregate,
+                TokenKind::Collation,
+                TokenKind::TextP,
+            ],
+        }
     }
 
     fn parse_create_relpersistence(&mut self) -> PResult<u8> {
@@ -159,7 +270,7 @@ impl Parser {
 
     fn parse_create_assertion(&mut self) -> PResult<Node> {
         let location = self.expect(TokenKind::Assertion)?.location();
-        Err(ParseError::new(
+        Err(ParseError::syntax_exit(
             location,
             "CREATE ASSERTION is not implemented by PostgreSQL",
         ))

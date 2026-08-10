@@ -1,3 +1,8 @@
+//! Window specifications, frame clauses, and row-locking clauses.
+//!
+//! Ordering, partitioning, frame bounds/exclusions, lock strength, targets, and
+//! wait policy are parsed with their query-level source locations.
+
 use super::*;
 
 impl Parser {
@@ -30,8 +35,18 @@ impl Parser {
         &mut self,
         location: usize,
     ) -> PResult<WindowDef> {
+        self.record_completion_tokens(&[
+            TokenKind::Partition,
+            TokenKind::Order,
+            TokenKind::Rows,
+            TokenKind::Range,
+            TokenKind::Groups,
+            TokenKind::Char(')'),
+        ]);
+        self.record_completion_phrase(&[TokenKind::Partition, TokenKind::By]);
+        self.record_completion_phrase(&[TokenKind::Order, TokenKind::By]);
+        self.record_completion_slot(GrammarSlot::AnyName);
         let mut window = WindowDef {
-            node_tag: NodeTag::WindowDef,
             location: location as ParseLoc,
             frame_options: FRAMEOPTION_DEFAULTS,
             ..WindowDef::default()
@@ -49,8 +64,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("invalid referenced window name"))?,
             );
         }
-        if self.consume(TokenKind::Partition) {
-            self.expect(TokenKind::By)?;
+        if self.consume_phrase(&[TokenKind::Partition, TokenKind::By])? {
             window.partition_clause = self.parse_expr_list_strict_until(&[
                 TokenKind::Order,
                 TokenKind::Rows,
@@ -62,8 +76,7 @@ impl Parser {
                 return Err(self.error_here("PARTITION BY requires an expression"));
             }
         }
-        if self.consume(TokenKind::Order) {
-            self.expect(TokenKind::By)?;
+        if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
             window.order_clause = self.parse_sort_list_strict_until(&[
                 TokenKind::Rows,
                 TokenKind::Range,
@@ -74,6 +87,11 @@ impl Parser {
                 return Err(self.error_here("ORDER BY requires a sort expression"));
             }
         }
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Rows,
+            TokenKind::Range,
+            TokenKind::Groups,
+        ]);
         if matches!(
             self.peek_kind(),
             TokenKind::Rows | TokenKind::Range | TokenKind::Groups
@@ -123,7 +141,15 @@ impl Parser {
             window.frame_options |= start_options | FRAMEOPTION_END_CURRENT_ROW;
             window.start_offset = start_offset;
         }
-        if self.consume(TokenKind::Exclude) {
+        if self.consume_follow(TokenKind::Exclude) {
+            self.record_completion_tokens(&[
+                TokenKind::CurrentP,
+                TokenKind::GroupP,
+                TokenKind::Ties,
+                TokenKind::No,
+            ]);
+            self.record_completion_phrase(&[TokenKind::CurrentP, TokenKind::Row]);
+            self.record_completion_phrase(&[TokenKind::No, TokenKind::Others]);
             window.frame_options |= match self.peek_kind() {
                 TokenKind::CurrentP => {
                     self.advance();
@@ -215,8 +241,7 @@ impl Parser {
             } else {
                 LockWaitPolicy::Block
             };
-            clauses.push(Node::LockingClause(LockingClause {
-                node_tag: NodeTag::LockingClause,
+            clauses.push(node!(LockingClause {
                 locked_rels,
                 strength,
                 wait_policy,
@@ -229,6 +254,12 @@ impl Parser {
     }
 
     pub(super) fn parse_locking_strength(&mut self) -> PResult<LockClauseStrength> {
+        self.record_completion_tokens(&[
+            TokenKind::Update,
+            TokenKind::No,
+            TokenKind::Share,
+            TokenKind::Key,
+        ]);
         match self.peek_kind() {
             TokenKind::Update => {
                 self.advance();

@@ -1,3 +1,8 @@
+//! Database and system-configuration DDL parsing.
+//!
+//! This module owns create/alter/drop database forms, database options, and
+//! `ALTER SYSTEM` rather than treating their option grammars as generic DDL.
+
 use super::*;
 
 impl Parser {
@@ -23,17 +28,14 @@ impl Parser {
     //            [ OID [=] oid ]
     pub(super) fn parse_createdb(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
+        self.record_completion_slot(GrammarSlot::Database);
         let dbname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE DATABASE requires a database name"))?,
         );
         self.consume(TokenKind::With);
         let options = self.parse_database_options()?;
-        Ok(Node::CreatedbStmt(CreatedbStmt {
-            node_tag: NodeTag::CreatedbStmt,
-            dbname,
-            options,
-        }))
+        Ok(node!(CreatedbStmt { dbname, options }))
     }
 
     fn parse_database_options(&mut self) -> PResult<NodeList> {
@@ -58,6 +60,12 @@ impl Parser {
                     .ok_or_else(|| self.error_here("expected a database option name"))?
             };
             self.consume(TokenKind::Char('='));
+            match name.as_str() {
+                "owner" => self.record_completion_slot(GrammarSlot::Role),
+                "tablespace" => self.record_completion_slot(GrammarSlot::Tablespace),
+                "template" => self.record_completion_slot(GrammarSlot::Database),
+                _ => {}
+            }
             let arg = if self.consume(TokenKind::Default) {
                 None
             } else if matches!(
@@ -71,8 +79,7 @@ impl Parser {
                     .ok_or_else(|| self.error_here("database option requires a value"))?;
                 Some(Box::new(make_string_node(value)))
             };
-            options.push(Node::DefElem(DefElem {
-                node_tag: NodeTag::DefElem,
+            options.push(node!(DefElem {
                 defname: Some(name),
                 arg,
                 location: location as ParseLoc,
@@ -106,29 +113,26 @@ impl Parser {
     // ALTER DATABASE name RESET ALL
     pub(super) fn parse_alter_database(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
+        self.record_completion_slot(GrammarSlot::Database);
         let dbname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("ALTER DATABASE requires a database name"))?,
         );
+        self.record_completion_tokens(&[TokenKind::Rename, TokenKind::Owner]);
         if self.consume(TokenKind::Refresh) {
             self.expect(TokenKind::Collation)?;
             self.expect(TokenKind::VersionP)?;
-            Ok(Node::AlterDatabaseRefreshCollStmt(
-                AlterDatabaseRefreshCollStmt {
-                    node_tag: NodeTag::AlterDatabaseRefreshCollStmt,
-                    dbname,
-                },
-            ))
+            Ok(node!(AlterDatabaseRefreshCollStmt { dbname }))
         } else if self.peek_kind() == TokenKind::Set && self.peek_kind_n(1) == TokenKind::Tablespace
         {
             self.expect(TokenKind::Set)?;
             self.expect(TokenKind::Tablespace)?;
+            self.record_completion_slot(GrammarSlot::Tablespace);
             let location = self.location();
             let tablespace = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("SET TABLESPACE requires a tablespace name"))?;
-            Ok(Node::AlterDatabaseStmt(AlterDatabaseStmt {
-                node_tag: NodeTag::AlterDatabaseStmt,
+            Ok(node!(AlterDatabaseStmt {
                 dbname,
                 options: vec![make_def_elem(
                     "tablespace",
@@ -138,22 +142,14 @@ impl Parser {
             }))
         } else if matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
             let setstmt = Some(Box::new(self.parse_variable_set_like(false)?));
-            Ok(Node::AlterDatabaseSetStmt(AlterDatabaseSetStmt {
-                node_tag: NodeTag::AlterDatabaseSetStmt,
-                dbname,
-                setstmt,
-            }))
+            Ok(node!(AlterDatabaseSetStmt { dbname, setstmt }))
         } else {
             self.consume(TokenKind::With);
             let options = self.parse_database_options()?;
             if options.is_empty() {
                 return Err(self.error_here("ALTER DATABASE requires an action or option"));
             }
-            Ok(Node::AlterDatabaseStmt(AlterDatabaseStmt {
-                node_tag: NodeTag::AlterDatabaseStmt,
-                dbname,
-                options,
-            }))
+            Ok(node!(AlterDatabaseStmt { dbname, options }))
         }
     }
 
@@ -165,14 +161,12 @@ impl Parser {
     // ALTER SYSTEM RESET ALL
     pub(super) fn parse_alter_system(&mut self) -> PResult<Node> {
         self.expect(TokenKind::SystemP)?;
+        self.record_completion_tokens(&[TokenKind::Set, TokenKind::Reset]);
         if !matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
             return Err(self.error_here("ALTER SYSTEM requires SET or RESET"));
         }
         let setstmt = Some(Box::new(self.parse_generic_set_reset_clause()?));
-        Ok(Node::AlterSystemStmt(AlterSystemStmt {
-            node_tag: NodeTag::AlterSystemStmt,
-            setstmt,
-        }))
+        Ok(node!(AlterSystemStmt { setstmt }))
     }
 
     // PostgreSQL 18 Synopsis
@@ -185,6 +179,7 @@ impl Parser {
     pub(super) fn parse_drop_database(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Database)?;
         let missing_ok = self.consume_if_exists()?;
+        self.record_completion_slot(GrammarSlot::Database);
         let dbname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("DROP DATABASE requires a database name"))?,
@@ -209,8 +204,7 @@ impl Parser {
             Vec::new()
         };
         self.expect_statement_end()?;
-        Ok(Node::DropdbStmt(DropdbStmt {
-            node_tag: NodeTag::DropdbStmt,
+        Ok(node!(DropdbStmt {
             dbname,
             missing_ok,
             options,

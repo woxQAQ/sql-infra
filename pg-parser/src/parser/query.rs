@@ -1,8 +1,32 @@
+//! Query-expression orchestration for `WITH`, `SELECT`, `VALUES`, and set operations.
+//!
+//! This module makes the major query phases visible—CTEs, primary forms, set
+//! precedence, result clauses, locking, and limits—while delegating list and range
+//! details to focused modules.
+
 use super::*;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WithTarget {
+    Select,
+    Insert,
+    Update,
+    Delete,
+    Merge,
+}
 
 impl Parser {
     pub(super) fn parse_with_statement(&mut self) -> PResult<Node> {
         let with = self.parse_with_clause()?;
+        self.record_completion_tokens(&[
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::Table,
+            TokenKind::Insert,
+            TokenKind::Update,
+            TokenKind::DeleteP,
+            TokenKind::Merge,
+        ]);
         let target = match self.peek_kind() {
             TokenKind::Select | TokenKind::Values | TokenKind::Table | TokenKind::Char('(') => {
                 WithTarget::Select
@@ -61,12 +85,12 @@ impl Parser {
             };
             self.expect(TokenKind::Char('('))?;
             let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            self.record_completion_tokens(&[TokenKind::Char(')')]);
+            let ctequery = self.parse_preparable_fragment_tokens(inner)?;
             self.expect(TokenKind::Char(')'))?;
-            let ctequery = parse_preparable_statement_tokens(inner)?;
             let search_clause = self.parse_cte_search_clause()?;
             let cycle_clause = self.parse_cte_cycle_clause()?;
-            ctes.push(Node::CommonTableExpr(CommonTableExpr {
-                node_tag: NodeTag::CommonTableExpr,
+            ctes.push(node!(CommonTableExpr {
                 ctename: Some(name),
                 aliascolnames,
                 ctematerialized,
@@ -82,7 +106,6 @@ impl Parser {
         }
 
         Ok(WithClause {
-            node_tag: NodeTag::WithClause,
             ctes,
             recursive,
             location: location as ParseLoc,
@@ -102,14 +125,14 @@ impl Parser {
         };
         self.expect(TokenKind::FirstP)?;
         self.expect(TokenKind::By)?;
-        let search_col_list = self.parse_simple_name_list_until(&[TokenKind::Set])?;
+        let search_col_list =
+            self.parse_simple_name_list_until(&[TokenKind::Set], GrammarSlot::Column)?;
         self.expect(TokenKind::Set)?;
         let search_seq_column = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("SEARCH SET requires a column name"))?,
         );
         Ok(Some(Box::new(CteSearchClause {
-            node_tag: NodeTag::CteSearchClause,
             search_col_list,
             search_breadth_first,
             search_seq_column,
@@ -122,7 +145,8 @@ impl Parser {
             return Ok(None);
         }
         let location = self.previous_location();
-        let cycle_col_list = self.parse_simple_name_list_until(&[TokenKind::Set])?;
+        let cycle_col_list =
+            self.parse_simple_name_list_until(&[TokenKind::Set], GrammarSlot::Column)?;
         self.expect(TokenKind::Set)?;
         let cycle_mark_column = Some(
             self.consume_col_id()
@@ -130,22 +154,26 @@ impl Parser {
         );
         let (cycle_mark_value, cycle_mark_default) = if self.consume(TokenKind::To) {
             let value_tokens = self.take_until_top_level(&[TokenKind::Default]);
+            if self.at_completion() && value_tokens.is_empty() {
+                self.record_completion_slot(GrammarSlot::Type);
+            }
             self.expect(TokenKind::Default)?;
             let default_tokens = self.take_until_top_level(&[TokenKind::Using]);
+            if self.at_completion() && default_tokens.is_empty() {
+                self.record_completion_slot(GrammarSlot::Type);
+            }
             (
                 Some(Box::new(parse_aexpr_const_tokens(value_tokens)?)),
                 Some(Box::new(parse_aexpr_const_tokens(default_tokens)?)),
             )
         } else {
             (
-                Some(Box::new(Node::AConst(AConst {
-                    node_tag: NodeTag::AConst,
+                Some(Box::new(node!(AConst {
                     val: ValUnion::Boolean(Boolean::new(true)),
                     location: -1,
                     ..AConst::default()
                 }))),
-                Some(Box::new(Node::AConst(AConst {
-                    node_tag: NodeTag::AConst,
+                Some(Box::new(node!(AConst {
                     val: ValUnion::Boolean(Boolean::new(false)),
                     location: -1,
                     ..AConst::default()
@@ -158,7 +186,6 @@ impl Parser {
                 .ok_or_else(|| self.error_here("CYCLE USING requires a path column name"))?,
         );
         Ok(Some(Box::new(CteCycleClause {
-            node_tag: NodeTag::CteCycleClause,
             cycle_col_list,
             cycle_mark_column,
             cycle_mark_value,
@@ -180,11 +207,12 @@ impl Parser {
     //     [ HAVING condition ]
     //     [ WINDOW window_name AS ( window_definition ) [, ...] ]
     //     [ { UNION | INTERSECT | EXCEPT } [ ALL | DISTINCT ] select ]
-    //     [ ORDER BY expression [ ASC | DESC | USING operator ] [ NULLS { FIRST | LAST } ] [, ...] ]
-    //     [ LIMIT { count | ALL } ]
+    //     [ ORDER BY expression [ ASC | DESC | USING operator ] [ NULLS { FIRST | LAST } ] [, ...]
+    // ]     [ LIMIT { count | ALL } ]
     //     [ OFFSET start [ ROW | ROWS ] ]
     //     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } { ONLY | WITH TIES } ]
-    //     [ FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF from_reference [, ...] ] [ NOWAIT | SKIP LOCKED ] [...] ]
+    //     [ FOR { UPDATE | NO KEY UPDATE | SHARE | KEY SHARE } [ OF from_reference [, ...] ] [
+    // NOWAIT | SKIP LOCKED ] [...] ]
     //
     // where from_item can be one of:
     //
@@ -194,13 +222,13 @@ impl Parser {
     //     with_query_name [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
     //     [ LATERAL ] function_name ( [ argument [, ...] ] )
     //                 [ WITH ORDINALITY ] [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
-    //     [ LATERAL ] function_name ( [ argument [, ...] ] ) [ AS ] alias ( column_definition [, ...] )
-    //     [ LATERAL ] function_name ( [ argument [, ...] ] ) AS ( column_definition [, ...] )
-    //     [ LATERAL ] ROWS FROM( function_name ( [ argument [, ...] ] ) [ AS ( column_definition [, ...] ) ] [, ...] )
-    //                 [ WITH ORDINALITY ] [ [ AS ] alias [ ( column_alias [, ...] ) ] ]
-    //     from_item join_type from_item { ON join_condition | USING ( join_column [, ...] ) [ AS join_using_alias ] }
-    //     from_item NATURAL join_type from_item
-    //     from_item CROSS JOIN from_item
+    //     [ LATERAL ] function_name ( [ argument [, ...] ] ) [ AS ] alias ( column_definition [,
+    // ...] )     [ LATERAL ] function_name ( [ argument [, ...] ] ) AS ( column_definition [,
+    // ...] )     [ LATERAL ] ROWS FROM( function_name ( [ argument [, ...] ] ) [ AS (
+    // column_definition [, ...] ) ] [, ...] )                 [ WITH ORDINALITY ] [ [ AS ]
+    // alias [ ( column_alias [, ...] ) ] ]     from_item join_type from_item { ON
+    // join_condition | USING ( join_column [, ...] ) [ AS join_using_alias ] }     from_item
+    // NATURAL join_type from_item     from_item CROSS JOIN from_item
     //
     // and grouping_element can be one of:
     //
@@ -213,9 +241,11 @@ impl Parser {
     //
     // and with_query is:
     //
-    //     with_query_name [ ( column_name [, ...] ) ] AS [ [ NOT ] MATERIALIZED ] ( select | values | insert | update | delete | merge )
-    //         [ SEARCH { BREADTH | DEPTH } FIRST BY column_name [, ...] SET search_seq_col_name ]
-    //         [ CYCLE column_name [, ...] SET cycle_mark_col_name [ TO cycle_mark_value DEFAULT cycle_mark_default ] USING cycle_path_col_name ]
+    //     with_query_name [ ( column_name [, ...] ) ] AS [ [ NOT ] MATERIALIZED ] ( select | values
+    // | insert | update | delete | merge )         [ SEARCH { BREADTH | DEPTH } FIRST BY
+    // column_name [, ...] SET search_seq_col_name ]         [ CYCLE column_name [, ...] SET
+    // cycle_mark_col_name [ TO cycle_mark_value DEFAULT cycle_mark_default ] USING
+    // cycle_path_col_name ]
     //
     // TABLE [ ONLY ] table_name [ * ]
     pub(super) fn parse_select(&mut self, with_clause: Option<WithClause>) -> PResult<SelectStmt> {
@@ -231,6 +261,7 @@ impl Parser {
     ) -> PResult<SelectStmt> {
         let mut lhs = self.parse_select_primary(with_clause)?;
 
+        self.record_completion_tokens(&[TokenKind::Union, TokenKind::Except, TokenKind::Intersect]);
         while let Some((op, precedence)) = select_set_operator(self.peek_kind()) {
             if precedence < min_precedence {
                 break;
@@ -245,7 +276,6 @@ impl Parser {
             let rhs = self.parse_select_set_expr(None, precedence + 1)?;
             let outer_with = lhs.with_clause.take();
             lhs = SelectStmt {
-                node_tag: NodeTag::SelectStmt,
                 op,
                 all,
                 larg: Some(Box::new(lhs)),
@@ -259,8 +289,42 @@ impl Parser {
     }
 
     fn parse_select_primary(&mut self, with_clause: Option<WithClause>) -> PResult<SelectStmt> {
+        self.record_completion_tokens(&[
+            TokenKind::Values,
+            TokenKind::Table,
+            TokenKind::Select,
+            TokenKind::Char('('),
+        ]);
         if self.consume(TokenKind::Char('(')) {
-            let inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            let mut inner = self.take_until_top_level(&[TokenKind::Char(')')]);
+            if self.at_completion() {
+                if inner.is_empty() {
+                    self.record_completion_tokens(&[
+                        TokenKind::With,
+                        TokenKind::Select,
+                        TokenKind::Values,
+                        TokenKind::Table,
+                        TokenKind::Char('('),
+                    ]);
+                    return Err(self.error_here("completion point in parenthesized query"));
+                }
+                self.append_completion_marker(&mut inner);
+                return match parse_select_statement_tokens_with_completion(
+                    inner,
+                    self.completion.clone(),
+                )? {
+                    Node::SelectStmt(mut stmt) => {
+                        if with_clause.is_some() && stmt.with_clause.is_some() {
+                            return Err(self.error_here("multiple WITH clauses are not allowed"));
+                        }
+                        if let Some(with_clause) = with_clause {
+                            stmt.with_clause = Some(Box::new(with_clause));
+                        }
+                        Ok(stmt)
+                    }
+                    _ => unreachable!("parse_select_statement_tokens returned a non-select node"),
+                };
+            }
             self.expect(TokenKind::Char(')'))?;
             return match parse_select_statement_tokens(inner)? {
                 Node::SelectStmt(mut stmt) => {
@@ -276,7 +340,6 @@ impl Parser {
             };
         }
         let mut stmt = SelectStmt {
-            node_tag: NodeTag::SelectStmt,
             with_clause: with_clause.map(Box::new),
             ..SelectStmt::default()
         };
@@ -292,14 +355,10 @@ impl Parser {
             }
             TokenKind::Table => {
                 self.advance();
-                let range = self.parse_relation_expr(false)?;
-                stmt.target_list.push(Node::ResTarget(ResTarget {
-                    node_tag: NodeTag::ResTarget,
-                    val: Some(Box::new(Node::ColumnRef(ColumnRef {
-                        node_tag: NodeTag::ColumnRef,
-                        fields: vec![Node::AStar(AStar {
-                            node_tag: NodeTag::AStar,
-                        })],
+                let range = self.parse_relation_expr()?;
+                stmt.target_list.push(node!(ResTarget {
+                    val: Some(Box::new(node!(ColumnRef {
+                        fields: vec![Node::AStar],
                         location: -1,
                     }))),
                     location: -1,
@@ -309,12 +368,30 @@ impl Parser {
             }
             _ => {
                 self.expect(TokenKind::Select)?;
+                self.record_completion_tokens(&[
+                    TokenKind::All,
+                    TokenKind::Distinct,
+                    TokenKind::Into,
+                    TokenKind::From,
+                    TokenKind::Where,
+                    TokenKind::GroupP,
+                    TokenKind::Having,
+                    TokenKind::Window,
+                    TokenKind::Order,
+                    TokenKind::Limit,
+                    TokenKind::Offset,
+                    TokenKind::Fetch,
+                    TokenKind::For,
+                    TokenKind::Union,
+                    TokenKind::Intersect,
+                    TokenKind::Except,
+                    TokenKind::Char(';'),
+                ]);
                 if self.consume(TokenKind::All) {
                     stmt.distinct_clause.clear();
                 } else if self.consume(TokenKind::Distinct) {
                     distinct_requires_target = true;
-                    stmt.distinct_clause
-                        .push(Node::String(String::new("distinct")));
+                    stmt.distinct_clause.push(node!(String::new("distinct")));
                     if self.consume(TokenKind::On) {
                         self.expect(TokenKind::Char('('))?;
                         let expressions =
@@ -372,8 +449,9 @@ impl Parser {
                 TokenKind::Eof,
             ])?;
         }
-        if self.consume(TokenKind::Where) {
-            stmt.where_clause = Some(self.parse_expr_box_strict_until(&[
+        stmt.where_clause = self.parse_optional_expr_clause(
+            TokenKind::Where,
+            &[
                 TokenKind::GroupP,
                 TokenKind::Having,
                 TokenKind::Window,
@@ -387,10 +465,9 @@ impl Parser {
                 TokenKind::Except,
                 TokenKind::Char(';'),
                 TokenKind::Eof,
-            ])?);
-        }
-        if self.consume(TokenKind::GroupP) {
-            self.expect(TokenKind::By)?;
+            ],
+        )?;
+        if self.consume_phrase(&[TokenKind::GroupP, TokenKind::By])? {
             if self.consume(TokenKind::All) {
                 stmt.group_by_all = true;
             } else {
@@ -416,8 +493,9 @@ impl Parser {
                 }
             }
         }
-        if self.consume(TokenKind::Having) {
-            stmt.having_clause = Some(self.parse_expr_box_strict_until(&[
+        stmt.having_clause = self.parse_optional_expr_clause(
+            TokenKind::Having,
+            &[
                 TokenKind::Window,
                 TokenKind::Order,
                 TokenKind::Limit,
@@ -429,8 +507,8 @@ impl Parser {
                 TokenKind::Except,
                 TokenKind::Char(';'),
                 TokenKind::Eof,
-            ])?);
-        }
+            ],
+        )?;
         if self.consume(TokenKind::Window) {
             stmt.window_clause = self.parse_window_clause_until(&[
                 TokenKind::Order,
@@ -461,8 +539,8 @@ impl Parser {
     //     [ HAVING condition ]
     //     [ WINDOW window_name AS ( window_definition ) [, ...] ]
     //     [ { UNION | INTERSECT | EXCEPT } [ ALL | DISTINCT ] select ]
-    //     [ ORDER BY expression [ ASC | DESC | USING operator ] [ NULLS { FIRST | LAST } ] [, ...] ]
-    //     [ LIMIT { count | ALL } ]
+    //     [ ORDER BY expression [ ASC | DESC | USING operator ] [ NULLS { FIRST | LAST } ] [, ...]
+    // ]     [ LIMIT { count | ALL } ]
     //     [ OFFSET start [ ROW | ROWS ] ]
     //     [ FETCH { FIRST | NEXT } [ count ] { ROW | ROWS } ONLY ]
     //     [ FOR { UPDATE | SHARE } [ OF table_name [, ...] ] [ NOWAIT ] [...] ]
@@ -494,19 +572,24 @@ impl Parser {
         };
         self.consume(TokenKind::Table);
         let mut relation = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
             .ok_or_else(|| self.error_here("SELECT INTO requires a relation name"))?;
         relation.relpersistence = relpersistence;
         Ok(IntoClause {
-            node_tag: NodeTag::IntoClause,
             rel: Some(Box::new(relation)),
             ..IntoClause::default()
         })
     }
 
     fn parse_select_tail(&mut self, stmt: &mut SelectStmt) -> PResult<()> {
-        if self.consume(TokenKind::Order) {
-            self.expect(TokenKind::By)?;
+        self.record_completion_tokens(&[
+            TokenKind::Order,
+            TokenKind::Limit,
+            TokenKind::Offset,
+            TokenKind::Fetch,
+            TokenKind::For,
+        ]);
+        if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
             stmt.sort_clause = self.parse_sort_list_strict_until(&[
                 TokenKind::Limit,
                 TokenKind::Offset,
@@ -545,7 +628,7 @@ impl Parser {
             if stmt.locking_clause.iter().any(|clause| {
                 matches!(
                     clause,
-                    Node::LockingClause(LockingClause {
+                    node!(LockingClause {
                         wait_policy: LockWaitPolicy::Skip,
                         ..
                     })
@@ -568,9 +651,7 @@ impl Parser {
                 }
                 saw_limit = true;
                 stmt.limit_count = Some(if self.consume(TokenKind::All) {
-                    Box::new(Node::AConst(AConst::null(
-                        self.previous_location() as ParseLoc
-                    )))
+                    Box::new(node!(AConst::null(self.previous_location() as ParseLoc)))
                 } else {
                     self.parse_expr_box_strict_until(&[
                         TokenKind::Char(','),
@@ -594,7 +675,7 @@ impl Parser {
                     return Err(self.error_here("multiple OFFSET clauses are not allowed"));
                 }
                 saw_offset = true;
-                let offset_tokens = self.take_until_top_level(&[
+                let offset_stops = [
                     TokenKind::Row,
                     TokenKind::Rows,
                     TokenKind::Limit,
@@ -605,12 +686,14 @@ impl Parser {
                     TokenKind::Except,
                     TokenKind::Char(';'),
                     TokenKind::Eof,
-                ]);
-                let has_row_suffix = self.at(TokenKind::Row) || self.at(TokenKind::Rows);
+                ];
+                let offset_tokens = self.take_until_top_level(&offset_stops);
+                self.record_expression_follow_tokens(&offset_tokens, &offset_stops, false);
+                let has_row_suffix = matches!(self.peek_kind(), TokenKind::Row | TokenKind::Rows);
                 stmt.limit_offset = Some(Box::new(if has_row_suffix {
                     parse_select_fetch_first_value_tokens(offset_tokens)?
                 } else {
-                    parse_expression_tokens(offset_tokens)?
+                    self.parse_expression_fragment_tokens(offset_tokens)?
                 }));
                 if has_row_suffix {
                     self.advance();
@@ -624,12 +707,25 @@ impl Parser {
                 if !(self.consume(TokenKind::FirstP) || self.consume(TokenKind::Next)) {
                     return Err(self.error_here("FETCH requires FIRST or NEXT"));
                 }
+                self.record_completion_tokens(&[TokenKind::Row, TokenKind::Rows]);
                 stmt.limit_count = Some(
                     if matches!(self.peek_kind(), TokenKind::Row | TokenKind::Rows) {
-                        Box::new(Node::AConst(AConst::integer(1, -1)))
+                        Box::new(node!(AConst::integer(1, -1)))
                     } else {
-                        Box::new(parse_select_fetch_first_value_tokens(
-                            self.take_until_top_level(&[TokenKind::Row, TokenKind::Rows]),
+                        let mut tokens =
+                            self.take_until_top_level(&[TokenKind::Row, TokenKind::Rows]);
+                        if self.at_completion()
+                            && parse_select_fetch_first_value_tokens(tokens.clone()).is_ok()
+                        {
+                            self.record_completion_follow_tokens(&[
+                                TokenKind::Row,
+                                TokenKind::Rows,
+                            ]);
+                        }
+                        self.append_completion_marker(&mut tokens);
+                        Box::new(parse_select_fetch_first_value_tokens_with_completion(
+                            tokens,
+                            self.completion.clone(),
                         )?)
                     },
                 );

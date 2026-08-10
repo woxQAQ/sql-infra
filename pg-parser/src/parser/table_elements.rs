@@ -1,7 +1,13 @@
+//! Table columns, typed-table elements, and column qualifiers.
+//!
+//! Column definitions, generated/identity forms, defaults, storage, compression,
+//! and embedded constraints are parsed before `create_table` assembles the table.
+
 use super::*;
 
 impl Parser {
     pub(super) fn parse_insert_column_list(&mut self) -> PResult<NodeList> {
+        self.record_completion_slot(GrammarSlot::Column);
         let mut cols = Vec::new();
         if self.at(TokenKind::Char(')')) {
             return Err(self.error_here("column list cannot be empty"));
@@ -12,8 +18,7 @@ impl Parser {
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a column name"))?;
             let indirection = self.parse_assignment_indirection()?;
-            cols.push(Node::ResTarget(ResTarget {
-                node_tag: NodeTag::ResTarget,
+            cols.push(node!(ResTarget {
                 name: Some(name),
                 indirection,
                 location: location as ParseLoc,
@@ -34,9 +39,10 @@ impl Parser {
         while !self.at(TokenKind::Char(')')) {
             if self.consume(TokenKind::Like) {
                 let relation = self
-                    .try_parse_qualified_range_var()
+                    .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                     .ok_or_else(|| self.error_here("expected a relation after LIKE"))?;
                 let mut options = 0u32;
+                self.record_completion_follow_tokens(&[TokenKind::Including, TokenKind::Excluding]);
                 while matches!(
                     self.peek_kind(),
                     TokenKind::Including | TokenKind::Excluding
@@ -45,6 +51,18 @@ impl Parser {
                     if !include {
                         self.expect(TokenKind::Excluding)?;
                     }
+                    self.record_completion_tokens(&[
+                        TokenKind::Comments,
+                        TokenKind::Compression,
+                        TokenKind::Constraints,
+                        TokenKind::Defaults,
+                        TokenKind::Generated,
+                        TokenKind::IdentityP,
+                        TokenKind::Indexes,
+                        TokenKind::Statistics,
+                        TokenKind::Storage,
+                        TokenKind::All,
+                    ]);
                     let option = match self.advance().kind {
                         TokenKind::Comments => TableLikeOption::Comments as u32,
                         TokenKind::Compression => TableLikeOption::Compression as u32,
@@ -67,23 +85,30 @@ impl Parser {
                     } else {
                         options &= !option;
                     }
+                    self.record_completion_follow_tokens(&[
+                        TokenKind::Including,
+                        TokenKind::Excluding,
+                    ]);
                 }
-                elements.push(Node::TableLikeClause(TableLikeClause {
-                    node_tag: NodeTag::TableLikeClause,
+                elements.push(node!(TableLikeClause {
                     relation: Some(Box::new(relation)),
                     options,
                     ..TableLikeClause::default()
                 }));
             } else {
                 let location = self.location();
-                let chunk =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                elements.push(parse_table_element_tokens(chunk).map_err(|mut error| {
-                    if error.location() == 0 {
-                        error.reanchor(location);
-                    }
-                    error
-                })?);
+                let mut chunk = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+                self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
+                self.append_completion_marker(&mut chunk);
+                elements.push(
+                    parse_table_element_tokens_with_completion(chunk, self.completion.clone())
+                        .map_err(|mut error| {
+                            if error.location() == 0 {
+                                error.reanchor(location);
+                            }
+                            error
+                        })?,
+                );
             }
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -103,14 +128,17 @@ impl Parser {
         }
         while !self.at(TokenKind::Char(')')) {
             let location = self.location();
-            let chunk = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+            let mut chunk = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+            self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
+            self.append_completion_marker(&mut chunk);
             elements.push(
-                parse_typed_table_element_tokens(chunk).map_err(|mut error| {
-                    if error.location() == 0 {
-                        error.reanchor(location);
-                    }
-                    error
-                })?,
+                parse_typed_table_element_tokens_with_completion(chunk, self.completion.clone())
+                    .map_err(|mut error| {
+                        if error.location() == 0 {
+                            error.reanchor(location);
+                        }
+                        error
+                    })?,
             );
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -124,6 +152,15 @@ impl Parser {
     }
 
     pub(super) fn parse_table_element_inner(&mut self) -> PResult<Node> {
+        self.record_completion_tokens(&[
+            TokenKind::Constraint,
+            TokenKind::Check,
+            TokenKind::Not,
+            TokenKind::Unique,
+            TokenKind::Primary,
+            TokenKind::Foreign,
+            TokenKind::Exclude,
+        ]);
         let node = if matches!(
             self.peek_kind(),
             TokenKind::Constraint
@@ -143,6 +180,15 @@ impl Parser {
     }
 
     pub(super) fn parse_typed_table_element_inner(&mut self) -> PResult<Node> {
+        self.record_completion_tokens(&[
+            TokenKind::Constraint,
+            TokenKind::Check,
+            TokenKind::Not,
+            TokenKind::Unique,
+            TokenKind::Primary,
+            TokenKind::Foreign,
+            TokenKind::Exclude,
+        ]);
         let node = if matches!(
             self.peek_kind(),
             TokenKind::Constraint
@@ -218,7 +264,6 @@ impl Parser {
         let (constraints, coll_clause) = self.parse_column_qualifiers()?;
 
         Ok(ColumnDef {
-            node_tag: NodeTag::ColumnDef,
             colname,
             type_name,
             compression,
@@ -234,6 +279,7 @@ impl Parser {
 
     pub(super) fn parse_typed_column_options(&mut self) -> PResult<ColumnDef> {
         let location = self.location();
+        self.record_completion_slot(GrammarSlot::Column);
         let colname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("expected a typed table column name"))?,
@@ -243,7 +289,6 @@ impl Parser {
         }
         let (constraints, coll_clause) = self.parse_column_qualifiers()?;
         Ok(ColumnDef {
-            node_tag: NodeTag::ColumnDef,
             colname,
             is_local: true,
             coll_clause,
@@ -260,6 +305,7 @@ impl Parser {
         let mut coll_clause = None;
         while !self.at(TokenKind::Eof) {
             if self.consume(TokenKind::Collate) {
+                self.record_completion_slot(GrammarSlot::Collation);
                 let coll_location = self.previous_location();
                 let collname = self.parse_name_list();
                 if collname.is_empty() {
@@ -269,7 +315,6 @@ impl Parser {
                     return Err(self.error_here("multiple COLLATE clauses are not allowed"));
                 }
                 coll_clause = Some(Box::new(CollateClause {
-                    node_tag: NodeTag::CollateClause,
                     collname,
                     location: coll_location as ParseLoc,
                     ..CollateClause::default()
@@ -277,14 +322,7 @@ impl Parser {
                 continue;
             }
             let con_location = self.location();
-            let conname = if self.consume(TokenKind::Constraint) {
-                Some(
-                    self.consume_col_id()
-                        .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
-                )
-            } else {
-                None
-            };
+            let conname = self.parse_optional_constraint_name()?;
             let mut constraint = self.parse_column_constraint_element(con_location)?;
             if conname.is_some()
                 && matches!(
@@ -305,15 +343,29 @@ impl Parser {
         Ok((constraints, coll_clause))
     }
 }
-pub(super) fn parse_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.last().map_or(0, Token::end_location);
+pub(super) fn parse_table_element_tokens_with_completion(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<Node> {
+    let location = tokens.last().end_location_or(0);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     parser.parse_table_element_inner()
 }
-pub(super) fn parse_typed_table_element_tokens(mut tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.last().map_or(0, Token::end_location);
+pub(super) fn parse_typed_table_element_tokens_with_completion(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<Node> {
+    let location = tokens.last().end_location_or(0);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     parser.parse_typed_table_element_inner()
 }

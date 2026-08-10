@@ -1,3 +1,8 @@
+//! Parsing for `CREATE ACCESS METHOD` statements.
+//!
+//! This module validates access-method type and handler clauses before building
+//! the PostgreSQL `CreateAmStmt` shape.
+
 use super::*;
 
 impl Parser {
@@ -8,6 +13,7 @@ impl Parser {
     //     HANDLER handler_function
     pub(super) fn parse_create_am(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Method)?;
+        self.record_completion_slot(GrammarSlot::AccessMethod);
         let amname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE ACCESS METHOD requires a name"))?,
@@ -21,12 +27,12 @@ impl Parser {
             return Err(self.error_here("access method TYPE must be INDEX or TABLE"));
         };
         self.expect(TokenKind::Handler)?;
+        self.record_completion_slot(GrammarSlot::Function);
         let handler_name = self.parse_name_list();
         if handler_name.is_empty() {
             return Err(self.error_here("access method HANDLER requires a function name"));
         }
-        Ok(Node::CreateAmStmt(CreateAmStmt {
-            node_tag: NodeTag::CreateAmStmt,
+        Ok(node!(CreateAmStmt {
             amname,
             handler_name,
             amtype,

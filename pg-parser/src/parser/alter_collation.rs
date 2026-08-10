@@ -1,3 +1,5 @@
+//! Parsing for `ALTER COLLATION` refresh-version statements.
+
 use super::*;
 
 impl Parser {
@@ -10,20 +12,16 @@ impl Parser {
     // ALTER COLLATION name SET SCHEMA new_schema
     pub(super) fn parse_alter_collation(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Collation)?;
-        let collname = self.parse_name_list_until_keywords(&[
-            TokenKind::Refresh,
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ]);
+        let name_stops = [TokenKind::Refresh, TokenKind::Char(';'), TokenKind::Eof];
+        self.record_completion_slot(GrammarSlot::Collation);
+        self.record_completion_qualified_name_slot(GrammarSlot::Collation, &name_stops);
+        let collname = self.parse_name_list_until_keywords_allow_initial_stop(&name_stops);
         if collname.is_empty() {
             return Err(self.error_here("ALTER COLLATION requires a collation name"));
         }
         self.expect(TokenKind::Refresh)?;
         self.expect(TokenKind::VersionP)?;
         self.expect_statement_end()?;
-        Ok(Node::AlterCollationStmt(AlterCollationStmt {
-            node_tag: NodeTag::AlterCollationStmt,
-            collname,
-        }))
+        Ok(node!(AlterCollationStmt { collname }))
     }
 }

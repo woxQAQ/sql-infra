@@ -1,3 +1,5 @@
+//! Domain creation, alteration, and domain-constraint parsing.
+
 use super::*;
 
 impl Parser {
@@ -14,6 +16,7 @@ impl Parser {
     // { NOT NULL | NULL | CHECK (expression) }
     pub(super) fn parse_create_domain(&mut self) -> PResult<Node> {
         self.expect(TokenKind::DomainP)?;
+        self.record_completion_slot(GrammarSlot::Domain);
         let domainname = self.parse_name_list();
         if domainname.is_empty() {
             return Err(self.error_here("CREATE DOMAIN requires a domain name"));
@@ -35,14 +38,22 @@ impl Parser {
         let mut coll_clause = None;
         let mut constraints = Vec::new();
         while !self.at_statement_end() {
+            self.record_completion_lookahead_tokens(&[
+                TokenKind::Collate,
+                TokenKind::Constraint,
+                TokenKind::Default,
+                TokenKind::Not,
+                TokenKind::NullP,
+                TokenKind::Check,
+            ]);
             if self.consume(TokenKind::Collate) {
+                self.record_completion_slot(GrammarSlot::Collation);
                 let location = self.previous_location();
                 let collname = self.parse_name_list();
                 if collname.is_empty() {
                     return Err(self.error_here("COLLATE requires a collation name"));
                 }
                 coll_clause = Some(Box::new(CollateClause {
-                    node_tag: NodeTag::CollateClause,
                     collname,
                     location: location as ParseLoc,
                     ..CollateClause::default()
@@ -50,14 +61,7 @@ impl Parser {
                 continue;
             }
             let location = self.location();
-            let conname = if self.consume(TokenKind::Constraint) {
-                Some(
-                    self.consume_col_id()
-                        .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
-                )
-            } else {
-                None
-            };
+            let conname = self.parse_optional_constraint_name()?;
             let (contype, raw_expr) = match self.peek_kind() {
                 TokenKind::Default => {
                     self.advance();
@@ -90,7 +94,6 @@ impl Parser {
                 _ => return Err(self.error_here("invalid domain constraint")),
             };
             let constraint = Constraint {
-                node_tag: NodeTag::Constraint,
                 conname,
                 contype,
                 raw_expr,
@@ -101,8 +104,7 @@ impl Parser {
             };
             constraints.push(Node::Constraint(constraint));
         }
-        Ok(Node::CreateDomainStmt(CreateDomainStmt {
-            node_tag: NodeTag::CreateDomainStmt,
+        Ok(node!(CreateDomainStmt {
             domainname,
             type_name,
             coll_clause,
@@ -137,7 +139,9 @@ impl Parser {
     // { NOT NULL | CHECK (expression) }
     pub(super) fn parse_alter_domain(&mut self) -> PResult<Node> {
         self.expect(TokenKind::DomainP)?;
-        let type_name = self.parse_name_list_until_keywords(&[
+        self.record_completion_slot(GrammarSlot::Domain);
+        let owner_start = self.pos;
+        let type_name = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::Set,
             TokenKind::Drop,
             TokenKind::AddP,
@@ -147,24 +151,39 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ]);
+        let owner_end = self.pos;
         let mut stmt = AlterDomainStmt {
-            node_tag: NodeTag::AlterDomainStmt,
             type_name,
             ..AlterDomainStmt::default()
         };
         if stmt.type_name.is_empty() {
             return Err(self.error_here("ALTER DOMAIN requires a domain name"));
         }
+        self.push_completion_membership_owner_from_tokens(
+            &[GrammarSlot::Constraint],
+            &[ObjectType::Domain],
+            owner_start,
+            owner_end,
+        );
+        self.record_completion_tokens(&[
+            TokenKind::Set,
+            TokenKind::Drop,
+            TokenKind::AddP,
+            TokenKind::Validate,
+            TokenKind::Rename,
+            TokenKind::Owner,
+        ]);
         match self.peek_kind() {
             TokenKind::Set => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::Schema,
+                    TokenKind::Default,
+                    TokenKind::Not,
+                ]);
                 if self.consume(TokenKind::Default) {
                     stmt.subtype = AlterDomainType::AlterDefault;
-                    stmt.def =
-                        Some(self.parse_expr_box_strict_until(&[
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ])?);
+                    stmt.def = Some(self.parse_expr_box_strict_until(STATEMENT_END_TOKENS)?);
                 } else if self.consume(TokenKind::Not) {
                     self.expect(TokenKind::NullP)?;
                     stmt.subtype = AlterDomainType::SetNotNull;
@@ -174,6 +193,11 @@ impl Parser {
             }
             TokenKind::Drop => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::Default,
+                    TokenKind::Not,
+                    TokenKind::Constraint,
+                ]);
                 match self.peek_kind() {
                     TokenKind::Default => {
                         self.advance();
@@ -188,6 +212,7 @@ impl Parser {
                         self.advance();
                         stmt.subtype = AlterDomainType::DropConstraint;
                         stmt.missing_ok = self.consume_if_exists()?;
+                        self.record_completion_slot(GrammarSlot::Constraint);
                         stmt.name =
                             Some(self.consume_col_id().ok_or_else(|| {
                                 self.error_here("DROP CONSTRAINT requires a name")
@@ -210,6 +235,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::Constraint)?;
                 stmt.subtype = AlterDomainType::ValidateConstraint;
+                self.record_completion_slot(GrammarSlot::Constraint);
                 stmt.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("VALIDATE CONSTRAINT requires a name"))?,
@@ -223,14 +249,9 @@ impl Parser {
 
     fn parse_domain_constraint(&mut self) -> PResult<Constraint> {
         let location = self.location();
-        let conname = if self.consume(TokenKind::Constraint) {
-            Some(
-                self.consume_col_id()
-                    .ok_or_else(|| self.error_here("CONSTRAINT requires a name"))?,
-            )
-        } else {
-            None
-        };
+        self.record_completion_tokens(&[TokenKind::Constraint, TokenKind::Check, TokenKind::Not]);
+        let conname = self.parse_optional_constraint_name()?;
+        self.record_completion_tokens(&[TokenKind::Check, TokenKind::Not]);
         let (contype, raw_expr, keys) = match self.peek_kind() {
             TokenKind::Check => {
                 self.advance();
@@ -247,7 +268,6 @@ impl Parser {
             _ => return Err(self.error_here("domain constraint must be CHECK or NOT NULL")),
         };
         let mut constraint = Constraint {
-            node_tag: NodeTag::Constraint,
             conname,
             contype,
             raw_expr,
@@ -262,6 +282,13 @@ impl Parser {
         let mut initially_deferred = None;
         let mut enforced = None;
         loop {
+            self.record_completion_lookahead_tokens(&[
+                TokenKind::Deferrable,
+                TokenKind::Initially,
+                TokenKind::No,
+                TokenKind::Enforced,
+                TokenKind::Not,
+            ]);
             match self.peek_kind() {
                 TokenKind::Deferrable => {
                     self.advance();
@@ -270,6 +297,10 @@ impl Parser {
                 }
                 TokenKind::Initially => {
                     self.advance();
+                    self.record_completion_lookahead_tokens(&[
+                        TokenKind::Immediate,
+                        TokenKind::Deferred,
+                    ]);
                     let value = match self.peek_kind() {
                         TokenKind::Immediate => false,
                         TokenKind::Deferred => true,
@@ -293,6 +324,11 @@ impl Parser {
                 }
                 TokenKind::Not => {
                     self.advance();
+                    self.record_completion_lookahead_tokens(&[
+                        TokenKind::Deferrable,
+                        TokenKind::Valid,
+                        TokenKind::Enforced,
+                    ]);
                     match self.peek_kind() {
                         TokenKind::Deferrable => {
                             self.advance();

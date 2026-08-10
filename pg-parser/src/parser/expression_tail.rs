@@ -1,14 +1,36 @@
+//! Postfix, predicate, and token-cursor operations for [`ExprParser`].
+//!
+//! Indirection, casts, quantified comparisons, `BETWEEN`, `IS`, list parsing,
+//! and expression-level completion recording extend already parsed prefixes.
+
 use super::expression::ExprParser;
 use super::*;
 
 impl ExprParser {
     pub(super) fn parse_name_nodes(&mut self) -> Option<NodeList> {
+        self.parse_name_nodes_with_slots(&[GrammarSlot::Column, GrammarSlot::Function], true)
+    }
+
+    pub(super) fn parse_name_nodes_with_slots(
+        &mut self,
+        slots: &[GrammarSlot],
+        allow_star: bool,
+    ) -> Option<NodeList> {
         let mut fields = Vec::new();
         loop {
-            if self.consume(TokenKind::Char('*')) {
-                fields.push(Node::AStar(AStar {
-                    node_tag: NodeTag::AStar,
-                }));
+            if self.at_completion() {
+                for slot in slots {
+                    self.record_completion_slot(*slot);
+                }
+                if allow_star {
+                    self.record_completion_tokens(&[TokenKind::Char('*')]);
+                }
+                let Some(hole) = self.recover_completion_hole() else {
+                    return self.fail("completion point in a qualified name");
+                };
+                fields.push(make_string_node(token_name(&hole)?));
+            } else if allow_star && !fields.is_empty() && self.consume(TokenKind::Char('*')) {
+                fields.push(Node::AStar);
             } else {
                 let token = self.peek().clone();
                 let categories: &[KeywordCategory] = if fields.is_empty() {
@@ -44,7 +66,7 @@ impl ExprParser {
             if !self.consume(TokenKind::Char('.')) {
                 break;
             }
-            if matches!(fields.last(), Some(Node::AStar(_))) {
+            if matches!(fields.last(), Some(Node::AStar)) {
                 return self.fail("'*' must be the last indirection element");
             }
         }
@@ -77,27 +99,28 @@ impl ExprParser {
             }
         };
         self.expect(TokenKind::Char(']'))?;
-        Some(Node::AIndices(AIndices {
-            node_tag: NodeTag::AIndices,
+        Some(node!(AIndices {
             is_slice,
             lidx,
             uidx,
         }))
     }
 
-    pub(super) fn parse_parenthesized_expr(&mut self) -> Option<Node> {
+    pub(super) fn parse_parenthesized_expr(&mut self) -> Option<(Node, bool)> {
         let location = self.expect(TokenKind::Char('('))?.location();
-        if self.starts_statement() {
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
-            self.expect(TokenKind::Char(')'))?;
+        self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
+        if let Some(tokens) = self.take_parenthesized_select_tokens() {
             let subselect = self.parse_nested_select(tokens)?;
-            return Some(Node::SubLink(SubLink {
-                xpr: Expr::new(NodeTag::SubLink),
-                sub_link_type: SubLinkType::ExprSublink,
-                subselect: Some(Box::new(subselect)),
-                location: location as ParseLoc,
-                ..SubLink::default()
-            }));
+            self.expect(TokenKind::Char(')'))?;
+            return Some((
+                node!(SubLink {
+                    sub_link_type: SubLinkType::ExprSublink,
+                    subselect: Some(Box::new(subselect)),
+                    location: location as ParseLoc,
+                    ..SubLink::default()
+                }),
+                false,
+            ));
         }
         let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
         self.expect(TokenKind::Char(')'))?;
@@ -105,15 +128,17 @@ impl ExprParser {
             return self.fail("parenthesized expression cannot be empty");
         }
         if args.len() == 1 {
-            args.into_iter().next()
+            args.into_iter().next().map(|node| (node, false))
         } else {
-            Some(Node::RowExpr(RowExpr {
-                xpr: Expr::new(NodeTag::RowExpr),
-                args,
-                row_format: CoercionForm::ImplicitCast,
-                location: location as ParseLoc,
-                ..RowExpr::default()
-            }))
+            Some((
+                node!(RowExpr {
+                    args,
+                    row_format: CoercionForm::ImplicitCast,
+                    location: location as ParseLoc,
+                    ..RowExpr::default()
+                }),
+                true,
+            ))
         }
     }
 
@@ -121,9 +146,11 @@ impl ExprParser {
         if !self.consume(TokenKind::Char('(')) {
             return None;
         }
+        self.record_completion_tokens(completion::SUBQUERY_START_TOKENS);
         let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        let subselect = self.parse_nested_select(tokens)?;
         self.expect(TokenKind::Char(')'))?;
-        self.parse_nested_select(tokens)
+        Some(subselect)
     }
 
     pub(super) fn parse_keyword_call_as_coalesce(&mut self) -> Option<Node> {
@@ -134,8 +161,7 @@ impl ExprParser {
         if args.is_empty() {
             return self.fail("COALESCE requires at least one argument");
         }
-        Some(Node::CoalesceExpr(CoalesceExpr {
-            xpr: Expr::new(NodeTag::CoalesceExpr),
+        Some(node!(CoalesceExpr {
             args,
             location: location as ParseLoc,
             ..CoalesceExpr::default()
@@ -150,8 +176,7 @@ impl ExprParser {
         if args.is_empty() {
             return self.fail("GREATEST/LEAST requires at least one argument");
         }
-        Some(Node::MinMaxExpr(MinMaxExpr {
-            xpr: Expr::new(NodeTag::MinMaxExpr),
+        Some(node!(MinMaxExpr {
             op: if token.kind == TokenKind::Least {
                 MinMaxOp::Least
             } else {
@@ -187,14 +212,14 @@ impl ExprParser {
         match op {
             TokenKind::InP => {
                 let list_start = self.expect(TokenKind::Char('('))?.location();
-                if self.starts_statement() {
-                    let tokens = self.take_until_balanced(TokenKind::Char(')'));
+                self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
+                if let Some(tokens) = self.take_parenthesized_select_tokens() {
+                    let subselect = self.parse_nested_select(tokens)?;
                     self.expect(TokenKind::Char(')'))?;
-                    let sublink = Node::SubLink(SubLink {
-                        xpr: Expr::new(NodeTag::SubLink),
+                    let sublink = node!(SubLink {
                         sub_link_type: SubLinkType::AnySublink,
                         testexpr: Some(Box::new(lhs)),
-                        subselect: self.parse_nested_select(tokens).map(Box::new),
+                        subselect: Some(Box::new(subselect)),
                         location: location as ParseLoc,
                         ..SubLink::default()
                     });
@@ -213,8 +238,7 @@ impl ExprParser {
                         AExprKind::In,
                         vec![if negated { "<>" } else { "=" }],
                         Some(lhs),
-                        Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
+                        Some(node!(AArrayExpr {
                             elements,
                             location: location as ParseLoc,
                             ..AArrayExpr::default()
@@ -267,8 +291,7 @@ impl ExprParser {
                     if let Some(escape) = escape {
                         args.push(escape);
                     }
-                    Node::FuncCall(FuncCall {
-                        node_tag: NodeTag::FuncCall,
+                    node!(FuncCall {
                         funcname: system_type_names(if op == TokenKind::Similar {
                             "similar_to_escape"
                         } else {
@@ -295,6 +318,11 @@ impl ExprParser {
     }
 
     pub(super) fn quantified_sub_link_type(&self) -> Option<SubLinkType> {
+        self.record_completion_expression_continuation_tokens(&[
+            TokenKind::Any,
+            TokenKind::Some,
+            TokenKind::All,
+        ]);
         match self.peek_kind() {
             TokenKind::Any | TokenKind::Some => Some(SubLinkType::AnySublink),
             TokenKind::All => Some(SubLinkType::AllSublink),
@@ -306,15 +334,13 @@ impl ExprParser {
         let location = self.expect(TokenKind::Operator)?.location();
         self.expect(TokenKind::Char('('))?;
         let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        if self.at_completion() {
+            self.record_completion_slot(GrammarSlot::Operator);
+        }
         self.expect(TokenKind::Char(')'))?;
         match parse_operator_name_tokens(tokens, location) {
             Ok(name) => Some(name),
-            Err(error) => {
-                if self.error.is_none() {
-                    self.error = Some(error);
-                }
-                None
-            }
+            Err(error) => self.fail_with(error),
         }
     }
 
@@ -336,15 +362,15 @@ impl ExprParser {
         let sub_link_type = self.quantified_sub_link_type()?;
         self.advance();
         self.expect(TokenKind::Char('('))?;
-        if self.starts_statement() {
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
+        self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
+        if let Some(tokens) = self.take_parenthesized_select_tokens() {
+            let subselect = self.parse_nested_select(tokens)?;
             self.expect(TokenKind::Char(')'))?;
-            Some(Node::SubLink(SubLink {
-                xpr: Expr::new(NodeTag::SubLink),
+            Some(node!(SubLink {
                 sub_link_type,
                 testexpr: Some(Box::new(lhs)),
                 oper_name: operator_name,
-                subselect: self.parse_nested_select(tokens).map(Box::new),
+                subselect: Some(Box::new(subselect)),
                 location: location as ParseLoc,
                 ..SubLink::default()
             }))
@@ -391,14 +417,43 @@ impl ExprParser {
                 (false, false) => "BETWEEN",
             }],
             Some(lhs),
-            Some(Node::AArrayExpr(AArrayExpr {
-                node_tag: NodeTag::AArrayExpr,
+            Some(node!(AArrayExpr {
                 elements: vec![lower, upper],
                 location: location as ParseLoc,
                 ..AArrayExpr::default()
             })),
             location,
         ))
+    }
+
+    pub(super) fn parse_overlaps(&mut self, lhs: Node, location: usize) -> Option<Node> {
+        let Node::RowExpr(left_row) = lhs else {
+            return self.fail("left side of OVERLAPS must be a two-element row");
+        };
+        if left_row.args.len() != 2 {
+            return self.fail("left side of OVERLAPS must have two elements");
+        }
+
+        let right = self.parse_prefix(false)?;
+        if !right.is_row_syntax {
+            return self.fail("right side of OVERLAPS must be a row expression");
+        }
+        let Node::RowExpr(right_row) = right.node else {
+            return self.fail("right side of OVERLAPS must be a row expression");
+        };
+        if right_row.args.len() != 2 {
+            return self.fail("right side of OVERLAPS must have two elements");
+        }
+
+        let mut args = left_row.args;
+        args.extend(right_row.args);
+        Some(node!(FuncCall {
+            funcname: system_type_names("overlaps"),
+            args,
+            funcformat: CoercionForm::SqlSyntax,
+            location: location as ParseLoc,
+            ..FuncCall::default()
+        }))
     }
 
     pub(super) fn parse_is_expr(
@@ -409,9 +464,23 @@ impl ExprParser {
         restricted: bool,
     ) -> Option<Node> {
         let negated = self.consume(TokenKind::Not);
+        self.record_completion_tokens(&[TokenKind::DocumentP, TokenKind::Distinct]);
+        if !restricted {
+            self.record_completion_tokens(&[
+                TokenKind::Json,
+                TokenKind::Normalized,
+                TokenKind::Nfc,
+                TokenKind::Nfd,
+                TokenKind::Nfkc,
+                TokenKind::Nfkd,
+                TokenKind::NullP,
+                TokenKind::TrueP,
+                TokenKind::FalseP,
+                TokenKind::Unknown,
+            ]);
+        }
         if self.consume(TokenKind::DocumentP) {
-            let document = Node::XmlExpr(XmlExpr {
-                xpr: Expr::new(NodeTag::XmlExpr),
+            let document = node!(XmlExpr {
                 op: XmlExprOp::Document,
                 args: vec![lhs],
                 location: location as ParseLoc,
@@ -437,14 +506,10 @@ impl ExprParser {
             let mut args = vec![lhs];
             if let Some(form) = normalization_form {
                 let form_location = self.advance().location();
-                args.push(Node::AConst(AConst::string(
-                    form,
-                    form_location as ParseLoc,
-                )));
+                args.push(node!(AConst::string(form, form_location as ParseLoc,)));
             }
             self.expect(TokenKind::Normalized)?;
-            let normalized = Node::FuncCall(FuncCall {
-                node_tag: NodeTag::FuncCall,
+            let normalized = node!(FuncCall {
                 funcname: system_type_names("is_normalized"),
                 args,
                 funcformat: CoercionForm::SqlSyntax,
@@ -458,6 +523,14 @@ impl ExprParser {
             });
         }
         if !restricted && self.consume(TokenKind::Json) {
+            self.record_completion_tokens(&[
+                TokenKind::ValueP,
+                TokenKind::Array,
+                TokenKind::ObjectP,
+                TokenKind::Scalar,
+                TokenKind::With,
+                TokenKind::Without,
+            ]);
             let item_type = match self.peek_kind() {
                 TokenKind::ValueP => JsonValueType::Any,
                 TokenKind::Array => JsonValueType::Array,
@@ -482,8 +555,7 @@ impl ExprParser {
             } else {
                 false
             };
-            let predicate = Node::JsonIsPredicate(JsonIsPredicate {
-                node_tag: NodeTag::JsonIsPredicate,
+            let predicate = node!(JsonIsPredicate {
                 expr: Some(Box::new(lhs)),
                 format: Some(Box::new(default_json_format())),
                 item_type,
@@ -513,8 +585,7 @@ impl ExprParser {
             ));
         }
         if self.consume(TokenKind::NullP) {
-            return Some(Node::NullTest(NullTest {
-                xpr: Expr::new(NodeTag::NullTest),
+            return Some(node!(NullTest {
                 arg: Some(Box::new(lhs)),
                 nulltesttype: if negated {
                     NullTestType::NotNull
@@ -545,8 +616,7 @@ impl ExprParser {
         };
         if let Some(booltesttype) = booltesttype {
             self.advance();
-            return Some(Node::BooleanTest(BooleanTest {
-                xpr: Expr::new(NodeTag::BooleanTest),
+            return Some(node!(BooleanTest {
                 arg: Some(Box::new(lhs)),
                 booltesttype,
                 location: location as ParseLoc,
@@ -561,6 +631,9 @@ impl ExprParser {
         let mut best = None;
         for end in start + 1..self.tokens.len() {
             let token = &self.tokens[end - 1];
+            if token.kind == TokenKind::Completion {
+                record_type_name_completion(&self.tokens[start..end], self.completion.as_ref());
+            }
             if end - 1 > start
                 && depth == 0
                 && (expression_boundary(token.kind)
@@ -605,29 +678,41 @@ impl ExprParser {
                 break;
             }
             if self.at(stop) || self.at(TokenKind::Eof) {
-                if self.error.is_none() {
-                    self.error = Some(ParseError::ranged(
-                        self.peek().range,
-                        "expected an expression after ','",
-                    ));
-                }
-                return None;
+                return self.fail_with(ParseError::ranged(
+                    self.peek().range,
+                    "expected an expression after ','",
+                ));
             }
         }
         Some(items)
     }
 
     pub(super) fn fail<T>(&mut self, message: impl Into<std::string::String>) -> Option<T> {
+        if self.error.is_some() {
+            return None;
+        }
+        let error = self.error_here(message);
+        self.fail_with(error)
+    }
+
+    pub(super) fn fail_with<T>(&mut self, error: ParserExit) -> Option<T> {
         if self.error.is_none() {
-            self.error = Some(ParseError::ranged(self.peek().range, message));
+            self.error = Some(error);
         }
         None
     }
 
     pub(super) fn take_until_balanced(&mut self, stop: TokenKind) -> Vec<Token> {
-        let mut out = Vec::new();
+        let mut tokens = Vec::new();
         let mut depth = 0usize;
         while !self.at(TokenKind::Eof) {
+            if self.at_completion() {
+                if let Some(hole) = self.recover_completion_hole() {
+                    tokens.push(hole);
+                    continue;
+                }
+                break;
+            }
             let kind = self.peek_kind();
             if depth == 0 && kind == stop {
                 break;
@@ -637,9 +722,9 @@ impl ExprParser {
                 TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
                 _ => {}
             }
-            out.push(self.advance().clone());
+            tokens.push(self.advance().clone());
         }
-        out
+        tokens
     }
 
     pub(super) fn starts_statement(&self) -> bool {
@@ -663,6 +748,12 @@ impl ExprParser {
         &mut self,
         categories: &[KeywordCategory],
     ) -> Option<std::string::String> {
+        if self.at_completion() {
+            self.record_completion_slot(GrammarSlot::AnyName);
+            return self
+                .recover_completion_hole()
+                .and_then(|token| token_name(&token));
+        }
         if !self.identifier_in_categories(categories) {
             return None;
         }
@@ -670,11 +761,24 @@ impl ExprParser {
         token_name(&token)
     }
 
+    pub(super) fn consume_column_label(&mut self) -> Option<std::string::String> {
+        self.consume_identifier_in_categories(&[
+            KeywordCategory::Unreserved,
+            KeywordCategory::ColName,
+            KeywordCategory::TypeFuncName,
+            KeywordCategory::Reserved,
+        ])
+    }
+
     pub(super) fn at(&self, kind: TokenKind) -> bool {
         self.peek_kind() == kind
     }
 
     pub(super) fn consume(&mut self, kind: TokenKind) -> bool {
+        if self.at_completion() {
+            self.record_completion_tokens(&[kind]);
+            return false;
+        }
         if self.at(kind) {
             self.pos += 1;
             true
@@ -683,7 +787,26 @@ impl ExprParser {
         }
     }
 
+    /// Optional match of a fixed multi-token unit: if the head token matches,
+    /// every following token is required. Publishes the whole phrase as one
+    /// completion unit.
+    pub(super) fn consume_phrase(&mut self, phrase: &'static [TokenKind]) -> Option<bool> {
+        self.record_completion_phrase(phrase);
+        if !self.consume(phrase[0]) {
+            return Some(false);
+        }
+        for kind in &phrase[1..] {
+            self.expect(*kind)?;
+        }
+        Some(true)
+    }
+
     pub(super) fn expect(&mut self, kind: TokenKind) -> Option<Token> {
+        if self.at_completion() {
+            self.record_completion_tokens(&[kind]);
+            let error = self.error_here(format!("expected {kind:?}"));
+            return self.fail_with(error);
+        }
         if self.at(kind) {
             Some(self.advance().clone())
         } else {
@@ -692,7 +815,7 @@ impl ExprParser {
     }
 
     pub(super) fn advance(&mut self) -> &Token {
-        if !self.at(TokenKind::Eof) {
+        if !matches!(self.peek_kind(), TokenKind::Eof | TokenKind::Completion) {
             self.pos += 1;
         }
         &self.tokens[self.pos.saturating_sub(1)]
@@ -707,10 +830,7 @@ impl ExprParser {
     }
 
     pub(super) fn peek_kind_n(&self, n: usize) -> TokenKind {
-        self.tokens
-            .get(self.pos + n)
-            .map(|token| token.kind)
-            .unwrap_or(TokenKind::Eof)
+        self.tokens.get(self.pos + n).kind_or_eof()
     }
 
     pub(super) fn location(&self) -> usize {
@@ -720,7 +840,104 @@ impl ExprParser {
     pub(super) fn previous_location(&self) -> usize {
         self.tokens
             .get(self.pos.saturating_sub(1))
-            .map(|token| token.location())
-            .unwrap_or_else(|| self.location())
+            .location_or_else(|| self.location())
+    }
+
+    pub(super) fn at_completion(&self) -> bool {
+        self.at(TokenKind::Completion)
+    }
+
+    pub(super) fn recover_completion_hole(&mut self) -> Option<Token> {
+        if !self.at_completion() {
+            return None;
+        }
+        let recovered = self
+            .completion
+            .as_ref()
+            .is_some_and(|collector| collector.borrow_mut().try_recover_hole());
+        if !recovered {
+            return None;
+        }
+        let location = self.peek().location();
+        self.pos += 1;
+        Some(Token::completion_hole(location))
+    }
+
+    pub(super) fn record_completion_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().record_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_lookahead_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().record_lookahead_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_expression_start_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().record_expression_start_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_expression_continuation_tokens(&self, kinds: &[TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector
+                .borrow_mut()
+                .record_expression_continuation_tokens(kinds);
+        }
+    }
+
+    pub(super) fn record_completion_expression_continuation_phrase(
+        &self,
+        phrase: &'static [TokenKind],
+    ) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector
+                .borrow_mut()
+                .record_expression_continuation_phrase(phrase);
+        }
+    }
+
+    pub(super) fn record_completion_slot(&self, slot: GrammarSlot) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().record_slot(slot);
+        }
+    }
+
+    pub(super) fn record_completion_phrase(&self, phrase: &'static [TokenKind]) {
+        if !self.at_completion() {
+            return;
+        }
+        if let Some(collector) = &self.completion {
+            collector.borrow_mut().record_phrase(phrase);
+        }
+    }
+
+    pub(super) fn error_here(&self, message: impl Into<std::string::String>) -> ParserExit {
+        if self.at_completion() && self.completion.is_some() {
+            ParserExit::completion(self.peek().range)
+        } else {
+            ParseError::ranged(self.peek().range, message)
+        }
     }
 }

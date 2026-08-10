@@ -1,3 +1,8 @@
+//! `JSON_TABLE` range-function and column grammar.
+//!
+//! Path specifications, passing values, nested columns, wrappers, quotes, formats,
+//! and per-column behaviors are parsed as one cohesive SQL/JSON construct.
+
 use super::*;
 
 impl Parser {
@@ -7,12 +12,19 @@ impl Parser {
 
         let context_location = self.location();
         let context_tokens = self.take_until_top_level(&[TokenKind::Char(',')]);
-        let context_item = parse_json_value_expr_tokens(context_tokens).map_err(|mut error| {
-            if error.location() == 0 {
-                error.reanchor(context_location);
-            }
-            error
-        })?;
+        if self.at_completion()
+            && parse_json_value_expr_tokens_with_completion(context_tokens.clone(), None).is_ok()
+        {
+            self.record_completion_follow_tokens(&[TokenKind::Char(',')]);
+        }
+        let context_item = self
+            .parse_json_value_fragment_tokens(context_tokens)
+            .map_err(|mut error| {
+                if error.location() == 0 {
+                    error.reanchor(context_location);
+                }
+                error
+            })?;
         self.expect(TokenKind::Char(','))?;
 
         let pathspec = self.parse_json_table_path_spec(false)?.ok_or_else(|| {
@@ -30,7 +42,6 @@ impl Parser {
         let alias = self.parse_optional_alias_clause()?;
 
         Ok(JsonTable {
-            node_tag: NodeTag::JsonTable,
             context_item: Some(Box::new(context_item)),
             pathspec: Some(Box::new(pathspec)),
             passing,
@@ -51,21 +62,25 @@ impl Parser {
         loop {
             let location = self.location();
             let value_tokens = self.take_until_top_level(&[TokenKind::As]);
-            let value = parse_json_value_expr_tokens(value_tokens)?;
+            if self.at_completion()
+                && parse_json_value_expr_tokens_with_completion(value_tokens.clone(), None).is_ok()
+            {
+                self.record_completion_follow_tokens(&[TokenKind::As]);
+            }
+            let value = self.parse_json_value_fragment_tokens(value_tokens)?;
             self.expect(TokenKind::As)?;
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("JSON PASSING argument requires a name"))?;
-            arguments.push(Node::JsonArgument(JsonArgument {
-                node_tag: NodeTag::JsonArgument,
+            arguments.push(node!(JsonArgument {
                 val: Some(Box::new(value)),
                 name: Some(name),
             }));
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at(TokenKind::Columns) {
-                return Err(ParseError::new(
+            if self.peek_kind() == TokenKind::Columns {
+                return Err(ParseError::syntax_exit(
                     location,
                     "expected a JSON PASSING argument after ','",
                 ));
@@ -106,7 +121,6 @@ impl Parser {
             let columns = self.parse_json_table_column_list()?;
             self.expect(TokenKind::Char(')'))?;
             return Ok(JsonTableColumn {
-                node_tag: NodeTag::JsonTableColumn,
                 coltype: JsonTableColumnType::Nested,
                 pathspec: Some(Box::new(pathspec)),
                 columns,
@@ -121,7 +135,6 @@ impl Parser {
         if self.consume(TokenKind::For) {
             self.expect(TokenKind::Ordinality)?;
             return Ok(JsonTableColumn {
-                node_tag: NodeTag::JsonTableColumn,
                 coltype: JsonTableColumnType::ForOrdinality,
                 name: Some(name),
                 location: location as ParseLoc,
@@ -163,7 +176,6 @@ impl Parser {
         if exists {
             let on_error = self.parse_json_table_on_error_clause()?;
             return Ok(JsonTableColumn {
-                node_tag: NodeTag::JsonTableColumn,
                 coltype: JsonTableColumnType::Exists,
                 name: Some(name),
                 type_name: Some(type_name),
@@ -181,7 +193,6 @@ impl Parser {
         let quotes = self.parse_json_quotes_clause()?;
         let (on_empty, on_error) = self.parse_json_table_behavior_clauses()?;
         Ok(JsonTableColumn {
-            node_tag: NodeTag::JsonTableColumn,
             coltype: if explicit_format.is_some() {
                 JsonTableColumnType::Formatted
             } else {
@@ -226,8 +237,7 @@ impl Parser {
             (None, -1)
         };
         Ok(Some(JsonTablePathSpec {
-            node_tag: NodeTag::JsonTablePathSpec,
-            string: Some(Box::new(Node::AConst(AConst::string(
+            string: Some(Box::new(node!(AConst::string(
                 value,
                 token.location() as ParseLoc,
             )))),
@@ -263,7 +273,6 @@ impl Parser {
             JsonEncoding::Default
         };
         Ok(Some(JsonFormat {
-            node_tag: NodeTag::JsonFormat,
             format_type: JsonFormatType::Json,
             encoding,
             location: location as ParseLoc,
@@ -311,6 +320,7 @@ impl Parser {
     pub(super) fn parse_json_table_behavior_clauses(&mut self) -> PResult<JsonBehaviorPair> {
         let mut on_empty = None;
         let mut on_error = None;
+        self.record_completion_follow_tokens(json_behavior_tokens());
         while json_behavior_starts(self.peek_kind()) {
             let behavior = self.parse_json_table_behavior()?;
             self.expect(TokenKind::On)?;
@@ -329,6 +339,7 @@ impl Parser {
                 }
                 on_error = Some(Box::new(behavior));
             }
+            self.record_completion_follow_tokens(json_behavior_tokens());
         }
         Ok((on_empty, on_error))
     }
@@ -336,6 +347,7 @@ impl Parser {
     pub(super) fn parse_json_table_on_error_clause(
         &mut self,
     ) -> PResult<Option<Box<JsonBehavior>>> {
+        self.record_completion_follow_tokens(json_behavior_tokens());
         if !json_behavior_starts(self.peek_kind()) {
             return Ok(None);
         }
@@ -353,7 +365,7 @@ impl Parser {
                 let tokens = self.take_until_top_level(&[TokenKind::On]);
                 (
                     JsonBehaviorType::Default,
-                    Some(Box::new(parse_expression_tokens(tokens)?)),
+                    Some(Box::new(self.parse_expression_fragment_tokens(tokens)?)),
                 )
             }
             TokenKind::ErrorP => {
@@ -393,11 +405,22 @@ impl Parser {
             _ => return Err(self.error_here("expected a JSON behavior")),
         };
         Ok(JsonBehavior {
-            node_tag: NodeTag::JsonBehavior,
             btype,
             expr,
             location: location as ParseLoc,
             ..JsonBehavior::default()
         })
     }
+}
+
+fn json_behavior_tokens() -> &'static [TokenKind] {
+    &[
+        TokenKind::Default,
+        TokenKind::ErrorP,
+        TokenKind::NullP,
+        TokenKind::TrueP,
+        TokenKind::FalseP,
+        TokenKind::Unknown,
+        TokenKind::EmptyP,
+    ]
 }

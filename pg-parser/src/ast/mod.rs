@@ -1,5 +1,8 @@
-// This module mirrors PostgreSQL raw parse tree semantics with idiomatic Rust names.
-// Source of truth: pg-parser-offical/src/include/nodes/*.h, not gram.y output.
+//! PostgreSQL raw parse-tree types expressed with idiomatic Rust names.
+//!
+//! The source of truth is PostgreSQL's `src/include/nodes/*.h`, not the grammar
+//! output. Parser modules construct these types directly, so their field defaults
+//! and [`Node`] variants are part of the parser's compatibility contract.
 
 mod enums;
 mod helpers;
@@ -97,298 +100,6 @@ pub const AGGSPLITOP_COMBINE: i32 = 0x01;
 pub const AGGSPLITOP_SKIPFINAL: i32 = 0x02;
 pub const AGGSPLITOP_SERIALIZE: i32 = 0x04;
 pub const AGGSPLITOP_DESERIALIZE: i32 = 0x08;
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
-pub enum NodeTag {
-    #[default]
-    Invalid,
-    Alias,
-    RangeVar,
-    TableFunc,
-    IntoClause,
-    Expr,
-    Var,
-    Const,
-    Param,
-    Aggref,
-    GroupingFunc,
-    WindowFunc,
-    WindowFuncRunCondition,
-    MergeSupportFunc,
-    SubscriptingRef,
-    FuncExpr,
-    NamedArgExpr,
-    OpExpr,
-    ScalarArrayOpExpr,
-    BoolExpr,
-    SubLink,
-    SubPlan,
-    AlternativeSubPlan,
-    FieldSelect,
-    FieldStore,
-    RelabelType,
-    CoerceViaIo,
-    ArrayCoerceExpr,
-    ConvertRowtypeExpr,
-    CollateExpr,
-    CaseExpr,
-    CaseWhen,
-    CaseTestExpr,
-    ArrayExpr,
-    RowExpr,
-    RowCompareExpr,
-    CoalesceExpr,
-    MinMaxExpr,
-    SqlValueFunction,
-    XmlExpr,
-    JsonFormat,
-    JsonReturning,
-    JsonValueExpr,
-    JsonConstructorExpr,
-    JsonIsPredicate,
-    JsonBehavior,
-    JsonExpr,
-    JsonTablePath,
-    JsonTablePlan,
-    JsonTablePathScan,
-    JsonTableSiblingJoin,
-    NullTest,
-    BooleanTest,
-    MergeAction,
-    CoerceToDomain,
-    CoerceToDomainValue,
-    SetToDefault,
-    CurrentOfExpr,
-    NextValueExpr,
-    InferenceElem,
-    ReturningExpr,
-    GraphLabelRef,
-    GraphPropertyRef,
-    TargetEntry,
-    RangeTblRef,
-    JoinExpr,
-    FromExpr,
-    OnConflictExpr,
-    ForPortionOfExpr,
-    Query,
-    TypeName,
-    ColumnRef,
-    ParamRef,
-    AExpr,
-    AConst,
-    TypeCast,
-    CollateClause,
-    RoleSpec,
-    FuncCall,
-    AStar,
-    AIndices,
-    AIndirection,
-    AArrayExpr,
-    ResTarget,
-    MultiAssignRef,
-    SortBy,
-    WindowDef,
-    RangeSubselect,
-    RangeFunction,
-    RangeTableFunc,
-    RangeTableFuncCol,
-    RangeGraphTable,
-    RangeTableSample,
-    ColumnDef,
-    TableLikeClause,
-    IndexElem,
-    DefElem,
-    LockingClause,
-    XmlSerialize,
-    PartitionElem,
-    PartitionSpec,
-    PartitionRangeDatum,
-    SinglePartitionSpec,
-    PartitionCmd,
-    GraphPattern,
-    GraphElementPattern,
-    RangeTblEntry,
-    RtePermissionInfo,
-    RangeTblFunction,
-    TableSampleClause,
-    WithCheckOption,
-    SortGroupClause,
-    GroupingSet,
-    WindowClause,
-    RowMarkClause,
-    ForPortionOfClause,
-    WithClause,
-    InferClause,
-    OnConflictClause,
-    CteSearchClause,
-    CteCycleClause,
-    CommonTableExpr,
-    MergeWhenClause,
-    ReturningOption,
-    ReturningClause,
-    TriggerTransition,
-    JsonOutput,
-    JsonArgument,
-    JsonFuncExpr,
-    JsonTablePathSpec,
-    JsonTable,
-    JsonTableColumn,
-    JsonKeyValue,
-    JsonParseExpr,
-    JsonScalarExpr,
-    JsonSerializeExpr,
-    JsonObjectConstructor,
-    JsonArrayConstructor,
-    JsonArrayQueryConstructor,
-    JsonAggConstructor,
-    JsonObjectAgg,
-    JsonArrayAgg,
-    RawStmt,
-    InsertStmt,
-    DeleteStmt,
-    UpdateStmt,
-    MergeStmt,
-    SelectStmt,
-    SetOperationStmt,
-    ReturnStmt,
-    PlAssignStmt,
-    CreateSchemaStmt,
-    AlterTableStmt,
-    AlterTableCmd,
-    AtAlterConstraint,
-    ReplicaIdentityStmt,
-    AlterCollationStmt,
-    AlterDomainStmt,
-    GrantStmt,
-    ObjectWithArgs,
-    AccessPriv,
-    GrantRoleStmt,
-    AlterDefaultPrivilegesStmt,
-    CopyStmt,
-    VariableSetStmt,
-    VariableShowStmt,
-    CreateStmt,
-    Constraint,
-    CreateTableSpaceStmt,
-    DropTableSpaceStmt,
-    AlterTableSpaceOptionsStmt,
-    AlterTableMoveAllStmt,
-    CreateExtensionStmt,
-    AlterExtensionStmt,
-    AlterExtensionContentsStmt,
-    CreateFdwStmt,
-    AlterFdwStmt,
-    CreateForeignServerStmt,
-    AlterForeignServerStmt,
-    CreateForeignTableStmt,
-    CreateUserMappingStmt,
-    AlterUserMappingStmt,
-    DropUserMappingStmt,
-    ImportForeignSchemaStmt,
-    CreatePolicyStmt,
-    AlterPolicyStmt,
-    CreateAmStmt,
-    CreateTrigStmt,
-    CreateEventTrigStmt,
-    AlterEventTrigStmt,
-    CreatePLangStmt,
-    CreateRoleStmt,
-    AlterRoleStmt,
-    AlterRoleSetStmt,
-    DropRoleStmt,
-    CreateSeqStmt,
-    AlterSeqStmt,
-    DefineStmt,
-    CreateDomainStmt,
-    CreateOpClassStmt,
-    CreateOpClassItem,
-    CreateOpFamilyStmt,
-    AlterOpFamilyStmt,
-    DropStmt,
-    TruncateStmt,
-    CommentStmt,
-    SecLabelStmt,
-    DeclareCursorStmt,
-    ClosePortalStmt,
-    FetchStmt,
-    IndexStmt,
-    CreateStatsStmt,
-    StatsElem,
-    AlterStatsStmt,
-    CreateFunctionStmt,
-    FunctionParameter,
-    AlterFunctionStmt,
-    DoStmt,
-    InlineCodeBlock,
-    CallStmt,
-    CallContext,
-    RenameStmt,
-    AlterObjectDependsStmt,
-    AlterObjectSchemaStmt,
-    AlterOwnerStmt,
-    AlterOperatorStmt,
-    AlterTypeStmt,
-    RuleStmt,
-    NotifyStmt,
-    ListenStmt,
-    UnlistenStmt,
-    TransactionStmt,
-    CompositeTypeStmt,
-    CreateEnumStmt,
-    CreateRangeStmt,
-    AlterEnumStmt,
-    ViewStmt,
-    LoadStmt,
-    CreatedbStmt,
-    AlterDatabaseStmt,
-    AlterDatabaseRefreshCollStmt,
-    AlterDatabaseSetStmt,
-    DropdbStmt,
-    AlterSystemStmt,
-    VacuumStmt,
-    VacuumRelation,
-    RepackStmt,
-    ExplainStmt,
-    CreateTableAsStmt,
-    RefreshMatViewStmt,
-    CheckPointStmt,
-    DiscardStmt,
-    LockStmt,
-    ConstraintsSetStmt,
-    ReindexStmt,
-    CreateConversionStmt,
-    CreateCastStmt,
-    CreatePropGraphStmt,
-    PropGraphVertex,
-    PropGraphEdge,
-    PropGraphLabelAndProperties,
-    PropGraphProperties,
-    AlterPropGraphStmt,
-    CreateTransformStmt,
-    PrepareStmt,
-    ExecuteStmt,
-    DeallocateStmt,
-    DropOwnedStmt,
-    ReassignOwnedStmt,
-    AlterTsDictionaryStmt,
-    AlterTsConfigurationStmt,
-    PublicationTable,
-    PublicationObjSpec,
-    PublicationAllObjSpec,
-    CreatePublicationStmt,
-    AlterPublicationStmt,
-    CreateSubscriptionStmt,
-    AlterSubscriptionStmt,
-    DropSubscriptionStmt,
-    WaitStmt,
-    PartitionBoundSpec,
-    Integer,
-    Float,
-    Boolean,
-    String,
-    BitString,
-    DistinctExpr,
-    NullIfExpr,
-}
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum CmdType {
     #[default]
@@ -1224,7 +935,7 @@ pub enum Node {
     RangeVar(RangeVar),
     TableFunc(TableFunc),
     IntoClause(IntoClause),
-    Expr(Expr),
+    Expr,
     Var(Var),
     Const(Const),
     Param(Param),
@@ -1267,7 +978,7 @@ pub enum Node {
     JsonBehavior(JsonBehavior),
     JsonExpr(JsonExpr),
     JsonTablePath(JsonTablePath),
-    JsonTablePlan(JsonTablePlan),
+    JsonTablePlan,
     JsonTablePathScan(JsonTablePathScan),
     JsonTableSiblingJoin(JsonTableSiblingJoin),
     NullTest(NullTest),
@@ -1298,7 +1009,7 @@ pub enum Node {
     CollateClause(CollateClause),
     RoleSpec(RoleSpec),
     FuncCall(FuncCall),
-    AStar(AStar),
+    AStar,
     AIndices(AIndices),
     AIndirection(AIndirection),
     AArrayExpr(AArrayExpr),
@@ -1508,308 +1219,13 @@ pub enum Node {
     DistinctExpr(OpExpr),
     NullIfExpr(OpExpr),
 }
-impl Node {
-    pub fn tag(&self) -> NodeTag {
-        match self {
-            Self::Alias(..) => NodeTag::Alias,
-            Self::RangeVar(..) => NodeTag::RangeVar,
-            Self::TableFunc(..) => NodeTag::TableFunc,
-            Self::IntoClause(..) => NodeTag::IntoClause,
-            Self::Expr(..) => NodeTag::Expr,
-            Self::Var(..) => NodeTag::Var,
-            Self::Const(..) => NodeTag::Const,
-            Self::Param(..) => NodeTag::Param,
-            Self::Aggref(..) => NodeTag::Aggref,
-            Self::GroupingFunc(..) => NodeTag::GroupingFunc,
-            Self::WindowFunc(..) => NodeTag::WindowFunc,
-            Self::WindowFuncRunCondition(..) => NodeTag::WindowFuncRunCondition,
-            Self::MergeSupportFunc(..) => NodeTag::MergeSupportFunc,
-            Self::SubscriptingRef(..) => NodeTag::SubscriptingRef,
-            Self::FuncExpr(..) => NodeTag::FuncExpr,
-            Self::NamedArgExpr(..) => NodeTag::NamedArgExpr,
-            Self::OpExpr(..) => NodeTag::OpExpr,
-            Self::ScalarArrayOpExpr(..) => NodeTag::ScalarArrayOpExpr,
-            Self::BoolExpr(..) => NodeTag::BoolExpr,
-            Self::SubLink(..) => NodeTag::SubLink,
-            Self::SubPlan(..) => NodeTag::SubPlan,
-            Self::AlternativeSubPlan(..) => NodeTag::AlternativeSubPlan,
-            Self::FieldSelect(..) => NodeTag::FieldSelect,
-            Self::FieldStore(..) => NodeTag::FieldStore,
-            Self::RelabelType(..) => NodeTag::RelabelType,
-            Self::CoerceViaIo(..) => NodeTag::CoerceViaIo,
-            Self::ArrayCoerceExpr(..) => NodeTag::ArrayCoerceExpr,
-            Self::ConvertRowtypeExpr(..) => NodeTag::ConvertRowtypeExpr,
-            Self::CollateExpr(..) => NodeTag::CollateExpr,
-            Self::CaseExpr(..) => NodeTag::CaseExpr,
-            Self::CaseWhen(..) => NodeTag::CaseWhen,
-            Self::CaseTestExpr(..) => NodeTag::CaseTestExpr,
-            Self::ArrayExpr(..) => NodeTag::ArrayExpr,
-            Self::RowExpr(..) => NodeTag::RowExpr,
-            Self::RowCompareExpr(..) => NodeTag::RowCompareExpr,
-            Self::CoalesceExpr(..) => NodeTag::CoalesceExpr,
-            Self::MinMaxExpr(..) => NodeTag::MinMaxExpr,
-            Self::SqlValueFunction(..) => NodeTag::SqlValueFunction,
-            Self::XmlExpr(..) => NodeTag::XmlExpr,
-            Self::JsonFormat(..) => NodeTag::JsonFormat,
-            Self::JsonReturning(..) => NodeTag::JsonReturning,
-            Self::JsonValueExpr(..) => NodeTag::JsonValueExpr,
-            Self::JsonConstructorExpr(..) => NodeTag::JsonConstructorExpr,
-            Self::JsonIsPredicate(..) => NodeTag::JsonIsPredicate,
-            Self::JsonBehavior(..) => NodeTag::JsonBehavior,
-            Self::JsonExpr(..) => NodeTag::JsonExpr,
-            Self::JsonTablePath(..) => NodeTag::JsonTablePath,
-            Self::JsonTablePlan(..) => NodeTag::JsonTablePlan,
-            Self::JsonTablePathScan(..) => NodeTag::JsonTablePathScan,
-            Self::JsonTableSiblingJoin(..) => NodeTag::JsonTableSiblingJoin,
-            Self::NullTest(..) => NodeTag::NullTest,
-            Self::BooleanTest(..) => NodeTag::BooleanTest,
-            Self::MergeAction(..) => NodeTag::MergeAction,
-            Self::CoerceToDomain(..) => NodeTag::CoerceToDomain,
-            Self::CoerceToDomainValue(..) => NodeTag::CoerceToDomainValue,
-            Self::SetToDefault(..) => NodeTag::SetToDefault,
-            Self::CurrentOfExpr(..) => NodeTag::CurrentOfExpr,
-            Self::NextValueExpr(..) => NodeTag::NextValueExpr,
-            Self::InferenceElem(..) => NodeTag::InferenceElem,
-            Self::ReturningExpr(..) => NodeTag::ReturningExpr,
-            Self::GraphLabelRef(..) => NodeTag::GraphLabelRef,
-            Self::GraphPropertyRef(..) => NodeTag::GraphPropertyRef,
-            Self::TargetEntry(..) => NodeTag::TargetEntry,
-            Self::RangeTblRef(..) => NodeTag::RangeTblRef,
-            Self::JoinExpr(..) => NodeTag::JoinExpr,
-            Self::FromExpr(..) => NodeTag::FromExpr,
-            Self::OnConflictExpr(..) => NodeTag::OnConflictExpr,
-            Self::ForPortionOfExpr(..) => NodeTag::ForPortionOfExpr,
-            Self::Query(..) => NodeTag::Query,
-            Self::TypeName(..) => NodeTag::TypeName,
-            Self::ColumnRef(..) => NodeTag::ColumnRef,
-            Self::ParamRef(..) => NodeTag::ParamRef,
-            Self::AExpr(..) => NodeTag::AExpr,
-            Self::AConst(..) => NodeTag::AConst,
-            Self::TypeCast(..) => NodeTag::TypeCast,
-            Self::CollateClause(..) => NodeTag::CollateClause,
-            Self::RoleSpec(..) => NodeTag::RoleSpec,
-            Self::FuncCall(..) => NodeTag::FuncCall,
-            Self::AStar(..) => NodeTag::AStar,
-            Self::AIndices(..) => NodeTag::AIndices,
-            Self::AIndirection(..) => NodeTag::AIndirection,
-            Self::AArrayExpr(..) => NodeTag::AArrayExpr,
-            Self::ResTarget(..) => NodeTag::ResTarget,
-            Self::MultiAssignRef(..) => NodeTag::MultiAssignRef,
-            Self::SortBy(..) => NodeTag::SortBy,
-            Self::WindowDef(..) => NodeTag::WindowDef,
-            Self::RangeSubselect(..) => NodeTag::RangeSubselect,
-            Self::RangeFunction(..) => NodeTag::RangeFunction,
-            Self::RangeTableFunc(..) => NodeTag::RangeTableFunc,
-            Self::RangeTableFuncCol(..) => NodeTag::RangeTableFuncCol,
-            Self::RangeGraphTable(..) => NodeTag::RangeGraphTable,
-            Self::RangeTableSample(..) => NodeTag::RangeTableSample,
-            Self::ColumnDef(..) => NodeTag::ColumnDef,
-            Self::TableLikeClause(..) => NodeTag::TableLikeClause,
-            Self::IndexElem(..) => NodeTag::IndexElem,
-            Self::DefElem(..) => NodeTag::DefElem,
-            Self::LockingClause(..) => NodeTag::LockingClause,
-            Self::XmlSerialize(..) => NodeTag::XmlSerialize,
-            Self::PartitionElem(..) => NodeTag::PartitionElem,
-            Self::PartitionSpec(..) => NodeTag::PartitionSpec,
-            Self::PartitionRangeDatum(..) => NodeTag::PartitionRangeDatum,
-            Self::SinglePartitionSpec(..) => NodeTag::SinglePartitionSpec,
-            Self::PartitionCmd(..) => NodeTag::PartitionCmd,
-            Self::GraphPattern(..) => NodeTag::GraphPattern,
-            Self::GraphElementPattern(..) => NodeTag::GraphElementPattern,
-            Self::RangeTblEntry(..) => NodeTag::RangeTblEntry,
-            Self::RtePermissionInfo(..) => NodeTag::RtePermissionInfo,
-            Self::RangeTblFunction(..) => NodeTag::RangeTblFunction,
-            Self::TableSampleClause(..) => NodeTag::TableSampleClause,
-            Self::WithCheckOption(..) => NodeTag::WithCheckOption,
-            Self::SortGroupClause(..) => NodeTag::SortGroupClause,
-            Self::GroupingSet(..) => NodeTag::GroupingSet,
-            Self::WindowClause(..) => NodeTag::WindowClause,
-            Self::RowMarkClause(..) => NodeTag::RowMarkClause,
-            Self::ForPortionOfClause(..) => NodeTag::ForPortionOfClause,
-            Self::WithClause(..) => NodeTag::WithClause,
-            Self::InferClause(..) => NodeTag::InferClause,
-            Self::OnConflictClause(..) => NodeTag::OnConflictClause,
-            Self::CteSearchClause(..) => NodeTag::CteSearchClause,
-            Self::CteCycleClause(..) => NodeTag::CteCycleClause,
-            Self::CommonTableExpr(..) => NodeTag::CommonTableExpr,
-            Self::MergeWhenClause(..) => NodeTag::MergeWhenClause,
-            Self::ReturningOption(..) => NodeTag::ReturningOption,
-            Self::ReturningClause(..) => NodeTag::ReturningClause,
-            Self::TriggerTransition(..) => NodeTag::TriggerTransition,
-            Self::JsonOutput(..) => NodeTag::JsonOutput,
-            Self::JsonArgument(..) => NodeTag::JsonArgument,
-            Self::JsonFuncExpr(..) => NodeTag::JsonFuncExpr,
-            Self::JsonTablePathSpec(..) => NodeTag::JsonTablePathSpec,
-            Self::JsonTable(..) => NodeTag::JsonTable,
-            Self::JsonTableColumn(..) => NodeTag::JsonTableColumn,
-            Self::JsonKeyValue(..) => NodeTag::JsonKeyValue,
-            Self::JsonParseExpr(..) => NodeTag::JsonParseExpr,
-            Self::JsonScalarExpr(..) => NodeTag::JsonScalarExpr,
-            Self::JsonSerializeExpr(..) => NodeTag::JsonSerializeExpr,
-            Self::JsonObjectConstructor(..) => NodeTag::JsonObjectConstructor,
-            Self::JsonArrayConstructor(..) => NodeTag::JsonArrayConstructor,
-            Self::JsonArrayQueryConstructor(..) => NodeTag::JsonArrayQueryConstructor,
-            Self::JsonAggConstructor(..) => NodeTag::JsonAggConstructor,
-            Self::JsonObjectAgg(..) => NodeTag::JsonObjectAgg,
-            Self::JsonArrayAgg(..) => NodeTag::JsonArrayAgg,
-            Self::RawStmt(..) => NodeTag::RawStmt,
-            Self::InsertStmt(..) => NodeTag::InsertStmt,
-            Self::DeleteStmt(..) => NodeTag::DeleteStmt,
-            Self::UpdateStmt(..) => NodeTag::UpdateStmt,
-            Self::MergeStmt(..) => NodeTag::MergeStmt,
-            Self::SelectStmt(..) => NodeTag::SelectStmt,
-            Self::SetOperationStmt(..) => NodeTag::SetOperationStmt,
-            Self::ReturnStmt(..) => NodeTag::ReturnStmt,
-            Self::PlAssignStmt(..) => NodeTag::PlAssignStmt,
-            Self::CreateSchemaStmt(..) => NodeTag::CreateSchemaStmt,
-            Self::AlterTableStmt(..) => NodeTag::AlterTableStmt,
-            Self::AlterTableCmd(..) => NodeTag::AlterTableCmd,
-            Self::AtAlterConstraint(..) => NodeTag::AtAlterConstraint,
-            Self::ReplicaIdentityStmt(..) => NodeTag::ReplicaIdentityStmt,
-            Self::AlterCollationStmt(..) => NodeTag::AlterCollationStmt,
-            Self::AlterDomainStmt(..) => NodeTag::AlterDomainStmt,
-            Self::GrantStmt(..) => NodeTag::GrantStmt,
-            Self::ObjectWithArgs(..) => NodeTag::ObjectWithArgs,
-            Self::AccessPriv(..) => NodeTag::AccessPriv,
-            Self::GrantRoleStmt(..) => NodeTag::GrantRoleStmt,
-            Self::AlterDefaultPrivilegesStmt(..) => NodeTag::AlterDefaultPrivilegesStmt,
-            Self::CopyStmt(..) => NodeTag::CopyStmt,
-            Self::VariableSetStmt(..) => NodeTag::VariableSetStmt,
-            Self::VariableShowStmt(..) => NodeTag::VariableShowStmt,
-            Self::CreateStmt(..) => NodeTag::CreateStmt,
-            Self::Constraint(..) => NodeTag::Constraint,
-            Self::CreateTableSpaceStmt(..) => NodeTag::CreateTableSpaceStmt,
-            Self::DropTableSpaceStmt(..) => NodeTag::DropTableSpaceStmt,
-            Self::AlterTableSpaceOptionsStmt(..) => NodeTag::AlterTableSpaceOptionsStmt,
-            Self::AlterTableMoveAllStmt(..) => NodeTag::AlterTableMoveAllStmt,
-            Self::CreateExtensionStmt(..) => NodeTag::CreateExtensionStmt,
-            Self::AlterExtensionStmt(..) => NodeTag::AlterExtensionStmt,
-            Self::AlterExtensionContentsStmt(..) => NodeTag::AlterExtensionContentsStmt,
-            Self::CreateFdwStmt(..) => NodeTag::CreateFdwStmt,
-            Self::AlterFdwStmt(..) => NodeTag::AlterFdwStmt,
-            Self::CreateForeignServerStmt(..) => NodeTag::CreateForeignServerStmt,
-            Self::AlterForeignServerStmt(..) => NodeTag::AlterForeignServerStmt,
-            Self::CreateForeignTableStmt(..) => NodeTag::CreateForeignTableStmt,
-            Self::CreateUserMappingStmt(..) => NodeTag::CreateUserMappingStmt,
-            Self::AlterUserMappingStmt(..) => NodeTag::AlterUserMappingStmt,
-            Self::DropUserMappingStmt(..) => NodeTag::DropUserMappingStmt,
-            Self::ImportForeignSchemaStmt(..) => NodeTag::ImportForeignSchemaStmt,
-            Self::CreatePolicyStmt(..) => NodeTag::CreatePolicyStmt,
-            Self::AlterPolicyStmt(..) => NodeTag::AlterPolicyStmt,
-            Self::CreateAmStmt(..) => NodeTag::CreateAmStmt,
-            Self::CreateTrigStmt(..) => NodeTag::CreateTrigStmt,
-            Self::CreateEventTrigStmt(..) => NodeTag::CreateEventTrigStmt,
-            Self::AlterEventTrigStmt(..) => NodeTag::AlterEventTrigStmt,
-            Self::CreatePLangStmt(..) => NodeTag::CreatePLangStmt,
-            Self::CreateRoleStmt(..) => NodeTag::CreateRoleStmt,
-            Self::AlterRoleStmt(..) => NodeTag::AlterRoleStmt,
-            Self::AlterRoleSetStmt(..) => NodeTag::AlterRoleSetStmt,
-            Self::DropRoleStmt(..) => NodeTag::DropRoleStmt,
-            Self::CreateSeqStmt(..) => NodeTag::CreateSeqStmt,
-            Self::AlterSeqStmt(..) => NodeTag::AlterSeqStmt,
-            Self::DefineStmt(..) => NodeTag::DefineStmt,
-            Self::CreateDomainStmt(..) => NodeTag::CreateDomainStmt,
-            Self::CreateOpClassStmt(..) => NodeTag::CreateOpClassStmt,
-            Self::CreateOpClassItem(..) => NodeTag::CreateOpClassItem,
-            Self::CreateOpFamilyStmt(..) => NodeTag::CreateOpFamilyStmt,
-            Self::AlterOpFamilyStmt(..) => NodeTag::AlterOpFamilyStmt,
-            Self::DropStmt(..) => NodeTag::DropStmt,
-            Self::TruncateStmt(..) => NodeTag::TruncateStmt,
-            Self::CommentStmt(..) => NodeTag::CommentStmt,
-            Self::SecLabelStmt(..) => NodeTag::SecLabelStmt,
-            Self::DeclareCursorStmt(..) => NodeTag::DeclareCursorStmt,
-            Self::ClosePortalStmt(..) => NodeTag::ClosePortalStmt,
-            Self::FetchStmt(..) => NodeTag::FetchStmt,
-            Self::IndexStmt(..) => NodeTag::IndexStmt,
-            Self::CreateStatsStmt(..) => NodeTag::CreateStatsStmt,
-            Self::StatsElem(..) => NodeTag::StatsElem,
-            Self::AlterStatsStmt(..) => NodeTag::AlterStatsStmt,
-            Self::CreateFunctionStmt(..) => NodeTag::CreateFunctionStmt,
-            Self::FunctionParameter(..) => NodeTag::FunctionParameter,
-            Self::AlterFunctionStmt(..) => NodeTag::AlterFunctionStmt,
-            Self::DoStmt(..) => NodeTag::DoStmt,
-            Self::InlineCodeBlock(..) => NodeTag::InlineCodeBlock,
-            Self::CallStmt(..) => NodeTag::CallStmt,
-            Self::CallContext(..) => NodeTag::CallContext,
-            Self::RenameStmt(..) => NodeTag::RenameStmt,
-            Self::AlterObjectDependsStmt(..) => NodeTag::AlterObjectDependsStmt,
-            Self::AlterObjectSchemaStmt(..) => NodeTag::AlterObjectSchemaStmt,
-            Self::AlterOwnerStmt(..) => NodeTag::AlterOwnerStmt,
-            Self::AlterOperatorStmt(..) => NodeTag::AlterOperatorStmt,
-            Self::AlterTypeStmt(..) => NodeTag::AlterTypeStmt,
-            Self::RuleStmt(..) => NodeTag::RuleStmt,
-            Self::NotifyStmt(..) => NodeTag::NotifyStmt,
-            Self::ListenStmt(..) => NodeTag::ListenStmt,
-            Self::UnlistenStmt(..) => NodeTag::UnlistenStmt,
-            Self::TransactionStmt(..) => NodeTag::TransactionStmt,
-            Self::CompositeTypeStmt(..) => NodeTag::CompositeTypeStmt,
-            Self::CreateEnumStmt(..) => NodeTag::CreateEnumStmt,
-            Self::CreateRangeStmt(..) => NodeTag::CreateRangeStmt,
-            Self::AlterEnumStmt(..) => NodeTag::AlterEnumStmt,
-            Self::ViewStmt(..) => NodeTag::ViewStmt,
-            Self::LoadStmt(..) => NodeTag::LoadStmt,
-            Self::CreatedbStmt(..) => NodeTag::CreatedbStmt,
-            Self::AlterDatabaseStmt(..) => NodeTag::AlterDatabaseStmt,
-            Self::AlterDatabaseRefreshCollStmt(..) => NodeTag::AlterDatabaseRefreshCollStmt,
-            Self::AlterDatabaseSetStmt(..) => NodeTag::AlterDatabaseSetStmt,
-            Self::DropdbStmt(..) => NodeTag::DropdbStmt,
-            Self::AlterSystemStmt(..) => NodeTag::AlterSystemStmt,
-            Self::VacuumStmt(..) => NodeTag::VacuumStmt,
-            Self::VacuumRelation(..) => NodeTag::VacuumRelation,
-            Self::RepackStmt(..) => NodeTag::RepackStmt,
-            Self::ExplainStmt(..) => NodeTag::ExplainStmt,
-            Self::CreateTableAsStmt(..) => NodeTag::CreateTableAsStmt,
-            Self::RefreshMatViewStmt(..) => NodeTag::RefreshMatViewStmt,
-            Self::CheckPointStmt(..) => NodeTag::CheckPointStmt,
-            Self::DiscardStmt(..) => NodeTag::DiscardStmt,
-            Self::LockStmt(..) => NodeTag::LockStmt,
-            Self::ConstraintsSetStmt(..) => NodeTag::ConstraintsSetStmt,
-            Self::ReindexStmt(..) => NodeTag::ReindexStmt,
-            Self::CreateConversionStmt(..) => NodeTag::CreateConversionStmt,
-            Self::CreateCastStmt(..) => NodeTag::CreateCastStmt,
-            Self::CreatePropGraphStmt(..) => NodeTag::CreatePropGraphStmt,
-            Self::PropGraphVertex(..) => NodeTag::PropGraphVertex,
-            Self::PropGraphEdge(..) => NodeTag::PropGraphEdge,
-            Self::PropGraphLabelAndProperties(..) => NodeTag::PropGraphLabelAndProperties,
-            Self::PropGraphProperties(..) => NodeTag::PropGraphProperties,
-            Self::AlterPropGraphStmt(..) => NodeTag::AlterPropGraphStmt,
-            Self::CreateTransformStmt(..) => NodeTag::CreateTransformStmt,
-            Self::PrepareStmt(..) => NodeTag::PrepareStmt,
-            Self::ExecuteStmt(..) => NodeTag::ExecuteStmt,
-            Self::DeallocateStmt(..) => NodeTag::DeallocateStmt,
-            Self::DropOwnedStmt(..) => NodeTag::DropOwnedStmt,
-            Self::ReassignOwnedStmt(..) => NodeTag::ReassignOwnedStmt,
-            Self::AlterTsDictionaryStmt(..) => NodeTag::AlterTsDictionaryStmt,
-            Self::AlterTsConfigurationStmt(..) => NodeTag::AlterTsConfigurationStmt,
-            Self::PublicationTable(..) => NodeTag::PublicationTable,
-            Self::PublicationObjSpec(..) => NodeTag::PublicationObjSpec,
-            Self::PublicationAllObjSpec(..) => NodeTag::PublicationAllObjSpec,
-            Self::CreatePublicationStmt(..) => NodeTag::CreatePublicationStmt,
-            Self::AlterPublicationStmt(..) => NodeTag::AlterPublicationStmt,
-            Self::CreateSubscriptionStmt(..) => NodeTag::CreateSubscriptionStmt,
-            Self::AlterSubscriptionStmt(..) => NodeTag::AlterSubscriptionStmt,
-            Self::DropSubscriptionStmt(..) => NodeTag::DropSubscriptionStmt,
-            Self::WaitStmt(..) => NodeTag::WaitStmt,
-            Self::PartitionBoundSpec(..) => NodeTag::PartitionBoundSpec,
-            Self::Integer(..) => NodeTag::Integer,
-            Self::Float(..) => NodeTag::Float,
-            Self::Boolean(..) => NodeTag::Boolean,
-            Self::String(..) => NodeTag::String,
-            Self::BitString(..) => NodeTag::BitString,
-            Self::DistinctExpr(..) => NodeTag::DistinctExpr,
-            Self::NullIfExpr(..) => NodeTag::NullIfExpr,
-        }
-    }
-}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Alias {
-    pub node_tag: NodeTag,
     pub aliasname: Option<std::string::String>,
     pub colnames: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeVar {
-    pub node_tag: NodeTag,
     pub catalogname: Option<std::string::String>,
     pub schemaname: Option<std::string::String>,
     pub relname: Option<std::string::String>,
@@ -1820,7 +1236,6 @@ pub struct RangeVar {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableFunc {
-    pub node_tag: NodeTag,
     pub functype: TableFuncType,
     pub ns_uris: NodeList,
     pub ns_names: NodeList,
@@ -1841,7 +1256,6 @@ pub struct TableFunc {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct IntoClause {
-    pub node_tag: NodeTag,
     pub rel: Option<Box<RangeVar>>,
     pub col_names: NodeList,
     pub access_method: Option<std::string::String>,
@@ -1852,12 +1266,9 @@ pub struct IntoClause {
     pub skip_data: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Expr {
-    pub node_tag: NodeTag,
-}
+pub struct Expr {}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Var {
-    pub xpr: Expr,
     pub varno: i32,
     pub varattno: AttrNumber,
     pub vartype: Oid,
@@ -1872,7 +1283,6 @@ pub struct Var {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Const {
-    pub xpr: Expr,
     pub consttype: Oid,
     pub consttypmod: i32,
     pub constcollid: Oid,
@@ -1884,7 +1294,6 @@ pub struct Const {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Param {
-    pub xpr: Expr,
     pub paramkind: ParamKind,
     pub paramid: i32,
     pub paramtype: Oid,
@@ -1894,7 +1303,6 @@ pub struct Param {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Aggref {
-    pub xpr: Expr,
     pub aggfnoid: Oid,
     pub aggtype: Oid,
     pub aggcollid: Oid,
@@ -1918,7 +1326,6 @@ pub struct Aggref {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GroupingFunc {
-    pub xpr: Expr,
     pub args: NodeList,
     pub refs: NodeList,
     pub cols: NodeList,
@@ -1927,7 +1334,6 @@ pub struct GroupingFunc {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowFunc {
-    pub xpr: Expr,
     pub winfnoid: Oid,
     pub wintype: Oid,
     pub wincollid: Oid,
@@ -1943,7 +1349,6 @@ pub struct WindowFunc {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowFuncRunCondition {
-    pub xpr: Expr,
     pub opno: Oid,
     pub inputcollid: Oid,
     pub wfunc_left: bool,
@@ -1951,14 +1356,12 @@ pub struct WindowFuncRunCondition {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MergeSupportFunc {
-    pub xpr: Expr,
     pub msftype: Oid,
     pub msfcollid: Oid,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SubscriptingRef {
-    pub xpr: Expr,
     pub refcontainertype: Oid,
     pub refelemtype: Oid,
     pub refrestype: Oid,
@@ -1971,7 +1374,6 @@ pub struct SubscriptingRef {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FuncExpr {
-    pub xpr: Expr,
     pub funcid: Oid,
     pub funcresulttype: Oid,
     pub funcretset: bool,
@@ -1984,7 +1386,6 @@ pub struct FuncExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NamedArgExpr {
-    pub xpr: Expr,
     pub arg: Option<Box<Node>>,
     pub name: Option<std::string::String>,
     pub argnumber: i32,
@@ -1992,7 +1393,6 @@ pub struct NamedArgExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OpExpr {
-    pub xpr: Expr,
     pub opno: Oid,
     pub opfuncid: Oid,
     pub opresulttype: Oid,
@@ -2004,7 +1404,6 @@ pub struct OpExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ScalarArrayOpExpr {
-    pub xpr: Expr,
     pub opno: Oid,
     pub opfuncid: Oid,
     pub hashfuncid: Oid,
@@ -2016,14 +1415,12 @@ pub struct ScalarArrayOpExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BoolExpr {
-    pub xpr: Expr,
     pub boolop: BoolExprType,
     pub args: NodeList,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SubLink {
-    pub xpr: Expr,
     pub sub_link_type: SubLinkType,
     pub sub_link_id: i32,
     pub testexpr: Option<Box<Node>>,
@@ -2033,7 +1430,6 @@ pub struct SubLink {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SubPlan {
-    pub xpr: Expr,
     pub sub_link_type: SubLinkType,
     pub testexpr: Option<Box<Node>>,
     pub param_ids: NodeList,
@@ -2055,12 +1451,10 @@ pub struct SubPlan {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlternativeSubPlan {
-    pub xpr: Expr,
     pub subplans: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FieldSelect {
-    pub xpr: Expr,
     pub arg: Option<Box<Expr>>,
     pub fieldnum: AttrNumber,
     pub resulttype: Oid,
@@ -2069,7 +1463,6 @@ pub struct FieldSelect {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FieldStore {
-    pub xpr: Expr,
     pub arg: Option<Box<Expr>>,
     pub newvals: NodeList,
     pub fieldnums: NodeList,
@@ -2077,7 +1470,6 @@ pub struct FieldStore {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RelabelType {
-    pub xpr: Expr,
     pub arg: Option<Box<Expr>>,
     pub resulttype: Oid,
     pub resulttypmod: i32,
@@ -2087,7 +1479,6 @@ pub struct RelabelType {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoerceViaIo {
-    pub xpr: Expr,
     pub arg: Option<Box<Expr>>,
     pub resulttype: Oid,
     pub resultcollid: Oid,
@@ -2096,7 +1487,6 @@ pub struct CoerceViaIo {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ArrayCoerceExpr {
-    pub xpr: Expr,
     pub arg: Option<Box<Expr>>,
     pub elemexpr: Option<Box<Expr>>,
     pub resulttype: Oid,
@@ -2107,7 +1497,6 @@ pub struct ArrayCoerceExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConvertRowtypeExpr {
-    pub xpr: Expr,
     pub arg: Option<Box<Expr>>,
     pub resulttype: Oid,
     pub convertformat: CoercionForm,
@@ -2115,14 +1504,12 @@ pub struct ConvertRowtypeExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CollateExpr {
-    pub xpr: Expr,
     pub arg: Option<Box<Expr>>,
     pub coll_oid: Oid,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CaseExpr {
-    pub xpr: Expr,
     pub casetype: Oid,
     pub casecollid: Oid,
     pub arg: Option<Box<Node>>,
@@ -2132,21 +1519,18 @@ pub struct CaseExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CaseWhen {
-    pub xpr: Expr,
     pub expr: Option<Box<Node>>,
     pub result: Option<Box<Node>>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CaseTestExpr {
-    pub xpr: Expr,
     pub type_id: Oid,
     pub type_mod: i32,
     pub collation: Oid,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ArrayExpr {
-    pub xpr: Expr,
     pub array_typeid: Oid,
     pub array_collid: Oid,
     pub element_typeid: Oid,
@@ -2158,7 +1542,6 @@ pub struct ArrayExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RowExpr {
-    pub xpr: Expr,
     pub args: NodeList,
     pub row_typeid: Oid,
     pub row_format: CoercionForm,
@@ -2167,7 +1550,6 @@ pub struct RowExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RowCompareExpr {
-    pub xpr: Expr,
     pub cmptype: CompareType,
     pub opnos: NodeList,
     pub opfamilies: NodeList,
@@ -2177,7 +1559,6 @@ pub struct RowCompareExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoalesceExpr {
-    pub xpr: Expr,
     pub coalescetype: Oid,
     pub coalescecollid: Oid,
     pub args: NodeList,
@@ -2185,7 +1566,6 @@ pub struct CoalesceExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MinMaxExpr {
-    pub xpr: Expr,
     pub minmaxtype: Oid,
     pub minmaxcollid: Oid,
     pub inputcollid: Oid,
@@ -2195,15 +1575,13 @@ pub struct MinMaxExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SqlValueFunction {
-    pub xpr: Expr,
     pub op: SqlValueFunctionOp,
-    pub node_tag: Oid,
+    pub type_oid: Oid,
     pub typmod: i32,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct XmlExpr {
-    pub xpr: Expr,
     pub op: XmlExprOp,
     pub name: Option<std::string::String>,
     pub named_args: NodeList,
@@ -2211,35 +1589,31 @@ pub struct XmlExpr {
     pub args: NodeList,
     pub xmloption: XmlOptionType,
     pub indent: bool,
-    pub node_tag: Oid,
+    pub type_oid: Oid,
     pub typmod: i32,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonFormat {
-    pub node_tag: NodeTag,
     pub format_type: JsonFormatType,
     pub encoding: JsonEncoding,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonReturning {
-    pub node_tag: NodeTag,
     pub format: Option<Box<JsonFormat>>,
     pub typid: Oid,
     pub typmod: i32,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonValueExpr {
-    pub node_tag: NodeTag,
     pub raw_expr: Option<Box<Node>>,
     pub formatted_expr: Option<Box<Node>>,
     pub format: Option<Box<JsonFormat>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonConstructorExpr {
-    pub xpr: Expr,
-    pub node_tag: JsonConstructorType,
+    pub constructor_type: JsonConstructorType,
     pub args: NodeList,
     pub func: Option<Box<Expr>>,
     pub coercion: Option<Box<Expr>>,
@@ -2251,7 +1625,6 @@ pub struct JsonConstructorExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonIsPredicate {
-    pub node_tag: NodeTag,
     pub expr: Option<Box<Node>>,
     pub format: Option<Box<JsonFormat>>,
     pub item_type: JsonValueType,
@@ -2261,7 +1634,6 @@ pub struct JsonIsPredicate {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonBehavior {
-    pub node_tag: NodeTag,
     pub btype: JsonBehaviorType,
     pub expr: Option<Box<Node>>,
     pub coerce: bool,
@@ -2269,7 +1641,6 @@ pub struct JsonBehavior {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonExpr {
-    pub xpr: Expr,
     pub op: JsonExprOp,
     pub column_name: Option<std::string::String>,
     pub formatted_expr: Option<Box<Node>>,
@@ -2289,14 +1660,11 @@ pub struct JsonExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTablePath {
-    pub node_tag: NodeTag,
     pub value: Option<Box<Const>>,
     pub name: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct JsonTablePlan {
-    pub node_tag: NodeTag,
-}
+pub struct JsonTablePlan {}
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTablePathScan {
     pub plan: JsonTablePlan,
@@ -2314,7 +1682,6 @@ pub struct JsonTableSiblingJoin {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NullTest {
-    pub xpr: Expr,
     pub arg: Option<Box<Node>>,
     pub nulltesttype: NullTestType,
     pub argisrow: bool,
@@ -2322,14 +1689,12 @@ pub struct NullTest {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BooleanTest {
-    pub xpr: Expr,
     pub arg: Option<Box<Node>>,
     pub booltesttype: BoolTestType,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MergeAction {
-    pub node_tag: NodeTag,
     pub match_kind: MergeMatchKind,
     pub command_type: CmdType,
     pub override_: OverridingKind,
@@ -2339,7 +1704,6 @@ pub struct MergeAction {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoerceToDomain {
-    pub xpr: Expr,
     pub arg: Option<Box<Expr>>,
     pub resulttype: Oid,
     pub resulttypmod: i32,
@@ -2349,7 +1713,6 @@ pub struct CoerceToDomain {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoerceToDomainValue {
-    pub xpr: Expr,
     pub type_id: Oid,
     pub type_mod: i32,
     pub collation: Oid,
@@ -2357,7 +1720,6 @@ pub struct CoerceToDomainValue {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SetToDefault {
-    pub xpr: Expr,
     pub type_id: Oid,
     pub type_mod: i32,
     pub collation: Oid,
@@ -2365,40 +1727,34 @@ pub struct SetToDefault {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CurrentOfExpr {
-    pub xpr: Expr,
     pub cvarno: Index,
     pub cursor_name: Option<std::string::String>,
     pub cursor_param: i32,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NextValueExpr {
-    pub xpr: Expr,
     pub seqid: Oid,
     pub type_id: Oid,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InferenceElem {
-    pub xpr: Expr,
     pub expr: Option<Box<Node>>,
     pub infercollid: Oid,
     pub inferopclass: Oid,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReturningExpr {
-    pub xpr: Expr,
     pub retlevelsup: i32,
     pub retold: bool,
     pub retexpr: Option<Box<Expr>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GraphLabelRef {
-    pub node_tag: NodeTag,
     pub labelid: Oid,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GraphPropertyRef {
-    pub xpr: Expr,
     pub elvarname: Option<std::string::String>,
     pub propid: Oid,
     pub type_id: Oid,
@@ -2408,7 +1764,6 @@ pub struct GraphPropertyRef {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TargetEntry {
-    pub xpr: Expr,
     pub expr: Option<Box<Expr>>,
     pub resno: AttrNumber,
     pub resname: Option<std::string::String>,
@@ -2419,12 +1774,10 @@ pub struct TargetEntry {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTblRef {
-    pub node_tag: NodeTag,
     pub rtindex: i32,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JoinExpr {
-    pub node_tag: NodeTag,
     pub jointype: JoinType,
     pub is_natural: bool,
     pub larg: Option<Box<Node>>,
@@ -2437,13 +1790,11 @@ pub struct JoinExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FromExpr {
-    pub node_tag: NodeTag,
     pub fromlist: NodeList,
     pub quals: Option<Box<Node>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OnConflictExpr {
-    pub node_tag: NodeTag,
     pub action: OnConflictAction,
     pub arbiter_elems: NodeList,
     pub arbiter_where: Option<Box<Node>>,
@@ -2456,7 +1807,6 @@ pub struct OnConflictExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ForPortionOfExpr {
-    pub node_tag: NodeTag,
     pub range_var: Option<Box<Var>>,
     pub range_name: Option<std::string::String>,
     pub target_from: Option<Box<Node>>,
@@ -2472,7 +1822,6 @@ pub struct ForPortionOfExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Query {
-    pub node_tag: NodeTag,
     pub command_type: CmdType,
     pub query_source: QuerySource,
     pub can_set_tag: bool,
@@ -2523,7 +1872,6 @@ pub struct Query {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TypeName {
-    pub node_tag: NodeTag,
     pub names: NodeList,
     pub type_oid: Oid,
     pub setof: bool,
@@ -2535,19 +1883,16 @@ pub struct TypeName {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ColumnRef {
-    pub node_tag: NodeTag,
     pub fields: NodeList,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ParamRef {
-    pub node_tag: NodeTag,
     pub number: i32,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AExpr {
-    pub node_tag: NodeTag,
     pub kind: AExprKind,
     pub name: NodeList,
     pub lexpr: Option<Box<Node>>,
@@ -2558,35 +1903,30 @@ pub struct AExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AConst {
-    pub node_tag: NodeTag,
     pub val: ValUnion,
     pub isnull: bool,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TypeCast {
-    pub node_tag: NodeTag,
     pub arg: Option<Box<Node>>,
     pub type_name: Option<Box<TypeName>>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CollateClause {
-    pub node_tag: NodeTag,
     pub arg: Option<Box<Node>>,
     pub collname: NodeList,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RoleSpec {
-    pub node_tag: NodeTag,
     pub roletype: RoleSpecType,
     pub rolename: Option<std::string::String>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FuncCall {
-    pub node_tag: NodeTag,
     pub funcname: NodeList,
     pub args: NodeList,
     pub agg_order: NodeList,
@@ -2601,25 +1941,18 @@ pub struct FuncCall {
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct AStar {
-    pub node_tag: NodeTag,
-}
-#[derive(Clone, Debug, Default, PartialEq)]
 pub struct AIndices {
-    pub node_tag: NodeTag,
     pub is_slice: bool,
     pub lidx: Option<Box<Node>>,
     pub uidx: Option<Box<Node>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AIndirection {
-    pub node_tag: NodeTag,
     pub arg: Option<Box<Node>>,
     pub indirection: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AArrayExpr {
-    pub node_tag: NodeTag,
     pub elements: NodeList,
     pub list_start: ParseLoc,
     pub list_end: ParseLoc,
@@ -2627,7 +1960,6 @@ pub struct AArrayExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResTarget {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub indirection: NodeList,
     pub val: Option<Box<Node>>,
@@ -2635,14 +1967,12 @@ pub struct ResTarget {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MultiAssignRef {
-    pub node_tag: NodeTag,
     pub source: Option<Box<Node>>,
     pub colno: i32,
     pub ncolumns: i32,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SortBy {
-    pub node_tag: NodeTag,
     pub node: Option<Box<Node>>,
     pub sortby_dir: SortByDir,
     pub sortby_nulls: SortByNulls,
@@ -2651,7 +1981,6 @@ pub struct SortBy {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowDef {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub refname: Option<std::string::String>,
     pub partition_clause: NodeList,
@@ -2663,14 +1992,12 @@ pub struct WindowDef {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeSubselect {
-    pub node_tag: NodeTag,
     pub lateral: bool,
     pub subquery: Option<Box<Node>>,
     pub alias: Option<Box<Alias>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeFunction {
-    pub node_tag: NodeTag,
     pub lateral: bool,
     pub ordinality: bool,
     pub is_rowsfrom: bool,
@@ -2680,7 +2007,6 @@ pub struct RangeFunction {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTableFunc {
-    pub node_tag: NodeTag,
     pub lateral: bool,
     pub docexpr: Option<Box<Node>>,
     pub rowexpr: Option<Box<Node>>,
@@ -2691,7 +2017,6 @@ pub struct RangeTableFunc {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTableFuncCol {
-    pub node_tag: NodeTag,
     pub colname: Option<std::string::String>,
     pub type_name: Option<Box<TypeName>>,
     pub for_ordinality: bool,
@@ -2702,7 +2027,6 @@ pub struct RangeTableFuncCol {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeGraphTable {
-    pub node_tag: NodeTag,
     pub graph_name: Option<Box<RangeVar>>,
     pub graph_pattern: Option<Box<GraphPattern>>,
     pub columns: NodeList,
@@ -2711,7 +2035,6 @@ pub struct RangeGraphTable {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTableSample {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<Node>>,
     pub method: NodeList,
     pub args: NodeList,
@@ -2720,7 +2043,6 @@ pub struct RangeTableSample {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ColumnDef {
-    pub node_tag: NodeTag,
     pub colname: Option<std::string::String>,
     pub type_name: Option<Box<TypeName>>,
     pub compression: Option<std::string::String>,
@@ -2743,14 +2065,12 @@ pub struct ColumnDef {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableLikeClause {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub options: u32,
     pub relation_oid: Oid,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct IndexElem {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub expr: Option<Box<Node>>,
     pub indexcolname: Option<std::string::String>,
@@ -2763,7 +2083,6 @@ pub struct IndexElem {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DefElem {
-    pub node_tag: NodeTag,
     pub defnamespace: Option<std::string::String>,
     pub defname: Option<std::string::String>,
     pub arg: Option<Box<Node>>,
@@ -2772,14 +2091,12 @@ pub struct DefElem {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LockingClause {
-    pub node_tag: NodeTag,
     pub locked_rels: NodeList,
     pub strength: LockClauseStrength,
     pub wait_policy: LockWaitPolicy,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct XmlSerialize {
-    pub node_tag: NodeTag,
     pub xmloption: XmlOptionType,
     pub expr: Option<Box<Node>>,
     pub type_name: Option<Box<TypeName>>,
@@ -2788,7 +2105,6 @@ pub struct XmlSerialize {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartitionElem {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub expr: Option<Box<Node>>,
     pub collation: NodeList,
@@ -2797,27 +2113,23 @@ pub struct PartitionElem {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartitionSpec {
-    pub node_tag: NodeTag,
     pub strategy: PartitionStrategy,
     pub part_params: NodeList,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartitionRangeDatum {
-    pub node_tag: NodeTag,
     pub kind: PartitionRangeDatumKind,
     pub value: Option<Box<Node>>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SinglePartitionSpec {
-    pub node_tag: NodeTag,
     pub name: Option<Box<RangeVar>>,
     pub bound: Option<Box<PartitionBoundSpec>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartitionCmd {
-    pub node_tag: NodeTag,
     pub name: Option<Box<RangeVar>>,
     pub bound: Option<Box<PartitionBoundSpec>>,
     pub partlist: NodeList,
@@ -2825,13 +2137,11 @@ pub struct PartitionCmd {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GraphPattern {
-    pub node_tag: NodeTag,
     pub path_pattern_list: NodeList,
     pub where_clause: Option<Box<Node>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GraphElementPattern {
-    pub node_tag: NodeTag,
     pub kind: GraphElementPatternKind,
     pub variable: Option<std::string::String>,
     pub labelexpr: Option<Box<Node>>,
@@ -2842,7 +2152,6 @@ pub struct GraphElementPattern {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTblEntry {
-    pub node_tag: NodeTag,
     pub alias: Option<Box<Alias>>,
     pub eref: Option<Box<Alias>>,
     pub rtekind: RteKind,
@@ -2881,7 +2190,6 @@ pub struct RangeTblEntry {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RtePermissionInfo {
-    pub node_tag: NodeTag,
     pub relid: Oid,
     pub inh: bool,
     pub required_perms: AclMode,
@@ -2892,7 +2200,6 @@ pub struct RtePermissionInfo {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTblFunction {
-    pub node_tag: NodeTag,
     pub funcexpr: Option<Box<Node>>,
     pub funccolcount: i32,
     pub funccolnames: NodeList,
@@ -2903,14 +2210,12 @@ pub struct RangeTblFunction {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableSampleClause {
-    pub node_tag: NodeTag,
     pub tsmhandler: Oid,
     pub args: NodeList,
     pub repeatable: Option<Box<Expr>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WithCheckOption {
-    pub node_tag: NodeTag,
     pub kind: WcoKind,
     pub relname: Option<std::string::String>,
     pub polname: Option<std::string::String>,
@@ -2919,7 +2224,6 @@ pub struct WithCheckOption {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SortGroupClause {
-    pub node_tag: NodeTag,
     pub tle_sort_group_ref: Index,
     pub eqop: Oid,
     pub sortop: Oid,
@@ -2929,14 +2233,12 @@ pub struct SortGroupClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GroupingSet {
-    pub node_tag: NodeTag,
     pub kind: GroupingSetKind,
     pub content: NodeList,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowClause {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub refname: Option<std::string::String>,
     pub partition_clause: NodeList,
@@ -2954,7 +2256,6 @@ pub struct WindowClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RowMarkClause {
-    pub node_tag: NodeTag,
     pub rti: Index,
     pub strength: LockClauseStrength,
     pub wait_policy: LockWaitPolicy,
@@ -2962,7 +2263,6 @@ pub struct RowMarkClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ForPortionOfClause {
-    pub node_tag: NodeTag,
     pub range_name: Option<std::string::String>,
     pub location: ParseLoc,
     pub target_location: ParseLoc,
@@ -2972,14 +2272,12 @@ pub struct ForPortionOfClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WithClause {
-    pub node_tag: NodeTag,
     pub ctes: NodeList,
     pub recursive: bool,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InferClause {
-    pub node_tag: NodeTag,
     pub index_elems: NodeList,
     pub where_clause: Option<Box<Node>>,
     pub conname: Option<std::string::String>,
@@ -2987,7 +2285,6 @@ pub struct InferClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OnConflictClause {
-    pub node_tag: NodeTag,
     pub action: OnConflictAction,
     pub infer: Option<Box<InferClause>>,
     pub lock_strength: LockClauseStrength,
@@ -2997,7 +2294,6 @@ pub struct OnConflictClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CteSearchClause {
-    pub node_tag: NodeTag,
     pub search_col_list: NodeList,
     pub search_breadth_first: bool,
     pub search_seq_column: Option<std::string::String>,
@@ -3005,7 +2301,6 @@ pub struct CteSearchClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CteCycleClause {
-    pub node_tag: NodeTag,
     pub cycle_col_list: NodeList,
     pub cycle_mark_column: Option<std::string::String>,
     pub cycle_mark_value: Option<Box<Node>>,
@@ -3019,7 +2314,6 @@ pub struct CteCycleClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CommonTableExpr {
-    pub node_tag: NodeTag,
     pub ctename: Option<std::string::String>,
     pub aliascolnames: NodeList,
     pub ctematerialized: CteMaterialize,
@@ -3036,7 +2330,6 @@ pub struct CommonTableExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MergeWhenClause {
-    pub node_tag: NodeTag,
     pub match_kind: MergeMatchKind,
     pub command_type: CmdType,
     pub override_: OverridingKind,
@@ -3046,39 +2339,33 @@ pub struct MergeWhenClause {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReturningOption {
-    pub node_tag: NodeTag,
     pub option: ReturningOptionKind,
     pub value: Option<std::string::String>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReturningClause {
-    pub node_tag: NodeTag,
     pub options: NodeList,
     pub exprs: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TriggerTransition {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub is_new: bool,
     pub is_table: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonOutput {
-    pub node_tag: NodeTag,
     pub type_name: Option<Box<TypeName>>,
     pub returning: Option<Box<JsonReturning>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonArgument {
-    pub node_tag: NodeTag,
     pub val: Option<Box<JsonValueExpr>>,
     pub name: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonFuncExpr {
-    pub node_tag: NodeTag,
     pub op: JsonExprOp,
     pub column_name: Option<std::string::String>,
     pub context_item: Option<Box<JsonValueExpr>>,
@@ -3093,7 +2380,6 @@ pub struct JsonFuncExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTablePathSpec {
-    pub node_tag: NodeTag,
     pub string: Option<Box<Node>>,
     pub name: Option<std::string::String>,
     pub name_location: ParseLoc,
@@ -3101,7 +2387,6 @@ pub struct JsonTablePathSpec {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTable {
-    pub node_tag: NodeTag,
     pub context_item: Option<Box<JsonValueExpr>>,
     pub pathspec: Option<Box<JsonTablePathSpec>>,
     pub passing: NodeList,
@@ -3113,7 +2398,6 @@ pub struct JsonTable {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTableColumn {
-    pub node_tag: NodeTag,
     pub coltype: JsonTableColumnType,
     pub name: Option<std::string::String>,
     pub type_name: Option<Box<TypeName>>,
@@ -3128,13 +2412,11 @@ pub struct JsonTableColumn {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonKeyValue {
-    pub node_tag: NodeTag,
     pub key: Option<Box<Node>>,
     pub value: Option<Box<JsonValueExpr>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonParseExpr {
-    pub node_tag: NodeTag,
     pub expr: Option<Box<JsonValueExpr>>,
     pub output: Option<Box<JsonOutput>>,
     pub unique_keys: bool,
@@ -3142,21 +2424,18 @@ pub struct JsonParseExpr {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonScalarExpr {
-    pub node_tag: NodeTag,
     pub expr: Option<Box<Node>>,
     pub output: Option<Box<JsonOutput>>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonSerializeExpr {
-    pub node_tag: NodeTag,
     pub expr: Option<Box<JsonValueExpr>>,
     pub output: Option<Box<JsonOutput>>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonObjectConstructor {
-    pub node_tag: NodeTag,
     pub exprs: NodeList,
     pub output: Option<Box<JsonOutput>>,
     pub absent_on_null: bool,
@@ -3165,7 +2444,6 @@ pub struct JsonObjectConstructor {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonArrayConstructor {
-    pub node_tag: NodeTag,
     pub exprs: NodeList,
     pub output: Option<Box<JsonOutput>>,
     pub absent_on_null: bool,
@@ -3173,7 +2451,6 @@ pub struct JsonArrayConstructor {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonArrayQueryConstructor {
-    pub node_tag: NodeTag,
     pub query: Option<Box<Node>>,
     pub output: Option<Box<JsonOutput>>,
     pub format: Option<Box<JsonFormat>>,
@@ -3182,7 +2459,6 @@ pub struct JsonArrayQueryConstructor {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonAggConstructor {
-    pub node_tag: NodeTag,
     pub output: Option<Box<JsonOutput>>,
     pub agg_filter: Option<Box<Node>>,
     pub agg_order: NodeList,
@@ -3191,7 +2467,6 @@ pub struct JsonAggConstructor {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonObjectAgg {
-    pub node_tag: NodeTag,
     pub constructor: Option<Box<JsonAggConstructor>>,
     pub arg: Option<Box<JsonKeyValue>>,
     pub absent_on_null: bool,
@@ -3199,21 +2474,18 @@ pub struct JsonObjectAgg {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonArrayAgg {
-    pub node_tag: NodeTag,
     pub constructor: Option<Box<JsonAggConstructor>>,
     pub arg: Option<Box<JsonValueExpr>>,
     pub absent_on_null: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RawStmt {
-    pub node_tag: NodeTag,
     pub stmt: Option<Box<Node>>,
     pub stmt_location: ParseLoc,
     pub stmt_len: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InsertStmt {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub cols: NodeList,
     pub select_stmt: Option<Box<Node>>,
@@ -3224,7 +2496,6 @@ pub struct InsertStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DeleteStmt {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub using_clause: NodeList,
     pub where_clause: Option<Box<Node>>,
@@ -3234,7 +2505,6 @@ pub struct DeleteStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UpdateStmt {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub target_list: NodeList,
     pub where_clause: Option<Box<Node>>,
@@ -3245,7 +2515,6 @@ pub struct UpdateStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MergeStmt {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub source_relation: Option<Box<Node>>,
     pub join_condition: Option<Box<Node>>,
@@ -3255,7 +2524,6 @@ pub struct MergeStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SelectStmt {
-    pub node_tag: NodeTag,
     pub distinct_clause: NodeList,
     pub into_clause: Option<Box<IntoClause>>,
     pub target_list: NodeList,
@@ -3280,7 +2548,6 @@ pub struct SelectStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SetOperationStmt {
-    pub node_tag: NodeTag,
     pub op: SetOperation,
     pub all: bool,
     pub larg: Option<Box<Node>>,
@@ -3292,12 +2559,10 @@ pub struct SetOperationStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReturnStmt {
-    pub node_tag: NodeTag,
     pub returnval: Option<Box<Node>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PlAssignStmt {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub indirection: NodeList,
     pub nnames: i32,
@@ -3306,7 +2571,6 @@ pub struct PlAssignStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateSchemaStmt {
-    pub node_tag: NodeTag,
     pub schemaname: Option<std::string::String>,
     pub authrole: Option<Box<RoleSpec>>,
     pub schema_elts: NodeList,
@@ -3314,7 +2578,6 @@ pub struct CreateSchemaStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterTableStmt {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub cmds: NodeList,
     pub objtype: ObjectType,
@@ -3322,7 +2585,6 @@ pub struct AlterTableStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterTableCmd {
-    pub node_tag: NodeTag,
     pub subtype: AlterTableType,
     pub name: Option<std::string::String>,
     pub num: i16,
@@ -3334,7 +2596,6 @@ pub struct AlterTableCmd {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AtAlterConstraint {
-    pub node_tag: NodeTag,
     pub conname: Option<std::string::String>,
     pub alter_enforceability: bool,
     pub is_enforced: bool,
@@ -3346,18 +2607,15 @@ pub struct AtAlterConstraint {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReplicaIdentityStmt {
-    pub node_tag: NodeTag,
     pub identity_type: u8,
     pub name: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterCollationStmt {
-    pub node_tag: NodeTag,
     pub collname: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterDomainStmt {
-    pub node_tag: NodeTag,
     pub subtype: AlterDomainType,
     pub type_name: NodeList,
     pub name: Option<std::string::String>,
@@ -3367,7 +2625,6 @@ pub struct AlterDomainStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GrantStmt {
-    pub node_tag: NodeTag,
     pub is_grant: bool,
     pub targtype: GrantTargetType,
     pub objtype: ObjectType,
@@ -3380,7 +2637,6 @@ pub struct GrantStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ObjectWithArgs {
-    pub node_tag: NodeTag,
     pub objname: NodeList,
     pub objargs: Vec<Option<Node>>,
     pub objfuncargs: NodeList,
@@ -3388,13 +2644,11 @@ pub struct ObjectWithArgs {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AccessPriv {
-    pub node_tag: NodeTag,
     pub priv_name: Option<std::string::String>,
     pub cols: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GrantRoleStmt {
-    pub node_tag: NodeTag,
     pub granted_roles: NodeList,
     pub grantee_roles: NodeList,
     pub is_grant: bool,
@@ -3404,13 +2658,11 @@ pub struct GrantRoleStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterDefaultPrivilegesStmt {
-    pub node_tag: NodeTag,
     pub options: NodeList,
     pub action: Option<Box<GrantStmt>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CopyStmt {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub query: Option<Box<Node>>,
     pub attlist: NodeList,
@@ -3422,7 +2674,6 @@ pub struct CopyStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VariableSetStmt {
-    pub node_tag: NodeTag,
     pub kind: VariableSetKind,
     pub name: Option<std::string::String>,
     pub args: NodeList,
@@ -3432,12 +2683,10 @@ pub struct VariableSetStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VariableShowStmt {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateStmt {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub table_elts: NodeList,
     pub inh_relations: NodeList,
@@ -3454,7 +2703,6 @@ pub struct CreateStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Constraint {
-    pub node_tag: NodeTag,
     pub contype: ConstrType,
     pub conname: Option<std::string::String>,
     pub deferrable: bool,
@@ -3493,7 +2741,6 @@ pub struct Constraint {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateTableSpaceStmt {
-    pub node_tag: NodeTag,
     pub tablespacename: Option<std::string::String>,
     pub owner: Option<Box<RoleSpec>>,
     pub location: Option<std::string::String>,
@@ -3501,20 +2748,17 @@ pub struct CreateTableSpaceStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DropTableSpaceStmt {
-    pub node_tag: NodeTag,
     pub tablespacename: Option<std::string::String>,
     pub missing_ok: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterTableSpaceOptionsStmt {
-    pub node_tag: NodeTag,
     pub tablespacename: Option<std::string::String>,
     pub options: NodeList,
     pub is_reset: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterTableMoveAllStmt {
-    pub node_tag: NodeTag,
     pub orig_tablespacename: Option<std::string::String>,
     pub objtype: ObjectType,
     pub roles: NodeList,
@@ -3523,20 +2767,17 @@ pub struct AlterTableMoveAllStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateExtensionStmt {
-    pub node_tag: NodeTag,
     pub extname: Option<std::string::String>,
     pub if_not_exists: bool,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterExtensionStmt {
-    pub node_tag: NodeTag,
     pub extname: Option<std::string::String>,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterExtensionContentsStmt {
-    pub node_tag: NodeTag,
     pub extname: Option<std::string::String>,
     pub action: i32,
     pub objtype: ObjectType,
@@ -3544,21 +2785,18 @@ pub struct AlterExtensionContentsStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateFdwStmt {
-    pub node_tag: NodeTag,
     pub fdwname: Option<std::string::String>,
     pub func_options: NodeList,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterFdwStmt {
-    pub node_tag: NodeTag,
     pub fdwname: Option<std::string::String>,
     pub func_options: NodeList,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateForeignServerStmt {
-    pub node_tag: NodeTag,
     pub servername: Option<std::string::String>,
     pub servertype: Option<std::string::String>,
     pub version: Option<std::string::String>,
@@ -3568,7 +2806,6 @@ pub struct CreateForeignServerStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterForeignServerStmt {
-    pub node_tag: NodeTag,
     pub servername: Option<std::string::String>,
     pub version: Option<std::string::String>,
     pub options: NodeList,
@@ -3582,7 +2819,6 @@ pub struct CreateForeignTableStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateUserMappingStmt {
-    pub node_tag: NodeTag,
     pub user: Option<Box<RoleSpec>>,
     pub servername: Option<std::string::String>,
     pub if_not_exists: bool,
@@ -3590,21 +2826,18 @@ pub struct CreateUserMappingStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterUserMappingStmt {
-    pub node_tag: NodeTag,
     pub user: Option<Box<RoleSpec>>,
     pub servername: Option<std::string::String>,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DropUserMappingStmt {
-    pub node_tag: NodeTag,
     pub user: Option<Box<RoleSpec>>,
     pub servername: Option<std::string::String>,
     pub missing_ok: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ImportForeignSchemaStmt {
-    pub node_tag: NodeTag,
     pub server_name: Option<std::string::String>,
     pub remote_schema: Option<std::string::String>,
     pub local_schema: Option<std::string::String>,
@@ -3614,7 +2847,6 @@ pub struct ImportForeignSchemaStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreatePolicyStmt {
-    pub node_tag: NodeTag,
     pub policy_name: Option<std::string::String>,
     pub table: Option<Box<RangeVar>>,
     pub cmd_name: Option<std::string::String>,
@@ -3625,7 +2857,6 @@ pub struct CreatePolicyStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterPolicyStmt {
-    pub node_tag: NodeTag,
     pub policy_name: Option<std::string::String>,
     pub table: Option<Box<RangeVar>>,
     pub roles: NodeList,
@@ -3634,14 +2865,12 @@ pub struct AlterPolicyStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateAmStmt {
-    pub node_tag: NodeTag,
     pub amname: Option<std::string::String>,
     pub handler_name: NodeList,
     pub amtype: u8,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateTrigStmt {
-    pub node_tag: NodeTag,
     pub replace: bool,
     pub isconstraint: bool,
     pub trigname: Option<std::string::String>,
@@ -3660,7 +2889,6 @@ pub struct CreateTrigStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateEventTrigStmt {
-    pub node_tag: NodeTag,
     pub trigname: Option<std::string::String>,
     pub eventname: Option<std::string::String>,
     pub whenclause: NodeList,
@@ -3668,13 +2896,11 @@ pub struct CreateEventTrigStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterEventTrigStmt {
-    pub node_tag: NodeTag,
     pub trigname: Option<std::string::String>,
     pub tgenabled: u8,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreatePLangStmt {
-    pub node_tag: NodeTag,
     pub replace: bool,
     pub plname: Option<std::string::String>,
     pub plhandler: NodeList,
@@ -3684,34 +2910,29 @@ pub struct CreatePLangStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateRoleStmt {
-    pub node_tag: NodeTag,
     pub stmt_type: RoleStmtType,
     pub role: Option<std::string::String>,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterRoleStmt {
-    pub node_tag: NodeTag,
     pub role: Option<Box<RoleSpec>>,
     pub options: NodeList,
     pub action: i32,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterRoleSetStmt {
-    pub node_tag: NodeTag,
     pub role: Option<Box<RoleSpec>>,
     pub database: Option<std::string::String>,
     pub setstmt: Option<Box<VariableSetStmt>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DropRoleStmt {
-    pub node_tag: NodeTag,
     pub roles: NodeList,
     pub missing_ok: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateSeqStmt {
-    pub node_tag: NodeTag,
     pub sequence: Option<Box<RangeVar>>,
     pub options: NodeList,
     pub owner_id: Oid,
@@ -3720,7 +2941,6 @@ pub struct CreateSeqStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterSeqStmt {
-    pub node_tag: NodeTag,
     pub sequence: Option<Box<RangeVar>>,
     pub options: NodeList,
     pub for_identity: bool,
@@ -3728,7 +2948,6 @@ pub struct AlterSeqStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DefineStmt {
-    pub node_tag: NodeTag,
     pub kind: ObjectType,
     pub oldstyle: bool,
     pub defnames: NodeList,
@@ -3739,7 +2958,6 @@ pub struct DefineStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateDomainStmt {
-    pub node_tag: NodeTag,
     pub domainname: NodeList,
     pub type_name: Option<Box<TypeName>>,
     pub coll_clause: Option<Box<CollateClause>>,
@@ -3747,7 +2965,6 @@ pub struct CreateDomainStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateOpClassStmt {
-    pub node_tag: NodeTag,
     pub opclassname: NodeList,
     pub opfamilyname: NodeList,
     pub amname: Option<std::string::String>,
@@ -3757,7 +2974,6 @@ pub struct CreateOpClassStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateOpClassItem {
-    pub node_tag: NodeTag,
     pub itemtype: i32,
     pub name: Option<Box<ObjectWithArgs>>,
     pub number: i32,
@@ -3767,13 +2983,11 @@ pub struct CreateOpClassItem {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateOpFamilyStmt {
-    pub node_tag: NodeTag,
     pub opfamilyname: NodeList,
     pub amname: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterOpFamilyStmt {
-    pub node_tag: NodeTag,
     pub opfamilyname: NodeList,
     pub amname: Option<std::string::String>,
     pub is_drop: bool,
@@ -3781,7 +2995,6 @@ pub struct AlterOpFamilyStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DropStmt {
-    pub node_tag: NodeTag,
     pub objects: NodeList,
     pub remove_type: ObjectType,
     pub behavior: DropBehavior,
@@ -3790,21 +3003,18 @@ pub struct DropStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TruncateStmt {
-    pub node_tag: NodeTag,
     pub relations: NodeList,
     pub restart_seqs: bool,
     pub behavior: DropBehavior,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CommentStmt {
-    pub node_tag: NodeTag,
     pub objtype: ObjectType,
     pub object: Option<Box<Node>>,
     pub comment: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SecLabelStmt {
-    pub node_tag: NodeTag,
     pub objtype: ObjectType,
     pub object: Option<Box<Node>>,
     pub provider: Option<std::string::String>,
@@ -3812,19 +3022,16 @@ pub struct SecLabelStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DeclareCursorStmt {
-    pub node_tag: NodeTag,
     pub portalname: Option<std::string::String>,
     pub options: i32,
     pub query: Option<Box<Node>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClosePortalStmt {
-    pub node_tag: NodeTag,
     pub portalname: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FetchStmt {
-    pub node_tag: NodeTag,
     pub direction: FetchDirection,
     pub how_many: i64,
     pub portalname: Option<std::string::String>,
@@ -3834,7 +3041,6 @@ pub struct FetchStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct IndexStmt {
-    pub node_tag: NodeTag,
     pub idxname: Option<std::string::String>,
     pub relation: Option<Box<RangeVar>>,
     pub access_method: Option<std::string::String>,
@@ -3863,7 +3069,6 @@ pub struct IndexStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateStatsStmt {
-    pub node_tag: NodeTag,
     pub defnames: NodeList,
     pub stat_types: NodeList,
     pub exprs: NodeList,
@@ -3874,20 +3079,17 @@ pub struct CreateStatsStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct StatsElem {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub expr: Option<Box<Node>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterStatsStmt {
-    pub node_tag: NodeTag,
     pub defnames: NodeList,
     pub stxstattarget: Option<Box<Node>>,
     pub missing_ok: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateFunctionStmt {
-    pub node_tag: NodeTag,
     pub is_procedure: bool,
     pub replace: bool,
     pub funcname: NodeList,
@@ -3898,7 +3100,6 @@ pub struct CreateFunctionStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FunctionParameter {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub arg_type: Option<Box<TypeName>>,
     pub mode: FunctionParameterMode,
@@ -3907,19 +3108,16 @@ pub struct FunctionParameter {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterFunctionStmt {
-    pub node_tag: NodeTag,
     pub objtype: ObjectType,
     pub func: Option<Box<ObjectWithArgs>>,
     pub actions: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DoStmt {
-    pub node_tag: NodeTag,
     pub args: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InlineCodeBlock {
-    pub node_tag: NodeTag,
     pub source_text: Option<std::string::String>,
     pub lang_oid: Oid,
     pub lang_is_trusted: bool,
@@ -3927,19 +3125,16 @@ pub struct InlineCodeBlock {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CallStmt {
-    pub node_tag: NodeTag,
     pub funccall: Option<Box<FuncCall>>,
     pub funcexpr: Option<Box<FuncExpr>>,
     pub outargs: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CallContext {
-    pub node_tag: NodeTag,
     pub atomic: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenameStmt {
-    pub node_tag: NodeTag,
     pub rename_type: ObjectType,
     pub relation_type: ObjectType,
     pub relation: Option<Box<RangeVar>>,
@@ -3951,7 +3146,6 @@ pub struct RenameStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterObjectDependsStmt {
-    pub node_tag: NodeTag,
     pub object_type: ObjectType,
     pub relation: Option<Box<RangeVar>>,
     pub object: Option<Box<Node>>,
@@ -3960,7 +3154,6 @@ pub struct AlterObjectDependsStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterObjectSchemaStmt {
-    pub node_tag: NodeTag,
     pub object_type: ObjectType,
     pub relation: Option<Box<RangeVar>>,
     pub object: Option<Box<Node>>,
@@ -3969,7 +3162,6 @@ pub struct AlterObjectSchemaStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterOwnerStmt {
-    pub node_tag: NodeTag,
     pub object_type: ObjectType,
     pub relation: Option<Box<RangeVar>>,
     pub object: Option<Box<Node>>,
@@ -3977,19 +3169,16 @@ pub struct AlterOwnerStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterOperatorStmt {
-    pub node_tag: NodeTag,
     pub opername: Option<Box<ObjectWithArgs>>,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterTypeStmt {
-    pub node_tag: NodeTag,
     pub type_name: NodeList,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RuleStmt {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub rulename: Option<std::string::String>,
     pub where_clause: Option<Box<Node>>,
@@ -4000,23 +3189,19 @@ pub struct RuleStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NotifyStmt {
-    pub node_tag: NodeTag,
     pub conditionname: Option<std::string::String>,
     pub payload: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ListenStmt {
-    pub node_tag: NodeTag,
     pub conditionname: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UnlistenStmt {
-    pub node_tag: NodeTag,
     pub conditionname: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TransactionStmt {
-    pub node_tag: NodeTag,
     pub kind: TransactionStmtKind,
     pub options: NodeList,
     pub savepoint_name: Option<std::string::String>,
@@ -4026,25 +3211,21 @@ pub struct TransactionStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompositeTypeStmt {
-    pub node_tag: NodeTag,
     pub typevar: Option<Box<RangeVar>>,
     pub coldeflist: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateEnumStmt {
-    pub node_tag: NodeTag,
     pub type_name: NodeList,
     pub vals: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateRangeStmt {
-    pub node_tag: NodeTag,
     pub type_name: NodeList,
     pub params: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterEnumStmt {
-    pub node_tag: NodeTag,
     pub type_name: NodeList,
     pub old_val: Option<std::string::String>,
     pub new_val: Option<std::string::String>,
@@ -4054,7 +3235,6 @@ pub struct AlterEnumStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ViewStmt {
-    pub node_tag: NodeTag,
     pub view: Option<Box<RangeVar>>,
     pub aliases: NodeList,
     pub query: Option<Box<Node>>,
@@ -4064,61 +3244,51 @@ pub struct ViewStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LoadStmt {
-    pub node_tag: NodeTag,
     pub filename: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreatedbStmt {
-    pub node_tag: NodeTag,
     pub dbname: Option<std::string::String>,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterDatabaseStmt {
-    pub node_tag: NodeTag,
     pub dbname: Option<std::string::String>,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterDatabaseRefreshCollStmt {
-    pub node_tag: NodeTag,
     pub dbname: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterDatabaseSetStmt {
-    pub node_tag: NodeTag,
     pub dbname: Option<std::string::String>,
     pub setstmt: Option<Box<VariableSetStmt>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DropdbStmt {
-    pub node_tag: NodeTag,
     pub dbname: Option<std::string::String>,
     pub missing_ok: bool,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterSystemStmt {
-    pub node_tag: NodeTag,
     pub setstmt: Option<Box<VariableSetStmt>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VacuumStmt {
-    pub node_tag: NodeTag,
     pub options: NodeList,
     pub rels: NodeList,
     pub is_vacuumcmd: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VacuumRelation {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub oid: Oid,
     pub va_cols: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RepackStmt {
-    pub node_tag: NodeTag,
     pub command: RepackCommand,
     pub relation: Option<Box<VacuumRelation>>,
     pub indexname: Option<std::string::String>,
@@ -4127,13 +3297,11 @@ pub struct RepackStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ExplainStmt {
-    pub node_tag: NodeTag,
     pub query: Option<Box<Node>>,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateTableAsStmt {
-    pub node_tag: NodeTag,
     pub query: Option<Box<Node>>,
     pub into: Option<Box<IntoClause>>,
     pub objtype: ObjectType,
@@ -4142,37 +3310,31 @@ pub struct CreateTableAsStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RefreshMatViewStmt {
-    pub node_tag: NodeTag,
     pub concurrent: bool,
     pub skip_data: bool,
     pub relation: Option<Box<RangeVar>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CheckPointStmt {
-    pub node_tag: NodeTag,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DiscardStmt {
-    pub node_tag: NodeTag,
     pub target: DiscardMode,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LockStmt {
-    pub node_tag: NodeTag,
     pub relations: NodeList,
     pub mode: i32,
     pub nowait: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConstraintsSetStmt {
-    pub node_tag: NodeTag,
     pub constraints: NodeList,
     pub deferred: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReindexStmt {
-    pub node_tag: NodeTag,
     pub kind: ReindexObjectType,
     pub relation: Option<Box<RangeVar>>,
     pub name: Option<std::string::String>,
@@ -4180,7 +3342,6 @@ pub struct ReindexStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateConversionStmt {
-    pub node_tag: NodeTag,
     pub conversion_name: NodeList,
     pub for_encoding_name: Option<std::string::String>,
     pub to_encoding_name: Option<std::string::String>,
@@ -4189,7 +3350,6 @@ pub struct CreateConversionStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateCastStmt {
-    pub node_tag: NodeTag,
     pub sourcetype: Option<Box<TypeName>>,
     pub targettype: Option<Box<TypeName>>,
     pub func: Option<Box<ObjectWithArgs>>,
@@ -4198,14 +3358,12 @@ pub struct CreateCastStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreatePropGraphStmt {
-    pub node_tag: NodeTag,
     pub pgname: Option<Box<RangeVar>>,
     pub vertex_tables: NodeList,
     pub edge_tables: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PropGraphVertex {
-    pub node_tag: NodeTag,
     pub vtable: Option<Box<RangeVar>>,
     pub vkey: NodeList,
     pub labels: NodeList,
@@ -4213,7 +3371,6 @@ pub struct PropGraphVertex {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PropGraphEdge {
-    pub node_tag: NodeTag,
     pub etable: Option<Box<RangeVar>>,
     pub ekey: NodeList,
     pub esrckey: NodeList,
@@ -4227,21 +3384,18 @@ pub struct PropGraphEdge {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PropGraphLabelAndProperties {
-    pub node_tag: NodeTag,
     pub label: Option<std::string::String>,
     pub properties: Option<Box<PropGraphProperties>>,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PropGraphProperties {
-    pub node_tag: NodeTag,
     pub properties: NodeList,
     pub all: bool,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterPropGraphStmt {
-    pub node_tag: NodeTag,
     pub pgname: Option<Box<RangeVar>>,
     pub missing_ok: bool,
     pub add_vertex_tables: NodeList,
@@ -4259,7 +3413,6 @@ pub struct AlterPropGraphStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateTransformStmt {
-    pub node_tag: NodeTag,
     pub replace: bool,
     pub type_name: Option<Box<TypeName>>,
     pub lang: Option<std::string::String>,
@@ -4268,45 +3421,38 @@ pub struct CreateTransformStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PrepareStmt {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub argtypes: NodeList,
     pub query: Option<Box<Node>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ExecuteStmt {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub params: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DeallocateStmt {
-    pub node_tag: NodeTag,
     pub name: Option<std::string::String>,
     pub isall: bool,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DropOwnedStmt {
-    pub node_tag: NodeTag,
     pub roles: NodeList,
     pub behavior: DropBehavior,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReassignOwnedStmt {
-    pub node_tag: NodeTag,
     pub roles: NodeList,
     pub newrole: Option<Box<RoleSpec>>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterTsDictionaryStmt {
-    pub node_tag: NodeTag,
     pub dictname: NodeList,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterTsConfigurationStmt {
-    pub node_tag: NodeTag,
     pub kind: AlterTsConfigType,
     pub cfgname: NodeList,
     pub tokentype: NodeList,
@@ -4317,7 +3463,6 @@ pub struct AlterTsConfigurationStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PublicationTable {
-    pub node_tag: NodeTag,
     pub relation: Option<Box<RangeVar>>,
     pub where_clause: Option<Box<Node>>,
     pub columns: NodeList,
@@ -4325,7 +3470,6 @@ pub struct PublicationTable {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PublicationObjSpec {
-    pub node_tag: NodeTag,
     pub pubobjtype: PublicationObjSpecType,
     pub name: Option<std::string::String>,
     pub pubtable: Option<Box<PublicationTable>>,
@@ -4333,14 +3477,12 @@ pub struct PublicationObjSpec {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PublicationAllObjSpec {
-    pub node_tag: NodeTag,
     pub pubobjtype: PublicationAllObjType,
     pub except_tables: NodeList,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreatePublicationStmt {
-    pub node_tag: NodeTag,
     pub pubname: Option<std::string::String>,
     pub options: NodeList,
     pub pubobjects: NodeList,
@@ -4349,7 +3491,6 @@ pub struct CreatePublicationStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterPublicationStmt {
-    pub node_tag: NodeTag,
     pub pubname: Option<std::string::String>,
     pub options: NodeList,
     pub pubobjects: NodeList,
@@ -4359,7 +3500,6 @@ pub struct AlterPublicationStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateSubscriptionStmt {
-    pub node_tag: NodeTag,
     pub subname: Option<std::string::String>,
     pub servername: Option<std::string::String>,
     pub conninfo: Option<std::string::String>,
@@ -4368,7 +3508,6 @@ pub struct CreateSubscriptionStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterSubscriptionStmt {
-    pub node_tag: NodeTag,
     pub kind: AlterSubscriptionType,
     pub subname: Option<std::string::String>,
     pub servername: Option<std::string::String>,
@@ -4378,20 +3517,17 @@ pub struct AlterSubscriptionStmt {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DropSubscriptionStmt {
-    pub node_tag: NodeTag,
     pub subname: Option<std::string::String>,
     pub missing_ok: bool,
     pub behavior: DropBehavior,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WaitStmt {
-    pub node_tag: NodeTag,
     pub lsn_literal: Option<std::string::String>,
     pub options: NodeList,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartitionBoundSpec {
-    pub node_tag: NodeTag,
     pub strategy: u8,
     pub is_default: bool,
     pub modulus: i32,
@@ -4403,27 +3539,22 @@ pub struct PartitionBoundSpec {
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Integer {
-    pub node_tag: NodeTag,
     pub ival: i32,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Float {
-    pub node_tag: NodeTag,
     pub fval: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Boolean {
-    pub node_tag: NodeTag,
     pub boolval: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct String {
-    pub node_tag: NodeTag,
     pub sval: Option<std::string::String>,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BitString {
-    pub node_tag: NodeTag,
     pub bsval: Option<std::string::String>,
 }
 pub type DistinctExpr = OpExpr;
@@ -4431,17 +3562,13 @@ pub type NullIfExpr = OpExpr;
 
 impl Integer {
     pub fn new(ival: i32) -> Self {
-        Self {
-            node_tag: NodeTag::Integer,
-            ival,
-        }
+        Self { ival }
     }
 }
 
 impl Float {
     pub fn new(fval: impl Into<std::string::String>) -> Self {
         Self {
-            node_tag: NodeTag::Float,
             fval: Some(fval.into()),
         }
     }
@@ -4449,17 +3576,13 @@ impl Float {
 
 impl Boolean {
     pub fn new(boolval: bool) -> Self {
-        Self {
-            node_tag: NodeTag::Boolean,
-            boolval,
-        }
+        Self { boolval }
     }
 }
 
 impl String {
     pub fn new(sval: impl Into<std::string::String>) -> Self {
         Self {
-            node_tag: NodeTag::String,
             sval: Some(sval.into()),
         }
     }
@@ -4468,22 +3591,14 @@ impl String {
 impl BitString {
     pub fn new(bsval: impl Into<std::string::String>) -> Self {
         Self {
-            node_tag: NodeTag::BitString,
             bsval: Some(bsval.into()),
         }
-    }
-}
-
-impl Expr {
-    pub fn new(node_tag: NodeTag) -> Self {
-        Self { node_tag }
     }
 }
 
 impl AConst {
     pub fn null(location: ParseLoc) -> Self {
         Self {
-            node_tag: NodeTag::AConst,
             isnull: true,
             location,
             ..Self::default()
@@ -4492,7 +3607,6 @@ impl AConst {
 
     pub fn integer(ival: i32, location: ParseLoc) -> Self {
         Self {
-            node_tag: NodeTag::AConst,
             val: ValUnion::Integer(Integer::new(ival)),
             isnull: false,
             location,
@@ -4501,62 +3615,9 @@ impl AConst {
 
     pub fn string(sval: impl Into<std::string::String>, location: ParseLoc) -> Self {
         Self {
-            node_tag: NodeTag::AConst,
             val: ValUnion::String(String::new(sval)),
             isnull: false,
             location,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn node_reports_postgres_tag() {
-        let stmt = SelectStmt {
-            node_tag: NodeTag::SelectStmt,
-            ..SelectStmt::default()
-        };
-        let node = Node::SelectStmt(stmt);
-
-        assert_eq!(node.tag(), NodeTag::SelectStmt);
-    }
-
-    #[test]
-    fn raw_stmt_can_wrap_statement_node() {
-        let select = Node::SelectStmt(SelectStmt {
-            node_tag: NodeTag::SelectStmt,
-            ..SelectStmt::default()
-        });
-        let raw = RawStmt {
-            node_tag: NodeTag::RawStmt,
-            stmt: Some(Box::new(select)),
-            stmt_location: 0,
-            stmt_len: 8,
-        };
-
-        assert_eq!(raw.node_tag, NodeTag::RawStmt);
-        assert_eq!(
-            raw.stmt.as_ref().map(|stmt| stmt.tag()),
-            Some(NodeTag::SelectStmt)
-        );
-    }
-
-    #[test]
-    fn a_const_literal_constructors_preserve_value_nodes() {
-        let literal = AConst::string("postgres", 7);
-
-        assert_eq!(literal.node_tag, NodeTag::AConst);
-        assert_eq!(literal.location, 7);
-        assert!(!literal.isnull);
-        assert_eq!(
-            literal.val,
-            ValUnion::String(String {
-                node_tag: NodeTag::String,
-                sval: Some("postgres".to_owned()),
-            })
-        );
     }
 }

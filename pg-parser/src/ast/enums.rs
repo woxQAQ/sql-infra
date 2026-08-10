@@ -1,3 +1,8 @@
+//! Shared token, keyword, and PostgreSQL enum discriminants.
+//!
+//! These enums connect the lexer, parser, completion collector, and raw AST;
+//! changes therefore need to preserve the mappings between those layers.
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum KeywordCategory {
     Unreserved,
@@ -15,6 +20,9 @@ pub enum BareLabel {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum TokenKind {
     Eof,
+    /// Synthetic token used only by parser-native completion collection.
+    Completion,
+    Incomplete,
     Char(char),
     Ident,
     UIdent,

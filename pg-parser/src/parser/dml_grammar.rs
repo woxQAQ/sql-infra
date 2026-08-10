@@ -1,3 +1,8 @@
+//! Grammar shared by data-modification statements.
+//!
+//! Filters, assignments, `RETURNING`, conflict handling, row portions, and merge
+//! actions live here so `INSERT`, `UPDATE`, `DELETE`, and `MERGE` stay focused.
+
 use super::*;
 
 impl Parser {
@@ -10,12 +15,12 @@ impl Parser {
         }
         if self.consume(TokenKind::CurrentP) {
             self.expect(TokenKind::Of)?;
+            self.record_completion_slot(GrammarSlot::AnyName);
             let cursor_name = Some(
                 self.consume_col_id()
                     .ok_or_else(|| self.error_here("CURRENT OF requires a cursor name"))?,
             );
-            return Ok(Some(Box::new(Node::CurrentOfExpr(CurrentOfExpr {
-                xpr: Expr::new(NodeTag::CurrentOfExpr),
+            return Ok(Some(Box::new(node!(CurrentOfExpr {
                 cursor_name,
                 ..CurrentOfExpr::default()
             }))));
@@ -43,8 +48,7 @@ impl Parser {
                 let value = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("expected a returning option alias"))?;
-                options.push(Node::ReturningOption(ReturningOption {
-                    node_tag: NodeTag::ReturningOption,
+                options.push(node!(ReturningOption {
                     option,
                     value: Some(value),
                     location: location as ParseLoc,
@@ -55,26 +59,22 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
         }
-        let exprs =
-            self.parse_res_target_list_strict_until(&[TokenKind::Char(';'), TokenKind::Eof])?;
+        let exprs = self.parse_res_target_list_strict_until(STATEMENT_END_TOKENS)?;
         if exprs.is_empty() {
             return Err(self.error_here("RETURNING requires at least one expression"));
         }
-        Ok(Some(Box::new(ReturningClause {
-            node_tag: NodeTag::ReturningClause,
-            options,
-            exprs,
-        })))
+        Ok(Some(Box::new(ReturningClause { options, exprs })))
     }
 
     pub(super) fn parse_for_portion_of_clause(
         &mut self,
     ) -> PResult<Option<Box<ForPortionOfClause>>> {
-        if self.peek_kind() != TokenKind::For || self.peek_kind_n(1) != TokenKind::Portion {
+        self.record_completion_lookahead_tokens(&[TokenKind::For]);
+        if self.peek_kind() != TokenKind::For {
             return Ok(None);
         }
         self.advance();
-        self.advance();
+        self.expect(TokenKind::Portion)?;
         self.expect(TokenKind::Of)?;
         let location = self.location();
         let range_name = self
@@ -85,7 +85,6 @@ impl Parser {
             let target = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
             self.expect(TokenKind::Char(')'))?;
             return Ok(Some(Box::new(ForPortionOfClause {
-                node_tag: NodeTag::ForPortionOfClause,
                 range_name: Some(range_name),
                 location: location as ParseLoc,
                 target_location: target_location as ParseLoc,
@@ -106,7 +105,6 @@ impl Parser {
             TokenKind::Eof,
         ])?;
         Ok(Some(Box::new(ForPortionOfClause {
-            node_tag: NodeTag::ForPortionOfClause,
             range_name: Some(range_name),
             location: location as ParseLoc,
             target_location: target_location as ParseLoc,
@@ -126,9 +124,12 @@ impl Parser {
             let infer_location = self.previous_location();
             let mut index_elems = Vec::new();
             while !self.at(TokenKind::Char(')')) {
-                let tokens =
-                    self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-                index_elems.push(Node::IndexElem(parse_index_elem_tokens(tokens)?));
+                let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+                self.append_completion_marker(&mut tokens);
+                index_elems.push(Node::IndexElem(parse_index_elem_tokens_with_completion(
+                    tokens,
+                    self.completion.clone(),
+                )?));
                 if !self.consume(TokenKind::Char(',')) {
                     break;
                 }
@@ -140,13 +141,9 @@ impl Parser {
                 return Err(self.error_here("ON CONFLICT inference list cannot be empty"));
             }
             self.expect(TokenKind::Char(')'))?;
-            let where_clause = if self.consume(TokenKind::Where) {
-                Some(self.parse_expr_box_strict_until(&[TokenKind::Do])?)
-            } else {
-                None
-            };
+            let where_clause =
+                self.parse_optional_expr_clause(TokenKind::Where, &[TokenKind::Do])?;
             Some(Box::new(InferClause {
-                node_tag: NodeTag::InferClause,
                 index_elems,
                 where_clause,
                 location: infer_location as ParseLoc,
@@ -155,11 +152,11 @@ impl Parser {
         } else if self.consume(TokenKind::On) {
             let infer_location = self.previous_location();
             self.expect(TokenKind::Constraint)?;
+            self.record_completion_slot(GrammarSlot::Constraint);
             let conname = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a constraint name"))?;
             Some(Box::new(InferClause {
-                node_tag: NodeTag::InferClause,
                 conname: Some(conname),
                 location: infer_location as ParseLoc,
                 ..InferClause::default()
@@ -168,6 +165,7 @@ impl Parser {
             None
         };
         self.expect(TokenKind::Do)?;
+        self.record_completion_tokens(&[TokenKind::Nothing, TokenKind::Update, TokenKind::Select]);
         let (action, lock_strength, target_list, where_clause) = match self.peek_kind() {
             TokenKind::Nothing => {
                 self.advance();
@@ -187,15 +185,10 @@ impl Parser {
                     TokenKind::Char(';'),
                     TokenKind::Eof,
                 ])?;
-                let where_clause = if self.consume(TokenKind::Where) {
-                    Some(self.parse_expr_box_strict_until(&[
-                        TokenKind::Returning,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?)
-                } else {
-                    None
-                };
+                let where_clause = self.parse_optional_expr_clause(
+                    TokenKind::Where,
+                    &[TokenKind::Returning, TokenKind::Char(';'), TokenKind::Eof],
+                )?;
                 (
                     OnConflictAction::Update,
                     LockClauseStrength::None,
@@ -210,15 +203,10 @@ impl Parser {
                 } else {
                     LockClauseStrength::None
                 };
-                let where_clause = if self.consume(TokenKind::Where) {
-                    Some(self.parse_expr_box_strict_until(&[
-                        TokenKind::Returning,
-                        TokenKind::Char(';'),
-                        TokenKind::Eof,
-                    ])?)
-                } else {
-                    None
-                };
+                let where_clause = self.parse_optional_expr_clause(
+                    TokenKind::Where,
+                    &[TokenKind::Returning, TokenKind::Char(';'), TokenKind::Eof],
+                )?;
                 (
                     OnConflictAction::Select,
                     lock_strength,
@@ -233,7 +221,6 @@ impl Parser {
             }
         };
         Ok(Some(Box::new(OnConflictClause {
-            node_tag: NodeTag::OnConflictClause,
             action,
             infer,
             lock_strength,
@@ -244,8 +231,10 @@ impl Parser {
     }
 
     pub(super) fn parse_set_clause_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+        self.record_completion_slot(GrammarSlot::Column);
+        self.record_completion_qualified_name_slot(GrammarSlot::Column, stops);
         let mut targets = Vec::new();
-        while !self.at_any(stops) {
+        while self.at_completion() || !self.at_any(stops) {
             if self.consume(TokenKind::Char('(')) {
                 let mut names = Vec::new();
                 loop {
@@ -265,12 +254,10 @@ impl Parser {
                     self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
                 let ncolumns = names.len() as i32;
                 for (index, (name, indirection, location)) in names.into_iter().enumerate() {
-                    targets.push(Node::ResTarget(ResTarget {
-                        node_tag: NodeTag::ResTarget,
+                    targets.push(node!(ResTarget {
                         name: Some(name),
                         indirection,
-                        val: Some(Box::new(Node::MultiAssignRef(MultiAssignRef {
-                            node_tag: NodeTag::MultiAssignRef,
+                        val: Some(Box::new(node!(MultiAssignRef {
                             source: Some(source.clone()),
                             colno: index as i32 + 1,
                             ncolumns,
@@ -285,20 +272,19 @@ impl Parser {
                     .ok_or_else(|| self.error_here("expected an assignment target"))?;
                 let indirection = self.parse_assignment_indirection()?;
                 self.expect(TokenKind::Char('='))?;
-                let val =
+                let assignment_value =
                     self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
-                targets.push(Node::ResTarget(ResTarget {
-                    node_tag: NodeTag::ResTarget,
+                targets.push(node!(ResTarget {
                     name: Some(name),
                     indirection,
-                    val: Some(val),
+                    val: Some(assignment_value),
                     location: location as ParseLoc,
                 }));
             }
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
-            if self.at_any(stops) {
+            if !self.at_completion() && self.at_any(stops) {
                 return Err(self.error_here("expected an assignment after ','"));
             }
         }
@@ -319,8 +305,16 @@ impl Parser {
             } else if self.consume(TokenKind::Char('[')) {
                 let lower_or_index =
                     self.take_until_top_level(&[TokenKind::Char(':'), TokenKind::Char(']')]);
+                if self.at_completion() {
+                    let _ = self.parse_expression_fragment_tokens(lower_or_index)?;
+                    return Err(self.error_here("completion point in assignment subscript"));
+                }
                 let (is_slice, lidx, uidx) = if self.consume(TokenKind::Char(':')) {
                     let upper = self.take_until_top_level(&[TokenKind::Char(']')]);
+                    if self.at_completion() {
+                        let _ = self.parse_expression_fragment_tokens(upper)?;
+                        return Err(self.error_here("completion point in assignment slice"));
+                    }
                     (
                         true,
                         if lower_or_index.is_empty() {
@@ -345,8 +339,7 @@ impl Parser {
                     )
                 };
                 self.expect(TokenKind::Char(']'))?;
-                indirection.push(Node::AIndices(AIndices {
-                    node_tag: NodeTag::AIndices,
+                indirection.push(node!(AIndices {
                     is_slice,
                     lidx,
                     uidx,
@@ -377,13 +370,21 @@ impl Parser {
                     MergeMatchKind::NotMatchedByTarget
                 }
             };
-            let condition = if self.consume(TokenKind::And) {
-                Some(self.parse_expr_box_strict_until(&[TokenKind::Then])?)
-            } else {
-                None
-            };
+            let condition = self.parse_optional_expr_clause(TokenKind::And, &[TokenKind::Then])?;
             self.expect(TokenKind::Then)?;
 
+            match match_kind {
+                MergeMatchKind::Matched | MergeMatchKind::NotMatchedBySource => {
+                    self.record_completion_tokens(&[
+                        TokenKind::Update,
+                        TokenKind::DeleteP,
+                        TokenKind::Do,
+                    ]);
+                }
+                MergeMatchKind::NotMatchedByTarget => {
+                    self.record_completion_tokens(&[TokenKind::Insert, TokenKind::Do]);
+                }
+            }
             let (command_type, override_, target_list, values) = match self.peek_kind() {
                 TokenKind::Update => {
                     self.advance();
@@ -440,8 +441,7 @@ impl Parser {
             if !action_allowed {
                 return Err(self.error_here("MERGE action is not valid for this match kind"));
             }
-            clauses.push(Node::MergeWhenClause(MergeWhenClause {
-                node_tag: NodeTag::MergeWhenClause,
+            clauses.push(node!(MergeWhenClause {
                 match_kind,
                 command_type,
                 override_,

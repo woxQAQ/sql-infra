@@ -1,8 +1,18 @@
-use pg_parser::{
-    AlterDomainType, AlterPropGraphElementKind, AlterSubscriptionType, AlterTableType,
-    AlterTsConfigType, ConstrType, DefElem, DefElemAction, DropBehavior, Node, ObjectType,
-    VariableSetKind,
-};
+use pg_parser::AlterDomainType;
+use pg_parser::AlterPropGraphElementKind;
+use pg_parser::AlterSubscriptionType;
+use pg_parser::AlterTableType;
+use pg_parser::AlterTsConfigType;
+use pg_parser::ConstrType;
+use pg_parser::DefElem;
+use pg_parser::DefElemAction;
+use pg_parser::DropBehavior;
+use pg_parser::Node;
+use pg_parser::ObjectType;
+use pg_parser::TextSize;
+use pg_parser::TokenKind;
+use pg_parser::VariableSetKind;
+use pg_parser::collect_expectations;
 
 use super::common::parse_statement;
 
@@ -271,6 +281,278 @@ fn alter_role_and_enum_preserve_actions_and_values() {
     };
     assert_eq!(rename.old_val.as_deref(), Some("sad"));
     assert_eq!(rename.new_val.as_deref(), Some("unhappy"));
+}
+
+#[test]
+fn alter_dispatch_keeps_non_reserved_names_in_their_grammar_context() {
+    for sql in [
+        "alter table t add column rename int4",
+        "alter table t drop column rename",
+        "alter table t alter column c set default rename",
+        "alter table t owner to rename",
+        "alter table t set schema rename",
+        "alter group g add user rename",
+        "alter table rename add column c int4",
+        "alter function f(int4) owner to rename",
+        "alter table t drop column depends",
+        "alter role r set depends to 1",
+        "alter table set rename to t2",
+        "alter collation reset owner to r",
+        "alter function set() owner to r",
+        "alter system set schema to 'public'",
+        "alter role r set app.rename to 'x'",
+        "alter function f() set app.rename to 'x'",
+        "alter system set app.owner to 'x'",
+        "alter type t add attribute add value",
+        "alter function f() set schema to 'x'",
+        "alter function f() set schema = 'x'",
+        "alter function f() set schema from current",
+        "alter role r set schema to 1",
+        "alter role r set schema = 1",
+    ] {
+        parse_statement(sql);
+    }
+}
+
+#[test]
+fn alter_sequence_and_index_owner_use_relation_commands() {
+    for sql in ["alter sequence s owner to r", "alter index i owner to r"] {
+        let Node::AlterTableStmt(stmt) = parse_statement(sql) else {
+            panic!("expected AlterTableStmt for {sql}");
+        };
+        let Node::AlterTableCmd(command) = &stmt.cmds[0] else {
+            panic!("expected AlterTableCmd for {sql}");
+        };
+        assert_eq!(command.subtype, AlterTableType::ChangeOwner, "{sql}");
+    }
+}
+
+#[test]
+fn alter_identity_completion_publishes_shared_actions() {
+    let expectations = |sql: &str| {
+        collect_expectations(
+            sql,
+            TextSize::try_from(sql.len()).expect("test SQL length fits TextSize"),
+        )
+        .expect("completion collection should lex")
+        .tokens
+    };
+
+    for (sql, token) in [
+        ("alter collation c ", TokenKind::Rename),
+        ("alter collation c ", TokenKind::Owner),
+        ("alter collation c ", TokenKind::Set),
+        ("alter collation c ", TokenKind::Refresh),
+        ("alter collation c refresh ", TokenKind::VersionP),
+        ("alter collation c set ", TokenKind::Schema),
+        ("alter extension e set ", TokenKind::Schema),
+        ("alter index i no ", TokenKind::Depends),
+        ("alter trigger tr on tab no ", TokenKind::Depends),
+        ("alter materialized view v no ", TokenKind::Depends),
+        ("alter sequence s set ", TokenKind::Schema),
+        ("alter type t set ", TokenKind::Schema),
+        ("alter statistics s set ", TokenKind::Schema),
+        ("alter text search dictionary d set ", TokenKind::Schema),
+    ] {
+        assert!(
+            expectations(sql).contains(&token),
+            "{token:?} missing for {sql:?}"
+        );
+    }
+
+    for (sql, token) in [
+        ("alter database d ", TokenKind::Rename),
+        ("alter database d ", TokenKind::Owner),
+        ("alter role r ", TokenKind::Rename),
+        ("alter operator +(int, int) ", TokenKind::Owner),
+        ("alter operator family f using btree ", TokenKind::Rename),
+        ("alter operator family f using btree ", TokenKind::Set),
+        ("alter policy p on t ", TokenKind::Rename),
+        ("alter server s ", TokenKind::Rename),
+        ("alter server s ", TokenKind::Owner),
+        ("alter sequence s ", TokenKind::Rename),
+        ("alter sequence s ", TokenKind::Set),
+        ("alter materialized view v ", TokenKind::Depends),
+        ("alter index i ", TokenKind::Depends),
+        ("alter tablespace t ", TokenKind::Owner),
+        ("alter statistics s ", TokenKind::Rename),
+        ("alter statistics s ", TokenKind::Owner),
+        ("alter text search parser p ", TokenKind::Rename),
+        ("alter text search parser p ", TokenKind::Set),
+        ("alter text search dictionary d ", TokenKind::Rename),
+        ("alter text search dictionary d ", TokenKind::Owner),
+        ("alter text search template t ", TokenKind::Set),
+        ("alter foreign data wrapper f ", TokenKind::Owner),
+        ("alter conversion c set ", TokenKind::Schema),
+        ("alter domain d set ", TokenKind::Schema),
+        ("alter operator +(int, int) set ", TokenKind::Schema),
+        (
+            "alter operator family f using btree set ",
+            TokenKind::Schema,
+        ),
+        ("alter property graph g set ", TokenKind::Schema),
+        ("alter text search parser p set ", TokenKind::Schema),
+        ("alter text search template t set ", TokenKind::Schema),
+        ("alter index i no ", TokenKind::Inherit),
+        ("alter index i no ", TokenKind::Force),
+        ("alter index i no ", TokenKind::Depends),
+        ("alter materialized view v no ", TokenKind::Inherit),
+        ("alter materialized view v no ", TokenKind::Force),
+        ("alter materialized view v no ", TokenKind::Depends),
+    ] {
+        assert!(
+            expectations(sql).contains(&token),
+            "{token:?} missing for {sql:?}"
+        );
+    }
+
+    let top_level = expectations("alter ");
+    assert!(top_level.contains(&TokenKind::ConversionP));
+    assert!(!top_level.contains(&TokenKind::Access));
+    for (sql, token) in [
+        ("alter aggregate a(int) ", TokenKind::No),
+        ("alter collation c ", TokenKind::No),
+        ("alter operator class c using btree ", TokenKind::No),
+        ("alter trigger tr on tab ", TokenKind::Set),
+    ] {
+        assert!(
+            !expectations(sql).contains(&token),
+            "{token:?} is invalid for {sql:?}"
+        );
+    }
+}
+
+#[test]
+fn alter_action_keywords_can_be_object_names() {
+    for sql in [
+        "alter collation rename rename to c2",
+        "alter collation refresh refresh version",
+        "alter domain set set default 1",
+        "alter type owner owner to r",
+        "alter type add add attribute a int",
+        "alter type rename add value 'x'",
+        "alter function depends() no depends on extension e",
+        "alter statistics set set statistics 10",
+        "alter statistics set set schema s2",
+        "alter text search configuration add add mapping for asciiword with simple",
+        "alter database rename owner to r",
+        "alter table rename owner to r",
+        "alter server rename owner to r",
+        "alter policy depends on tab using (true)",
+        "alter policy depends on tab with check (true)",
+        "alter policy depends on tab to public",
+    ] {
+        pg_parser::parse_one(sql)
+            .unwrap_or_else(|error| panic!("failed to parse {sql:?}: {error}"));
+    }
+}
+
+#[test]
+fn alter_routine_identities_are_parsed_before_actions() {
+    for sql in [
+        "alter function called() called on null input",
+        "alter function returns() returns null on null input",
+        "alter function strict() strict",
+        "alter function immutable() immutable",
+        "alter function stable() stable",
+        "alter function volatile() volatile",
+        "alter function external() external security definer",
+        "alter function security() security definer",
+        "alter function leakproof() leakproof",
+        "alter function cost() cost 1",
+        "alter function rows() rows 1",
+        "alter function support() support helper",
+        "alter function set() set work_mem to 1",
+        "alter function reset() reset all",
+        "alter function parallel() parallel safe",
+        "alter function rename() rename to renamed",
+        "alter function owner() owner to role_name",
+        "alter function depends() depends on extension ext",
+        "alter function no() no depends on extension ext",
+        "alter function restrict() immutable restrict",
+        "alter procedure rename() rename to renamed",
+        "alter routine set() set schema app",
+        "alter function cost.f() cost 1",
+        "alter function set.f() set work_mem to 1",
+    ] {
+        parse_statement(sql);
+    }
+
+    for name in [
+        "called",
+        "returns",
+        "strict",
+        "immutable",
+        "stable",
+        "volatile",
+        "external",
+        "security",
+        "leakproof",
+        "cost",
+        "rows",
+        "support",
+        "set",
+        "reset",
+        "parallel",
+        "rename",
+        "owner",
+        "depends",
+        "no",
+        "restrict",
+    ] {
+        parse_statement(&format!("alter function app.{name}() security definer"));
+    }
+
+    for sql in [
+        "alter aggregate rename(int) rename to renamed",
+        "alter aggregate owner(int) owner to role_name",
+        "alter aggregate set(int) set schema app",
+        "alter aggregate app.rename(int) rename to renamed",
+        "alter aggregate app.owner(int) owner to role_name",
+        "alter aggregate app.set(int) set schema app",
+    ] {
+        parse_statement(sql);
+    }
+}
+
+#[test]
+fn alter_function_support_and_setting_values_accept_action_keywords() {
+    for sql in [
+        "alter function f() support cost",
+        "alter function f() support rename.helper",
+        "alter function f() support set",
+        "alter function f() set work_mem to stable",
+        "alter function f() set work_mem to owner",
+        "alter function f() set search_path to stable, public",
+        "alter function f() set search_path to public, stable",
+        "alter function f() set work_mem to stable immutable",
+    ] {
+        parse_statement(sql);
+    }
+}
+
+#[test]
+fn alter_qualified_rename_names_do_not_select_rename_actions() {
+    for sql in [
+        "alter collation s.rename owner to r",
+        "alter conversion s.rename owner to r",
+        "alter domain s.rename owner to r",
+        "alter type s.rename owner to r",
+        "alter statistics s.rename owner to r",
+        "alter text search dictionary s.rename owner to r",
+        "alter text search configuration s.rename owner to r",
+        "alter property graph s.rename owner to r",
+        "alter table s.rename owner to r",
+        "alter table only rename owner to r",
+        "alter table if exists s.rename owner to r",
+        "alter sequence s.rename owner to r",
+        "alter view s.rename owner to r",
+        "alter materialized view s.rename owner to r",
+        "alter index s.rename owner to r",
+        "alter foreign table s.rename owner to r",
+    ] {
+        parse_statement(sql);
+    }
 }
 
 #[test]

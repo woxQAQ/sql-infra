@@ -1,3 +1,8 @@
+//! `MERGE` statement parsing.
+//!
+//! Target/source relations, join conditions, aliases, and ordered actions combine
+//! with the shared DML action grammar in `dml_grammar`.
+
 use super::*;
 
 impl Parser {
@@ -17,8 +22,9 @@ impl Parser {
     // and when_clause is:
     //
     //     { WHEN MATCHED [ AND condition ] THEN { merge_update | merge_delete | DO NOTHING } |
-    //       WHEN NOT MATCHED BY SOURCE [ AND condition ] THEN { merge_update | merge_delete | DO NOTHING } |
-    //       WHEN NOT MATCHED [ BY TARGET ] [ AND condition ] THEN { merge_insert | DO NOTHING } }
+    //       WHEN NOT MATCHED BY SOURCE [ AND condition ] THEN { merge_update | merge_delete | DO
+    // NOTHING } |       WHEN NOT MATCHED [ BY TARGET ] [ AND condition ] THEN { merge_insert |
+    // DO NOTHING } }
     //
     // and merge_insert is:
     //
@@ -40,7 +46,7 @@ impl Parser {
         self.expect(TokenKind::Merge)?;
         self.expect(TokenKind::Into)?;
         let relation = Some(Box::new(
-            self.try_parse_range_var(true)
+            self.try_parse_range_var_with_slot(true, GrammarSlot::Table)?
                 .ok_or_else(|| self.error_here("MERGE INTO requires a relation name"))?,
         ));
         self.expect(TokenKind::Using)?;
@@ -57,8 +63,7 @@ impl Parser {
             return Err(self.error_here("MERGE requires at least one WHEN clause"));
         }
         let returning_clause = self.parse_returning_clause()?;
-        Ok(Node::MergeStmt(MergeStmt {
-            node_tag: NodeTag::MergeStmt,
+        Ok(node!(MergeStmt {
             relation,
             source_relation,
             join_condition: Some(join_condition),

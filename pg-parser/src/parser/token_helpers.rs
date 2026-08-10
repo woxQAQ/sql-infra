@@ -1,4 +1,51 @@
+//! Token interpretation, statement lookahead, and balanced token-list utilities.
+//!
+//! This module centralizes token-to-value projections, operator names, definition
+//! elements, top-level splitting/search, and source-like token rendering.
+
 use super::*;
+
+pub(super) trait TokenOptionExt {
+    fn has_kind(self, kind: TokenKind) -> bool;
+    fn kind_or_eof(self) -> TokenKind;
+    fn location_or(self, default: usize) -> usize;
+    fn location_or_else(self, default: impl FnOnce() -> usize) -> usize;
+    fn end_location_or(self, default: usize) -> usize;
+}
+
+impl TokenOptionExt for Option<&Token> {
+    fn has_kind(self, kind: TokenKind) -> bool {
+        matches!(self, Some(token) if token.kind == kind)
+    }
+
+    fn kind_or_eof(self) -> TokenKind {
+        match self {
+            Some(token) => token.kind,
+            None => TokenKind::Eof,
+        }
+    }
+
+    fn location_or(self, default: usize) -> usize {
+        match self {
+            Some(token) => token.location(),
+            None => default,
+        }
+    }
+
+    fn location_or_else(self, default: impl FnOnce() -> usize) -> usize {
+        match self {
+            Some(token) => token.location(),
+            None => default(),
+        }
+    }
+
+    fn end_location_or(self, default: usize) -> usize {
+        match self {
+            Some(token) => token.end_location(),
+            None => default,
+        }
+    }
+}
 
 pub(super) fn token_name(token: &Token) -> Option<std::string::String> {
     match &token.value {
@@ -23,7 +70,7 @@ pub(super) fn token_name_in_categories(
             }
             _ => false,
         };
-    accepted.then(|| token_name(token)).flatten()
+    if accepted { token_name(token) } else { None }
 }
 
 pub(super) fn token_text(token: &Token) -> std::string::String {
@@ -61,15 +108,13 @@ pub(super) fn is_operator_name_kind(kind: TokenKind) -> bool {
 pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
     match token.kind {
         TokenKind::IConst => match token.value {
-            Some(TokenValue::Integer(value)) => Some(Node::AConst(AConst::integer(
-                value,
-                token.location() as ParseLoc,
-            ))),
+            Some(TokenValue::Integer(value)) => {
+                Some(node!(AConst::integer(value, token.location() as ParseLoc,)))
+            }
             _ => None,
         },
         TokenKind::FConst => match &token.value {
-            Some(TokenValue::String(value)) => Some(Node::AConst(AConst {
-                node_tag: NodeTag::AConst,
+            Some(TokenValue::String(value)) => Some(node!(AConst {
                 val: ValUnion::Float(Float::new(value.clone())),
                 location: token.location() as ParseLoc,
                 ..AConst::default()
@@ -77,10 +122,9 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
             _ => None,
         },
         TokenKind::SConst => token_name(token)
-            .map(|value| Node::AConst(AConst::string(value, token.location() as ParseLoc))),
+            .map(|value| node!(AConst::string(value, token.location() as ParseLoc))),
         TokenKind::BConst | TokenKind::XConst => match &token.value {
-            Some(TokenValue::String(value)) => Some(Node::AConst(AConst {
-                node_tag: NodeTag::AConst,
+            Some(TokenValue::String(value)) => Some(node!(AConst {
                 val: ValUnion::BitString(BitString::new(value.clone())),
                 location: token.location() as ParseLoc,
                 ..AConst::default()
@@ -88,32 +132,26 @@ pub(super) fn token_to_leaf(token: &Token) -> Option<Node> {
             _ => None,
         },
         TokenKind::Param => match token.value {
-            Some(TokenValue::Integer(number)) => Some(Node::ParamRef(ParamRef {
-                node_tag: NodeTag::ParamRef,
+            Some(TokenValue::Integer(number)) => Some(node!(ParamRef {
                 number,
                 location: token.location() as ParseLoc,
             })),
             _ => None,
         },
-        TokenKind::NullP => Some(Node::AConst(AConst::null(token.location() as ParseLoc))),
-        TokenKind::TrueP => Some(Node::AConst(AConst {
-            node_tag: NodeTag::AConst,
+        TokenKind::NullP => Some(node!(AConst::null(token.location() as ParseLoc))),
+        TokenKind::TrueP => Some(node!(AConst {
             val: ValUnion::Boolean(Boolean::new(true)),
             location: token.location() as ParseLoc,
             ..AConst::default()
         })),
-        TokenKind::FalseP => Some(Node::AConst(AConst {
-            node_tag: NodeTag::AConst,
+        TokenKind::FalseP => Some(node!(AConst {
             val: ValUnion::Boolean(Boolean::new(false)),
             location: token.location() as ParseLoc,
             ..AConst::default()
         })),
-        TokenKind::Char('*') => Some(Node::AStar(AStar {
-            node_tag: NodeTag::AStar,
-        })),
+        TokenKind::Char('*') => Some(Node::AStar),
         _ => token_name(token).map(|name| {
-            Node::ColumnRef(ColumnRef {
-                node_tag: NodeTag::ColumnRef,
+            node!(ColumnRef {
                 fields: vec![make_string_node(name)],
                 location: token.location() as ParseLoc,
             })
@@ -127,11 +165,11 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
         .filter(|token| token.kind != TokenKind::Char(' '))
         .collect::<Vec<_>>();
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected an option"));
+        return Err(ParseError::syntax_exit(location, "expected an option"));
     }
     let first = token_name(&tokens[0])
-        .ok_or_else(|| ParseError::new(location, "expected an option name"))?;
-    if tokens.get(1).map(|token| token.kind) == Some(TokenKind::Char('.')) {
+        .ok_or_else(|| ParseError::syntax_exit(location, "expected an option name"))?;
+    if tokens.get(1).has_kind(TokenKind::Char('.')) {
         return Err(ParseError::ranged(
             tokens[1].range,
             "definition option names cannot be qualified",
@@ -154,7 +192,7 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
     }
     let arg = if tokens.is_empty() {
         if has_equals {
-            return Err(ParseError::new(
+            return Err(ParseError::syntax_exit(
                 location,
                 "option requires a value after '='",
             ));
@@ -166,7 +204,6 @@ pub(super) fn tokens_to_def_elem(tokens: Vec<Token>, location: usize) -> PResult
         )?))
     };
     Ok(DefElem {
-        node_tag: NodeTag::DefElem,
         defnamespace: None,
         defname: Some(defname),
         arg,
@@ -181,16 +218,16 @@ pub(super) fn parse_operator_def_arg(
     location: usize,
 ) -> PResult<Node> {
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "option requires a value"));
+        return Err(ParseError::syntax_exit(location, "option requires a value"));
     }
     if tokens.len() == 1 {
         let token = &tokens[0];
         return match (&token.kind, &token.value) {
             (TokenKind::IConst, Some(TokenValue::Integer(value))) => {
-                Ok(Node::Integer(Integer::new(*value)))
+                Ok(node!(Integer::new(*value)))
             }
             (TokenKind::FConst, Some(TokenValue::String(value))) => {
-                Ok(Node::Float(Float::new(value.clone())))
+                Ok(node!(Float::new(value.clone())))
             }
             (TokenKind::SConst, Some(TokenValue::String(value))) => {
                 Ok(make_string_node(value.clone()))
@@ -210,11 +247,11 @@ pub(super) fn parse_operator_def_arg(
             _ => Err(ParseError::ranged(token.range, "invalid option value")),
         };
     }
-    if tokens.first().map(|token| token.kind) == Some(TokenKind::Operator) {
+    if tokens.first().has_kind(TokenKind::Operator) {
         return parse_qualified_all_operator_tokens(tokens, location).map(name_list_node);
     }
     if tokens.iter().any(|token| is_operator_name_kind(token.kind)) {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "qualified operator values require OPERATOR(schema.operator)",
         ));
@@ -224,7 +261,10 @@ pub(super) fn parse_operator_def_arg(
 
 pub(super) fn parse_operator_name_tokens(tokens: Vec<Token>, location: usize) -> PResult<NodeList> {
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected an operator name"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "expected an operator name",
+        ));
     }
     let mut elements = Vec::new();
     let mut expect_component = true;
@@ -262,7 +302,7 @@ pub(super) fn parse_operator_name_tokens(tokens: Vec<Token>, location: usize) ->
         expect_component = false;
     }
     if expect_component {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "operator name cannot end with '.'",
         ));
@@ -325,13 +365,98 @@ pub(super) fn find_matching_close(tokens: &[Token], open: usize) -> Option<usize
     None
 }
 
-pub(super) fn tokens_to_text(tokens: &[Token]) -> std::string::String {
-    tokens.iter().map(token_text).collect::<Vec<_>>().join(" ")
-}
 pub(super) fn extend_stops(stops: &[TokenKind], extra: TokenKind) -> Vec<TokenKind> {
-    let mut out = stops.to_vec();
-    if !out.contains(&extra) {
-        out.push(extra);
+    let mut extended_stops = stops.to_vec();
+    if !extended_stops.contains(&extra) {
+        extended_stops.push(extra);
     }
-    out
+    extended_stops
+}
+
+impl Parser {
+    pub(super) fn top_level_contains(&self, needle: TokenKind) -> bool {
+        self.top_level_kinds()
+            .into_iter()
+            .any(|kind| kind == needle)
+    }
+
+    pub(super) fn top_level_kinds(&self) -> Vec<TokenKind> {
+        let mut kinds = Vec::new();
+        let mut depth = 0usize;
+        let mut i = self.pos;
+        while let Some(token) = self.tokens.get(i) {
+            let kind = token.kind;
+            if kind == TokenKind::Eof || (depth == 0 && kind == TokenKind::Char(';')) {
+                break;
+            }
+            if depth == 0 {
+                kinds.push(kind);
+            }
+            match kind {
+                TokenKind::Char('(') | TokenKind::Char('[') => depth += 1,
+                TokenKind::Char(')') | TokenKind::Char(']') => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            i += 1;
+        }
+        kinds
+    }
+
+    pub(super) fn consume_string_like(&mut self) -> Option<std::string::String> {
+        match self.peek().value.clone() {
+            Some(TokenValue::String(value)) => {
+                self.advance();
+                Some(value)
+            }
+            Some(TokenValue::Keyword(value)) => {
+                self.advance();
+                Some(value.to_owned())
+            }
+            Some(TokenValue::Integer(value)) => {
+                self.advance();
+                Some(value.to_string())
+            }
+            None => None,
+        }
+    }
+
+    pub(super) fn consume_opt_boolean_or_string(&mut self) -> Option<std::string::String> {
+        self.record_completion_tokens(&[
+            TokenKind::SConst,
+            TokenKind::TrueP,
+            TokenKind::FalseP,
+            TokenKind::On,
+        ]);
+        let token = self.peek().clone();
+        let accepted = matches!(
+            token.kind,
+            TokenKind::SConst | TokenKind::TrueP | TokenKind::FalseP | TokenKind::On
+        ) || token_name_in_categories(
+            &token,
+            &[
+                KeywordCategory::Unreserved,
+                KeywordCategory::ColName,
+                KeywordCategory::TypeFuncName,
+            ],
+        )
+        .is_some();
+        if !accepted {
+            return None;
+        }
+        let value = token_name(&token)?;
+        self.advance();
+        Some(value)
+    }
+
+    pub(super) fn consume_required_string(
+        &mut self,
+        message: &str,
+    ) -> PResult<std::string::String> {
+        self.record_completion_tokens(&[TokenKind::SConst]);
+        if !self.at(TokenKind::SConst) {
+            return Err(self.error_here(message));
+        }
+        self.consume_string_like()
+            .ok_or_else(|| self.error_here(message))
+    }
 }

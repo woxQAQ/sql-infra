@@ -1,3 +1,8 @@
+//! Function and procedure creation.
+//!
+//! Parameters, result types, transforms, definition options, SQL bodies, and
+//! `BEGIN ATOMIC` statement lists are assembled into routine raw nodes.
+
 use super::*;
 
 impl Parser {
@@ -25,11 +30,13 @@ impl Parser {
     //   } ...
     pub(super) fn parse_create_function(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Function)?;
+        self.record_completion_slot(GrammarSlot::Function);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("CREATE FUNCTION requires a function name"));
         }
         let mut parameters = self.parse_function_parameters()?;
+        self.record_completion_tokens(&[TokenKind::Returns]);
         let has_return_clause = self.at(TokenKind::Returns)
             && !(self.peek_kind_n(1) == TokenKind::NullP && self.peek_kind_n(2) == TokenKind::On);
         let return_type = if has_return_clause {
@@ -46,7 +53,7 @@ impl Parser {
                             | FunctionParameterMode::In
                             | FunctionParameterMode::Variadic
                     ) {
-                        return Err(ParseError::new(
+                        return Err(ParseError::syntax_exit(
                             parameter.location as usize,
                             "OUT and INOUT arguments aren't allowed in TABLE functions",
                         ));
@@ -63,7 +70,6 @@ impl Parser {
                         })?
                     } else {
                         TypeName {
-                            node_tag: NodeTag::TypeName,
                             names: system_type_names("record"),
                             ..TypeName::default()
                         }
@@ -74,7 +80,17 @@ impl Parser {
                 Some(Box::new(table_type))
             } else {
                 let location = self.location();
+                self.record_completion_slot(GrammarSlot::Type);
+                self.record_completion_qualified_name_slot(
+                    GrammarSlot::Type,
+                    Self::create_function_option_starts(),
+                );
                 let tokens = self.take_until_top_level(Self::create_function_option_starts());
+                if self.at_completion() {
+                    let mut completion_tokens = tokens.clone();
+                    self.append_completion_marker(&mut completion_tokens);
+                    record_type_name_completion(&completion_tokens, self.completion.as_ref());
+                }
                 Some(Box::new(parse_func_type_tokens(tokens).map_err(
                     |mut error| {
                         if error.location() == 0 {
@@ -90,10 +106,12 @@ impl Parser {
         let mut options = Vec::new();
         let mut sql_body = None;
         while !self.at_statement_end() {
+            self.record_completion_tokens(Self::create_function_option_starts());
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::Language => {
                     self.advance();
+                    self.record_completion_slot(GrammarSlot::Language);
                     let language = self
                         .consume_non_reserved_word_or_sconst()
                         .ok_or_else(|| self.error_here("expected a language name"))?;
@@ -105,20 +123,16 @@ impl Parser {
                 }
                 TokenKind::As => {
                     self.advance();
-                    let first = self
-                        .consume_string_like()
-                        .ok_or_else(|| self.error_here("expected a function body string"))?;
+                    let first = self.consume_required_string("expected a function body string")?;
                     let mut bodies = vec![make_string_node(first)];
                     if self.consume(TokenKind::Char(',')) {
-                        let second = self.consume_string_like().ok_or_else(|| {
-                            self.error_here("expected a second function body string")
-                        })?;
+                        let second =
+                            self.consume_required_string("expected a second function body string")?;
                         bodies.push(make_string_node(second));
                     }
                     options.push(make_def_elem(
                         "as",
-                        Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
+                        Some(node!(AArrayExpr {
                             elements: bodies,
                             ..AArrayExpr::default()
                         })),
@@ -137,7 +151,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "strict",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -152,7 +166,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "security",
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -174,14 +188,14 @@ impl Parser {
                 }
                 TokenKind::Support => {
                     self.advance();
+                    self.record_completion_slot(GrammarSlot::Function);
                     let name = self.parse_name_list();
                     if name.is_empty() {
                         return Err(self.error_here("SUPPORT requires a function name"));
                     }
                     options.push(make_def_elem(
                         "support",
-                        Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
+                        Some(node!(AArrayExpr {
                             elements: name,
                             ..AArrayExpr::default()
                         })),
@@ -203,7 +217,7 @@ impl Parser {
                     self.expect(TokenKind::InputP)?;
                     options.push(make_def_elem(
                         "strict",
-                        Some(Node::Boolean(Boolean::new(false))),
+                        Some(node!(Boolean::new(false))),
                         location,
                     ));
                 }
@@ -215,7 +229,7 @@ impl Parser {
                     self.expect(TokenKind::InputP)?;
                     options.push(make_def_elem(
                         "strict",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -231,7 +245,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "security",
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -239,7 +253,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "leakproof",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -248,7 +262,7 @@ impl Parser {
                     self.expect(TokenKind::Leakproof)?;
                     options.push(make_def_elem(
                         "leakproof",
-                        Some(Node::Boolean(Boolean::new(false))),
+                        Some(node!(Boolean::new(false))),
                         location,
                     ));
                 }
@@ -265,7 +279,7 @@ impl Parser {
                     self.advance();
                     options.push(make_def_elem(
                         "window",
-                        Some(Node::Boolean(Boolean::new(true))),
+                        Some(node!(Boolean::new(true))),
                         location,
                     ));
                 }
@@ -286,8 +300,7 @@ impl Parser {
                 }
             }
         }
-        Ok(Node::CreateFunctionStmt(CreateFunctionStmt {
-            node_tag: NodeTag::CreateFunctionStmt,
+        Ok(node!(CreateFunctionStmt {
             is_procedure: false,
             replace,
             funcname,
@@ -312,6 +325,7 @@ impl Parser {
     //   } ...
     pub(super) fn parse_create_procedure(&mut self, replace: bool) -> PResult<Node> {
         self.expect(TokenKind::Procedure)?;
+        self.record_completion_slot(GrammarSlot::Procedure);
         let funcname = self.parse_func_name_list();
         if funcname.is_empty() {
             return Err(self.error_here("CREATE PROCEDURE requires a procedure name"));
@@ -320,10 +334,12 @@ impl Parser {
         let mut options = Vec::new();
         let mut sql_body = None;
         while !self.at_statement_end() {
+            self.record_completion_tokens(Self::create_procedure_option_starts());
             let location = self.location();
             match self.peek_kind() {
                 TokenKind::Language => {
                     self.advance();
+                    self.record_completion_slot(GrammarSlot::Language);
                     let language = self
                         .consume_non_reserved_word_or_sconst()
                         .ok_or_else(|| self.error_here("expected a language name"))?;
@@ -335,20 +351,16 @@ impl Parser {
                 }
                 TokenKind::As => {
                     self.advance();
-                    let first = self
-                        .consume_string_like()
-                        .ok_or_else(|| self.error_here("expected a procedure body string"))?;
+                    let first = self.consume_required_string("expected a procedure body string")?;
                     let mut bodies = vec![make_string_node(first)];
                     if self.consume(TokenKind::Char(',')) {
-                        let second = self.consume_string_like().ok_or_else(|| {
-                            self.error_here("expected a second procedure body string")
-                        })?;
+                        let second = self
+                            .consume_required_string("expected a second procedure body string")?;
                         bodies.push(make_string_node(second));
                     }
                     options.push(make_def_elem(
                         "as",
-                        Some(Node::AArrayExpr(AArrayExpr {
-                            node_tag: NodeTag::AArrayExpr,
+                        Some(node!(AArrayExpr {
                             elements: bodies,
                             ..AArrayExpr::default()
                         })),
@@ -366,7 +378,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "security",
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -382,7 +394,7 @@ impl Parser {
                     };
                     options.push(make_def_elem(
                         "security",
-                        Some(Node::Boolean(Boolean::new(value))),
+                        Some(node!(Boolean::new(value))),
                         location,
                     ));
                 }
@@ -416,8 +428,7 @@ impl Parser {
                 }
             }
         }
-        Ok(Node::CreateFunctionStmt(CreateFunctionStmt {
-            node_tag: NodeTag::CreateFunctionStmt,
+        Ok(node!(CreateFunctionStmt {
             is_procedure: true,
             replace,
             funcname,
@@ -432,10 +443,11 @@ impl Parser {
         self.expect(TokenKind::Char('('))?;
         let mut parameters = Vec::new();
         while !self.at(TokenKind::Char(')')) {
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            parameters.push(Node::FunctionParameter(function_parameter_from_tokens(
-                tokens,
-            )?));
+            let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+            self.append_completion_marker(&mut tokens);
+            parameters.push(Node::FunctionParameter(
+                function_parameter_from_tokens_with_completion(tokens, self.completion.clone())?,
+            ));
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
@@ -454,10 +466,22 @@ impl Parser {
             return Err(self.error_here("RETURNS TABLE requires at least one column"));
         }
         while !self.at(TokenKind::Char(')')) {
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            let location = tokens
-                .first()
-                .map_or(self.location(), |token| token.location());
+            let stops = [TokenKind::Char(','), TokenKind::Char(')')];
+            let mut tokens = self.take_until_top_level(&stops);
+            self.append_completion_marker(&mut tokens);
+            let location = tokens.first().location_or(self.location());
+            if let Some(completion_index) = tokens
+                .iter()
+                .position(|token| token.kind == TokenKind::Completion)
+                && let Some(collector) = &self.completion
+            {
+                let mut collector = collector.borrow_mut();
+                if completion_index == 0 {
+                    collector.record_slot(GrammarSlot::AnyName);
+                } else {
+                    collector.record_slot(GrammarSlot::Type);
+                }
+            }
             let name = tokens
                 .first()
                 .and_then(|token| {
@@ -467,13 +491,14 @@ impl Parser {
                     )
                 })
                 .ok_or_else(|| {
-                    ParseError::new(location, "expected a table function column name")
+                    ParseError::syntax_exit(location, "expected a table function column name")
                 })?;
             let arg_type = parse_func_type_tokens(tokens[1..].to_vec())
                 .map(Box::new)
-                .map_err(|_| ParseError::new(location, "expected a table function column type"))?;
-            columns.push(Node::FunctionParameter(FunctionParameter {
-                node_tag: NodeTag::FunctionParameter,
+                .map_err(|_| {
+                    ParseError::syntax_exit(location, "expected a table function column type")
+                })?;
+            columns.push(node!(FunctionParameter {
                 name: Some(name),
                 arg_type: Some(arg_type),
                 mode: FunctionParameterMode::Table,

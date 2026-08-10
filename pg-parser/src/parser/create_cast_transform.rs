@@ -1,3 +1,7 @@
+//! Parsing for `CREATE CAST`, `CREATE CONVERSION`, and `CREATE TRANSFORM`.
+//!
+//! These forms share type/function identities but produce distinct raw nodes.
+
 use super::*;
 
 impl Parser {
@@ -57,8 +61,7 @@ impl Parser {
         } else {
             CoercionContext::Explicit
         };
-        Ok(Node::CreateCastStmt(CreateCastStmt {
-            node_tag: NodeTag::CreateCastStmt,
+        Ok(node!(CreateCastStmt {
             sourcetype: Some(sourcetype),
             targettype: Some(targettype),
             func,
@@ -71,39 +74,35 @@ impl Parser {
     // Source: https://www.postgresql.org/docs/18/sql-createconversion.html
     // CREATE [ DEFAULT ] CONVERSION name
     //     FOR source_encoding TO dest_encoding FROM function_name
-    pub(super) fn parse_create_conversion(&mut self, def: bool) -> PResult<Node> {
+    pub(super) fn parse_create_conversion(&mut self, is_default: bool) -> PResult<Node> {
         self.expect(TokenKind::ConversionP)?;
-        let conversion_name = self.parse_name_list_until_keywords(&[
-            TokenKind::For,
-            TokenKind::Char(';'),
-            TokenKind::Eof,
-        ]);
+        let name_stops = [TokenKind::For, TokenKind::Char(';'), TokenKind::Eof];
+        self.record_completion_slot(GrammarSlot::Conversion);
+        self.record_completion_qualified_name_slot(GrammarSlot::Conversion, &name_stops);
+        let conversion_name = self.parse_name_list_until_keywords(&name_stops);
         if conversion_name.is_empty() {
             return Err(self.error_here("CREATE CONVERSION requires a name"));
         }
         self.expect(TokenKind::For)?;
-        if !self.at(TokenKind::SConst) {
-            return Err(self.error_here("source encoding must be a string"));
-        }
-        let for_encoding_name = self.consume_string_like();
+        let for_encoding_name =
+            Some(self.consume_required_string("source encoding must be a string")?);
         self.expect(TokenKind::To)?;
-        if !self.at(TokenKind::SConst) {
-            return Err(self.error_here("target encoding must be a string"));
-        }
-        let to_encoding_name = self.consume_string_like();
+        let to_encoding_name =
+            Some(self.consume_required_string("target encoding must be a string")?);
         self.expect(TokenKind::From)?;
-        let func_name =
-            self.parse_name_list_until_keywords(&[TokenKind::Char(';'), TokenKind::Eof]);
+        let function_stops = [TokenKind::Char(';'), TokenKind::Eof];
+        self.record_completion_slot(GrammarSlot::Function);
+        self.record_completion_qualified_name_slot(GrammarSlot::Function, &function_stops);
+        let func_name = self.parse_name_list_until_keywords(&function_stops);
         if func_name.is_empty() {
             return Err(self.error_here("CREATE CONVERSION requires a function"));
         }
-        Ok(Node::CreateConversionStmt(CreateConversionStmt {
-            node_tag: NodeTag::CreateConversionStmt,
+        Ok(node!(CreateConversionStmt {
             conversion_name,
             for_encoding_name,
             to_encoding_name,
             func_name,
-            def,
+            def: is_default,
         }))
     }
 
@@ -121,6 +120,8 @@ impl Parser {
             .map(Box::new)
             .ok_or_else(|| self.error_here("CREATE TRANSFORM requires a type"))?;
         self.expect(TokenKind::Language)?;
+        self.record_completion_slot(GrammarSlot::Language);
+        self.record_completion_qualified_name_slot(GrammarSlot::Language, &[TokenKind::Char('(')]);
         let lang = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("CREATE TRANSFORM requires a language"))?,
@@ -171,8 +172,7 @@ impl Parser {
             return Err(self.error_here("CREATE TRANSFORM requires at least one transform element"));
         }
         self.expect(TokenKind::Char(')'))?;
-        Ok(Node::CreateTransformStmt(CreateTransformStmt {
-            node_tag: NodeTag::CreateTransformStmt,
+        Ok(node!(CreateTransformStmt {
             replace,
             type_name: Some(type_name),
             lang,

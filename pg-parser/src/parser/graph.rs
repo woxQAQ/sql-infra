@@ -1,3 +1,8 @@
+//! SQL property-graph query expressions.
+//!
+//! `GRAPH_TABLE`, element patterns, label expressions, endpoints, and pattern
+//! quantifiers are parsed into PostgreSQL graph nodes.
+
 use super::*;
 
 impl Parser {
@@ -5,7 +10,7 @@ impl Parser {
         let location = self.expect(TokenKind::GraphTable)?.location();
         self.expect(TokenKind::Char('('))?;
         let graph_name = Some(Box::new(
-            self.try_parse_qualified_range_var()
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::PropertyGraph)
                 .ok_or_else(|| self.error_here("GRAPH_TABLE requires a graph name"))?,
         ));
         self.expect(TokenKind::Match)?;
@@ -16,6 +21,19 @@ impl Parser {
                 self.peek_kind(),
                 TokenKind::Char(',') | TokenKind::Where | TokenKind::Columns | TokenKind::Eof
             ) {
+                self.record_completion_tokens(&[
+                    TokenKind::Char('('),
+                    TokenKind::Char('<'),
+                    TokenKind::Char('-'),
+                    TokenKind::RightArrow,
+                ]);
+                if !elements.is_empty() {
+                    self.record_completion_follow_tokens(&[
+                        TokenKind::Char(','),
+                        TokenKind::Where,
+                        TokenKind::Columns,
+                    ]);
+                }
                 elements.push(Node::GraphElementPattern(
                     self.parse_graph_element_pattern()?,
                 ));
@@ -23,8 +41,7 @@ impl Parser {
             if elements.is_empty() {
                 return Err(self.error_here("expected a graph path pattern"));
             }
-            paths.push(Node::AArrayExpr(AArrayExpr {
-                node_tag: NodeTag::AArrayExpr,
+            paths.push(node!(AArrayExpr {
                 elements,
                 ..AArrayExpr::default()
             }));
@@ -32,11 +49,8 @@ impl Parser {
                 break;
             }
         }
-        let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[TokenKind::Columns])?)
-        } else {
-            None
-        };
+        let where_clause =
+            self.parse_optional_expr_clause(TokenKind::Where, &[TokenKind::Columns])?;
         self.expect(TokenKind::Columns)?;
         self.expect(TokenKind::Char('('))?;
         let columns = self.parse_res_target_list_strict_until(&[TokenKind::Char(')')])?;
@@ -44,10 +58,8 @@ impl Parser {
         self.expect(TokenKind::Char(')'))?;
         let alias = self.parse_optional_alias_clause()?;
         Ok(RangeGraphTable {
-            node_tag: NodeTag::RangeGraphTable,
             graph_name,
             graph_pattern: Some(Box::new(GraphPattern {
-                node_tag: NodeTag::GraphPattern,
                 path_pattern_list: paths,
                 where_clause,
             })),
@@ -78,15 +90,11 @@ impl Parser {
             if subexpr.is_empty() {
                 return Err(self.error_here("parenthesized graph path cannot be empty"));
             }
-            let where_clause = if self.consume(TokenKind::Where) {
-                Some(self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?)
-            } else {
-                None
-            };
+            let where_clause =
+                self.parse_optional_expr_clause(TokenKind::Where, &[TokenKind::Char(')')])?;
             self.expect(TokenKind::Char(')'))?;
             let quantifier = self.parse_graph_pattern_quantifier()?;
             return Ok(GraphElementPattern {
-                node_tag: NodeTag::GraphElementPattern,
                 kind: GraphElementPatternKind::ParenExpr,
                 subexpr,
                 where_clause,
@@ -114,7 +122,6 @@ impl Parser {
                 } else {
                     let quantifier = self.parse_graph_pattern_quantifier()?;
                     return Ok(GraphElementPattern {
-                        node_tag: NodeTag::GraphElementPattern,
                         kind: GraphElementPatternKind::EdgePatternLeft,
                         quantifier,
                         location: location as ParseLoc,
@@ -126,7 +133,6 @@ impl Parser {
                 self.advance();
                 let quantifier = self.parse_graph_pattern_quantifier()?;
                 return Ok(GraphElementPattern {
-                    node_tag: NodeTag::GraphElementPattern,
                     kind: GraphElementPatternKind::EdgePatternRight,
                     quantifier,
                     location: location as ParseLoc,
@@ -143,7 +149,6 @@ impl Parser {
                 } else if self.consume(TokenKind::Char('>')) {
                     let quantifier = self.parse_graph_pattern_quantifier()?;
                     return Ok(GraphElementPattern {
-                        node_tag: NodeTag::GraphElementPattern,
                         kind: GraphElementPatternKind::EdgePatternRight,
                         quantifier,
                         location: location as ParseLoc,
@@ -152,7 +157,6 @@ impl Parser {
                 } else {
                     let quantifier = self.parse_graph_pattern_quantifier()?;
                     return Ok(GraphElementPattern {
-                        node_tag: NodeTag::GraphElementPattern,
                         kind: GraphElementPatternKind::EdgePatternAny,
                         quantifier,
                         location: location as ParseLoc,
@@ -176,11 +180,7 @@ impl Parser {
         } else {
             None
         };
-        let where_clause = if self.consume(TokenKind::Where) {
-            Some(self.parse_expr_box_strict_until(&[close.unwrap()])?)
-        } else {
-            None
-        };
+        let where_clause = self.parse_optional_expr_clause(TokenKind::Where, &[close.unwrap()])?;
         if let Some(close) = close {
             self.expect(close)?;
         }
@@ -195,7 +195,6 @@ impl Parser {
         }
         let quantifier = self.parse_graph_pattern_quantifier()?;
         Ok(GraphElementPattern {
-            node_tag: NodeTag::GraphElementPattern,
             kind: actual_kind,
             variable,
             labelexpr,
@@ -208,8 +207,7 @@ impl Parser {
 
     pub(super) fn parse_graph_label_expression(&mut self) -> PResult<Node> {
         let make_term = |name: std::string::String, location: usize| {
-            Node::ColumnRef(ColumnRef {
-                node_tag: NodeTag::ColumnRef,
+            node!(ColumnRef {
                 fields: vec![make_string_node(name)],
                 location: location as ParseLoc,
             })
@@ -229,7 +227,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("expected a graph label after '|'"))?;
             let term = make_term(name, term_location);
             match expression {
-                Node::BoolExpr(BoolExpr {
+                node!(BoolExpr {
                     boolop: BoolExprType::OrExpr,
                     ref mut args,
                     ..
@@ -268,10 +266,7 @@ impl Parser {
                 (first, second)
             };
             self.expect(TokenKind::Char('}'))?;
-            quantifier = vec![
-                Node::Integer(Integer::new(first)),
-                Node::Integer(Integer::new(second)),
-            ];
+            quantifier = vec![node!(Integer::new(first)), node!(Integer::new(second))];
         }
         Ok(quantifier)
     }

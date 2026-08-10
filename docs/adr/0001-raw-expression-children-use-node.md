@@ -1,3 +1,3 @@
-# Raw expression children use `Node`
+# 原始表达式子节点使用 `Node`
 
-Raw PostgreSQL grammar nodes store polymorphic expression children: an `Expr *` field can point to an `AExpr`, `AConst`, `ColumnRef`, `FuncCall`, or another raw syntax node. In Rust, those raw child fields use `Box<Node>` rather than `Box<Expr>`; typed boxes remain appropriate only where the grammar fixes the concrete child type. This preserves raw-tree fidelity without introducing a second expression enum parallel to `Node`.
+PostgreSQL 原始语法节点会保存多态表达式子节点：一个 `Expr *` 字段可以指向 `AExpr`、`AConst`、`ColumnRef`、`FuncCall` 或其他原始语法节点。在 Rust 中，这些原始子节点字段使用 `Box<Node>`，而不是 `Box<Expr>`；只有当语法确定了具体子节点类型时才使用相应的强类型 Box。这样既能保持原始解析树的保真度，也不需要引入一个与 `Node` 平行的第二套表达式枚举。

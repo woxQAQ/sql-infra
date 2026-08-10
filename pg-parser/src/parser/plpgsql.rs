@@ -1,8 +1,13 @@
+//! PL/pgSQL-specific raw parse modes exposed by PostgreSQL's parser.
+//!
+//! Assignment and expression entry points adapt PL/pgSQL fragments into the same
+//! raw statement nodes used by normal SQL parsing.
+
 use super::*;
 
-pub(super) fn parse_assignment(sql: &str, nnames: i32) -> PResult<RawStmt> {
-    if !(1..=3).contains(&nnames) {
-        return Err(ParseError::new(
+pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<RawStmt> {
+    if !(1..=3).contains(&target_name_count) {
+        return Err(ParseError::syntax_exit(
             0,
             "PL/pgSQL assignment name count must be between 1 and 3",
         ));
@@ -26,16 +31,14 @@ pub(super) fn parse_assignment(sql: &str, nnames: i32) -> PResult<RawStmt> {
         parser.expect(TokenKind::Char('='))?;
     }
 
-    let val = Some(Box::new(parse_expression_select(&mut parser)?));
+    let assignment_value = Some(Box::new(parse_expression_select(&mut parser)?));
 
     Ok(RawStmt {
-        node_tag: NodeTag::RawStmt,
-        stmt: Some(Box::new(Node::PlAssignStmt(PlAssignStmt {
-            node_tag: NodeTag::PlAssignStmt,
+        stmt: Some(Box::new(node!(PlAssignStmt {
             name: Some(name),
             indirection,
-            nnames,
-            val,
+            nnames: target_name_count,
+            val: assignment_value,
             location: location as ParseLoc,
         }))),
         stmt_location: location as ParseLoc,
@@ -48,7 +51,6 @@ pub(super) fn parse_expression(sql: &str) -> PResult<RawStmt> {
     let location = parser.location();
     let select = parse_expression_select(&mut parser)?;
     Ok(RawStmt {
-        node_tag: NodeTag::RawStmt,
         stmt: Some(Box::new(Node::SelectStmt(select))),
         stmt_location: location as ParseLoc,
         stmt_len: 0,
@@ -57,9 +59,7 @@ pub(super) fn parse_expression(sql: &str) -> PResult<RawStmt> {
 
 fn parse_expression_select(parser: &mut Parser) -> PResult<SelectStmt> {
     let mut tokens = parser.take_until_top_level(&[TokenKind::Eof]);
-    let location = tokens
-        .first()
-        .map_or_else(|| parser.location(), |token| token.location());
+    let location = tokens.first().location_or_else(|| parser.location());
     tokens.insert(0, Token::synthetic(TokenKind::Select, location));
     match parse_statement_node_tokens(tokens)? {
         Node::SelectStmt(select) => Ok(select),

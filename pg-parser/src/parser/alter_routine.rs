@@ -1,3 +1,8 @@
+//! Routine alteration and routine-scoped setting actions.
+//!
+//! Function, procedure, routine, and aggregate identities feed a common action
+//! parser without erasing their distinct object types.
+
 use super::*;
 
 impl Parser {
@@ -31,23 +36,23 @@ impl Parser {
             }
             _ => ObjectType::Function,
         };
-        let action_starts = Self::alter_function_action_starts();
-        let func = Some(Box::new(self.parse_object_with_args_until(&action_starts)?));
+        let func = Some(Box::new(
+            self.parse_routine_with_args_with_slot(object_type_slot(objtype))?,
+        ));
         let actions = self.parse_alter_function_actions()?;
         if actions.is_empty() {
             return Err(self.error_here("ALTER FUNCTION requires at least one option"));
         }
         self.consume(TokenKind::Restrict);
         self.expect_statement_end()?;
-        Ok(Node::AlterFunctionStmt(AlterFunctionStmt {
-            node_tag: NodeTag::AlterFunctionStmt,
+        Ok(node!(AlterFunctionStmt {
             objtype,
             func,
             actions,
         }))
     }
 
-    fn alter_function_action_starts() -> [TokenKind; 19] {
+    fn alter_function_action_starts() -> [TokenKind; 23] {
         [
             TokenKind::Called,
             TokenKind::Returns,
@@ -65,6 +70,10 @@ impl Parser {
             TokenKind::Set,
             TokenKind::Reset,
             TokenKind::Parallel,
+            TokenKind::Rename,
+            TokenKind::Owner,
+            TokenKind::Depends,
+            TokenKind::No,
             TokenKind::Restrict,
             TokenKind::Char(';'),
             TokenKind::Eof,
@@ -74,6 +83,31 @@ impl Parser {
     fn parse_alter_function_actions(&mut self) -> PResult<NodeList> {
         let mut actions = Vec::new();
         while !self.at_any(&[TokenKind::Restrict, TokenKind::Char(';'), TokenKind::Eof]) {
+            self.record_completion_tokens(&[
+                TokenKind::Called,
+                TokenKind::Returns,
+                TokenKind::StrictP,
+                TokenKind::Immutable,
+                TokenKind::Stable,
+                TokenKind::Volatile,
+                TokenKind::External,
+                TokenKind::Security,
+                TokenKind::Leakproof,
+                TokenKind::Not,
+                TokenKind::Cost,
+                TokenKind::Rows,
+                TokenKind::Support,
+                TokenKind::Set,
+                TokenKind::Reset,
+                TokenKind::Parallel,
+                TokenKind::Rename,
+                TokenKind::Owner,
+                TokenKind::Depends,
+                TokenKind::No,
+            ]);
+            if !actions.is_empty() {
+                self.record_completion_tokens(&[TokenKind::Restrict, TokenKind::Char(';')]);
+            }
             let location = self.location();
             let (name, arg) = match self.peek_kind() {
                 TokenKind::Called => {
@@ -81,7 +115,7 @@ impl Parser {
                     self.expect(TokenKind::On)?;
                     self.expect(TokenKind::NullP)?;
                     self.expect(TokenKind::InputP)?;
-                    ("strict", Some(Node::Boolean(Boolean::new(false))))
+                    ("strict", Some(node!(Boolean::new(false))))
                 }
                 TokenKind::Returns => {
                     self.advance();
@@ -89,11 +123,11 @@ impl Parser {
                     self.expect(TokenKind::On)?;
                     self.expect(TokenKind::NullP)?;
                     self.expect(TokenKind::InputP)?;
-                    ("strict", Some(Node::Boolean(Boolean::new(true))))
+                    ("strict", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::StrictP => {
                     self.advance();
-                    ("strict", Some(Node::Boolean(Boolean::new(true))))
+                    ("strict", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::Immutable | TokenKind::Stable | TokenKind::Volatile => {
                     let value = match self.advance().kind {
@@ -108,21 +142,21 @@ impl Parser {
                     self.advance();
                     self.expect(TokenKind::Security)?;
                     let value = self.parse_routine_security()?;
-                    ("security", Some(Node::Boolean(Boolean::new(value))))
+                    ("security", Some(node!(Boolean::new(value))))
                 }
                 TokenKind::Security => {
                     self.advance();
                     let value = self.parse_routine_security()?;
-                    ("security", Some(Node::Boolean(Boolean::new(value))))
+                    ("security", Some(node!(Boolean::new(value))))
                 }
                 TokenKind::Leakproof => {
                     self.advance();
-                    ("leakproof", Some(Node::Boolean(Boolean::new(true))))
+                    ("leakproof", Some(node!(Boolean::new(true))))
                 }
                 TokenKind::Not => {
                     self.advance();
                     self.expect(TokenKind::Leakproof)?;
-                    ("leakproof", Some(Node::Boolean(Boolean::new(false))))
+                    ("leakproof", Some(node!(Boolean::new(false))))
                 }
                 TokenKind::Cost => {
                     self.advance();
@@ -134,8 +168,8 @@ impl Parser {
                 }
                 TokenKind::Support => {
                     self.advance();
-                    let names =
-                        self.parse_name_list_until_keywords(&Self::alter_function_action_starts());
+                    self.record_completion_slot(GrammarSlot::Function);
+                    let names = self.parse_name_list();
                     if names.is_empty() {
                         return Err(self.error_here("SUPPORT requires a function name"));
                     }
@@ -153,6 +187,11 @@ impl Parser {
                         .ok_or_else(|| self.error_here("PARALLEL requires a mode"))?;
                     ("parallel", Some(make_string_node(value)))
                 }
+                TokenKind::No => {
+                    self.advance();
+                    self.expect(TokenKind::Depends)?;
+                    return Err(self.error_here("NO DEPENDS is handled by generic ALTER"));
+                }
                 _ => return Err(self.error_here("invalid ALTER FUNCTION option")),
             };
             actions.push(make_def_elem(name, arg, location));
@@ -161,6 +200,7 @@ impl Parser {
     }
 
     fn parse_routine_security(&mut self) -> PResult<bool> {
+        self.record_completion_tokens(&[TokenKind::Definer, TokenKind::Invoker]);
         match self.peek_kind() {
             TokenKind::Definer => {
                 self.advance();
@@ -215,7 +255,6 @@ impl Parser {
                 ),
             };
             return Ok(VariableSetStmt {
-                node_tag: NodeTag::VariableSetStmt,
                 kind,
                 name,
                 location: -1,
@@ -224,7 +263,6 @@ impl Parser {
         }
         self.expect(TokenKind::Set)?;
         let mut stmt = VariableSetStmt {
-            node_tag: NodeTag::VariableSetStmt,
             kind: VariableSetKind::SetValue,
             location: -1,
             ..VariableSetStmt::default()
@@ -244,10 +282,11 @@ impl Parser {
         if self.consume(TokenKind::CatalogP) {
             return Err(self.error_here("current database cannot be changed"));
         }
-        if self.consume(TokenKind::Schema) {
+        if self.at(TokenKind::Schema) && self.peek_kind_n(1) == TokenKind::SConst {
+            self.advance();
             stmt.name = Some("search_path".to_owned());
             let value = self.consume_required_string("SET SCHEMA requires a string")?;
-            stmt.args = vec![Node::AConst(AConst::string(
+            stmt.args = vec![node!(AConst::string(
                 value,
                 self.previous_location() as ParseLoc,
             ))];
@@ -265,7 +304,7 @@ impl Parser {
                 let value = self
                     .consume_string_like()
                     .ok_or_else(|| self.error_here("SET NAMES requires an encoding"))?;
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     value,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -275,10 +314,11 @@ impl Parser {
         }
         if self.consume(TokenKind::Role) {
             stmt.name = Some("role".to_owned());
+            self.record_completion_slot(GrammarSlot::Role);
             let value = self
                 .consume_string_like()
                 .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
-            stmt.args = vec![Node::AConst(AConst::string(
+            stmt.args = vec![node!(AConst::string(
                 value,
                 self.previous_location() as ParseLoc,
             ))];
@@ -294,7 +334,7 @@ impl Parser {
                 let value = self
                     .consume_string_like()
                     .ok_or_else(|| self.error_here("SET SESSION AUTHORIZATION requires a role"))?;
-                stmt.args = vec![Node::AConst(AConst::string(
+                stmt.args = vec![node!(AConst::string(
                     value,
                     self.previous_location() as ParseLoc,
                 ))];
@@ -311,7 +351,7 @@ impl Parser {
                 ("CONTENT", self.previous_location() as ParseLoc)
             };
             stmt.name = Some("xmloption".to_owned());
-            stmt.args = vec![Node::AConst(AConst::string(value, value_location))];
+            stmt.args = vec![node!(AConst::string(value, value_location))];
             stmt.jumble_args = true;
             return Ok(stmt);
         }
@@ -320,7 +360,7 @@ impl Parser {
             stmt.kind = VariableSetKind::SetMulti;
             stmt.name = Some("TRANSACTION SNAPSHOT".to_owned());
             let value = self.consume_required_string("TRANSACTION SNAPSHOT requires a string")?;
-            stmt.args = vec![Node::AConst(AConst::string(
+            stmt.args = vec![node!(AConst::string(
                 value,
                 self.previous_location() as ParseLoc,
             ))];
@@ -331,10 +371,10 @@ impl Parser {
             self.consume_setting_name()
                 .ok_or_else(|| self.error_here("SET requires a parameter name"))?,
         );
+        self.record_completion_tokens(&[TokenKind::To, TokenKind::Char('=')]);
         if self.consume(TokenKind::From) {
             self.expect(TokenKind::CurrentP)?;
             return Ok(VariableSetStmt {
-                node_tag: NodeTag::VariableSetStmt,
                 kind: VariableSetKind::SetCurrent,
                 name,
                 location: -1,
@@ -350,20 +390,17 @@ impl Parser {
         } else if self.consume(TokenKind::NullP) {
             (
                 VariableSetKind::SetValue,
-                vec![Node::AConst(AConst::null(
-                    self.previous_location() as ParseLoc
-                ))],
+                vec![node!(AConst::null(self.previous_location() as ParseLoc))],
                 value_location,
             )
         } else {
-            let args = self.parse_setting_value_list_until(stops)?;
+            let args = self.parse_function_setting_value_list()?;
             if args.is_empty() {
                 return Err(self.error_here("SET parameter requires a value"));
             }
             (VariableSetKind::SetValue, args, value_location)
         };
         Ok(VariableSetStmt {
-            node_tag: NodeTag::VariableSetStmt,
             kind,
             name,
             args,
@@ -372,17 +409,37 @@ impl Parser {
         })
     }
 
-    fn parse_setting_value_list_until(&mut self, stops: &[TokenKind]) -> PResult<NodeList> {
+    fn parse_function_setting_value_list(&mut self) -> PResult<NodeList> {
         let mut args = Vec::new();
         loop {
-            let chunk_stops = extend_stops(stops, TokenKind::Char(','));
-            let tokens = self.take_until_top_level(&chunk_stops);
-            args.push(parse_setting_value_tokens(tokens)?);
+            if self.at_completion() {
+                self.record_completion_tokens(&[TokenKind::Default]);
+                self.record_completion_slot(GrammarSlot::AnyName);
+            }
+            let value_start = self.pos;
+            match self.peek_kind() {
+                TokenKind::Char('+') | TokenKind::Char('-')
+                    if matches!(self.peek_kind_n(1), TokenKind::IConst | TokenKind::FConst) =>
+                {
+                    self.advance();
+                    self.advance();
+                }
+                TokenKind::IConst
+                | TokenKind::FConst
+                | TokenKind::SConst
+                | TokenKind::TrueP
+                | TokenKind::FalseP
+                | TokenKind::On => {
+                    self.advance();
+                }
+                _ if self.consume_non_reserved_word().is_some() => {}
+                _ => return Err(self.error_here("SET requires a value")),
+            }
+            args.push(parse_setting_value_tokens(
+                self.tokens[value_start..self.pos].to_vec(),
+            )?);
             if !self.consume(TokenKind::Char(',')) {
                 break;
-            }
-            if self.at_any(stops) {
-                return Err(self.error_here("expected a SET value after ','"));
             }
         }
         Ok(args)

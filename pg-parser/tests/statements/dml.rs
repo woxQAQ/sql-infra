@@ -1,7 +1,10 @@
-use pg_parser::{
-    CmdType, LockClauseStrength, MergeMatchKind, Node, OnConflictAction, OverridingKind,
-    ReturningOptionKind,
-};
+use pg_parser::CmdType;
+use pg_parser::LockClauseStrength;
+use pg_parser::MergeMatchKind;
+use pg_parser::Node;
+use pg_parser::OnConflictAction;
+use pg_parser::OverridingKind;
+use pg_parser::ReturningOptionKind;
 
 use super::common::parse_statement;
 

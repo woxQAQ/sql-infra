@@ -1,3 +1,8 @@
+//! General `ALTER TABLE` parsing and `AlterTableCmd` construction.
+//!
+//! Command-family dispatch lives here; partition-specific actions are delegated
+//! to `alter_table_partition` so the common command sequence stays visible.
+
 use super::*;
 
 impl Parser {
@@ -23,6 +28,7 @@ impl Parser {
         self.expect(TokenKind::All)?;
         self.expect(TokenKind::InP)?;
         self.expect(TokenKind::Tablespace)?;
+        self.record_completion_slot(GrammarSlot::Tablespace);
         let orig_tablespacename = self
             .consume_col_id()
             .ok_or_else(|| self.error_here("expected the source tablespace name"))?;
@@ -41,12 +47,12 @@ impl Parser {
         }
         self.expect(TokenKind::Set)?;
         self.expect(TokenKind::Tablespace)?;
+        self.record_completion_slot(GrammarSlot::Tablespace);
         let new_tablespacename = self
             .consume_col_id()
             .ok_or_else(|| self.error_here("expected the destination tablespace name"))?;
         let nowait = self.consume(TokenKind::Nowait);
-        Ok(Node::AlterTableMoveAllStmt(AlterTableMoveAllStmt {
-            node_tag: NodeTag::AlterTableMoveAllStmt,
+        Ok(node!(AlterTableMoveAllStmt {
             orig_tablespacename: Some(orig_tablespacename),
             objtype,
             roles,
@@ -57,12 +63,18 @@ impl Parser {
 
     pub(super) fn parse_alter_table_after_kind(&mut self, objtype: ObjectType) -> PResult<Node> {
         let missing_ok = self.consume_if_exists()?;
-        let relation = Some(Box::new(self.try_parse_qualified_range_var().ok_or_else(
-            || self.error_here("ALTER relation requires a relation name"),
-        )?));
+        let slot = object_type_slot(objtype);
+        let owner_start = self.pos;
+        let relation = Some(Box::new(self.parse_relation_expr_with_slot(slot)?));
+        let owner_end = self.pos;
+        self.push_completion_membership_owner_from_tokens(
+            &[GrammarSlot::Column, GrammarSlot::Constraint],
+            &[objtype],
+            owner_start,
+            owner_end,
+        );
         let cmds = self.parse_alter_table_cmds(objtype)?;
-        Ok(Node::AlterTableStmt(AlterTableStmt {
-            node_tag: NodeTag::AlterTableStmt,
+        Ok(node!(AlterTableStmt {
             relation,
             cmds,
             objtype,
@@ -92,7 +104,6 @@ impl Parser {
         self.expect(TokenKind::AddP)?;
         self.consume(TokenKind::Column);
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
         if self.at(TokenKind::Constraint)
@@ -107,12 +118,12 @@ impl Parser {
         } else {
             cmd.subtype = AlterTableType::AddColumn;
             cmd.missing_ok = self.consume_if_not_exists()?;
-            let tokens = self.take_until_top_level(&[
-                TokenKind::Char(','),
-                TokenKind::Char(';'),
-                TokenKind::Eof,
-            ]);
-            let Node::ColumnDef(column) = parse_table_element_tokens(tokens)? else {
+            let mut tokens = self.take_until_top_level(COMMA_OR_STATEMENT_END_TOKENS);
+            self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(';')]);
+            self.append_completion_marker(&mut tokens);
+            let Node::ColumnDef(column) =
+                parse_table_element_tokens_with_completion(tokens, self.completion.clone())?
+            else {
                 return Err(self.error_here("ADD COLUMN requires a column definition"));
             };
             cmd.def = Some(Box::new(Node::ColumnDef(column)));
@@ -123,15 +134,17 @@ impl Parser {
     fn parse_alter_table_drop_cmd(&mut self) -> PResult<AlterTableCmd> {
         self.expect(TokenKind::Drop)?;
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
         if self.consume(TokenKind::Column) {
             cmd.subtype = AlterTableType::DropColumn;
+            self.record_completion_slot(GrammarSlot::Column);
         } else if self.consume(TokenKind::Constraint) {
             cmd.subtype = AlterTableType::DropConstraint;
+            self.record_completion_slot(GrammarSlot::Constraint);
         } else {
             cmd.subtype = AlterTableType::DropColumn;
+            self.record_completion_slot(GrammarSlot::Column);
         }
         cmd.missing_ok = self.consume_if_exists()?;
         cmd.name = Some(
@@ -144,14 +157,23 @@ impl Parser {
 
     fn parse_alter_table_set_cmd(&mut self) -> PResult<AlterTableCmd> {
         self.expect(TokenKind::Set)?;
+        self.record_completion_tokens(&[
+            TokenKind::Schema,
+            TokenKind::Tablespace,
+            TokenKind::Logged,
+            TokenKind::Unlogged,
+            TokenKind::Access,
+            TokenKind::Without,
+            TokenKind::Char('('),
+        ]);
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
         match self.peek_kind() {
             TokenKind::Tablespace => {
                 self.advance();
                 cmd.subtype = AlterTableType::SetTableSpace;
+                self.record_completion_slot(GrammarSlot::Tablespace);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("SET TABLESPACE requires a name"))?,
@@ -170,6 +192,7 @@ impl Parser {
                 self.expect(TokenKind::Method)?;
                 cmd.subtype = AlterTableType::SetAccessMethod;
                 if !self.consume(TokenKind::Default) {
+                    self.record_completion_slot(GrammarSlot::AccessMethod);
                     cmd.name = Some(self.consume_col_id().ok_or_else(|| {
                         self.error_here("SET ACCESS METHOD requires a method name or DEFAULT")
                     })?);
@@ -186,8 +209,7 @@ impl Parser {
             }
             TokenKind::Char('(') => {
                 cmd.subtype = AlterTableType::SetRelOptions;
-                cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                    node_tag: NodeTag::AArrayExpr,
+                cmd.def = Some(Box::new(node!(AArrayExpr {
                     elements: self.parse_parenthesized_reloptions()?,
                     ..AArrayExpr::default()
                 })));
@@ -200,10 +222,8 @@ impl Parser {
     fn parse_alter_table_reset_cmd(&mut self) -> PResult<AlterTableCmd> {
         self.expect(TokenKind::Reset)?;
         Ok(AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             subtype: AlterTableType::ResetRelOptions,
-            def: Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                node_tag: NodeTag::AArrayExpr,
+            def: Some(Box::new(node!(AArrayExpr {
                 elements: self.parse_parenthesized_reloptions()?,
                 ..AArrayExpr::default()
             }))),
@@ -213,6 +233,13 @@ impl Parser {
 
     fn parse_alter_table_enable_cmd(&mut self) -> PResult<AlterTableCmd> {
         self.expect(TokenKind::EnableP)?;
+        self.record_completion_tokens(&[
+            TokenKind::Always,
+            TokenKind::Replica,
+            TokenKind::Trigger,
+            TokenKind::Rule,
+            TokenKind::Row,
+        ]);
         let qualifier = if self.consume(TokenKind::Always) {
             Some(TokenKind::Always)
         } else if self.consume(TokenKind::Replica) {
@@ -221,9 +248,9 @@ impl Parser {
             None
         };
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
+        self.record_completion_tokens(&[TokenKind::Trigger, TokenKind::Rule, TokenKind::Row]);
         match self.peek_kind() {
             TokenKind::Trigger => {
                 self.advance();
@@ -242,6 +269,7 @@ impl Parser {
                         Some(TokenKind::Replica) => AlterTableType::EnableReplicaTrig,
                         _ => AlterTableType::EnableTrig,
                     };
+                    self.record_completion_slot(GrammarSlot::Trigger);
                     cmd.name = Some(self.consume_col_id().ok_or_else(|| {
                         self.error_here("ENABLE TRIGGER requires a trigger name")
                     })?);
@@ -254,6 +282,7 @@ impl Parser {
                     Some(TokenKind::Replica) => AlterTableType::EnableReplicaRule,
                     _ => AlterTableType::EnableRule,
                 };
+                self.record_completion_slot(GrammarSlot::Rule);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("ENABLE RULE requires a rule name"))?,
@@ -275,7 +304,6 @@ impl Parser {
     fn parse_alter_table_disable_cmd(&mut self) -> PResult<AlterTableCmd> {
         self.expect(TokenKind::DisableP)?;
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
         match self.peek_kind() {
@@ -292,6 +320,7 @@ impl Parser {
                     }
                     _ => {
                         cmd.subtype = AlterTableType::DisableTrig;
+                        self.record_completion_slot(GrammarSlot::Trigger);
                         cmd.name = Some(self.consume_col_id().ok_or_else(|| {
                             self.error_here("DISABLE TRIGGER requires a trigger name")
                         })?);
@@ -301,6 +330,7 @@ impl Parser {
             TokenKind::Rule => {
                 self.advance();
                 cmd.subtype = AlterTableType::DisableRule;
+                self.record_completion_slot(GrammarSlot::Rule);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("DISABLE RULE requires a rule name"))?,
@@ -322,8 +352,34 @@ impl Parser {
     }
 
     fn parse_alter_table_cmd(&mut self, objtype: ObjectType) -> PResult<AlterTableCmd> {
+        self.record_completion_tokens(&[
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Alter,
+            TokenKind::Set,
+            TokenKind::Reset,
+            TokenKind::Validate,
+            TokenKind::EnableP,
+            TokenKind::DisableP,
+            TokenKind::Cluster,
+            TokenKind::Replica,
+            TokenKind::Owner,
+            TokenKind::Attach,
+            TokenKind::Detach,
+            TokenKind::Split,
+            TokenKind::Merge,
+            TokenKind::Inherit,
+            TokenKind::No,
+            TokenKind::Of,
+            TokenKind::Not,
+            TokenKind::Force,
+            TokenKind::Options,
+            TokenKind::Rename,
+        ]);
+        if matches!(objtype, ObjectType::Index | ObjectType::Matview) {
+            self.record_completion_tokens(&[TokenKind::Depends]);
+        }
         let mut cmd = AlterTableCmd {
-            node_tag: NodeTag::AlterTableCmd,
             ..AlterTableCmd::default()
         };
         match self.peek_kind() {
@@ -332,11 +388,11 @@ impl Parser {
             TokenKind::Alter => {
                 self.advance();
                 if self.consume(TokenKind::Constraint) {
+                    self.record_completion_slot(GrammarSlot::Constraint);
                     let conname = Some(self.consume_col_id().ok_or_else(|| {
                         self.error_here("ALTER CONSTRAINT requires a constraint name")
                     })?);
                     let mut altered = AtAlterConstraint {
-                        node_tag: NodeTag::AtAlterConstraint,
                         conname,
                         ..AtAlterConstraint::default()
                     };
@@ -344,11 +400,15 @@ impl Parser {
                         altered.alter_inheritability = true;
                     } else {
                         let mut saw_attribute = false;
-                        while !self.at_any(&[
-                            TokenKind::Char(','),
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ]) {
+                        while !self.at_any(COMMA_OR_STATEMENT_END_TOKENS) {
+                            self.record_completion_tokens(&[
+                                TokenKind::Deferrable,
+                                TokenKind::Initially,
+                                TokenKind::Enforced,
+                                TokenKind::Not,
+                                TokenKind::No,
+                                TokenKind::Inherit,
+                            ]);
                             match self.peek_kind() {
                                 TokenKind::Deferrable => {
                                     self.advance();
@@ -358,12 +418,7 @@ impl Parser {
                                 TokenKind::Initially => {
                                     self.advance();
                                     altered.alter_deferrability = true;
-                                    altered.initdeferred = if self.consume(TokenKind::Deferred) {
-                                        true
-                                    } else {
-                                        self.expect(TokenKind::Immediate)?;
-                                        false
-                                    };
+                                    altered.initdeferred = self.parse_deferred_or_immediate()?;
                                 }
                                 TokenKind::Enforced => {
                                     self.advance();
@@ -372,6 +427,10 @@ impl Parser {
                                 }
                                 TokenKind::Not => {
                                     self.advance();
+                                    self.record_completion_tokens(&[
+                                        TokenKind::Deferrable,
+                                        TokenKind::Enforced,
+                                    ]);
                                     match self.peek_kind() {
                                         TokenKind::Deferrable => {
                                             self.advance();
@@ -434,6 +493,7 @@ impl Parser {
                     }
                     cmd.num = value as i16;
                 } else {
+                    self.record_completion_slot(GrammarSlot::Column);
                     cmd.name =
                         Some(self.consume_col_id().ok_or_else(|| {
                             self.error_here("ALTER COLUMN requires a column name")
@@ -442,12 +502,7 @@ impl Parser {
 
                 let saw_set = self.consume(TokenKind::Set);
                 let set_data_type = if saw_set {
-                    if self.consume(TokenKind::DataP) {
-                        self.expect(TokenKind::TypeP)?;
-                        true
-                    } else {
-                        false
-                    }
+                    self.consume_phrase(&[TokenKind::DataP, TokenKind::TypeP])?
                 } else {
                     false
                 };
@@ -468,13 +523,13 @@ impl Parser {
                         ])
                         .ok_or_else(|| self.error_here("ALTER COLUMN TYPE requires a type"))?;
                     let coll_clause = if self.consume(TokenKind::Collate) {
+                        self.record_completion_slot(GrammarSlot::Collation);
                         let location = self.previous_location();
                         let collname = self.parse_name_list();
                         if collname.is_empty() {
                             return Err(self.error_here("COLLATE requires a collation name"));
                         }
                         Some(Box::new(CollateClause {
-                            node_tag: NodeTag::CollateClause,
                             collname,
                             location: location as ParseLoc,
                             ..CollateClause::default()
@@ -482,17 +537,11 @@ impl Parser {
                     } else {
                         None
                     };
-                    let raw_default = if self.consume(TokenKind::Using) {
-                        Some(self.parse_expr_box_strict_until(&[
-                            TokenKind::Char(','),
-                            TokenKind::Char(';'),
-                            TokenKind::Eof,
-                        ])?)
-                    } else {
-                        None
-                    };
-                    cmd.def = Some(Box::new(Node::ColumnDef(ColumnDef {
-                        node_tag: NodeTag::ColumnDef,
+                    let raw_default = self.parse_optional_expr_clause(
+                        TokenKind::Using,
+                        COMMA_OR_STATEMENT_END_TOKENS,
+                    )?;
+                    cmd.def = Some(Box::new(node!(ColumnDef {
                         type_name: Some(Box::new(type_name)),
                         coll_clause,
                         raw_default,
@@ -500,6 +549,25 @@ impl Parser {
                         ..ColumnDef::default()
                     })));
                 } else if saw_set {
+                    self.record_completion_tokens(&[
+                        TokenKind::Default,
+                        TokenKind::Not,
+                        TokenKind::Expression,
+                        TokenKind::Statistics,
+                        TokenKind::Char('('),
+                        TokenKind::Storage,
+                        TokenKind::Compression,
+                        TokenKind::Generated,
+                        TokenKind::Cache,
+                        TokenKind::Cycle,
+                        TokenKind::Increment,
+                        TokenKind::Logged,
+                        TokenKind::Maxvalue,
+                        TokenKind::Minvalue,
+                        TokenKind::No,
+                        TokenKind::Start,
+                        TokenKind::Unlogged,
+                    ]);
                     match self.peek_kind() {
                         TokenKind::Default => {
                             self.advance();
@@ -509,11 +577,9 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::ColumnDefault;
-                            cmd.def = Some(self.parse_expr_box_strict_until(&[
-                                TokenKind::Char(','),
-                                TokenKind::Char(';'),
-                                TokenKind::Eof,
-                            ])?);
+                            cmd.def = Some(
+                                self.parse_expr_box_strict_until(COMMA_OR_STATEMENT_END_TOKENS)?,
+                            );
                         }
                         TokenKind::Not => {
                             self.advance();
@@ -553,8 +619,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::SetOptions;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                                node_tag: NodeTag::AArrayExpr,
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_parenthesized_reloptions()?,
                                 ..AArrayExpr::default()
                             })));
@@ -610,11 +675,10 @@ impl Parser {
                                 );
                             };
                             cmd.subtype = AlterTableType::SetIdentity;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                                node_tag: NodeTag::AArrayExpr,
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: vec![make_def_elem(
                                     "generated",
-                                    Some(Node::Integer(Integer::new(i32::from(generated_when)))),
+                                    Some(node!(Integer::new(i32::from(generated_when)))),
                                     self.previous_location(),
                                 )],
                                 ..AArrayExpr::default()
@@ -635,8 +699,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::SetIdentity;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                                node_tag: NodeTag::AArrayExpr,
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_sequence_options()?,
                                 ..AArrayExpr::default()
                             })));
@@ -646,6 +709,13 @@ impl Parser {
                         }
                     }
                 } else {
+                    self.record_completion_tokens(&[
+                        TokenKind::AddP,
+                        TokenKind::Restart,
+                        TokenKind::Reset,
+                        TokenKind::Drop,
+                        TokenKind::Options,
+                    ]);
                     match self.peek_kind() {
                         TokenKind::AddP => {
                             self.advance();
@@ -674,8 +744,7 @@ impl Parser {
                                 Vec::new()
                             };
                             cmd.subtype = AlterTableType::AddIdentity;
-                            cmd.def = Some(Box::new(Node::Constraint(Constraint {
-                                node_tag: NodeTag::Constraint,
+                            cmd.def = Some(Box::new(node!(Constraint {
                                 contype: ConstrType::Identity,
                                 generated_when,
                                 options,
@@ -690,8 +759,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::SetIdentity;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                                node_tag: NodeTag::AArrayExpr,
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_sequence_options()?,
                                 ..AArrayExpr::default()
                             })));
@@ -704,8 +772,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::ResetOptions;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                                node_tag: NodeTag::AArrayExpr,
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_parenthesized_reloptions()?,
                                 ..AArrayExpr::default()
                             })));
@@ -717,6 +784,12 @@ impl Parser {
                                     "column numbers are only valid with SET STATISTICS",
                                 ));
                             }
+                            self.record_completion_tokens(&[
+                                TokenKind::Default,
+                                TokenKind::Not,
+                                TokenKind::Expression,
+                                TokenKind::IdentityP,
+                            ]);
                             match self.peek_kind() {
                                 TokenKind::Default => {
                                     self.advance();
@@ -751,8 +824,7 @@ impl Parser {
                                 ));
                             }
                             cmd.subtype = AlterTableType::AlterColumnGenericOptions;
-                            cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                                node_tag: NodeTag::AArrayExpr,
+                            cmd.def = Some(Box::new(node!(AArrayExpr {
                                 elements: self.parse_alter_generic_options()?,
                                 ..AArrayExpr::default()
                             })));
@@ -769,6 +841,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::Constraint)?;
                 cmd.subtype = AlterTableType::ValidateConstraint;
+                self.record_completion_slot(GrammarSlot::Constraint);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("VALIDATE CONSTRAINT requires a name"))?,
@@ -780,6 +853,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::On)?;
                 cmd.subtype = AlterTableType::ClusterOn;
+                self.record_completion_slot(GrammarSlot::Index);
                 cmd.name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("CLUSTER ON requires an index name"))?,
@@ -788,6 +862,12 @@ impl Parser {
             TokenKind::Replica => {
                 self.advance();
                 self.expect(TokenKind::IdentityP)?;
+                self.record_completion_tokens(&[
+                    TokenKind::Nothing,
+                    TokenKind::Full,
+                    TokenKind::Default,
+                    TokenKind::Using,
+                ]);
                 let (identity_type, name) = match self.peek_kind() {
                     TokenKind::Nothing => {
                         self.advance();
@@ -804,6 +884,7 @@ impl Parser {
                     TokenKind::Using => {
                         self.advance();
                         self.expect(TokenKind::Index)?;
+                        self.record_completion_slot(GrammarSlot::Index);
                         (
                             b'i',
                             Some(self.consume_col_id().ok_or_else(|| {
@@ -820,8 +901,7 @@ impl Parser {
                     }
                 };
                 cmd.subtype = AlterTableType::ReplicaIdentity;
-                cmd.def = Some(Box::new(Node::ReplicaIdentityStmt(ReplicaIdentityStmt {
-                    node_tag: NodeTag::ReplicaIdentityStmt,
+                cmd.def = Some(Box::new(node!(ReplicaIdentityStmt {
                     identity_type,
                     name,
                 })));
@@ -830,6 +910,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::To)?;
                 cmd.subtype = AlterTableType::ChangeOwner;
+                self.record_completion_slot(GrammarSlot::Role);
                 cmd.newowner =
                     Some(Box::new(self.consume_role_spec().ok_or_else(|| {
                         self.error_here("OWNER TO requires a role")
@@ -842,16 +923,19 @@ impl Parser {
                 self.advance();
                 cmd.subtype = AlterTableType::AddInherit;
                 cmd.def = Some(Box::new(Node::RangeVar(
-                    self.try_parse_qualified_range_var()
+                    self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                         .ok_or_else(|| self.error_here("INHERIT requires a parent table"))?,
                 )));
             }
             TokenKind::No => {
                 self.advance();
+                if matches!(objtype, ObjectType::Index | ObjectType::Matview) {
+                    self.record_completion_tokens(&[TokenKind::Depends]);
+                }
                 if self.consume(TokenKind::Inherit) {
                     cmd.subtype = AlterTableType::DropInherit;
                     cmd.def = Some(Box::new(Node::RangeVar(
-                        self.try_parse_qualified_range_var()
+                        self.try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                             .ok_or_else(|| self.error_here("NO INHERIT requires a parent table"))?,
                     )));
                 } else if self.consume(TokenKind::Force) {
@@ -865,13 +949,13 @@ impl Parser {
             }
             TokenKind::Of => {
                 let location = self.advance().location();
+                self.record_completion_slot(GrammarSlot::Type);
                 let names = self.parse_name_list();
                 if names.is_empty() {
                     return Err(self.error_here("OF requires a type name"));
                 }
                 cmd.subtype = AlterTableType::AddOf;
-                cmd.def = Some(Box::new(Node::TypeName(TypeName {
-                    node_tag: NodeTag::TypeName,
+                cmd.def = Some(Box::new(node!(TypeName {
                     names,
                     location: location as ParseLoc,
                     ..TypeName::default()
@@ -891,8 +975,7 @@ impl Parser {
             }
             TokenKind::Options => {
                 cmd.subtype = AlterTableType::GenericOptions;
-                cmd.def = Some(Box::new(Node::AArrayExpr(AArrayExpr {
-                    node_tag: NodeTag::AArrayExpr,
+                cmd.def = Some(Box::new(node!(AArrayExpr {
                     elements: self.parse_alter_generic_options()?,
                     ..AArrayExpr::default()
                 })));
@@ -904,7 +987,8 @@ impl Parser {
                 )));
             }
         }
-        if !self.at_any(&[TokenKind::Char(','), TokenKind::Char(';'), TokenKind::Eof]) {
+        self.record_completion_tokens(&[TokenKind::Char(','), TokenKind::Char(';')]);
+        if !self.at_completion() && !self.at_any(COMMA_OR_STATEMENT_END_TOKENS) {
             return Err(self.error_here("unexpected token after ALTER TABLE command"));
         }
         Ok(cmd)

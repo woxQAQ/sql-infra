@@ -1,8 +1,51 @@
+//! Top-level and object-specific `DROP` statement parsing.
+//!
+//! Shared behavior and missing-object options are combined with identity grammars
+//! for functions, operators, mappings, and other special object families.
+
 use super::*;
 
 impl Parser {
     pub(super) fn parse_drop(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Drop)?;
+        self.record_completion_tokens(&[
+            TokenKind::Access,
+            TokenKind::Database,
+            TokenKind::Cast,
+            TokenKind::Transform,
+            TokenKind::Operator,
+            TokenKind::User,
+            TokenKind::Role,
+            TokenKind::GroupP,
+            TokenKind::Owned,
+            TokenKind::Tablespace,
+            TokenKind::Subscription,
+            TokenKind::Table,
+            TokenKind::Sequence,
+            TokenKind::View,
+            TokenKind::Materialized,
+            TokenKind::Index,
+            TokenKind::Schema,
+            TokenKind::TypeP,
+            TokenKind::DomainP,
+            TokenKind::Function,
+            TokenKind::Procedure,
+            TokenKind::Routine,
+            TokenKind::Aggregate,
+            TokenKind::Collation,
+            TokenKind::Extension,
+            TokenKind::Event,
+            TokenKind::Foreign,
+            TokenKind::Language,
+            TokenKind::Policy,
+            TokenKind::Property,
+            TokenKind::Rule,
+            TokenKind::Server,
+            TokenKind::Statistics,
+            TokenKind::TextP,
+            TokenKind::Trigger,
+            TokenKind::Publication,
+        ]);
         match self.peek_kind() {
             TokenKind::Database => self.parse_drop_database(),
             TokenKind::Cast => self.parse_drop_special(ObjectType::Cast),
@@ -53,12 +96,23 @@ impl Parser {
             TokenKind::Char(';'),
             TokenKind::Eof,
         ];
+        let object_slot = object_type_slot(remove_type);
+        self.record_completion_slot(object_slot);
+        if matches!(
+            remove_type,
+            ObjectType::Policy | ObjectType::Rule | ObjectType::Trigger
+        ) {
+            self.record_completion_qualified_name_slot(object_slot, &[TokenKind::On]);
+        } else {
+            self.record_completion_qualified_name_slot(object_slot, &stops);
+        }
         let objects = match remove_type {
             ObjectType::Policy | ObjectType::Rule | ObjectType::Trigger => {
                 let object_name = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("DROP requires an object name"))?;
                 self.expect(TokenKind::On)?;
+                self.record_completion_slot(GrammarSlot::Table);
                 let mut parts = self.consume_name_parts();
                 if parts.is_empty() {
                     return Err(self.error_here("ON requires an object name"));
@@ -71,7 +125,7 @@ impl Parser {
             ObjectType::Operator => self.parse_operator_with_args_list_until(&stops)?,
             ObjectType::Aggregate => self.parse_aggregate_with_args_list_until(&stops)?,
             ObjectType::Function | ObjectType::Procedure | ObjectType::Routine => {
-                self.parse_object_with_args_list_until(&stops)?
+                self.parse_object_with_args_list_until_with_slot(&stops, object_slot)?
             }
             ObjectType::Type | ObjectType::Domain => {
                 parse_type_node_list(self.take_until_top_level(&stops))?
@@ -83,15 +137,16 @@ impl Parser {
             | ObjectType::Language
             | ObjectType::Publication
             | ObjectType::Schema
-            | ObjectType::ForeignServer => self.parse_simple_name_list_until(&stops)?,
-            _ => self.parse_any_name_list_until(&stops)?,
+            | ObjectType::ForeignServer => {
+                self.parse_simple_name_list_until(&stops, object_slot)?
+            }
+            _ => self.parse_any_name_list_until_with_slot(&stops, object_slot)?,
         };
         if objects.is_empty() {
             return Err(self.error_here("DROP requires at least one object name"));
         }
         let behavior = self.parse_drop_behavior();
-        Ok(Node::DropStmt(DropStmt {
-            node_tag: NodeTag::DropStmt,
+        Ok(node!(DropStmt {
             objects,
             remove_type,
             behavior,
@@ -127,6 +182,7 @@ impl Parser {
                 .parse_type_name_until(&[TokenKind::Language])
                 .ok_or_else(|| self.error_here("DROP TRANSFORM FOR requires a type"))?;
             self.expect(TokenKind::Language)?;
+            self.record_completion_slot(GrammarSlot::Language);
             let language = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("LANGUAGE requires a name"))?;
@@ -134,8 +190,7 @@ impl Parser {
         };
         let behavior = self.parse_drop_behavior();
         self.expect_statement_end()?;
-        Ok(Node::DropStmt(DropStmt {
-            node_tag: NodeTag::DropStmt,
+        Ok(node!(DropStmt {
             objects: vec![object],
             remove_type,
             behavior,
@@ -159,20 +214,21 @@ impl Parser {
             self.expect(TokenKind::Family)?;
         }
         let missing_ok = self.consume_if_exists()?;
-        let mut names = self.parse_name_list_until_keywords(&[TokenKind::Using]);
+        let name_stops = [TokenKind::Using];
+        let slot = object_type_slot(remove_type);
+        self.record_completion_slot(slot);
+        self.record_completion_qualified_name_slot(slot, &name_stops);
+        let mut names = self.parse_name_list_until_keywords(&name_stops);
         if names.is_empty() {
             return Err(self.error_here("operator class or family requires a name"));
         }
         self.expect(TokenKind::Using)?;
-        let amname = self
-            .consume_col_id()
-            .ok_or_else(|| self.error_here("USING requires an access method"))?;
+        let amname = self.parse_access_method_name()?;
         names.insert(0, make_string_node(amname));
         let objects = vec![name_list_node(names)];
         let behavior = self.parse_drop_behavior();
         self.expect_statement_end()?;
-        Ok(Node::DropStmt(DropStmt {
-            node_tag: NodeTag::DropStmt,
+        Ok(node!(DropStmt {
             objects,
             remove_type,
             behavior,
@@ -183,24 +239,26 @@ impl Parser {
 
     // PostgreSQL 18 Synopsis
     // Source: https://www.postgresql.org/docs/18/sql-dropusermapping.html
-    // DROP USER MAPPING [ IF EXISTS ] FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | PUBLIC } SERVER server_name
+    // DROP USER MAPPING [ IF EXISTS ] FOR { user_name | USER | CURRENT_ROLE | CURRENT_USER | PUBLIC
+    // } SERVER server_name
     fn parse_drop_user_mapping(&mut self) -> PResult<Node> {
         self.expect(TokenKind::User)?;
         self.expect(TokenKind::Mapping)?;
         let missing_ok = self.consume_if_exists()?;
         self.expect(TokenKind::For)?;
+        self.record_completion_slot(GrammarSlot::Role);
         let user =
             Some(Box::new(self.consume_auth_ident().ok_or_else(|| {
                 self.error_here("DROP USER MAPPING requires a user")
             })?));
         self.expect(TokenKind::Server)?;
+        self.record_completion_slot(GrammarSlot::ForeignServer);
         let servername = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("SERVER requires a name"))?,
         );
         self.expect_statement_end()?;
-        Ok(Node::DropUserMappingStmt(DropUserMappingStmt {
-            node_tag: NodeTag::DropUserMappingStmt,
+        Ok(node!(DropUserMappingStmt {
             user,
             servername,
             missing_ok,

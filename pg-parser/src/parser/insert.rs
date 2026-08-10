@@ -1,3 +1,8 @@
+//! `INSERT` statement parsing and source normalization.
+//!
+//! Column indirection, overriding, selectable sources, conflict handling, aliases,
+//! and returning clauses are assembled into `InsertStmt`.
+
 use super::*;
 
 impl Parser {
@@ -13,8 +18,8 @@ impl Parser {
     //
     // where conflict_target can be one of:
     //
-    //     ( { index_column_name | ( index_expression ) } [ COLLATE collation ] [ opclass ] [, ...] ) [ WHERE index_predicate ]
-    //     ON CONSTRAINT constraint_name
+    //     ( { index_column_name | ( index_expression ) } [ COLLATE collation ] [ opclass ] [, ...]
+    // ) [ WHERE index_predicate ]     ON CONSTRAINT constraint_name
     //
     // and conflict_action is one of:
     //
@@ -28,11 +33,10 @@ impl Parser {
         self.expect(TokenKind::Insert)?;
         self.expect(TokenKind::Into)?;
         let mut relation = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
             .ok_or_else(|| self.error_here("INSERT INTO requires a relation name"))?;
         if self.consume(TokenKind::As) {
             relation.alias = Some(Box::new(Alias {
-                node_tag: NodeTag::Alias,
                 aliasname: Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("INSERT AS requires an alias"))?,
@@ -41,6 +45,15 @@ impl Parser {
             }));
         }
         let relation = Some(Box::new(relation));
+        self.record_completion_tokens(&[
+            TokenKind::Char('('),
+            TokenKind::Overriding,
+            TokenKind::Default,
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::With,
+            TokenKind::Table,
+        ]);
         let mut cols = Vec::new();
         if self.at(TokenKind::Char('('))
             && !matches!(
@@ -69,6 +82,14 @@ impl Parser {
         } else {
             OverridingKind::NotSet
         };
+        self.record_completion_tokens(&[
+            TokenKind::Default,
+            TokenKind::Select,
+            TokenKind::Values,
+            TokenKind::With,
+            TokenKind::Table,
+            TokenKind::Char('('),
+        ]);
         let select_stmt = if self.consume(TokenKind::Default) {
             if !cols.is_empty() || override_ != OverridingKind::NotSet {
                 return Err(
@@ -95,8 +116,7 @@ impl Parser {
         };
         let on_conflict_clause = self.parse_on_conflict_clause()?;
         let returning_clause = self.parse_returning_clause()?;
-        Ok(Node::InsertStmt(InsertStmt {
-            node_tag: NodeTag::InsertStmt,
+        Ok(node!(InsertStmt {
             relation,
             cols,
             select_stmt,

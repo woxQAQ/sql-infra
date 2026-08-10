@@ -1,3 +1,8 @@
+//! Table partition specifications and partition bounds.
+//!
+//! Range, list, hash, default, and multi-column bound forms are normalized into
+//! PostgreSQL partition AST nodes.
+
 use super::*;
 
 impl Parser {
@@ -17,11 +22,16 @@ impl Parser {
         let mut part_params = Vec::new();
         while !self.at(TokenKind::Char(')')) {
             let elem_location = self.location();
-            let tokens = self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
-            let starts_parenthesized =
-                tokens.first().map(|token| token.kind) == Some(TokenKind::Char('('));
-            let starts_with_cast = tokens.first().map(|token| token.kind) == Some(TokenKind::Cast);
-            let parsed = parse_index_elem_tokens(tokens)?;
+            let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+            if tokens_end_at_top_level(&tokens)
+                && parse_index_elem_tokens_with_completion(tokens.clone(), None).is_ok()
+            {
+                self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
+            }
+            self.append_completion_marker(&mut tokens);
+            let starts_parenthesized = tokens.first().has_kind(TokenKind::Char('('));
+            let starts_with_cast = tokens.first().has_kind(TokenKind::Cast);
+            let parsed = parse_index_elem_tokens_with_completion(tokens, self.completion.clone())?;
             if !parsed.opclassopts.is_empty()
                 || parsed.ordering != SortByDir::Default
                 || parsed.nulls_ordering != SortByNulls::Default
@@ -34,13 +44,12 @@ impl Parser {
                 && !starts_parenthesized
                 && !is_windowless_function_expression_node(expression, starts_with_cast)
             {
-                return Err(ParseError::new(
+                return Err(ParseError::syntax_exit(
                     elem_location,
                     "partition expressions must be parenthesized unless they are function calls",
                 ));
             }
             let elem = PartitionElem {
-                node_tag: NodeTag::PartitionElem,
                 name: parsed.name,
                 expr: parsed.expr,
                 collation: parsed.collation,
@@ -60,7 +69,6 @@ impl Parser {
             return Err(self.error_here("partition key cannot be empty"));
         }
         Ok(PartitionSpec {
-            node_tag: NodeTag::PartitionSpec,
             strategy,
             part_params,
             location: location as ParseLoc,
@@ -71,7 +79,6 @@ impl Parser {
         let location = self.location();
         if self.consume(TokenKind::Default) {
             return Ok(PartitionBoundSpec {
-                node_tag: NodeTag::PartitionBoundSpec,
                 is_default: true,
                 location: location as ParseLoc,
                 ..PartitionBoundSpec::default()
@@ -88,7 +95,6 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             return Ok(PartitionBoundSpec {
-                node_tag: NodeTag::PartitionBoundSpec,
                 strategy: b'l',
                 listdatums,
                 location: location as ParseLoc,
@@ -111,7 +117,6 @@ impl Parser {
             }
             self.expect(TokenKind::Char(')'))?;
             return Ok(PartitionBoundSpec {
-                node_tag: NodeTag::PartitionBoundSpec,
                 strategy: b'r',
                 lowerdatums,
                 upperdatums,
@@ -150,7 +155,6 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(PartitionBoundSpec {
-            node_tag: NodeTag::PartitionBoundSpec,
             strategy: b'h',
             modulus: modulus.ok_or_else(|| self.error_here("missing MODULUS"))?,
             remainder: remainder.ok_or_else(|| self.error_here("missing REMAINDER"))?,

@@ -1,5 +1,13 @@
+//! SQL/JSON query functions, behaviors, wrappers, passing clauses, and aggregates.
+//!
+//! This module owns the clause-rich JSON forms that operate on paths or aggregate
+//! rows, complementing the value constructors in `expression_json`.
+
 use super::expression::ExprParser;
 use super::*;
+
+const JSON_ABSENT_ON_NULL: &[TokenKind] = &[TokenKind::Absent, TokenKind::On, TokenKind::NullP];
+const JSON_NULL_ON_NULL: &[TokenKind] = &[TokenKind::NullP, TokenKind::On, TokenKind::NullP];
 
 impl ExprParser {
     pub(super) fn parse_json_func(&mut self, token: Token) -> Option<Node> {
@@ -30,8 +38,7 @@ impl ExprParser {
         };
         let (on_empty, on_error) = self.parse_json_behaviors(op != JsonExprOp::ExistsOp)?;
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::JsonFuncExpr(JsonFuncExpr {
-            node_tag: NodeTag::JsonFuncExpr,
+        Some(node!(JsonFuncExpr {
             op,
             context_item: Some(Box::new(context_item)),
             pathspec: Some(Box::new(pathspec)),
@@ -52,19 +59,13 @@ impl ExprParser {
         }
         let mut arguments = Vec::new();
         loop {
-            let val = self.parse_json_value_expr()?;
+            let value = self.parse_json_value_expr()?;
             self.expect(TokenKind::As)?;
             let name = self
-                .consume_identifier_in_categories(&[
-                    KeywordCategory::Unreserved,
-                    KeywordCategory::ColName,
-                    KeywordCategory::TypeFuncName,
-                    KeywordCategory::Reserved,
-                ])
+                .consume_column_label()
                 .or_else(|| self.fail("JSON PASSING requires a column label after AS"))?;
-            arguments.push(Node::JsonArgument(JsonArgument {
-                node_tag: NodeTag::JsonArgument,
-                val: Some(Box::new(val)),
+            arguments.push(node!(JsonArgument {
+                val: Some(Box::new(value)),
                 name: Some(name),
             }));
             if !self.consume(TokenKind::Char(',')) {
@@ -116,22 +117,39 @@ impl ExprParser {
         }
     }
 
-    pub(super) fn parse_json_behaviors(&mut self, allow_empty: bool) -> Option<JsonBehaviorPair> {
+    pub(super) fn parse_json_behaviors(
+        &mut self,
+        allow_on_empty: bool,
+    ) -> Option<JsonBehaviorPair> {
         let mut on_empty = None;
         let mut on_error = None;
-        while matches!(
-            self.peek_kind(),
-            TokenKind::Default
-                | TokenKind::ErrorP
-                | TokenKind::NullP
-                | TokenKind::TrueP
-                | TokenKind::FalseP
-                | TokenKind::Unknown
-                | TokenKind::EmptyP
-        ) {
+        loop {
+            if on_error.is_none() {
+                self.record_completion_lookahead_tokens(&[
+                    TokenKind::Default,
+                    TokenKind::ErrorP,
+                    TokenKind::NullP,
+                    TokenKind::TrueP,
+                    TokenKind::FalseP,
+                    TokenKind::Unknown,
+                    TokenKind::EmptyP,
+                ]);
+            }
+            if !matches!(
+                self.peek_kind(),
+                TokenKind::Default
+                    | TokenKind::ErrorP
+                    | TokenKind::NullP
+                    | TokenKind::TrueP
+                    | TokenKind::FalseP
+                    | TokenKind::Unknown
+                    | TokenKind::EmptyP
+            ) {
+                break;
+            }
             let behavior = self.parse_json_behavior()?;
             self.expect(TokenKind::On)?;
-            if allow_empty && self.consume(TokenKind::EmptyP) {
+            if allow_on_empty && self.consume(TokenKind::EmptyP) {
                 if on_error.is_some() {
                     return self.fail("JSON ON EMPTY must precede ON ERROR");
                 }
@@ -182,6 +200,7 @@ impl ExprParser {
             }
             TokenKind::EmptyP => {
                 self.advance();
+                self.record_completion_tokens(&[TokenKind::ObjectP, TokenKind::Array]);
                 match self.peek_kind() {
                     TokenKind::ObjectP => {
                         self.advance();
@@ -197,7 +216,6 @@ impl ExprParser {
             _ => return None,
         };
         Some(JsonBehavior {
-            node_tag: NodeTag::JsonBehavior,
             btype,
             expr,
             location: location as ParseLoc,
@@ -216,17 +234,14 @@ impl ExprParser {
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
         let mut constructor = JsonAggConstructor {
-            node_tag: NodeTag::JsonAggConstructor,
             output,
             location: location as ParseLoc,
             ..JsonAggConstructor::default()
         };
         self.parse_json_aggregate_decorations(&mut constructor)?;
-        Some(Node::JsonObjectAgg(JsonObjectAgg {
-            node_tag: NodeTag::JsonObjectAgg,
+        Some(node!(JsonObjectAgg {
             constructor: Some(Box::new(constructor)),
             arg: Some(Box::new(JsonKeyValue {
-                node_tag: NodeTag::JsonKeyValue,
                 key: Some(Box::new(key)),
                 value: Some(Box::new(value)),
             })),
@@ -238,19 +253,41 @@ impl ExprParser {
     pub(super) fn parse_json_array_agg(&mut self, location: usize) -> Option<Node> {
         let value = self.parse_json_value_expr()?;
         let mut agg_order = Vec::new();
-        if self.consume(TokenKind::Order) {
-            self.expect(TokenKind::By)?;
+        if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
             let start = self.pos;
             let mut end = start;
             let mut depth = 0usize;
             while end < self.tokens.len() {
                 let kind = self.tokens[end].kind;
+                if depth == 0 && kind == TokenKind::Completion {
+                    if parse_sort_list_tokens(self.tokens[start..end].to_vec(), None).is_ok()
+                        && let Some(collector) = &self.completion
+                    {
+                        let mut collector = collector.borrow_mut();
+                        collector.record_follow_tokens(&[
+                            TokenKind::Absent,
+                            TokenKind::NullP,
+                            TokenKind::Returning,
+                            TokenKind::Char(')'),
+                        ]);
+                        collector.record_follow_phrase(JSON_ABSENT_ON_NULL);
+                        collector.record_follow_phrase(JSON_NULL_ON_NULL);
+                    }
+                    end += 1;
+                    continue;
+                }
                 if depth == 0
                     && (matches!(
                         kind,
                         TokenKind::Returning | TokenKind::Char(')') | TokenKind::Eof
                     ) || (matches!(kind, TokenKind::Absent | TokenKind::NullP)
-                        && self.tokens.get(end + 1).map(|token| token.kind) == Some(TokenKind::On)))
+                        && (self.tokens.get(end + 1).has_kind(TokenKind::On)
+                            || (self.tokens.get(end + 1).has_kind(TokenKind::Completion)
+                                && parse_sort_list_tokens(
+                                    self.tokens[start..end].to_vec(),
+                                    None,
+                                )
+                                .is_ok()))))
                 {
                     break;
                 }
@@ -261,14 +298,10 @@ impl ExprParser {
                 }
                 end += 1;
             }
-            match parse_sort_list_tokens(self.tokens[start..end].to_vec()) {
+            match parse_sort_list_tokens(self.tokens[start..end].to_vec(), self.completion.clone())
+            {
                 Ok(items) => agg_order = items,
-                Err(error) => {
-                    if self.error.is_none() {
-                        self.error = Some(error);
-                    }
-                    return None;
-                }
+                Err(error) => return self.fail_with(error),
             }
             self.pos = end;
         }
@@ -276,15 +309,13 @@ impl ExprParser {
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
         let mut constructor = JsonAggConstructor {
-            node_tag: NodeTag::JsonAggConstructor,
             output,
             agg_order,
             location: location as ParseLoc,
             ..JsonAggConstructor::default()
         };
         self.parse_json_aggregate_decorations(&mut constructor)?;
-        Some(Node::JsonArrayAgg(JsonArrayAgg {
-            node_tag: NodeTag::JsonArrayAgg,
+        Some(node!(JsonArrayAgg {
             constructor: Some(Box::new(constructor)),
             arg: Some(Box::new(value)),
             absent_on_null,
@@ -305,10 +336,17 @@ impl ExprParser {
         Some(())
     }
 }
-pub(super) fn parse_sort_list_tokens(mut tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.last().map_or(0, Token::end_location);
+pub(super) fn parse_sort_list_tokens(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<NodeList> {
+    let location = tokens.last().end_location_or(0);
     tokens.push(Token::synthetic(TokenKind::Eof, location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     let items = parser.parse_sort_list_strict_until(&[TokenKind::Eof])?;
     if !parser.at(TokenKind::Eof) {
         return Err(parser.error_here("unexpected token after sort list"));

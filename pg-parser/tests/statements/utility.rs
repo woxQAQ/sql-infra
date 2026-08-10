@@ -1,9 +1,23 @@
-use pg_parser::{
-    CURSOR_OPT_ASENSITIVE, CURSOR_OPT_BINARY, CURSOR_OPT_FAST_PLAN, CURSOR_OPT_HOLD,
-    CURSOR_OPT_INSENSITIVE, CURSOR_OPT_NO_SCROLL, CURSOR_OPT_SCROLL, DefElem, DiscardMode,
-    DropBehavior, FetchDirection, FetchDirectionKeywords, ImportForeignSchemaType, Node,
-    ObjectType, ReindexObjectType, RepackCommand, TransactionStmtKind, ValUnion, VariableSetKind,
-};
+use pg_parser::CURSOR_OPT_ASENSITIVE;
+use pg_parser::CURSOR_OPT_BINARY;
+use pg_parser::CURSOR_OPT_FAST_PLAN;
+use pg_parser::CURSOR_OPT_HOLD;
+use pg_parser::CURSOR_OPT_INSENSITIVE;
+use pg_parser::CURSOR_OPT_NO_SCROLL;
+use pg_parser::CURSOR_OPT_SCROLL;
+use pg_parser::DefElem;
+use pg_parser::DiscardMode;
+use pg_parser::DropBehavior;
+use pg_parser::FetchDirection;
+use pg_parser::FetchDirectionKeywords;
+use pg_parser::ImportForeignSchemaType;
+use pg_parser::Node;
+use pg_parser::ObjectType;
+use pg_parser::ReindexObjectType;
+use pg_parser::RepackCommand;
+use pg_parser::TransactionStmtKind;
+use pg_parser::ValUnion;
+use pg_parser::VariableSetKind;
 
 use super::common::parse_statement;
 
@@ -119,7 +133,7 @@ fn copy_generic_options_preserve_every_raw_argument_shape() {
     ));
     assert!(matches!(
         def(&copy.options[5]).arg.as_deref(),
-        Some(Node::AStar(_))
+        Some(Node::AStar)
     ));
     assert!(matches!(
         def(&copy.options[6]).arg.as_deref(),
@@ -166,7 +180,7 @@ fn copy_generic_options_preserve_every_raw_argument_shape() {
     ));
     assert!(matches!(
         def(&force.options[2]).arg.as_deref(),
-        Some(Node::AStar(_))
+        Some(Node::AStar)
     ));
     assert!(matches!(
         def(&force.options[3]).arg.as_deref(),
@@ -369,6 +383,8 @@ fn vacuum_and_analyze_populate_options_relations_and_columns() {
 
 #[test]
 fn explain_checkpoint_and_discard_populate_utility_options() {
+    type ExplainedStatementCase = (&'static str, fn(&Node) -> bool);
+
     let Node::ExplainStmt(explain) =
         parse_statement("explain (analyze true, verbose true) select * from app.items")
     else {
@@ -380,48 +396,45 @@ fn explain_checkpoint_and_discard_populate_utility_options() {
         Some(Node::SelectStmt(_))
     ));
 
-    for (sql, expected_tag) in [
+    let cases: &[ExplainedStatementCase] = &[
         (
             "explain analyse verbose execute prepared_query(1)",
-            pg_parser::NodeTag::ExecuteStmt,
+            |node| matches!(node, Node::ExecuteStmt(_)),
         ),
-        (
-            "explain declare c cursor for select 1",
-            pg_parser::NodeTag::DeclareCursorStmt,
-        ),
-        (
-            "explain create table explained as select 1",
-            pg_parser::NodeTag::CreateTableAsStmt,
-        ),
+        ("explain declare c cursor for select 1", |node| {
+            matches!(node, Node::DeclareCursorStmt(_))
+        }),
+        ("explain create table explained as select 1", |node| {
+            matches!(node, Node::CreateTableAsStmt(_))
+        }),
         (
             "explain create materialized view explained_mv as select 1",
-            pg_parser::NodeTag::CreateTableAsStmt,
+            |node| matches!(node, Node::CreateTableAsStmt(_)),
         ),
-        (
-            "explain refresh materialized view mv",
-            pg_parser::NodeTag::RefreshMatViewStmt,
-        ),
-        (
-            "explain insert into t values (1)",
-            pg_parser::NodeTag::InsertStmt,
-        ),
-        (
-            "explain update t set id = 1",
-            pg_parser::NodeTag::UpdateStmt,
-        ),
-        ("explain delete from t", pg_parser::NodeTag::DeleteStmt),
+        ("explain refresh materialized view mv", |node| {
+            matches!(node, Node::RefreshMatViewStmt(_))
+        }),
+        ("explain insert into t values (1)", |node| {
+            matches!(node, Node::InsertStmt(_))
+        }),
+        ("explain update t set id = 1", |node| {
+            matches!(node, Node::UpdateStmt(_))
+        }),
+        ("explain delete from t", |node| {
+            matches!(node, Node::DeleteStmt(_))
+        }),
         (
             "explain merge into t using s on t.id = s.id when matched then do nothing",
-            pg_parser::NodeTag::MergeStmt,
+            |node| matches!(node, Node::MergeStmt(_)),
         ),
-    ] {
+    ];
+    for &(sql, expected) in cases {
         let Node::ExplainStmt(explain) = parse_statement(sql) else {
             panic!("expected ExplainStmt for {sql}");
         };
-        assert_eq!(
-            explain.query.as_deref().map(Node::tag),
-            Some(expected_tag),
-            "{sql}"
+        assert!(
+            explain.query.as_deref().is_some_and(expected),
+            "unexpected explained statement for {sql}"
         );
     }
 

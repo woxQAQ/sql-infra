@@ -1,7 +1,15 @@
+//! Operator definition options and `ALTER OPERATOR` parsing.
+//!
+//! Operator-specific procedure, selectivity, join, commutator, negator, and
+//! property clauses become typed raw definition elements here.
+
 use super::*;
 
 impl Parser {
-    pub(super) fn parse_operator_definition_list(&mut self) -> PResult<NodeList> {
+    pub(super) fn parse_operator_definition_list(
+        &mut self,
+        object_type: ObjectType,
+    ) -> PResult<NodeList> {
         self.expect(TokenKind::Char('('))?;
         if self.at(TokenKind::Char(')')) {
             return Err(self.error_here("ALTER TYPE option list cannot be empty"));
@@ -9,22 +17,25 @@ impl Parser {
         let mut options = Vec::new();
         loop {
             let location = self.location();
+            self.record_completion_slot(GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("expected an ALTER TYPE option name"))?;
             let arg = if self.consume(TokenKind::Char('=')) {
+                if let Some(slot) = completion::definition_value_slot(object_type, &name) {
+                    self.record_completion_slot(slot);
+                    self.record_completion_slot_within_fragment(slot, COMMA_OR_CLOSE_PAREN_TOKENS);
+                }
                 if self.consume(TokenKind::None) {
                     None
                 } else {
-                    let tokens =
-                        self.take_until_top_level(&[TokenKind::Char(','), TokenKind::Char(')')]);
+                    let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                     Some(Box::new(parse_operator_def_arg(&name, tokens, location)?))
                 }
             } else {
                 None
             };
-            options.push(Node::DefElem(DefElem {
-                node_tag: NodeTag::DefElem,
+            options.push(node!(DefElem {
                 defname: Some(name),
                 arg,
                 location: location as ParseLoc,
@@ -59,18 +70,17 @@ impl Parser {
     //           } [, ... ] )
     pub(super) fn parse_alter_operator(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Operator)?;
+        self.record_completion_tokens(&[TokenKind::Family]);
         let opername = Some(Box::new(self.parse_operator_with_args_until(&[
             TokenKind::Set,
             TokenKind::Char(';'),
             TokenKind::Eof,
         ])?));
+        self.record_completion_tokens(&[TokenKind::Owner]);
         self.expect(TokenKind::Set)?;
-        let options = self.parse_operator_definition_list()?;
+        self.record_completion_tokens(&[TokenKind::Schema]);
+        let options = self.parse_operator_definition_list(ObjectType::Operator)?;
         self.expect_statement_end()?;
-        Ok(Node::AlterOperatorStmt(AlterOperatorStmt {
-            node_tag: NodeTag::AlterOperatorStmt,
-            opername,
-            options,
-        }))
+        Ok(node!(AlterOperatorStmt { opername, options }))
     }
 }

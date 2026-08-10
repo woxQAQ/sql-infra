@@ -1,13 +1,24 @@
+//! Property-graph DDL.
+//!
+//! Vertex and edge tables, endpoints, keys, labels, and property projections are
+//! parsed together so cross-references remain local to the graph definition.
+
 use super::*;
 
 impl Parser {
     pub(super) fn parse_create_prop_graph(&mut self, relpersistence: u8) -> PResult<Node> {
         self.expect(TokenKind::Graph)?;
         let mut pgname = self
-            .try_parse_qualified_range_var()
+            .try_parse_qualified_range_var_with_slot(GrammarSlot::PropertyGraph)
             .ok_or_else(|| self.error_here("CREATE PROPERTY GRAPH requires a name"))?;
         pgname.relpersistence = relpersistence;
         let pgname = Some(Box::new(pgname));
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Vertex,
+            TokenKind::Node,
+            TokenKind::Edge,
+            TokenKind::Relationship,
+        ]);
         let vertex_tables = if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
             self.advance();
             self.expect(TokenKind::Tables)?;
@@ -15,6 +26,7 @@ impl Parser {
         } else {
             Vec::new()
         };
+        self.record_completion_lookahead_tokens(&[TokenKind::Edge, TokenKind::Relationship]);
         let edge_tables = if matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
             self.advance();
             self.expect(TokenKind::Tables)?;
@@ -23,8 +35,7 @@ impl Parser {
             Vec::new()
         };
         self.expect_statement_end()?;
-        Ok(Node::CreatePropGraphStmt(CreatePropGraphStmt {
-            node_tag: NodeTag::CreatePropGraphStmt,
+        Ok(node!(CreatePropGraphStmt {
             pgname,
             vertex_tables,
             edge_tables,
@@ -34,22 +45,37 @@ impl Parser {
     pub(super) fn parse_alter_prop_graph(&mut self) -> PResult<Node> {
         self.expect(TokenKind::Graph)?;
         let pgname = Some(Box::new(
-            self.try_parse_qualified_range_var()
+            self.try_parse_qualified_range_var_with_slot(GrammarSlot::PropertyGraph)
                 .ok_or_else(|| self.error_here("ALTER PROPERTY GRAPH requires a name"))?,
         ));
         let mut stmt = AlterPropGraphStmt {
-            node_tag: NodeTag::AlterPropGraphStmt,
             pgname,
             ..AlterPropGraphStmt::default()
         };
+        self.record_completion_tokens(&[
+            TokenKind::AddP,
+            TokenKind::Drop,
+            TokenKind::Alter,
+            TokenKind::Rename,
+            TokenKind::Owner,
+            TokenKind::Set,
+        ]);
         match self.peek_kind() {
             TokenKind::AddP => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::Vertex,
+                    TokenKind::Node,
+                    TokenKind::Edge,
+                    TokenKind::Relationship,
+                ]);
                 if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
                     self.advance();
                     self.expect(TokenKind::Tables)?;
                     stmt.add_vertex_tables = self.parse_prop_graph_vertex_list()?;
+                    self.record_completion_lookahead_tokens(&[TokenKind::AddP]);
                     if self.consume(TokenKind::AddP) {
+                        self.record_completion_tokens(&[TokenKind::Edge, TokenKind::Relationship]);
                         if !matches!(self.peek_kind(), TokenKind::Edge | TokenKind::Relationship) {
                             return Err(self.error_here("second ADD must introduce EDGE TABLES"));
                         }
@@ -67,6 +93,12 @@ impl Parser {
             }
             TokenKind::Drop => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::Vertex,
+                    TokenKind::Node,
+                    TokenKind::Edge,
+                    TokenKind::Relationship,
+                ]);
                 let vertex = if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
                     self.advance();
                     true
@@ -89,6 +121,12 @@ impl Parser {
             }
             TokenKind::Alter => {
                 self.advance();
+                self.record_completion_tokens(&[
+                    TokenKind::Vertex,
+                    TokenKind::Node,
+                    TokenKind::Edge,
+                    TokenKind::Relationship,
+                ]);
                 stmt.element_kind =
                     if matches!(self.peek_kind(), TokenKind::Vertex | TokenKind::Node) {
                         self.advance();
@@ -105,6 +143,11 @@ impl Parser {
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("ALTER graph element requires an alias"))?,
                 );
+                self.record_completion_tokens(&[
+                    TokenKind::AddP,
+                    TokenKind::Drop,
+                    TokenKind::Alter,
+                ]);
                 match self.peek_kind() {
                     TokenKind::AddP => {
                         while self.consume(TokenKind::AddP) {
@@ -115,14 +158,11 @@ impl Parser {
                                     .ok_or_else(|| self.error_here("ADD LABEL requires a name"))?,
                             );
                             let properties = Some(Box::new(self.parse_prop_graph_properties()?));
-                            stmt.add_labels.push(Node::PropGraphLabelAndProperties(
-                                PropGraphLabelAndProperties {
-                                    node_tag: NodeTag::PropGraphLabelAndProperties,
-                                    label,
-                                    properties,
-                                    location: location as ParseLoc,
-                                },
-                            ));
+                            stmt.add_labels.push(node!(PropGraphLabelAndProperties {
+                                label,
+                                properties,
+                                location: location as ParseLoc,
+                            }));
                         }
                     }
                     TokenKind::Drop => {
@@ -161,6 +201,11 @@ impl Parser {
                     }
                 }
             }
+            TokenKind::Set => {
+                self.advance();
+                self.record_completion_tokens(&[TokenKind::Schema]);
+                return Err(self.error_here("expected SET SCHEMA"));
+            }
             _ => {
                 return Err(self.error_here("ALTER PROPERTY GRAPH requires ADD, DROP, or ALTER"));
             }
@@ -178,22 +223,20 @@ impl Parser {
         loop {
             let location = self.location();
             let mut vtable = self
-                .try_parse_qualified_range_var()
+                .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("expected a vertex table name"))?;
             if self.consume(TokenKind::As) {
                 let aliasname = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("AS requires a graph table alias"))?;
                 vtable.alias = Some(Box::new(Alias {
-                    node_tag: NodeTag::Alias,
                     aliasname: Some(aliasname),
                     ..Alias::default()
                 }));
             }
             let vkey = self.parse_optional_key_clause()?;
             let labels = self.parse_prop_graph_labels()?;
-            vertices.push(Node::PropGraphVertex(PropGraphVertex {
-                node_tag: NodeTag::PropGraphVertex,
+            vertices.push(node!(PropGraphVertex {
                 vtable: Some(Box::new(vtable)),
                 vkey,
                 labels,
@@ -219,14 +262,13 @@ impl Parser {
         loop {
             let location = self.location();
             let mut etable = self
-                .try_parse_qualified_range_var()
+                .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("expected an edge table name"))?;
             if self.consume(TokenKind::As) {
                 let aliasname = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("AS requires a graph table alias"))?;
                 etable.alias = Some(Box::new(Alias {
-                    node_tag: NodeTag::Alias,
                     aliasname: Some(aliasname),
                     ..Alias::default()
                 }));
@@ -237,8 +279,7 @@ impl Parser {
             let (edestkey, edestvertex, edestvertexcols) =
                 self.parse_prop_graph_endpoint(TokenKind::Destination, "DESTINATION")?;
             let labels = self.parse_prop_graph_labels()?;
-            edges.push(Node::PropGraphEdge(PropGraphEdge {
-                node_tag: NodeTag::PropGraphEdge,
+            edges.push(node!(PropGraphEdge {
                 etable: Some(Box::new(etable)),
                 ekey,
                 esrckey,
@@ -269,6 +310,7 @@ impl Parser {
         self.expect(keyword)?;
         if self.consume(TokenKind::Key) {
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot(GrammarSlot::Column);
             let key = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             self.expect(TokenKind::References)?;
@@ -277,6 +319,7 @@ impl Parser {
                     self.error_here(format!("{label} REFERENCES requires an alias"))
                 })?);
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot(GrammarSlot::Column);
             let columns = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             Ok((key, vertex, columns))
@@ -292,6 +335,7 @@ impl Parser {
     pub(super) fn parse_optional_key_clause(&mut self) -> PResult<NodeList> {
         if self.consume(TokenKind::Key) {
             self.expect(TokenKind::Char('('))?;
+            self.record_completion_slot(GrammarSlot::Column);
             let columns = self.parse_parenthesized_name_list_body()?;
             self.expect(TokenKind::Char(')'))?;
             Ok(columns)
@@ -302,10 +346,10 @@ impl Parser {
 
     pub(super) fn parse_prop_graph_properties(&mut self) -> PResult<PropGraphProperties> {
         let location = self.location();
+        self.record_completion_lookahead_tokens(&[TokenKind::Properties, TokenKind::No]);
         if self.consume(TokenKind::No) {
             self.expect(TokenKind::Properties)?;
             return Ok(PropGraphProperties {
-                node_tag: NodeTag::PropGraphProperties,
                 location: location as ParseLoc,
                 ..PropGraphProperties::default()
             });
@@ -314,7 +358,6 @@ impl Parser {
         if self.consume(TokenKind::All) {
             self.expect(TokenKind::Columns)?;
             return Ok(PropGraphProperties {
-                node_tag: NodeTag::PropGraphProperties,
                 all: true,
                 location: location as ParseLoc,
                 ..PropGraphProperties::default()
@@ -327,7 +370,6 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(PropGraphProperties {
-            node_tag: NodeTag::PropGraphProperties,
             properties,
             location: location as ParseLoc,
             ..PropGraphProperties::default()
@@ -344,7 +386,6 @@ impl Parser {
         }
         self.expect(TokenKind::Char(')'))?;
         Ok(PropGraphProperties {
-            node_tag: NodeTag::PropGraphProperties,
             properties,
             location: location as ParseLoc,
             ..PropGraphProperties::default()
@@ -353,17 +394,20 @@ impl Parser {
 
     pub(super) fn parse_prop_graph_labels(&mut self) -> PResult<NodeList> {
         let mut labels = Vec::new();
+        self.record_completion_lookahead_tokens(&[
+            TokenKind::Label,
+            TokenKind::Default,
+            TokenKind::Properties,
+            TokenKind::No,
+        ]);
         if matches!(self.peek_kind(), TokenKind::Properties | TokenKind::No) {
             let location = self.location();
             let properties = Some(Box::new(self.parse_prop_graph_properties()?));
-            labels.push(Node::PropGraphLabelAndProperties(
-                PropGraphLabelAndProperties {
-                    node_tag: NodeTag::PropGraphLabelAndProperties,
-                    properties,
-                    location: location as ParseLoc,
-                    ..PropGraphLabelAndProperties::default()
-                },
-            ));
+            labels.push(node!(PropGraphLabelAndProperties {
+                properties,
+                location: location as ParseLoc,
+                ..PropGraphLabelAndProperties::default()
+            }));
             return Ok(labels);
         }
         while matches!(self.peek_kind(), TokenKind::Label | TokenKind::Default) {
@@ -378,39 +422,32 @@ impl Parser {
                 self.expect(TokenKind::Label)?;
                 None
             };
+            self.record_completion_lookahead_tokens(&[TokenKind::Properties, TokenKind::No]);
             let properties = if matches!(self.peek_kind(), TokenKind::Properties | TokenKind::No) {
                 Some(Box::new(self.parse_prop_graph_properties()?))
             } else {
                 Some(Box::new(PropGraphProperties {
-                    node_tag: NodeTag::PropGraphProperties,
                     all: true,
                     location: -1,
                     ..PropGraphProperties::default()
                 }))
             };
-            labels.push(Node::PropGraphLabelAndProperties(
-                PropGraphLabelAndProperties {
-                    node_tag: NodeTag::PropGraphLabelAndProperties,
-                    label,
-                    properties,
-                    location: location as ParseLoc,
-                },
-            ));
+            labels.push(node!(PropGraphLabelAndProperties {
+                label,
+                properties,
+                location: location as ParseLoc,
+            }));
         }
         if labels.is_empty() {
-            labels.push(Node::PropGraphLabelAndProperties(
-                PropGraphLabelAndProperties {
-                    node_tag: NodeTag::PropGraphLabelAndProperties,
-                    properties: Some(Box::new(PropGraphProperties {
-                        node_tag: NodeTag::PropGraphProperties,
-                        all: true,
-                        location: -1,
-                        ..PropGraphProperties::default()
-                    })),
+            labels.push(node!(PropGraphLabelAndProperties {
+                properties: Some(Box::new(PropGraphProperties {
+                    all: true,
                     location: -1,
-                    ..PropGraphLabelAndProperties::default()
-                },
-            ));
+                    ..PropGraphProperties::default()
+                })),
+                location: -1,
+                ..PropGraphLabelAndProperties::default()
+            }));
         }
         Ok(labels)
     }

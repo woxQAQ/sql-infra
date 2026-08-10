@@ -1,0 +1,271 @@
+- input: WITH x AS (SELECT 1) SELECT * FROM x |
+  want:
+    candidates:
+      tokens: [(, '*', ',', ., AS, CROSS, EXCEPT, FETCH, FOR, FULL, GROUP, HAVING, INNER, INTERSECT, JOIN, LEFT, LIMIT, NATURAL, OFFSET, ORDER, RIGHT, TABLESAMPLE, UNION, WHERE, WINDOW]
+      phrases: [GROUP BY, ORDER BY]
+      slots: [Alias]
+
+- input: SELECT 1 |
+  want:
+    candidates:
+      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, OVERLAPS, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, '[', ^, '|']
+      phrases: [GROUP BY, ORDER BY]
+      slots: [Alias]
+
+- input: INSERT INTO t VALUES (1) |
+  want:
+    candidates:
+      tokens: [',', EXCEPT, FETCH, FOR, FROM, GROUP, HAVING, INTERSECT, INTO, LIMIT, OFFSET, ON, ORDER, RETURNING, UNION, WHERE, WINDOW]
+      phrases: [GROUP BY, ORDER BY]
+      slots: []
+
+- input: UPDATE t SET id = 1 |
+  want:
+    candidates:
+      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AT, BETWEEN, COLLATE, FROM, GreaterEquals, ILIKE, IN, IS, ISNULL, LIKE, LessEquals, NOT, NOTNULL, NotEquals, OPERATOR, OR, OVERLAPS, Op, RETURNING, RightArrow, SIMILAR, TypeCast, WHERE, '[', ^, '|']
+      slots: []
+
+- input: DELETE FROM t |
+  want:
+    candidates:
+      tokens: [., AS, FOR, RETURNING, USING, WHERE]
+      slots: [Alias]
+
+- input: MERGE INTO t USING s ON true WHEN MATCHED THEN DO NOTHING |
+  want:
+    candidates:
+      tokens: [RETURNING, WHEN]
+      slots: []
+
+- input: CREATE TABLE t (id int) |
+  want:
+    candidates:
+      tokens: [INHERITS, ON, PARTITION, TABLESPACE, USING, WITH, WITHOUT]
+      phrases: [PARTITION BY]
+      slots: []
+
+- input: ALTER TABLE t ADD COLUMN c int |
+  want:
+    candidates:
+      tokens: [',', ARRAY, CHECK, COLLATE, COMPRESSION, CONSTRAINT, DEFAULT, DEFERRABLE, ENFORCED, GENERATED, INITIALLY, NOT, 'NULL', OPTIONS, PRIMARY, REFERENCES, STORAGE, UNIQUE]
+      phrases: [NOT NULL, PRIMARY KEY]
+      slots: []
+
+- input: DROP TABLE t |
+  want:
+    candidates:
+      tokens: [',', CASCADE, RESTRICT]
+      slots: []
+
+- input: SET CONSTRAINTS ALL DEFERRED |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: SET work_mem = '4MB' |
+  want:
+    candidates:
+      tokens: [',']
+      slots: []
+
+- input: RESET work_mem |
+  want:
+    candidates:
+      tokens: [.]
+      slots: []
+
+- input: SHOW work_mem |
+  want:
+    candidates:
+      tokens: [.]
+      slots: []
+
+- input: BEGIN |
+  want:
+    candidates:
+      tokens: [DEFERRABLE, ISOLATION, NOT, READ, TRANSACTION, WORK]
+      slots: []
+
+- input: PREPARE TRANSACTION 'tx' |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: PREPARE q AS SELECT 1 |
+  want:
+    candidates:
+      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, OVERLAPS, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, '[', ^, '|']
+      phrases: [GROUP BY, ORDER BY]
+      slots: [Alias]
+
+- input: EXECUTE q |
+  want:
+    candidates:
+      tokens: [(]
+      slots: []
+
+- input: DEALLOCATE q |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: DECLARE c CURSOR FOR SELECT 1 |
+  want:
+    candidates:
+      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, OVERLAPS, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, '[', ^, '|']
+      phrases: [GROUP BY, ORDER BY]
+      slots: [Alias]
+
+- input: CLOSE c |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: FETCH NEXT FROM c |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: COPY t FROM STDIN |
+  want:
+    candidates:
+      tokens: [(, BINARY, CSV, DELIMITER, DELIMITERS, ENCODING, ESCAPE, FORCE, FREEZE, HEADER, JSON, 'NULL', QUOTE, USING, WHERE, WITH]
+      slots: []
+
+- input: ANALYZE t |
+  want:
+    candidates:
+      tokens: [(, '*', ',', .]
+      slots: []
+
+- input: EXPLAIN SELECT 1 |
+  want:
+    candidates:
+      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, OVERLAPS, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, '[', ^, '|']
+      phrases: [GROUP BY, ORDER BY]
+      slots: [Alias]
+
+- input: CALL f() |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: CHECKPOINT |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: DISCARD ALL |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: LOCK TABLE t |
+  want:
+    candidates:
+      tokens: ['*', ',', ., IN, NOWAIT]
+      slots: []
+
+- input: LISTEN channel |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: UNLISTEN * |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: NOTIFY channel |
+  want:
+    candidates:
+      tokens: [',']
+      slots: []
+
+- input: LOAD 'library' |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: REFRESH MATERIALIZED VIEW mv |
+  want:
+    candidates:
+      tokens: [., WITH]
+      slots: []
+
+- input: REINDEX TABLE t |
+  want:
+    candidates:
+      tokens: [.]
+      slots: []
+
+- input: CLUSTER t |
+  want:
+    candidates:
+      tokens: [., ON, USING]
+      slots: []
+
+- input: REASSIGN OWNED BY old_role TO new_role |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: TRUNCATE TABLE t |
+  want:
+    candidates:
+      tokens: ['*', ',', ., CASCADE, CONTINUE, RESTART, RESTRICT]
+      slots: []
+
+- input: COMMENT ON TABLE t IS 'comment' |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: SECURITY LABEL ON TABLE t IS 'label' |
+  want:
+    candidates:
+      tokens: []
+      slots: []
+
+- input: GRANT SELECT ON TABLE t TO role_name |
+  want:
+    candidates:
+      tokens: [',', GRANTED, WITH]
+      slots: []
+
+- input: REVOKE SELECT ON TABLE t FROM role_name |
+  want:
+    candidates:
+      tokens: [',', CASCADE, GRANTED, RESTRICT]
+      slots: []
+
+- input: IMPORT FOREIGN SCHEMA s FROM SERVER srv INTO public |
+  want:
+    candidates:
+      tokens: [OPTIONS]
+      slots: []
+
+- input: DO 'BEGIN END' |
+  want:
+    candidates:
+      tokens: [LANGUAGE]
+      slots: []
+
+- input: WAIT FOR LSN '0/0' |
+  want:
+    candidates:
+      tokens: [WITH]
+      slots: []

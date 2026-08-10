@@ -1,3 +1,8 @@
+//! Function-parameter token classification and fragment parsing.
+//!
+//! Parameter modes, names, defaults, and type grammars normalize into
+//! `FunctionParameter` nodes for routines and aggregate signatures.
+
 use super::*;
 
 fn function_parameter_mode(kind: TokenKind) -> Option<FunctionParameterMode> {
@@ -37,21 +42,82 @@ pub(super) fn token_starts_builtin_type(kind: TokenKind) -> bool {
     )
 }
 
-pub(super) fn function_parameter_from_tokens(mut tokens: Vec<Token>) -> PResult<FunctionParameter> {
-    let location = tokens.first().map_or(0, |token| token.location());
+pub(super) fn function_parameter_from_tokens(tokens: Vec<Token>) -> PResult<FunctionParameter> {
+    function_parameter_from_tokens_with_completion(tokens, None)
+}
+
+pub(super) fn function_parameter_from_tokens_with_completion(
+    mut tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<FunctionParameter> {
+    record_type_name_completion(&tokens, completion.as_ref());
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
-        return Err(ParseError::new(location, "expected a function parameter"));
+        return Err(ParseError::syntax_exit(
+            location,
+            "expected a function parameter",
+        ));
     }
 
     let default_index = tokens
         .iter()
         .position(|token| matches!(token.kind, TokenKind::Default | TokenKind::Char('=')));
+    if let Some(completion_index) = tokens
+        .iter()
+        .position(|token| token.kind == TokenKind::Completion)
+        && default_index.is_none_or(|default_index| completion_index <= default_index)
+        && let Some(collector) = &completion
+    {
+        let mut collector = collector.borrow_mut();
+        collector.record_slot(GrammarSlot::Type);
+        let can_start_parameter_mode = completion_index == 0
+            || (completion_index == 1
+                && tokens.first().is_some_and(|token| {
+                    function_parameter_mode(token.kind).is_none()
+                        && !token_starts_builtin_type(token.kind)
+                        && token_name_in_categories(
+                            token,
+                            &[KeywordCategory::Unreserved, KeywordCategory::TypeFuncName],
+                        )
+                        .is_some()
+                }));
+        if can_start_parameter_mode {
+            collector.record_lookahead_tokens(&[
+                TokenKind::InP,
+                TokenKind::OutP,
+                TokenKind::Inout,
+                TokenKind::Variadic,
+            ]);
+        } else if tokens.first().has_kind(TokenKind::InP) && completion_index == 1 {
+            collector.record_lookahead_tokens(&[TokenKind::OutP]);
+        }
+        if function_parameter_from_tokens(tokens[..completion_index].to_vec()).is_ok() {
+            collector.record_lookahead_tokens(&[TokenKind::Default]);
+        }
+        collector.record_tokens(&[TokenKind::Char(')')]);
+        if completion_index > 0 {
+            collector.record_tokens(&[TokenKind::Char(',')]);
+        }
+    }
+    if let (Some(completion_index), Some(default_index)) = (
+        tokens
+            .iter()
+            .position(|token| token.kind == TokenKind::Completion),
+        default_index,
+    ) && completion_index > default_index + 1
+        && parse_expression_tokens(tokens[default_index + 1..completion_index].to_vec()).is_ok()
+        && let Some(collector) = &completion
+    {
+        collector
+            .borrow_mut()
+            .record_follow_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
+    }
     let default_tokens = default_index.map(|index| tokens.split_off(index + 1));
     if default_index.is_some() {
         tokens.pop();
     }
     let defexpr = default_tokens
-        .map(parse_expression_tokens)
+        .map(|tokens| parse_expression_tokens_with_completion(tokens, completion.clone()))
         .transpose()?
         .map(Box::new);
 
@@ -63,9 +129,7 @@ pub(super) fn function_parameter_from_tokens(mut tokens: Vec<Token>) -> PResult<
     {
         mode = parameter_mode;
         tokens.remove(0);
-        if mode == FunctionParameterMode::In
-            && tokens.first().map(|token| token.kind) == Some(TokenKind::OutP)
-        {
+        if mode == FunctionParameterMode::In && tokens.first().has_kind(TokenKind::OutP) {
             mode = FunctionParameterMode::Inout;
             tokens.remove(0);
         }
@@ -79,9 +143,7 @@ pub(super) fn function_parameter_from_tokens(mut tokens: Vec<Token>) -> PResult<
         name = Some(parameter_name);
         mode = parameter_mode;
         tokens.drain(0..2);
-        if mode == FunctionParameterMode::In
-            && tokens.first().map(|token| token.kind) == Some(TokenKind::OutP)
-        {
+        if mode == FunctionParameterMode::In && tokens.first().has_kind(TokenKind::OutP) {
             mode = FunctionParameterMode::Inout;
             tokens.remove(0);
         }
@@ -103,9 +165,8 @@ pub(super) fn function_parameter_from_tokens(mut tokens: Vec<Token>) -> PResult<
 
     let arg_type = parse_func_type_tokens(tokens)
         .map(Box::new)
-        .map_err(|_| ParseError::new(location, "expected a function parameter type"))?;
+        .map_err(|_| ParseError::syntax_exit(location, "expected a function parameter type"))?;
     Ok(FunctionParameter {
-        node_tag: NodeTag::FunctionParameter,
         name,
         arg_type: Some(arg_type),
         mode,

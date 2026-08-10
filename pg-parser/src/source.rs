@@ -1,10 +1,17 @@
-use std::fmt;
+//! UTF-8 source offsets, half-open ranges, slicing, and line/column mapping.
+//!
+//! Offsets are byte-based and limited to PostgreSQL's signed 32-bit parse
+//! locations. [`SourceText`] validates boundaries before exposing source slices.
 
-/// A UTF-8 byte offset into a SQL source string.
+use std::fmt;
+use std::ops::Add;
+use std::ops::Sub;
+
+/// A UTF-8 byte quantity used as a source offset, text length, or range shift.
 ///
-/// Values are deliberately limited to `i32::MAX`: PostgreSQL parse locations
-/// use signed 32-bit integers. Inputs that do not fit are rejected instead of
-/// being truncated.
+/// Values are deliberately limited to `i32::MAX` so that source offsets remain
+/// compatible with PostgreSQL's signed 32-bit parse locations. Inputs that do
+/// not fit are rejected instead of being truncated.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TextSize(u32);
 
@@ -14,6 +21,19 @@ impl TextSize {
     pub const fn new(value: u32) -> Self {
         assert!(value <= i32::MAX as u32, "text offset exceeds i32::MAX");
         Self(value)
+    }
+
+    /// Converts a validated UTF-8 byte quantity into a text size.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `value` exceeds the supported text size range.
+    #[track_caller]
+    pub fn from_usize(value: usize) -> Self {
+        match Self::try_from(value) {
+            Ok(size) => size,
+            Err(_) => panic!("text offset {value} exceeds i32::MAX"),
+        }
     }
 
     pub const fn get(self) -> u32 {
@@ -35,6 +55,22 @@ impl TryFrom<usize> for TextSize {
 impl From<TextSize> for usize {
     fn from(value: TextSize) -> Self {
         value.0 as usize
+    }
+}
+
+impl Add for TextSize {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Self::new(self.0.checked_add(rhs.0).expect("text offset overflow"))
+    }
+}
+
+impl Sub for TextSize {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self {
+        Self::new(self.0.checked_sub(rhs.0).expect("text offset underflow"))
     }
 }
 
@@ -67,7 +103,7 @@ impl TextRange {
     }
 
     pub fn len(self) -> TextSize {
-        TextSize(self.end.0 - self.start.0)
+        self.end - self.start
     }
 
     pub const fn is_empty(self) -> bool {
@@ -76,6 +112,22 @@ impl TextRange {
 
     pub fn contains(self, offset: TextSize) -> bool {
         self.start <= offset && offset < self.end
+    }
+}
+
+impl Add<TextSize> for TextRange {
+    type Output = Self;
+
+    fn add(self, offset: TextSize) -> Self {
+        Self::new(self.start + offset, self.end + offset)
+    }
+}
+
+impl Sub<TextSize> for TextRange {
+    type Output = Self;
+
+    fn sub(self, offset: TextSize) -> Self {
+        Self::new(self.start - offset, self.end - offset)
     }
 }
 
@@ -146,25 +198,32 @@ impl From<SourceTooLarge> for SourceError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LineIndex<'a> {
     text: &'a str,
+    len: TextSize,
     line_starts: Vec<TextSize>,
 }
 
 impl<'a> LineIndex<'a> {
     pub fn new(text: &'a str) -> Result<Self, SourceTooLarge> {
-        TextSize::try_from(text.len())?;
+        let len = TextSize::try_from(text.len())?;
         let mut line_starts = vec![TextSize::ZERO];
         for (index, byte) in text.bytes().enumerate() {
             if byte == b'\n' {
                 line_starts.push(TextSize::try_from(index + 1)?);
             }
         }
-        Ok(Self { text, line_starts })
+        Ok(Self {
+            text,
+            len,
+            line_starts,
+        })
     }
 
     pub fn line_column(&self, offset: TextSize) -> Result<LineColumn, SourceError> {
-        let len = TextSize::try_from(self.text.len())?;
-        if offset > len {
-            return Err(SourceError::OutOfBounds { offset, len });
+        if offset > self.len {
+            return Err(SourceError::OutOfBounds {
+                offset,
+                len: self.len,
+            });
         }
         let offset_usize = usize::from(offset);
         if !self.text.is_char_boundary(offset_usize) {
@@ -185,7 +244,6 @@ impl<'a> LineIndex<'a> {
 #[derive(Clone, Debug)]
 pub struct SourceText<'a> {
     text: &'a str,
-    len: TextSize,
     line_index: LineIndex<'a>,
 }
 
@@ -193,7 +251,6 @@ impl<'a> SourceText<'a> {
     pub fn new(text: &'a str) -> Result<Self, SourceTooLarge> {
         Ok(Self {
             text,
-            len: TextSize::try_from(text.len())?,
             line_index: LineIndex::new(text)?,
         })
     }
@@ -203,11 +260,11 @@ impl<'a> SourceText<'a> {
     }
 
     pub const fn len(&self) -> TextSize {
-        self.len
+        self.line_index.len
     }
 
     pub const fn is_empty(&self) -> bool {
-        self.len.get() == 0
+        self.len().get() == 0
     }
 
     pub fn line_column(&self, offset: TextSize) -> Result<LineColumn, SourceError> {
@@ -225,10 +282,10 @@ impl<'a> SourceText<'a> {
     }
 
     pub fn slice(&self, range: TextRange) -> Result<&'a str, SourceError> {
-        if range.end() > self.len {
+        if range.end() > self.len() {
             return Err(SourceError::OutOfBounds {
                 offset: range.end(),
-                len: self.len,
+                len: self.len(),
             });
         }
         let start = usize::from(range.start());
@@ -278,5 +335,40 @@ mod tests {
         let source = SourceText::new("select 中文").unwrap();
         let range = TextRange::new(TextSize::new(7), TextSize::new(13));
         assert_eq!(source.slice(range).unwrap(), "中文");
+    }
+
+    #[test]
+    fn text_size_adds_and_subtracts() {
+        let left = TextSize::new(10);
+        let right = TextSize::new(3);
+        assert_eq!(left + right, TextSize::new(13));
+        assert_eq!(left - right, TextSize::new(7));
+        assert_eq!(TextRange::new(right, left).len(), TextSize::new(7));
+    }
+
+    #[test]
+    fn constructs_text_size_from_usize() {
+        assert_eq!(TextSize::from_usize(42), TextSize::new(42));
+    }
+
+    #[test]
+    fn rejects_usize_outside_supported_range() {
+        assert_eq!(
+            TextSize::try_from(i32::MAX as usize + 1),
+            Err(SourceTooLarge {
+                len: i32::MAX as usize + 1,
+            })
+        );
+    }
+
+    #[test]
+    fn text_range_shifts_by_offset() {
+        let range = TextRange::new(TextSize::new(3), TextSize::new(10));
+        let base = TextSize::new(100);
+        assert_eq!(
+            range + base,
+            TextRange::new(TextSize::new(103), TextSize::new(110))
+        );
+        assert_eq!((range + base) - base, range);
     }
 }

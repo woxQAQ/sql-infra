@@ -1,3 +1,8 @@
+//! Core SQL/JSON value expressions and constructors.
+//!
+//! JSON formats, output clauses, null handling, uniqueness, object construction,
+//! and array construction are parsed here.
+
 use super::expression::ExprParser;
 use super::*;
 
@@ -11,10 +16,13 @@ impl ExprParser {
                     self.parse_json_object_constructor(token.location())
                 } else {
                     let first = self.parse_function_argument()?;
+                    self.record_completion_expression_continuation_tokens(&[
+                        TokenKind::ValueP,
+                        TokenKind::Char(':'),
+                    ]);
                     let args = self.parse_plain_function_arguments_after(first)?;
                     self.expect(TokenKind::Char(')'))?;
-                    Some(Node::FuncCall(FuncCall {
-                        node_tag: NodeTag::FuncCall,
+                    Some(node!(FuncCall {
                         funcname: system_type_names("json_object"),
                         args,
                         location: token.location() as ParseLoc,
@@ -27,8 +35,7 @@ impl ExprParser {
                 let expr = self.parse_json_value_expr()?;
                 let unique_keys = self.parse_json_unique_keys()?;
                 self.expect(TokenKind::Char(')'))?;
-                Some(Node::JsonParseExpr(JsonParseExpr {
-                    node_tag: NodeTag::JsonParseExpr,
+                Some(node!(JsonParseExpr {
                     expr: Some(Box::new(expr)),
                     unique_keys,
                     location: token.location() as ParseLoc,
@@ -38,8 +45,7 @@ impl ExprParser {
             TokenKind::JsonScalar => {
                 let expr = self.parse_expr(0)?;
                 self.expect(TokenKind::Char(')'))?;
-                Some(Node::JsonScalarExpr(JsonScalarExpr {
-                    node_tag: NodeTag::JsonScalarExpr,
+                Some(node!(JsonScalarExpr {
                     expr: Some(Box::new(expr)),
                     location: token.location() as ParseLoc,
                     ..JsonScalarExpr::default()
@@ -49,8 +55,7 @@ impl ExprParser {
                 let expr = self.parse_json_value_expr()?;
                 let output = self.parse_json_output()?;
                 self.expect(TokenKind::Char(')'))?;
-                Some(Node::JsonSerializeExpr(JsonSerializeExpr {
-                    node_tag: NodeTag::JsonSerializeExpr,
+                Some(node!(JsonSerializeExpr {
                     expr: Some(Box::new(expr)),
                     output,
                     location: token.location() as ParseLoc,
@@ -69,7 +74,6 @@ impl ExprParser {
         let raw_expr = self.parse_expr(0)?;
         let format = self.parse_json_format()?;
         Some(JsonValueExpr {
-            node_tag: NodeTag::JsonValueExpr,
             raw_expr: Some(Box::new(raw_expr)),
             format: Some(Box::new(format.unwrap_or_else(default_json_format))),
             ..JsonValueExpr::default()
@@ -123,7 +127,6 @@ impl ExprParser {
             JsonEncoding::Default
         };
         Some(Some(JsonFormat {
-            node_tag: NodeTag::JsonFormat,
             format_type: JsonFormatType::Json,
             encoding,
             location: location as ParseLoc,
@@ -148,20 +151,31 @@ impl ExprParser {
                 | TokenKind::Keep
                 | TokenKind::Omit
                 | TokenKind::Char(')')
+                | TokenKind::Completion
                 | TokenKind::Eof
         ) {
             type_tokens.push(self.advance().clone());
         }
-        let type_name = tokens_to_type_name(type_tokens).map(Box::new)?;
+        let completing_type = self.at_completion();
+        if completing_type {
+            let mut completion_tokens = type_tokens.clone();
+            completion_tokens.push(self.peek().clone());
+            record_type_name_completion(&completion_tokens, self.completion.as_ref());
+        }
+        let type_name = match tokens_to_type_name(type_tokens).map(Box::new) {
+            Some(type_name) => type_name,
+            None if completing_type => {
+                return self.fail("completion point in JSON RETURNING type");
+            }
+            None => return None,
+        };
         let format = Some(Box::new(
             self.parse_json_format()?
                 .unwrap_or_else(default_json_format),
         ));
         Some(Some(Box::new(JsonOutput {
-            node_tag: NodeTag::JsonOutput,
             type_name: Some(type_name),
             returning: Some(Box::new(JsonReturning {
-                node_tag: NodeTag::JsonReturning,
                 format,
                 ..JsonReturning::default()
             })),
@@ -182,7 +196,7 @@ impl ExprParser {
         }
     }
 
-    pub(super) fn parse_json_null_clause(&mut self, array_default: bool) -> Option<bool> {
+    pub(super) fn parse_json_null_clause(&mut self, default_absent_on_null: bool) -> Option<bool> {
         if self.consume(TokenKind::Absent) {
             self.expect(TokenKind::On)?;
             self.expect(TokenKind::NullP)?;
@@ -192,7 +206,7 @@ impl ExprParser {
             self.expect(TokenKind::NullP)?;
             Some(false)
         } else {
-            Some(array_default)
+            Some(default_absent_on_null)
         }
     }
 
@@ -213,8 +227,7 @@ impl ExprParser {
                 self.expect(TokenKind::Char(':'))?;
             }
             let value = self.parse_json_value_expr()?;
-            exprs.push(Node::JsonKeyValue(JsonKeyValue {
-                node_tag: NodeTag::JsonKeyValue,
+            exprs.push(node!(JsonKeyValue {
                 key: Some(Box::new(key)),
                 value: Some(Box::new(value)),
             }));
@@ -238,8 +251,7 @@ impl ExprParser {
         let unique = self.parse_json_unique_keys()?;
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::JsonObjectConstructor(JsonObjectConstructor {
-            node_tag: NodeTag::JsonObjectConstructor,
+        Some(node!(JsonObjectConstructor {
             exprs,
             output,
             absent_on_null,
@@ -249,9 +261,9 @@ impl ExprParser {
     }
 
     pub(super) fn parse_json_array_constructor(&mut self, location: usize) -> Option<Node> {
+        self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
-            self.expect(TokenKind::Char(')'))?;
             let mut depth = 0usize;
             let mut suffix_start = tokens.len();
             for (index, token) in tokens.iter().enumerate() {
@@ -268,8 +280,23 @@ impl ExprParser {
                     _ => {}
                 }
             }
-            let query = self.parse_nested_select(tokens[..suffix_start].to_vec())?;
-            let mut suffix = ExprParser::new(tokens[suffix_start..].to_vec());
+            let completion_in_suffix = self.at_completion() && suffix_start < tokens.len();
+            let query = if completion_in_suffix {
+                match parse_select_statement_tokens_with_completion(
+                    tokens[..suffix_start].to_vec(),
+                    self.completion.clone(),
+                ) {
+                    Ok(query) => query,
+                    Err(error) => return self.fail_with(error),
+                }
+            } else {
+                self.parse_nested_select(tokens[..suffix_start].to_vec())?
+            };
+            let mut suffix_tokens = tokens[suffix_start..].to_vec();
+            if completion_in_suffix {
+                suffix_tokens.push(self.peek().clone());
+            }
+            let mut suffix = ExprParser::with_completion(suffix_tokens, self.completion.clone());
             let format = match suffix.parse_json_format() {
                 Some(format) => Some(Box::new(format.unwrap_or_else(default_json_format))),
                 None => {
@@ -288,11 +315,11 @@ impl ExprParser {
                     return None;
                 }
             };
+            self.expect(TokenKind::Char(')'))?;
             if !suffix.at(TokenKind::Eof) {
                 return self.fail("unexpected token after JSON_ARRAY query clauses");
             }
-            return Some(Node::JsonArrayQueryConstructor(JsonArrayQueryConstructor {
-                node_tag: NodeTag::JsonArrayQueryConstructor,
+            return Some(node!(JsonArrayQueryConstructor {
                 query: Some(Box::new(query)),
                 output,
                 format,
@@ -327,8 +354,7 @@ impl ExprParser {
         let absent_on_null = self.parse_json_null_clause(true)?;
         let output = self.parse_json_output()?;
         self.expect(TokenKind::Char(')'))?;
-        Some(Node::JsonArrayConstructor(JsonArrayConstructor {
-            node_tag: NodeTag::JsonArrayConstructor,
+        Some(node!(JsonArrayConstructor {
             exprs,
             output,
             absent_on_null,
@@ -336,23 +362,26 @@ impl ExprParser {
         }))
     }
 }
-pub(super) fn parse_json_value_expr_tokens(tokens: Vec<Token>) -> PResult<JsonValueExpr> {
-    let location = tokens.first().map_or(0, |token| token.location());
+pub(super) fn parse_json_value_expr_tokens_with_completion(
+    tokens: Vec<Token>,
+    completion: Option<completion::SharedCollector>,
+) -> PResult<JsonValueExpr> {
+    let location = tokens.first().location_or(0);
     if tokens.is_empty() {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             location,
             "expected a JSON value expression",
         ));
     }
-    let mut parser = ExprParser::new(tokens);
+    let mut parser = ExprParser::with_completion(tokens, completion);
     let value = parser.parse_json_value_expr().ok_or_else(|| {
         parser
             .error
             .take()
-            .unwrap_or_else(|| ParseError::new(location, "invalid JSON value expression"))
+            .unwrap_or_else(|| ParseError::syntax_exit(location, "invalid JSON value expression"))
     })?;
     if !parser.at(TokenKind::Eof) {
-        return Err(ParseError::new(
+        return Err(ParseError::syntax_exit(
             parser.location(),
             "unexpected token after JSON value expression",
         ));
@@ -362,7 +391,6 @@ pub(super) fn parse_json_value_expr_tokens(tokens: Vec<Token>) -> PResult<JsonVa
 
 pub(super) fn default_json_format() -> JsonFormat {
     JsonFormat {
-        node_tag: NodeTag::JsonFormat,
         location: -1,
         ..JsonFormat::default()
     }

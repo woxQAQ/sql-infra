@@ -1,3 +1,8 @@
+//! Function, array, and call-like expression parsing.
+//!
+//! Argument lists, aggregate decorations, filters, ordering, and window clauses
+//! are assembled here after a callable name or constructor is recognized.
+
 use super::expression::ExprParser;
 use super::*;
 
@@ -10,11 +15,11 @@ impl ExprParser {
         }
         if self.consume(TokenKind::Char('(')) {
             let mut call = FuncCall {
-                node_tag: NodeTag::FuncCall,
                 funcname: fields,
                 location: location as ParseLoc,
                 ..FuncCall::default()
             };
+            self.record_completion_tokens(&[TokenKind::Char('*')]);
             if self.consume(TokenKind::Char('*')) {
                 call.agg_star = true;
                 self.expect(TokenKind::Char(')'))?;
@@ -26,6 +31,7 @@ impl ExprParser {
                     return self.fail("ALL and DISTINCT cannot be used together");
                 }
                 loop {
+                    self.record_completion_tokens(&[TokenKind::Variadic]);
                     if self.at(TokenKind::Variadic) {
                         if agg_all || call.agg_distinct {
                             return self.fail("ALL/DISTINCT cannot be used with VARIADIC");
@@ -46,8 +52,7 @@ impl ExprParser {
                 if call.agg_distinct && call.args.is_empty() {
                     return self.fail("DISTINCT requires at least one function argument");
                 }
-                if self.consume(TokenKind::Order) {
-                    self.expect(TokenKind::By)?;
+                if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
                     call.agg_order = self.parse_expression_sort_list(TokenKind::Char(')'))?;
                 }
                 self.expect(TokenKind::Char(')'))?;
@@ -55,8 +60,7 @@ impl ExprParser {
             self.parse_function_decorations(&mut call)?;
             Some(Node::FuncCall(call))
         } else {
-            Some(Node::ColumnRef(ColumnRef {
-                node_tag: NodeTag::ColumnRef,
+            Some(node!(ColumnRef {
                 fields,
                 location: location as ParseLoc,
             }))
@@ -86,8 +90,7 @@ impl ExprParser {
             }
         }
         let list_end = self.expect(TokenKind::Char(']'))?.location();
-        Some(Node::AArrayExpr(AArrayExpr {
-            node_tag: NodeTag::AArrayExpr,
+        Some(node!(AArrayExpr {
             elements,
             list_start: list_start as ParseLoc,
             list_end: list_end as ParseLoc,
@@ -100,8 +103,7 @@ impl ExprParser {
             let name_token = self.advance().clone();
             let location = name_token.location();
             self.advance();
-            return Some(Node::NamedArgExpr(NamedArgExpr {
-                xpr: Expr::new(NodeTag::NamedArgExpr),
+            return Some(node!(NamedArgExpr {
                 arg: Some(Box::new(self.parse_expr(0)?)),
                 name: token_name(&name_token),
                 argnumber: -1,
@@ -134,6 +136,14 @@ impl ExprParser {
         let mut items = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
             let expression = self.parse_expr(0)?;
+            self.record_completion_expression_continuation_tokens(&[
+                TokenKind::Using,
+                TokenKind::Asc,
+                TokenKind::Desc,
+                TokenKind::NullsP,
+                TokenKind::Char(','),
+                stop,
+            ]);
             let mut sortby_dir = SortByDir::Default;
             let mut use_op = Vec::new();
             let mut location = -1;
@@ -148,6 +158,8 @@ impl ExprParser {
                 }
                 TokenKind::Using => {
                     self.advance();
+                    self.record_completion_tokens(&[TokenKind::Op, TokenKind::Operator]);
+                    self.record_completion_slot(GrammarSlot::Operator);
                     sortby_dir = SortByDir::Using;
                     location = self.location() as ParseLoc;
                     if self.at(TokenKind::Operator) {
@@ -190,8 +202,7 @@ impl ExprParser {
             } else {
                 SortByNulls::Default
             };
-            items.push(Node::SortBy(SortBy {
-                node_tag: NodeTag::SortBy,
+            items.push(node!(SortBy {
                 node: Some(Box::new(expression)),
                 sortby_dir,
                 sortby_nulls,
@@ -212,6 +223,16 @@ impl ExprParser {
     }
 
     pub(super) fn parse_function_decorations(&mut self, call: &mut FuncCall) -> Option<()> {
+        self.record_completion_expression_continuation_phrase(&[
+            TokenKind::Within,
+            TokenKind::GroupP,
+        ]);
+        self.record_completion_expression_continuation_tokens(&[
+            TokenKind::Filter,
+            TokenKind::IgnoreP,
+            TokenKind::RespectP,
+            TokenKind::Over,
+        ]);
         if self.consume(TokenKind::Within) {
             if !call.agg_order.is_empty() || call.agg_distinct || call.func_variadic {
                 return self.fail("WITHIN GROUP conflicts with function argument modifiers");
@@ -247,16 +268,16 @@ impl ExprParser {
         }
         if self.at(TokenKind::Char('(')) {
             let location = self.advance().location();
-            let tokens = self.take_until_balanced(TokenKind::Char(')'));
-            self.expect(TokenKind::Char(')'))?;
-            match parse_window_specification_tokens(tokens, location) {
-                Ok(window) => Some(Some(Box::new(window))),
-                Err(error) => {
-                    if self.error.is_none() {
-                        self.error = Some(error);
-                    }
-                    None
+            let mut tokens = self.take_until_balanced(TokenKind::Char(')'));
+            if self.at_completion() {
+                tokens.push(self.peek().clone());
+            }
+            match parse_window_specification_tokens(tokens, location, self.completion.clone()) {
+                Ok(window) => {
+                    self.expect(TokenKind::Char(')'))?;
+                    Some(Some(Box::new(window)))
                 }
+                Err(error) => self.fail_with(error),
             }
         } else {
             let name_location = self.location();
@@ -267,7 +288,6 @@ impl ExprParser {
                 ])
                 .or_else(|| self.fail("OVER requires a window name"))?;
             Some(Some(Box::new(WindowDef {
-                node_tag: NodeTag::WindowDef,
                 name: Some(name),
                 frame_options: FRAMEOPTION_DEFAULTS,
                 location: name_location as ParseLoc,
@@ -318,11 +338,16 @@ impl ExprParser {
 pub(super) fn parse_window_specification_tokens(
     mut tokens: Vec<Token>,
     location: usize,
+    completion: Option<completion::SharedCollector>,
 ) -> PResult<WindowDef> {
-    let end_location = tokens.last().map_or(location, Token::end_location);
+    let end_location = tokens.last().end_location_or(location);
     tokens.push(Token::synthetic(TokenKind::Char(')'), end_location));
     tokens.push(Token::synthetic(TokenKind::Eof, end_location));
-    let mut parser = Parser { tokens, pos: 0 };
+    let mut parser = Parser {
+        tokens,
+        pos: 0,
+        completion,
+    };
     let window = parser.parse_window_specification_body(location)?;
     if !parser.at(TokenKind::Eof) {
         return Err(parser.error_here("unexpected token after window specification"));

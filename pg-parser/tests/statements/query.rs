@@ -1,14 +1,41 @@
-use pg_parser::{
-    AExprKind, Alias, BoolExprType, BoolTestType, CteCycleClause, CteMaterialize, CteSearchClause,
-    FRAMEOPTION_BETWEEN, FRAMEOPTION_EXCLUDE_TIES, FRAMEOPTION_ROWS,
-    FRAMEOPTION_START_OFFSET_PRECEDING, GraphElementPatternKind, GroupingSetKind, JoinType,
-    JsonBehavior, JsonBehaviorType, JsonEncoding, JsonExprOp, JsonFormatType, JsonQuotes,
-    JsonReturning, JsonTableColumnType, JsonTablePathSpec, JsonValueType, JsonWrapper,
-    LockClauseStrength, LockWaitPolicy, MinMaxOp, Node, NullTestType, SetOperation, ValUnion,
-    WithClause, XmlExprOp,
-};
+use pg_parser::AExprKind;
+use pg_parser::Alias;
+use pg_parser::BoolExprType;
+use pg_parser::BoolTestType;
+use pg_parser::CteCycleClause;
+use pg_parser::CteMaterialize;
+use pg_parser::CteSearchClause;
+use pg_parser::FRAMEOPTION_BETWEEN;
+use pg_parser::FRAMEOPTION_EXCLUDE_TIES;
+use pg_parser::FRAMEOPTION_ROWS;
+use pg_parser::FRAMEOPTION_START_OFFSET_PRECEDING;
+use pg_parser::GraphElementPatternKind;
+use pg_parser::GroupingSetKind;
+use pg_parser::JoinType;
+use pg_parser::JsonBehavior;
+use pg_parser::JsonBehaviorType;
+use pg_parser::JsonEncoding;
+use pg_parser::JsonExprOp;
+use pg_parser::JsonFormatType;
+use pg_parser::JsonQuotes;
+use pg_parser::JsonReturning;
+use pg_parser::JsonTableColumnType;
+use pg_parser::JsonTablePathSpec;
+use pg_parser::JsonValueType;
+use pg_parser::JsonWrapper;
+use pg_parser::LockClauseStrength;
+use pg_parser::LockWaitPolicy;
+use pg_parser::MinMaxOp;
+use pg_parser::Node;
+use pg_parser::NullTestType;
+use pg_parser::SetOperation;
+use pg_parser::TextSize;
+use pg_parser::TokenKind;
+use pg_parser::ValUnion;
+use pg_parser::WithClause;
+use pg_parser::XmlExprOp;
 
-use super::common::parse_statement;
+use super::common::{parse_error, parse_statement};
 
 #[test]
 fn raw_select_statement_locations_follow_postgresql_semicolon_rules() {
@@ -619,7 +646,7 @@ fn select_stmt_parses_values_and_table_forms() {
     assert!(matches!(
         target.val.as_deref(),
         Some(Node::ColumnRef(column))
-            if matches!(column.fields.as_slice(), [Node::AStar(_)])
+            if matches!(column.fields.as_slice(), [Node::AStar])
                 && column.location == -1
     ));
 
@@ -934,7 +961,7 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
     );
     assert!(element.arg_names.is_empty());
     assert_eq!(element.args.len(), 1);
-    assert_eq!(element.node_tag, 0);
+    assert_eq!(element.type_oid, 0);
     assert_eq!(element.typmod, 0);
 
     let Node::ResTarget(forest_target) = &stmt.target_list[1] else {
@@ -1726,7 +1753,7 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
         .collect::<Vec<_>>();
     assert!(matches!(
         values[0],
-        Node::ColumnRef(column) if matches!(column.fields.as_slice(), [Node::AStar(_)])
+        Node::ColumnRef(column) if matches!(column.fields.as_slice(), [Node::AStar])
     ));
     assert!(matches!(
         values[1],
@@ -2337,6 +2364,389 @@ fn select_qualified_prefix_and_quantified_operators_follow_postgresql_precedence
             if between.kind == pg_parser::AExprKind::NotBetweenSym
                 && matches!(between.name.as_slice(), [Node::String(name)] if name.sval.as_deref() == Some("NOT BETWEEN SYMMETRIC"))
     ));
+}
+
+#[test]
+fn select_boolean_null_and_collation_precedence_follow_postgresql() {
+    let Node::SelectStmt(stmt) = parse_statement(
+        "select not x = y,
+                not x is null,
+                not x like 'a%',
+                not x between 1 and 2,
+                not x not like 'a%',
+                1 + 1 isnull,
+                a = b isnull,
+                x like 'a%' isnull,
+                -x notnull,
+                -x collate \"C\",
+                x collate \"C\"::text,
+                1 = any (select 1) = 2",
+    ) else {
+        panic!("expected SelectStmt");
+    };
+    let values = stmt
+        .target_list
+        .iter()
+        .map(|target| match target {
+            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
+            other => panic!("expected ResTarget, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    for value in &values[..5] {
+        assert!(matches!(
+            value,
+            Node::BoolExpr(expression)
+                if expression.boolop == pg_parser::BoolExprType::NotExpr
+                    && expression.args.len() == 1
+        ));
+    }
+    assert!(matches!(
+        values[5],
+        Node::NullTest(test)
+            if matches!(test.arg.as_deref(), Some(Node::AExpr(expression))
+                if matches!(expression.name.as_slice(), [Node::String(name)]
+                    if name.sval.as_deref() == Some("+")
+                ))
+    ));
+    assert!(matches!(
+        values[6],
+        Node::NullTest(test)
+            if matches!(test.arg.as_deref(), Some(Node::AExpr(expression))
+                if expression.kind == pg_parser::AExprKind::Op
+                    && matches!(expression.name.as_slice(), [Node::String(name)]
+                        if name.sval.as_deref() == Some("=")
+                    ))
+    ));
+    assert!(matches!(
+        values[7],
+        Node::NullTest(test)
+            if matches!(test.arg.as_deref(), Some(Node::AExpr(expression))
+                if expression.kind == pg_parser::AExprKind::Like
+            )
+    ));
+    assert!(matches!(
+        values[8],
+        Node::NullTest(test)
+            if matches!(test.arg.as_deref(), Some(Node::AExpr(expression))
+                if matches!(expression.name.as_slice(), [Node::String(name)]
+                    if name.sval.as_deref() == Some("-")
+                ))
+    ));
+    assert!(matches!(
+        values[9],
+        Node::CollateClause(clause)
+            if matches!(clause.arg.as_deref(), Some(Node::AExpr(expression))
+                if matches!(expression.name.as_slice(), [Node::String(name)]
+                    if name.sval.as_deref() == Some("-")
+                ))
+    ));
+    assert!(matches!(
+        values[10],
+        Node::TypeCast(cast)
+            if matches!(cast.arg.as_deref(), Some(Node::CollateClause(_)))
+    ));
+    assert!(matches!(
+        values[11],
+        Node::AExpr(expression)
+            if expression.kind == pg_parser::AExprKind::Op
+                && matches!(expression.lexpr.as_deref(), Some(Node::SubLink(link))
+                    if link.sub_link_type == pg_parser::SubLinkType::AnySublink)
+    ));
+
+    parse_statement("select a isnull notnull, a is not null isnull, a is null isnull");
+    for sql in [
+        "select a = b = any (select 1)",
+        "select a = b < any (select 1)",
+        "select 1 = any (select 1) = 2 = 3",
+    ] {
+        assert!(
+            parse_error(sql)
+                .message
+                .contains("cannot chain comparison operators")
+        );
+    }
+}
+
+#[test]
+fn select_quantified_operators_follow_postgresql_precedence_and_chain_rules() {
+    let Node::SelectStmt(stmt) = parse_statement(
+        "select 1 like 2 = any(array[2]),
+                1 # 2 + any(array[3]),
+                1 like any(array[1]) like 2,
+                1 in (2) like 3,
+                1 in (2) in (3)",
+    ) else {
+        panic!("expected SelectStmt");
+    };
+    let values = stmt
+        .target_list
+        .iter()
+        .map(|target| match target {
+            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
+            other => panic!("expected ResTarget, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+
+    assert!(matches!(
+        values[0],
+        Node::AExpr(any)
+            if any.kind == AExprKind::OpAny
+                && matches!(any.lexpr.as_deref(), Some(Node::AExpr(like)) if like.kind == AExprKind::Like)
+    ));
+    assert!(matches!(
+        values[1],
+        Node::AExpr(custom)
+            if matches!(custom.name.as_slice(), [Node::String(name)] if name.sval.as_deref() == Some("#"))
+                && matches!(custom.rexpr.as_deref(), Some(Node::AExpr(any)) if any.kind == AExprKind::OpAny)
+    ));
+    assert!(matches!(
+        values[2],
+        Node::AExpr(like)
+            if like.kind == AExprKind::Like
+                && matches!(like.lexpr.as_deref(), Some(Node::AExpr(any)) if any.kind == AExprKind::OpAny)
+    ));
+    assert!(matches!(
+        values[3],
+        Node::AExpr(like)
+            if like.kind == AExprKind::Like
+                && matches!(like.lexpr.as_deref(), Some(Node::AExpr(member)) if member.kind == AExprKind::In)
+    ));
+    assert!(matches!(
+        values[4],
+        Node::AExpr(outer)
+            if outer.kind == AExprKind::In
+                && matches!(outer.lexpr.as_deref(), Some(Node::AExpr(inner)) if inner.kind == AExprKind::In)
+    ));
+}
+
+#[test]
+fn select_postfix_is_predicates_follow_postgresql_chain_rules() {
+    let Node::SelectStmt(stmt) = parse_statement(
+        "select 1 is null is document,
+                1 is true is false,
+                1 is document is distinct from 2",
+    ) else {
+        panic!("expected SelectStmt");
+    };
+    let values = stmt
+        .target_list
+        .iter()
+        .map(|target| match target {
+            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
+            other => panic!("expected ResTarget, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        values[0],
+        Node::XmlExpr(document)
+            if matches!(document.args.as_slice(), [Node::NullTest(_)])
+    ));
+    assert!(matches!(
+        values[1],
+        Node::BooleanTest(outer)
+            if matches!(outer.arg.as_deref(), Some(Node::BooleanTest(_)))
+    ));
+    assert!(matches!(
+        values[2],
+        Node::AExpr(distinct)
+            if distinct.kind == AExprKind::Distinct
+                && matches!(distinct.lexpr.as_deref(), Some(Node::XmlExpr(_)))
+    ));
+
+    for sql in [
+        "select 1 is distinct from 2 is null",
+        "select 1 is distinct from 2 is distinct from 3",
+    ] {
+        assert!(
+            parse_error(sql)
+                .message
+                .contains("cannot chain IS predicates")
+        );
+    }
+}
+
+#[test]
+fn select_overlaps_preserves_row_syntax_and_primary_expression_binding() {
+    let Node::SelectStmt(stmt) = parse_statement(
+        "select (1,2) overlaps (3,4)::bool,
+                (1,2) overlaps (3,4) + 1,
+                1 + (2,3) overlaps (4,5),
+                (1,2) overlaps (3,4) like true",
+    ) else {
+        panic!("expected SelectStmt");
+    };
+    let values = stmt
+        .target_list
+        .iter()
+        .map(|target| match target {
+            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
+            other => panic!("expected ResTarget, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert!(matches!(
+        values[0],
+        Node::TypeCast(cast) if matches!(cast.arg.as_deref(), Some(Node::FuncCall(_)))
+    ));
+    assert!(matches!(
+        values[1],
+        Node::AExpr(add) if matches!(add.lexpr.as_deref(), Some(Node::FuncCall(_)))
+    ));
+    assert!(matches!(
+        values[2],
+        Node::AExpr(add) if matches!(add.rexpr.as_deref(), Some(Node::FuncCall(_)))
+    ));
+    assert!(matches!(
+        values[3],
+        Node::AExpr(like) if matches!(like.lexpr.as_deref(), Some(Node::FuncCall(_)))
+    ));
+
+    for sql in [
+        "select ((1,2)) overlaps (3,4)",
+        "select (1,2) overlaps ((3,4))",
+        "select (row(1,2)) overlaps row(3,4)",
+    ] {
+        parse_error(sql);
+    }
+}
+
+#[test]
+fn select_indirection_is_limited_to_postgresql_common_expression_forms() {
+    parse_statement("select items[1][2].field, $1[1], (f())[1], (cast(a as int[]))[1], (a.*)[1]");
+
+    for sql in [
+        "select 1[1]",
+        "select array[1][1]",
+        "select f()[1]",
+        "select cast(a as int[])[1]",
+        "select null.x",
+        "select f().x",
+        "select 1 is null[1]",
+        "select 1 + 2[1]",
+        "select 1::int[:]",
+        "select 1::int .x",
+        "select a.*[1]",
+        "select (a).* [1]",
+    ] {
+        parse_error(sql);
+    }
+}
+
+#[test]
+fn select_star_is_limited_to_postgresql_wildcard_positions() {
+    parse_statement("select *, t.*, (t).*, count(*) from t");
+
+    for sql in [
+        "select * + 1",
+        "select (*)",
+        "select array[*]",
+        "select 1 in (*)",
+        "select 1 where *",
+        "select row(*)",
+        "select case when true then * end",
+        "select * as alias",
+    ] {
+        parse_error(sql);
+    }
+}
+
+#[test]
+fn select_split_generic_prefix_operators_and_nested_subqueries_match_postgresql() {
+    let Node::SelectStmt(prefixes) = parse_statement("select -> 1, | 2") else {
+        panic!("expected SelectStmt");
+    };
+    for target in prefixes.target_list {
+        assert!(matches!(
+            target,
+            Node::ResTarget(target)
+                if matches!(target.val.as_deref(), Some(Node::AExpr(expression))
+                    if expression.lexpr.is_none())
+        ));
+    }
+
+    let Node::SelectStmt(nested) =
+        parse_statement("select 1 = any ((select 1)), 1 in ((select 1)), ((select 1))")
+    else {
+        panic!("expected SelectStmt");
+    };
+    let values = nested
+        .target_list
+        .iter()
+        .map(|target| match target {
+            Node::ResTarget(target) => target.val.as_deref().expect("target value"),
+            other => panic!("expected ResTarget, got {other:?}"),
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        matches!(values[0], Node::SubLink(link) if link.sub_link_type == pg_parser::SubLinkType::AnySublink)
+    );
+    assert!(
+        matches!(values[1], Node::SubLink(link) if link.sub_link_type == pg_parser::SubLinkType::AnySublink)
+    );
+    assert!(matches!(values[2], Node::SubLink(link) if link.location == 48));
+}
+
+#[test]
+fn expression_completion_respects_postgresql_expression_categories() {
+    let expectations = |sql: &str| {
+        pg_parser::collect_expectations(sql, TextSize::try_from(sql.len()).unwrap())
+            .expect("collect expectations")
+    };
+
+    let start = expectations("select 1 where ");
+    assert!(
+        start
+            .expression_start_tokens
+            .contains(&TokenKind::RightArrow)
+    );
+    assert!(
+        start
+            .expression_start_tokens
+            .contains(&TokenKind::Char('|'))
+    );
+    assert!(
+        !start
+            .expression_start_tokens
+            .contains(&TokenKind::Char('*'))
+    );
+
+    let common = expectations("select xmlexists(");
+    for token in [
+        TokenKind::Char('+'),
+        TokenKind::Char('-'),
+        TokenKind::Char('*'),
+        TokenKind::Char('|'),
+        TokenKind::RightArrow,
+        TokenKind::Op,
+        TokenKind::Operator,
+        TokenKind::Not,
+        TokenKind::Default,
+    ] {
+        assert!(!common.expression_start_tokens.contains(&token));
+    }
+
+    let postfix_is = expectations("select 1 is null ");
+    for token in [TokenKind::Is, TokenKind::Isnull, TokenKind::Notnull] {
+        assert!(postfix_is.expression_continuation_tokens.contains(&token));
+    }
+
+    let membership = expectations("select 1 in (2) ");
+    for token in [TokenKind::InP, TokenKind::Like, TokenKind::Between] {
+        assert!(membership.expression_continuation_tokens.contains(&token));
+    }
+
+    let scalar = expectations("select 1 ");
+    for token in [
+        TokenKind::Char('['),
+        TokenKind::Char('.'),
+        TokenKind::Overlaps,
+    ] {
+        assert!(!scalar.expression_continuation_tokens.contains(&token));
+    }
+    let row = expectations("select (1,2) ");
+    assert!(
+        row.expression_continuation_tokens
+            .contains(&TokenKind::Overlaps)
+    );
 }
 
 #[test]
