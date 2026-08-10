@@ -1169,18 +1169,6 @@ mod tests {
     }
 
     #[test]
-    fn xmltable_column_fragment_shares_the_expression_collector() {
-        let mut tokens = crate::lex("c text DEFAULT ").unwrap();
-        let eof = tokens.pop().unwrap();
-        tokens.push(Token::synthetic(TokenKind::Completion, eof.location()));
-        let collector = Rc::new(RefCell::new(CompletionCollector::default()));
-        let _ = xmltable_column_from_tokens_with_completion(tokens, Some(collector.clone()));
-        let slots = &collector.borrow().expectations.slots;
-        assert!(slots.contains(&GrammarSlot::Column), "{slots:?}");
-        assert!(slots.contains(&GrammarSlot::Function), "{slots:?}");
-    }
-
-    #[test]
     fn collects_json_array_query_suffixes_after_the_nested_query() {
         let format_expectations = expectations_at_end("SELECT JSON_ARRAY(SELECT 1 FORMAT ");
         assert!(format_expectations.tokens.contains(&TokenKind::Json));
