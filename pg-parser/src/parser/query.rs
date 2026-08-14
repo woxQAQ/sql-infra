@@ -470,27 +470,25 @@ impl Parser {
         if self.consume_phrase(&[TokenKind::GroupP, TokenKind::By])? {
             if self.consume(TokenKind::All) {
                 stmt.group_by_all = true;
-            } else {
-                if self.consume(TokenKind::Distinct) {
-                    stmt.group_distinct = true;
-                }
-                stmt.group_clause = self.parse_group_by_list_until(&[
-                    TokenKind::Having,
-                    TokenKind::Window,
-                    TokenKind::Order,
-                    TokenKind::Limit,
-                    TokenKind::Offset,
-                    TokenKind::Fetch,
-                    TokenKind::For,
-                    TokenKind::Union,
-                    TokenKind::Intersect,
-                    TokenKind::Except,
-                    TokenKind::Char(';'),
-                    TokenKind::Eof,
-                ])?;
-                if stmt.group_clause.is_empty() {
-                    return Err(self.error_here("GROUP BY requires at least one expression"));
-                }
+            } else if self.consume(TokenKind::Distinct) {
+                stmt.group_distinct = true;
+            }
+            stmt.group_clause = self.parse_group_by_list_until(&[
+                TokenKind::Having,
+                TokenKind::Window,
+                TokenKind::Order,
+                TokenKind::Limit,
+                TokenKind::Offset,
+                TokenKind::Fetch,
+                TokenKind::For,
+                TokenKind::Union,
+                TokenKind::Intersect,
+                TokenKind::Except,
+                TokenKind::Char(';'),
+                TokenKind::Eof,
+            ])?;
+            if stmt.group_clause.is_empty() {
+                return Err(self.error_here("GROUP BY requires at least one expression"));
             }
         }
         stmt.having_clause = self.parse_optional_expr_clause(

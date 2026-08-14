@@ -39,11 +39,35 @@ pub(super) fn parse_aggregate_with_args_tokens(
             "aggregate requires a function name",
         ));
     }
+    let agg_star =
+        matches!(&tokens[open + 1..close], [token] if token.kind == TokenKind::Char('*'));
     let name = parse_object_with_args_tokens(name_tokens, location)?;
     let mut parsed_args = parse_aggregate_args(tokens[open + 1..close].to_vec())?;
+    let direct_count = match parsed_args.get(1) {
+        Some(Node::Integer(count)) if count.ival >= 0 => Some(count.ival as u32),
+        _ => None,
+    };
     let parameters = match parsed_args.remove(0) {
         Node::AArrayExpr(list) => list.elements,
         _ => unreachable!("aggregate argument parser returned a non-list"),
+    };
+    let agg_signature = if agg_star {
+        AggregateSignature::Star
+    } else if let Some(direct_args) = direct_count {
+        // A compatible shared VARIADIC pair is merged into one parameter, so
+        // the ordered argument does not extend the parameter list.
+        let shared_variadic = direct_args as usize == parameters.len()
+            && matches!(
+                parameters.last(),
+                Some(Node::FunctionParameter(parameter))
+                    if parameter.mode == FunctionParameterMode::Variadic
+            );
+        AggregateSignature::OrderedSet {
+            direct_args,
+            shared_variadic,
+        }
+    } else {
+        AggregateSignature::None
     };
     let objargs = parameters
         .iter()
@@ -59,6 +83,7 @@ pub(super) fn parse_aggregate_with_args_tokens(
         objargs,
         objfuncargs: parameters,
         args_unspecified: false,
+        agg_signature,
     })
 }
 
@@ -277,6 +302,7 @@ fn parse_object_with_args_tokens_impl(
         objargs,
         objfuncargs,
         args_unspecified,
+        agg_signature: AggregateSignature::None,
     })
 }
 
@@ -1037,7 +1063,6 @@ impl Parser {
                 | ObjectType::Tsdictionary
                 | ObjectType::Tstemplate
                 | ObjectType::Tsconfiguration
-                | ObjectType::Language
         ) {
             self.advance();
         }

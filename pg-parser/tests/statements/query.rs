@@ -158,7 +158,7 @@ fn select_limit_offset_and_fetch_follow_exact_grammar_forms() {
     };
     assert!(matches!(
         stmt.limit_count.as_deref(),
-        Some(Node::AConst(value)) if value.isnull
+        Some(Node::AConst(value)) if value.is_null
     ));
     assert!(stmt.limit_offset.is_some());
 
@@ -455,11 +455,12 @@ fn select_stmt_builds_grouping_sets_rollup_cube_and_group_by_all() {
     assert!(empty.content.is_empty());
     assert_eq!(empty.location as usize, sql.rfind("()").unwrap());
 
-    let Node::SelectStmt(stmt) = parse_statement("select count(*) from t group by all") else {
+    let Node::SelectStmt(stmt) = parse_statement("select a, count(*) from t group by all a") else {
         panic!("expected SelectStmt");
     };
     assert!(stmt.group_by_all);
-    assert!(stmt.group_clause.is_empty());
+    assert_eq!(stmt.group_clause.len(), 1);
+    assert!(pg_parser::parse("select count(*) from t group by all").is_err());
 }
 
 #[test]
@@ -1135,7 +1136,7 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
         [Node::RangeTableFuncCol(compared), Node::RangeTableFuncCol(grouped), Node::RangeTableFuncCol(nullable)]
             if matches!(compared.colexpr.as_deref(), Some(Node::AExpr(_)))
                 && matches!(grouped.coldefexpr.as_deref(), Some(Node::BoolExpr(_)))
-                && matches!(nullable.colexpr.as_deref(), Some(Node::AConst(value)) if value.isnull)
+                && matches!(nullable.colexpr.as_deref(), Some(Node::AConst(value)) if value.is_null)
     ));
 
     let Node::SelectStmt(parenthesized) = parse_statement(

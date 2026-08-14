@@ -1904,7 +1904,7 @@ pub struct AExpr {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AConst {
     pub val: ValUnion,
-    pub isnull: bool,
+    pub is_null: bool,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2641,6 +2641,24 @@ pub struct ObjectWithArgs {
     pub objargs: Vec<Option<Node>>,
     pub objfuncargs: NodeList,
     pub args_unspecified: bool,
+    /// Aggregate-only argument form; `None` for non-aggregate identities.
+    pub agg_signature: AggregateSignature,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+pub enum AggregateSignature {
+    /// Not an aggregate signature, or a plain aggregate argument list.
+    #[default]
+    None,
+    /// `(*)` aggregate argument list.
+    Star,
+    /// Ordered-set aggregate: the first `direct_args` arguments are direct
+    /// arguments and the rest follow `ORDER BY`. With `shared_variadic`, the
+    /// final direct `VARIADIC` argument is repeated as the single ordered
+    /// argument instead of appearing twice in the parameter list.
+    OrderedSet {
+        direct_args: u32,
+        shared_variadic: bool,
+    },
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AccessPriv {
@@ -3599,7 +3617,7 @@ impl BitString {
 impl AConst {
     pub fn null(location: ParseLoc) -> Self {
         Self {
-            isnull: true,
+            is_null: true,
             location,
             ..Self::default()
         }
@@ -3608,7 +3626,7 @@ impl AConst {
     pub fn integer(ival: i32, location: ParseLoc) -> Self {
         Self {
             val: ValUnion::Integer(Integer::new(ival)),
-            isnull: false,
+            is_null: false,
             location,
         }
     }
@@ -3616,7 +3634,7 @@ impl AConst {
     pub fn string(sval: impl Into<std::string::String>, location: ParseLoc) -> Self {
         Self {
             val: ValUnion::String(String::new(sval)),
-            isnull: false,
+            is_null: false,
             location,
         }
     }

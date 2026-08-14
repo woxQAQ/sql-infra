@@ -75,6 +75,50 @@ impl Parser {
         })
     }
 
+    fn parse_partition_range_datums(&mut self, empty_error: &str) -> PResult<NodeList> {
+        let mut datums = Vec::new();
+        while self.at_completion() || !self.at(TokenKind::Char(')')) {
+            let location = self.location();
+            if self.consume(TokenKind::Minvalue) {
+                datums.push(node!(PartitionRangeDatum {
+                    kind: PartitionRangeDatumKind::Minvalue,
+                    value: None,
+                    location: location as ParseLoc,
+                }));
+            } else if self.consume(TokenKind::Maxvalue) {
+                datums.push(node!(PartitionRangeDatum {
+                    kind: PartitionRangeDatumKind::Maxvalue,
+                    value: None,
+                    location: location as ParseLoc,
+                }));
+            } else {
+                let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
+                self.record_expression_follow_tokens(&tokens, COMMA_OR_CLOSE_PAREN_TOKENS, false);
+                self.append_completion_marker(&mut tokens);
+                if tokens.is_empty() {
+                    return Err(self.error_here("expected a partition bound value"));
+                }
+                let value =
+                    parse_expression_tokens_with_completion(tokens, self.completion.clone())?;
+                datums.push(node!(PartitionRangeDatum {
+                    kind: PartitionRangeDatumKind::Value,
+                    value: Some(Box::new(value)),
+                    location: location as ParseLoc,
+                }));
+            }
+            if !self.consume(TokenKind::Char(',')) {
+                break;
+            }
+            if self.at(TokenKind::Char(')')) {
+                return Err(self.error_here("expected a partition bound value after ','"));
+            }
+        }
+        if datums.is_empty() {
+            return Err(self.error_here(empty_error));
+        }
+        Ok(datums)
+    }
+
     pub(super) fn parse_partition_bound(&mut self) -> PResult<PartitionBoundSpec> {
         let location = self.location();
         if self.consume(TokenKind::Default) {
@@ -104,17 +148,13 @@ impl Parser {
         if self.consume(TokenKind::From) {
             let location = self.previous_location();
             self.expect(TokenKind::Char('('))?;
-            let lowerdatums = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
-            if lowerdatums.is_empty() {
-                return Err(self.error_here("range partition lower bound cannot be empty"));
-            }
+            let lowerdatums =
+                self.parse_partition_range_datums("range partition lower bound cannot be empty")?;
             self.expect(TokenKind::Char(')'))?;
             self.expect(TokenKind::To)?;
             self.expect(TokenKind::Char('('))?;
-            let upperdatums = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
-            if upperdatums.is_empty() {
-                return Err(self.error_here("range partition upper bound cannot be empty"));
-            }
+            let upperdatums =
+                self.parse_partition_range_datums("range partition upper bound cannot be empty")?;
             self.expect(TokenKind::Char(')'))?;
             return Ok(PartitionBoundSpec {
                 strategy: b'r',

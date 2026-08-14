@@ -21,8 +21,9 @@ impl Parser {
         let for_portion_of = self.parse_for_portion_of_clause()?;
         if for_portion_of.is_some()
             && let Some(relation) = relation.as_mut()
+            && let Some(alias) = self.parse_optional_alias(true)?
         {
-            relation.alias = self.parse_optional_alias(true)?;
+            relation.alias = Some(alias);
         }
         let using_clause = if self.consume(TokenKind::Using) {
             let using_clause = self.parse_from_clause_until(&[
