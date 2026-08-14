@@ -1904,7 +1904,7 @@ pub struct AExpr {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AConst {
     pub val: ValUnion,
-    pub isnull: bool,
+    pub is_null: bool,
     pub location: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -3617,7 +3617,7 @@ impl BitString {
 impl AConst {
     pub fn null(location: ParseLoc) -> Self {
         Self {
-            isnull: true,
+            is_null: true,
             location,
             ..Self::default()
         }
@@ -3626,7 +3626,7 @@ impl AConst {
     pub fn integer(ival: i32, location: ParseLoc) -> Self {
         Self {
             val: ValUnion::Integer(Integer::new(ival)),
-            isnull: false,
+            is_null: false,
             location,
         }
     }
@@ -3634,7 +3634,7 @@ impl AConst {
     pub fn string(sval: impl Into<std::string::String>, location: ParseLoc) -> Self {
         Self {
             val: ValUnion::String(String::new(sval)),
-            isnull: false,
+            is_null: false,
             location,
         }
     }

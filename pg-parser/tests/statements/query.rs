@@ -158,7 +158,7 @@ fn select_limit_offset_and_fetch_follow_exact_grammar_forms() {
     };
     assert!(matches!(
         stmt.limit_count.as_deref(),
-        Some(Node::AConst(value)) if value.isnull
+        Some(Node::AConst(value)) if value.is_null
     ));
     assert!(stmt.limit_offset.is_some());
 
@@ -1136,7 +1136,7 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
         [Node::RangeTableFuncCol(compared), Node::RangeTableFuncCol(grouped), Node::RangeTableFuncCol(nullable)]
             if matches!(compared.colexpr.as_deref(), Some(Node::AExpr(_)))
                 && matches!(grouped.coldefexpr.as_deref(), Some(Node::BoolExpr(_)))
-                && matches!(nullable.colexpr.as_deref(), Some(Node::AConst(value)) if value.isnull)
+                && matches!(nullable.colexpr.as_deref(), Some(Node::AConst(value)) if value.is_null)
     ));
 
     let Node::SelectStmt(parenthesized) = parse_statement(

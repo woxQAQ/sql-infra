@@ -178,7 +178,7 @@ fn type_names_equal_ignoring_locations(left: &TypeName, right: &TypeName) -> boo
             .zip(&right.typmods)
             .all(|(left, right)| match (left, right) {
                 (Node::AConst(left), Node::AConst(right)) => {
-                    left.val == right.val && left.isnull == right.isnull
+                    left.val == right.val && left.is_null == right.is_null
                 }
                 _ => left == right,
             })

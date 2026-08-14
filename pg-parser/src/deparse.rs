@@ -3772,7 +3772,7 @@ impl Deparser {
 }
 
 fn render_constant(value: &AConst) -> std::string::String {
-    if value.isnull {
+    if value.is_null {
         return "NULL".to_owned();
     }
     match &value.val {
@@ -3853,7 +3853,7 @@ fn is_distinct_marker(nodes: &[Node]) -> bool {
 }
 
 fn is_null_constant(node: &Node) -> bool {
-    matches!(node, Node::AConst(value) if value.isnull)
+    matches!(node, Node::AConst(value) if value.is_null)
 }
 
 fn object_type_sql(object_type: ObjectType) -> &'static str {
