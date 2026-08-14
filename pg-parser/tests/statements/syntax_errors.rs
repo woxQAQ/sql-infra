@@ -184,7 +184,7 @@ fn incomplete_select_forms_are_rejected() {
         "select 1 into temporary table",
         "select 1 between 0 2",
         "select 1 group nonsense",
-        "select 1 group by all a",
+        "select 1 group by all",
         "select 1 group by rollup()",
         "select 1 group by cube(a,)",
         "select 1 group by grouping sets ()",

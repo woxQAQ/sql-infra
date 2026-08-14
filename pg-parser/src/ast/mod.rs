@@ -2641,6 +2641,24 @@ pub struct ObjectWithArgs {
     pub objargs: Vec<Option<Node>>,
     pub objfuncargs: NodeList,
     pub args_unspecified: bool,
+    /// Aggregate-only argument form; `None` for non-aggregate identities.
+    pub agg_signature: AggregateSignature,
+}
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
+pub enum AggregateSignature {
+    /// Not an aggregate signature, or a plain aggregate argument list.
+    #[default]
+    None,
+    /// `(*)` aggregate argument list.
+    Star,
+    /// Ordered-set aggregate: the first `direct_args` arguments are direct
+    /// arguments and the rest follow `ORDER BY`. With `shared_variadic`, the
+    /// final direct `VARIADIC` argument is repeated as the single ordered
+    /// argument instead of appearing twice in the parameter list.
+    OrderedSet {
+        direct_args: u32,
+        shared_variadic: bool,
+    },
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AccessPriv {

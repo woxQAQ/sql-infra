@@ -455,11 +455,12 @@ fn select_stmt_builds_grouping_sets_rollup_cube_and_group_by_all() {
     assert!(empty.content.is_empty());
     assert_eq!(empty.location as usize, sql.rfind("()").unwrap());
 
-    let Node::SelectStmt(stmt) = parse_statement("select count(*) from t group by all") else {
+    let Node::SelectStmt(stmt) = parse_statement("select a, count(*) from t group by all a") else {
         panic!("expected SelectStmt");
     };
     assert!(stmt.group_by_all);
-    assert!(stmt.group_clause.is_empty());
+    assert_eq!(stmt.group_clause.len(), 1);
+    assert!(pg_parser::parse("select count(*) from t group by all").is_err());
 }
 
 #[test]

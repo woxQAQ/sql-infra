@@ -2,6 +2,7 @@ use pg_parser::CmdType;
 use pg_parser::ConstrType;
 use pg_parser::FunctionParameterMode;
 use pg_parser::Node;
+use pg_parser::PartitionRangeDatumKind;
 use pg_parser::PartitionStrategy;
 use pg_parser::PropGraphProperties;
 use pg_parser::TableLikeOption;
@@ -1225,15 +1226,13 @@ fn create_partition_stmt_populates_range_and_hash_bounds() {
     assert_eq!(range_bound.remainder, 0);
     assert!(matches!(
         range_bound.lowerdatums.as_slice(),
-        [Node::ColumnRef(minimum), Node::AConst(_)]
-            if matches!(minimum.fields.as_slice(), [Node::String(name)]
-                if name.sval.as_deref() == Some("minvalue"))
+        [Node::PartitionRangeDatum(minimum), Node::PartitionRangeDatum(_)]
+            if minimum.kind == PartitionRangeDatumKind::Minvalue && minimum.value.is_none()
     ));
     assert!(matches!(
         range_bound.upperdatums.as_slice(),
-        [Node::ColumnRef(maximum), Node::AConst(_)]
-            if matches!(maximum.fields.as_slice(), [Node::String(name)]
-                if name.sval.as_deref() == Some("maxvalue"))
+        [Node::PartitionRangeDatum(maximum), Node::PartitionRangeDatum(_)]
+            if maximum.kind == PartitionRangeDatumKind::Maxvalue && maximum.value.is_none()
     ));
 
     let hash_sql =

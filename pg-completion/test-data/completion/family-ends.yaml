@@ -8,7 +8,7 @@
 - input: SELECT 1 |
   want:
     candidates:
-      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, OVERLAPS, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, '[', ^, '|']
+      tokens: ['%', '*', +, ',', '-', /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, ^, '|']
       phrases: [GROUP BY, ORDER BY]
       slots: [Alias]
 
@@ -22,7 +22,7 @@
 - input: UPDATE t SET id = 1 |
   want:
     candidates:
-      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AT, BETWEEN, COLLATE, FROM, GreaterEquals, ILIKE, IN, IS, ISNULL, LIKE, LessEquals, NOT, NOTNULL, NotEquals, OPERATOR, OR, OVERLAPS, Op, RETURNING, RightArrow, SIMILAR, TypeCast, WHERE, '[', ^, '|']
+      tokens: ['%', '*', +, ',', '-', /, <, =, '>', AND, AT, BETWEEN, COLLATE, FROM, GreaterEquals, ILIKE, IN, IS, ISNULL, LIKE, LessEquals, NOT, NOTNULL, NotEquals, OPERATOR, OR, Op, RETURNING, RightArrow, SIMILAR, TypeCast, WHERE, ^, '|']
       slots: []
 
 - input: DELETE FROM t |
@@ -96,7 +96,7 @@
 - input: PREPARE q AS SELECT 1 |
   want:
     candidates:
-      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, OVERLAPS, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, '[', ^, '|']
+      tokens: ['%', '*', +, ',', '-', /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, ^, '|']
       phrases: [GROUP BY, ORDER BY]
       slots: [Alias]
 
@@ -115,7 +115,7 @@
 - input: DECLARE c CURSOR FOR SELECT 1 |
   want:
     candidates:
-      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, OVERLAPS, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, '[', ^, '|']
+      tokens: ['%', '*', +, ',', '-', /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, ^, '|']
       phrases: [GROUP BY, ORDER BY]
       slots: [Alias]
 
@@ -146,7 +146,7 @@
 - input: EXPLAIN SELECT 1 |
   want:
     candidates:
-      tokens: ['%', '*', +, ',', '-', ., /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, OVERLAPS, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, '[', ^, '|']
+      tokens: ['%', '*', +, ',', '-', /, <, =, '>', AND, AS, AT, BETWEEN, COLLATE, EXCEPT, FETCH, FOR, FROM, GROUP, GreaterEquals, HAVING, ILIKE, IN, INTERSECT, INTO, IS, ISNULL, LIKE, LIMIT, LessEquals, NOT, NOTNULL, NotEquals, OFFSET, OPERATOR, OR, ORDER, Op, RightArrow, SIMILAR, TypeCast, UNION, WHERE, WINDOW, ^, '|']
       phrases: [GROUP BY, ORDER BY]
       slots: [Alias]
 

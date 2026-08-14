@@ -49,7 +49,7 @@ pub enum DeparseError {
         detail: &'static str,
     },
     /// The node belongs to the analysis tree or has no serializer yet.
-    UnsupportedNode { node: &'static str },
+    UnsupportedNode { node: std::string::String },
 }
 
 impl DeparseError {
@@ -61,8 +61,8 @@ impl DeparseError {
         Self::InvalidNode { node, detail }
     }
 
-    fn unsupported(node: &'static str) -> Self {
-        Self::UnsupportedNode { node }
+    fn unsupported(node: impl Into<std::string::String>) -> Self {
+        Self::UnsupportedNode { node: node.into() }
     }
 }
 
@@ -88,6 +88,12 @@ impl fmt::Display for DeparseError {
 impl Error for DeparseError {}
 
 struct Deparser;
+
+fn node_variant_name(node: &Node) -> std::string::String {
+    let debug = format!("{node:?}");
+    let end = debug.find(['(', ' ', '{']).unwrap_or(debug.len());
+    debug[..end].to_owned()
+}
 
 impl Deparser {
     fn render(&self, node: &Node) -> Result<std::string::String, DeparseError> {
@@ -182,11 +188,16 @@ impl Deparser {
             Node::OnConflictClause(clause) => self.on_conflict_clause(clause),
             Node::MergeWhenClause(clause) => self.merge_when_clause(clause),
             Node::IndexElem(element) => self.index_element(element),
+            Node::PartitionElem(element) => self.partition_element(element),
+            Node::TableLikeClause(clause) => self.table_like(clause),
             Node::ColumnDef(column) => self.column_definition(column),
             Node::Constraint(constraint) => self.constraint(constraint),
             Node::DefElem(element) => self.definition_element(element),
             Node::FunctionParameter(parameter) => self.function_parameter(parameter),
-            Node::ObjectWithArgs(object) => self.object_with_args(object),
+            Node::ObjectWithArgs(_) => Err(DeparseError::invalid(
+                "ObjectWithArgs",
+                "object identity serialization requires the owning object type",
+            )),
             Node::TypeName(name) => self.type_name(name),
             Node::RoleSpec(role) => self.role(role),
 
@@ -208,7 +219,10 @@ impl Deparser {
             Node::Query(_) => Err(DeparseError::unsupported("Query (analysis tree)")),
             Node::Var(_) => Err(DeparseError::unsupported("Var (analysis tree)")),
             Node::Const(_) => Err(DeparseError::unsupported("Const (analysis tree)")),
-            _ => Err(DeparseError::unsupported("raw syntax node")),
+            other => Err(DeparseError::unsupported(format!(
+                "{} (no serializer yet)",
+                node_variant_name(other)
+            ))),
         }
     }
 
@@ -423,17 +437,22 @@ impl Deparser {
     fn update(&self, statement: &UpdateStmt) -> Result<std::string::String, DeparseError> {
         let mut sql = self.optional_with(statement.with_clause.as_deref())?;
         sql.push_str("UPDATE ");
-        sql.push_str(
-            &self.range_var(
-                statement
-                    .relation
-                    .as_deref()
-                    .ok_or_else(|| DeparseError::missing("UpdateStmt", "relation"))?,
-            )?,
-        );
-        if let Some(portion) = statement.for_portion_of.as_deref() {
+        let relation = statement
+            .relation
+            .as_deref()
+            .ok_or_else(|| DeparseError::missing("UpdateStmt", "relation"))?;
+        if statement.for_portion_of.is_some() {
+            let mut without_alias = relation.clone();
+            let alias = without_alias.alias.take();
+            sql.push_str(&self.range_var(&without_alias)?);
             sql.push(' ');
-            sql.push_str(&self.for_portion_of(portion)?);
+            sql.push_str(&self.for_portion_of(statement.for_portion_of.as_deref().unwrap())?);
+            if let Some(alias) = alias.as_deref() {
+                sql.push_str(" AS ");
+                sql.push_str(&self.alias(alias)?);
+            }
+        } else {
+            sql.push_str(&self.range_var(relation)?);
         }
         sql.push_str(" SET ");
         sql.push_str(&self.update_targets(&statement.target_list)?);
@@ -455,17 +474,22 @@ impl Deparser {
     fn delete(&self, statement: &DeleteStmt) -> Result<std::string::String, DeparseError> {
         let mut sql = self.optional_with(statement.with_clause.as_deref())?;
         sql.push_str("DELETE FROM ");
-        sql.push_str(
-            &self.range_var(
-                statement
-                    .relation
-                    .as_deref()
-                    .ok_or_else(|| DeparseError::missing("DeleteStmt", "relation"))?,
-            )?,
-        );
-        if let Some(portion) = statement.for_portion_of.as_deref() {
+        let relation = statement
+            .relation
+            .as_deref()
+            .ok_or_else(|| DeparseError::missing("DeleteStmt", "relation"))?;
+        if statement.for_portion_of.is_some() {
+            let mut without_alias = relation.clone();
+            let alias = without_alias.alias.take();
+            sql.push_str(&self.range_var(&without_alias)?);
             sql.push(' ');
-            sql.push_str(&self.for_portion_of(portion)?);
+            sql.push_str(&self.for_portion_of(statement.for_portion_of.as_deref().unwrap())?);
+            if let Some(alias) = alias.as_deref() {
+                sql.push_str(" AS ");
+                sql.push_str(&self.alias(alias)?);
+            }
+        } else {
+            sql.push_str(&self.range_var(relation)?);
         }
         if !statement.using_clause.is_empty() {
             sql.push_str(" USING ");
@@ -915,11 +939,16 @@ impl Deparser {
             sql.push_str(&self.render(filter)?);
             sql.push(')');
         }
+        match call.ignore_nulls {
+            1 => sql.push_str(" IGNORE NULLS"),
+            2 => sql.push_str(" RESPECT NULLS"),
+            _ => {}
+        }
         if let Some(over) = call.over.as_deref() {
             sql.push_str(" OVER ");
             if over.partition_clause.is_empty()
                 && over.order_clause.is_empty()
-                && over.frame_options == 0
+                && (over.frame_options == 0 || over.frame_options == FRAMEOPTION_DEFAULTS)
                 && over.refname.is_none()
                 && over.name.is_some()
             {
@@ -948,7 +977,24 @@ impl Deparser {
         &self,
         indirection: &AIndirection,
     ) -> Result<std::string::String, DeparseError> {
-        let mut sql = self.required_node(indirection.arg.as_deref(), "AIndirection", "arg")?;
+        let base = indirection
+            .arg
+            .as_deref()
+            .ok_or_else(|| DeparseError::missing("AIndirection", "arg"))?;
+        let rendered_base = self.render(base)?;
+        let simple_base = match base {
+            Node::ColumnRef(reference) => !reference
+                .fields
+                .iter()
+                .any(|field| matches!(field, Node::AStar)),
+            Node::AIndirection(_) => true,
+            _ => false,
+        };
+        let mut sql = if simple_base {
+            rendered_base
+        } else {
+            format!("({rendered_base})")
+        };
         for item in &indirection.indirection {
             match item {
                 Node::String(name) => {
@@ -1454,6 +1500,35 @@ impl Deparser {
         Ok(sql)
     }
 
+    fn partition_element(
+        &self,
+        element: &PartitionElem,
+    ) -> Result<std::string::String, DeparseError> {
+        let mut sql = if let Some(name) = element.name.as_deref() {
+            quote_identifier(name)
+        } else {
+            let expression = element
+                .expr
+                .as_deref()
+                .ok_or_else(|| DeparseError::missing("PartitionElem", "expr"))?;
+            // Non-function partition expressions must stay parenthesized.
+            if matches!(expression, Node::FuncCall(_)) {
+                self.render(expression)?
+            } else {
+                format!("({})", self.render(expression)?)
+            }
+        };
+        if !element.collation.is_empty() {
+            sql.push_str(" COLLATE ");
+            sql.push_str(&self.qualified_nodes(&element.collation)?);
+        }
+        if !element.opclass.is_empty() {
+            sql.push(' ');
+            sql.push_str(&self.qualified_nodes(&element.opclass)?);
+        }
+        Ok(sql)
+    }
+
     fn index_element(&self, element: &IndexElem) -> Result<std::string::String, DeparseError> {
         let mut sql = if let Some(name) = element.name.as_deref() {
             quote_identifier(name)
@@ -1470,6 +1545,11 @@ impl Deparser {
         if !element.opclass.is_empty() {
             sql.push(' ');
             sql.push_str(&self.qualified_nodes(&element.opclass)?);
+        }
+        if !element.opclassopts.is_empty() {
+            sql.push_str(" (");
+            sql.push_str(&self.list(&element.opclassopts, ", ")?);
+            sql.push(')');
         }
         match element.ordering {
             SortByDir::Default => {}
@@ -1698,20 +1778,45 @@ impl Deparser {
             XmlExprOp::Xmlconcat => {
                 Ok(format!("XMLCONCAT({})", self.list(&expression.args, ", ")?))
             }
-            XmlExprOp::Xmlparse => Ok(format!(
-                "XMLPARSE({} {}{} )",
-                if expression.xmloption == XmlOptionType::Document {
-                    "DOCUMENT"
-                } else {
-                    "CONTENT"
-                },
-                self.list(&expression.args, ", ")?,
-                if expression.indent {
-                    " PRESERVE WHITESPACE"
-                } else {
-                    " STRIP WHITESPACE"
-                }
-            )),
+            XmlExprOp::Xmlparse => {
+                // The parser stores the whitespace handling flag as a second,
+                // internal boolean argument.
+                let mut args = expression.args.iter();
+                let value = args
+                    .next()
+                    .ok_or_else(|| DeparseError::missing("XmlExpr", "args"))?;
+                let preserve_whitespace = match args.next() {
+                    Some(Node::AConst(konst)) => match &konst.val {
+                        ValUnion::Boolean(flag) => flag.boolval,
+                        _ => {
+                            return Err(DeparseError::invalid(
+                                "XmlExpr",
+                                "XMLPARSE whitespace flag must be a boolean",
+                            ));
+                        }
+                    },
+                    _ => {
+                        return Err(DeparseError::invalid(
+                            "XmlExpr",
+                            "XMLPARSE requires a whitespace flag argument",
+                        ));
+                    }
+                };
+                Ok(format!(
+                    "XMLPARSE({} {}{})",
+                    if expression.xmloption == XmlOptionType::Document {
+                        "DOCUMENT"
+                    } else {
+                        "CONTENT"
+                    },
+                    self.render(value)?,
+                    if preserve_whitespace {
+                        " PRESERVE WHITESPACE"
+                    } else {
+                        " STRIP WHITESPACE"
+                    }
+                ))
+            }
             _ => Err(DeparseError::unsupported("XmlExpr variant")),
         }
     }
@@ -1787,21 +1892,46 @@ impl Deparser {
         relation.alias = None;
         relation.inh = true;
         sql.push_str(&self.range_var(&relation)?);
-        if let Some(type_name) = statement.of_typename.as_deref() {
-            sql.push_str(" OF ");
-            sql.push_str(&self.type_name(type_name)?);
-        }
-        let mut elements = statement.table_elts.clone();
-        elements.extend(statement.constraints.iter().cloned());
-        if !elements.is_empty() || statement.of_typename.is_none() {
-            sql.push_str(" (");
-            sql.push_str(&self.list(&elements, ", ")?);
-            sql.push(')');
-        }
-        if !statement.inh_relations.is_empty() {
-            sql.push_str(" INHERITS (");
-            sql.push_str(&self.list(&statement.inh_relations, ", ")?);
-            sql.push(')');
+        if let Some(partbound) = statement.partbound.as_deref() {
+            let parent = statement
+                .inh_relations
+                .first()
+                .ok_or_else(|| DeparseError::missing("CreateStmt", "inh_relations"))?;
+            let Node::RangeVar(parent) = parent else {
+                return Err(DeparseError::invalid(
+                    "CreateStmt",
+                    "partition parent must be a RangeVar",
+                ));
+            };
+            let mut parent = parent.clone();
+            parent.alias = None;
+            parent.inh = true;
+            sql.push_str(" PARTITION OF ");
+            sql.push_str(&self.range_var(&parent)?);
+            if !statement.table_elts.is_empty() {
+                sql.push_str(" (");
+                sql.push_str(&self.list(&statement.table_elts, ", ")?);
+                sql.push(')');
+            }
+            sql.push(' ');
+            sql.push_str(&self.partition_bound(partbound)?);
+        } else {
+            if let Some(type_name) = statement.of_typename.as_deref() {
+                sql.push_str(" OF ");
+                sql.push_str(&self.type_name(type_name)?);
+            }
+            let mut elements = statement.table_elts.clone();
+            elements.extend(statement.constraints.iter().cloned());
+            if !elements.is_empty() || statement.of_typename.is_none() {
+                sql.push_str(" (");
+                sql.push_str(&self.list(&elements, ", ")?);
+                sql.push(')');
+            }
+            if !statement.inh_relations.is_empty() {
+                sql.push_str(" INHERITS (");
+                sql.push_str(&self.list(&statement.inh_relations, ", ")?);
+                sql.push(')');
+            }
         }
         if let Some(spec) = statement.partspec.as_deref() {
             sql.push_str(" PARTITION BY ");
@@ -1814,14 +1944,14 @@ impl Deparser {
             sql.push_str(&self.list(&spec.part_params, ", ")?);
             sql.push(')');
         }
+        if let Some(method) = statement.access_method.as_deref() {
+            sql.push_str(" USING ");
+            sql.push_str(&quote_identifier(method));
+        }
         if !statement.options.is_empty() {
             sql.push_str(" WITH (");
             sql.push_str(&self.list(&statement.options, ", ")?);
             sql.push(')');
-        }
-        if let Some(method) = statement.access_method.as_deref() {
-            sql.push_str(" USING ");
-            sql.push_str(&quote_identifier(method));
         }
         match statement.oncommit {
             OnCommitAction::Noop => {}
@@ -1836,6 +1966,88 @@ impl Deparser {
         Ok(sql)
     }
 
+    fn partition_bound(
+        &self,
+        bound: &PartitionBoundSpec,
+    ) -> Result<std::string::String, DeparseError> {
+        if bound.is_default {
+            return Ok("DEFAULT".to_owned());
+        }
+        match bound.strategy {
+            b'l' => Ok(format!(
+                "FOR VALUES IN ({})",
+                self.list(&bound.listdatums, ", ")?
+            )),
+            b'r' => Ok(format!(
+                "FOR VALUES FROM ({}) TO ({})",
+                self.partition_range_datums(&bound.lowerdatums)?,
+                self.partition_range_datums(&bound.upperdatums)?
+            )),
+            b'h' => Ok(format!(
+                "FOR VALUES WITH (MODULUS {}, REMAINDER {})",
+                bound.modulus, bound.remainder
+            )),
+            _ => Err(DeparseError::invalid(
+                "PartitionBoundSpec",
+                "unknown partition strategy",
+            )),
+        }
+    }
+
+    fn partition_range_datums(&self, datums: &[Node]) -> Result<std::string::String, DeparseError> {
+        datums
+            .iter()
+            .map(|datum| match datum {
+                Node::PartitionRangeDatum(datum) => match datum.kind {
+                    PartitionRangeDatumKind::Minvalue => Ok("MINVALUE".to_owned()),
+                    PartitionRangeDatumKind::Maxvalue => Ok("MAXVALUE".to_owned()),
+                    PartitionRangeDatumKind::Value => {
+                        self.required_node(datum.value.as_deref(), "PartitionRangeDatum", "value")
+                    }
+                },
+                _ => Err(DeparseError::invalid(
+                    "PartitionBoundSpec",
+                    "range bounds must be PartitionRangeDatum nodes",
+                )),
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|items| items.join(", "))
+    }
+
+    fn table_like(&self, clause: &TableLikeClause) -> Result<std::string::String, DeparseError> {
+        let mut sql = format!(
+            "LIKE {}",
+            self.range_var(
+                clause
+                    .relation
+                    .as_deref()
+                    .ok_or_else(|| DeparseError::missing("TableLikeClause", "relation"))?,
+            )?
+        );
+        const OPTIONS: &[(u32, &str)] = &[
+            (TableLikeOption::Comments as u32, "COMMENTS"),
+            (TableLikeOption::Compression as u32, "COMPRESSION"),
+            (TableLikeOption::Constraints as u32, "CONSTRAINTS"),
+            (TableLikeOption::Defaults as u32, "DEFAULTS"),
+            (TableLikeOption::Generated as u32, "GENERATED"),
+            (TableLikeOption::Identity as u32, "IDENTITY"),
+            (TableLikeOption::Indexes as u32, "INDEXES"),
+            (TableLikeOption::Statistics as u32, "STATISTICS"),
+            (TableLikeOption::Storage as u32, "STORAGE"),
+        ];
+        if clause.options == TableLikeOption::All as u32 {
+            sql.push_str(" INCLUDING ALL");
+        } else {
+            for (bit, name) in OPTIONS {
+                if clause.options & bit != 0 {
+                    sql.push_str(" INCLUDING ");
+                    sql.push_str(name);
+                }
+            }
+        }
+        Ok(sql)
+    }
+
     fn column_definition(&self, column: &ColumnDef) -> Result<std::string::String, DeparseError> {
         let mut sql = quote_identifier(
             column
@@ -1846,6 +2058,14 @@ impl Deparser {
         if let Some(type_name) = column.type_name.as_deref() {
             sql.push(' ');
             sql.push_str(&self.type_name(type_name)?);
+        }
+        if let Some(storage) = column.storage_name.as_deref() {
+            sql.push_str(" STORAGE ");
+            if storage == "default" {
+                sql.push_str("DEFAULT");
+            } else {
+                sql.push_str(&storage.to_ascii_uppercase());
+            }
         }
         if let Some(compression) = column.compression.as_deref() {
             sql.push_str(" COMPRESSION ");
@@ -1876,7 +2096,13 @@ impl Deparser {
         }
         match constraint.contype {
             ConstrType::Null => sql.push_str("NULL"),
-            ConstrType::Notnull => sql.push_str("NOT NULL"),
+            ConstrType::Notnull => {
+                sql.push_str("NOT NULL");
+                if !constraint.keys.is_empty() {
+                    sql.push(' ');
+                    sql.push_str(&self.qualified_name_list(&constraint.keys, ", ")?);
+                }
+            }
             ConstrType::Default => {
                 sql.push_str("DEFAULT ");
                 sql.push_str(&self.required_node(
@@ -1893,7 +2119,18 @@ impl Deparser {
                 });
                 if !constraint.options.is_empty() {
                     sql.push_str(" (");
-                    sql.push_str(&self.list(&constraint.options, " ")?);
+                    let options = constraint
+                        .options
+                        .iter()
+                        .map(|option| match option {
+                            Node::DefElem(element) => self.sequence_option(element),
+                            _ => Err(DeparseError::invalid(
+                                "Constraint",
+                                "identity options must be DefElem nodes",
+                            )),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    sql.push_str(&options.join(" "));
                     sql.push(')');
                 }
             }
@@ -1929,13 +2166,30 @@ impl Deparser {
                 if constraint.nulls_not_distinct {
                     sql.push_str(" NULLS NOT DISTINCT");
                 }
-                if !constraint.keys.is_empty() {
+                if let Some(indexname) = constraint.indexname.as_deref() {
+                    sql.push_str(" USING INDEX ");
+                    sql.push_str(&quote_identifier(indexname));
+                } else if !constraint.keys.is_empty() {
                     sql.push_str(" (");
                     sql.push_str(&self.qualified_name_list(&constraint.keys, ", ")?);
                     if constraint.without_overlaps {
                         sql.push_str(" WITHOUT OVERLAPS");
                     }
                     sql.push(')');
+                    if !constraint.including.is_empty() {
+                        sql.push_str(" INCLUDE (");
+                        sql.push_str(&self.qualified_name_list(&constraint.including, ", ")?);
+                        sql.push(')');
+                    }
+                }
+                if !constraint.options.is_empty() {
+                    sql.push_str(" WITH (");
+                    sql.push_str(&self.list(&constraint.options, ", ")?);
+                    sql.push(')');
+                }
+                if let Some(indexspace) = constraint.indexspace.as_deref() {
+                    sql.push_str(" USING INDEX TABLESPACE ");
+                    sql.push_str(&quote_identifier(indexspace));
                 }
             }
             ConstrType::Foreign => {
@@ -1972,7 +2226,75 @@ impl Deparser {
             ConstrType::AttrImmediate => sql.push_str("INITIALLY IMMEDIATE"),
             ConstrType::AttrEnforced => sql.push_str("ENFORCED"),
             ConstrType::AttrNotEnforced => sql.push_str("NOT ENFORCED"),
-            ConstrType::Exclusion => return Err(DeparseError::unsupported("exclusion Constraint")),
+            ConstrType::Exclusion => {
+                sql.push_str("EXCLUDE");
+                if let Some(method) = constraint.access_method.as_deref() {
+                    sql.push_str(" USING ");
+                    sql.push_str(&quote_identifier(method));
+                }
+                sql.push_str(" (");
+                let elements = constraint
+                    .exclusions
+                    .iter()
+                    .map(|item| {
+                        let Node::AArrayExpr(pair) = item else {
+                            return Err(DeparseError::invalid(
+                                "Constraint",
+                                "exclusion elements must be [IndexElem, operator] pairs",
+                            ));
+                        };
+                        let [Node::IndexElem(element), operator] = pair.elements.as_slice() else {
+                            return Err(DeparseError::invalid(
+                                "Constraint",
+                                "exclusion elements must be [IndexElem, operator] pairs",
+                            ));
+                        };
+                        let Node::AArrayExpr(operator) = operator else {
+                            return Err(DeparseError::invalid(
+                                "Constraint",
+                                "exclusion operator must be a name list",
+                            ));
+                        };
+                        Ok(format!(
+                            "{} WITH {}",
+                            self.index_element(element)?,
+                            operator_name(&operator.elements)?
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, DeparseError>>()?;
+                sql.push_str(&elements.join(", "));
+                sql.push(')');
+                if !constraint.including.is_empty() {
+                    sql.push_str(" INCLUDE (");
+                    sql.push_str(&self.qualified_name_list(&constraint.including, ", ")?);
+                    sql.push(')');
+                }
+                if !constraint.options.is_empty() {
+                    sql.push_str(" WITH (");
+                    sql.push_str(&self.list(&constraint.options, ", ")?);
+                    sql.push(')');
+                }
+                if let Some(indexspace) = constraint.indexspace.as_deref() {
+                    sql.push_str(" USING INDEX TABLESPACE ");
+                    sql.push_str(&quote_identifier(indexspace));
+                }
+                if let Some(predicate) = constraint.where_clause.as_deref() {
+                    sql.push_str(" WHERE (");
+                    sql.push_str(&self.render(predicate)?);
+                    sql.push(')');
+                }
+            }
+        }
+        if constraint.deferrable {
+            sql.push_str(" DEFERRABLE");
+            if constraint.initdeferred {
+                sql.push_str(" INITIALLY DEFERRED");
+            }
+        }
+        if matches!(constraint.contype, ConstrType::Check | ConstrType::Foreign)
+            && !constraint.is_enforced
+        {
+            sql.push_str(" NOT ENFORCED");
         }
         if constraint.is_no_inherit {
             sql.push_str(" NO INHERIT");
@@ -1996,6 +2318,11 @@ impl Deparser {
             FKCONSTR_ACTION_SETDEFAULT => Some("SET DEFAULT"),
             _ => None,
         };
+        match constraint.fk_matchtype {
+            FKCONSTR_MATCH_FULL => sql.push_str(" MATCH FULL"),
+            FKCONSTR_MATCH_PARTIAL => sql.push_str(" MATCH PARTIAL"),
+            _ => {}
+        }
         if let Some(update) = action(constraint.fk_upd_action) {
             sql.push_str(" ON UPDATE ");
             sql.push_str(update);
@@ -2009,12 +2336,82 @@ impl Deparser {
                 sql.push(')');
             }
         }
-        match constraint.fk_matchtype {
-            FKCONSTR_MATCH_FULL => sql.push_str(" MATCH FULL"),
-            FKCONSTR_MATCH_PARTIAL => sql.push_str(" MATCH PARTIAL"),
-            _ => {}
-        }
         Ok(())
+    }
+
+    fn sequence_option(&self, option: &DefElem) -> Result<std::string::String, DeparseError> {
+        let name = option
+            .defname
+            .as_deref()
+            .ok_or_else(|| DeparseError::missing("DefElem", "defname"))?;
+        let argument = option.arg.as_deref();
+        let required_argument = |kind: &'static str| {
+            self.render(argument.ok_or_else(|| DeparseError::missing("DefElem", "arg"))?)
+                .map(|value| format!("{kind} {value}"))
+        };
+        match name {
+            "increment" => required_argument("INCREMENT BY"),
+            "start" => required_argument("START WITH"),
+            "cache" => required_argument("CACHE"),
+            "minvalue" => match argument {
+                Some(_) => required_argument("MINVALUE"),
+                None => Ok("NO MINVALUE".to_owned()),
+            },
+            "maxvalue" => match argument {
+                Some(_) => required_argument("MAXVALUE"),
+                None => Ok("NO MAXVALUE".to_owned()),
+            },
+            "cycle" => match argument {
+                Some(Node::Boolean(value)) => {
+                    Ok(if value.boolval { "CYCLE" } else { "NO CYCLE" }.to_owned())
+                }
+                None => Ok("CYCLE".to_owned()),
+                Some(_) => Err(DeparseError::invalid(
+                    "DefElem",
+                    "CYCLE option argument must be a boolean",
+                )),
+            },
+            "restart" => match argument {
+                Some(_) => required_argument("RESTART WITH"),
+                None => Ok("RESTART".to_owned()),
+            },
+            "owned_by" => {
+                let Some(Node::AArrayExpr(names)) = argument else {
+                    return Err(DeparseError::invalid(
+                        "DefElem",
+                        "OWNED BY option argument must be a name list",
+                    ));
+                };
+                Ok(format!(
+                    "OWNED BY {}",
+                    self.qualified_nodes(&names.elements)?
+                ))
+            }
+            "sequence_name" => {
+                let Some(Node::AArrayExpr(names)) = argument else {
+                    return Err(DeparseError::invalid(
+                        "DefElem",
+                        "SEQUENCE NAME option argument must be a name list",
+                    ));
+                };
+                Ok(format!(
+                    "SEQUENCE NAME {}",
+                    self.qualified_nodes(&names.elements)?
+                ))
+            }
+            "as" => {
+                let Some(Node::TypeName(type_name)) = argument else {
+                    return Err(DeparseError::invalid(
+                        "DefElem",
+                        "AS option argument must be a type name",
+                    ));
+                };
+                Ok(format!("AS {}", self.type_name(type_name)?))
+            }
+            "logged" => Ok("LOGGED".to_owned()),
+            "unlogged" => Ok("UNLOGGED".to_owned()),
+            _ => Err(DeparseError::invalid("DefElem", "unknown sequence option")),
+        }
     }
 
     fn definition_element(&self, element: &DefElem) -> Result<std::string::String, DeparseError> {
@@ -2103,7 +2500,7 @@ impl Deparser {
         let objects = statement
             .objects
             .iter()
-            .map(|object| self.object_identity(object))
+            .map(|object| self.object_identity(object, statement.remove_type))
             .collect::<Result<Vec<_>, _>>()?;
         sql.push_str(&objects.join(", "));
         if statement.behavior == DropBehavior::Cascade {
@@ -2112,21 +2509,206 @@ impl Deparser {
         Ok(sql)
     }
 
-    fn object_identity(&self, node: &Node) -> Result<std::string::String, DeparseError> {
-        match node {
-            Node::AArrayExpr(array) => self.qualified_nodes(&array.elements),
-            Node::ObjectWithArgs(object) => self.object_with_args(object),
-            Node::TypeName(name) => self.type_name(name),
-            Node::RangeVar(range) => self.range_var(range),
-            other => self.render(other),
+    fn object_identity(
+        &self,
+        node: &Node,
+        object_type: ObjectType,
+    ) -> Result<std::string::String, DeparseError> {
+        match object_type {
+            ObjectType::Policy
+            | ObjectType::Rule
+            | ObjectType::Trigger
+            | ObjectType::Tabconstraint => {
+                let Node::AArrayExpr(array) = node else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "POLICY, RULE, TRIGGER, and CONSTRAINT identities must be name lists",
+                    ));
+                };
+                let Some((name, relation)) = array.elements.split_last() else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "ON identity requires an object name and a relation",
+                    ));
+                };
+                if relation.is_empty() {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "ON identity requires a relation name",
+                    ));
+                }
+                Ok(format!(
+                    "{} ON {}",
+                    self.qualified_nodes(std::slice::from_ref(name))?,
+                    self.qualified_nodes(relation)?
+                ))
+            }
+            ObjectType::Domconstraint => {
+                let Node::AArrayExpr(array) = node else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "domain CONSTRAINT identity must be a name list",
+                    ));
+                };
+                let [Node::TypeName(domain), name] = array.elements.as_slice() else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "domain CONSTRAINT identity must be [TypeName, name]",
+                    ));
+                };
+                Ok(format!(
+                    "{} ON DOMAIN {}",
+                    self.qualified_nodes(std::slice::from_ref(name))?,
+                    self.type_name(domain)?
+                ))
+            }
+            ObjectType::Opclass | ObjectType::Opfamily => {
+                let Node::AArrayExpr(array) = node else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "OPERATOR CLASS and OPERATOR FAMILY identities must be name lists",
+                    ));
+                };
+                let Some((method, names)) = array.elements.split_first() else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "USING identity requires an access method and a name",
+                    ));
+                };
+                if names.is_empty() {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "USING identity requires an object name",
+                    ));
+                }
+                Ok(format!(
+                    "{} USING {}",
+                    self.qualified_nodes(names)?,
+                    self.qualified_nodes(std::slice::from_ref(method))?
+                ))
+            }
+            ObjectType::Cast => {
+                let Node::AArrayExpr(array) = node else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "CAST identity must be a [source, target] list",
+                    ));
+                };
+                let [Node::TypeName(source), Node::TypeName(target)] = array.elements.as_slice()
+                else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "CAST identity must be a [source, target] list",
+                    ));
+                };
+                Ok(format!(
+                    "({} AS {})",
+                    self.type_name(source)?,
+                    self.type_name(target)?
+                ))
+            }
+            ObjectType::Transform => {
+                let Node::AArrayExpr(array) = node else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "TRANSFORM identity must be a [TypeName, language] list",
+                    ));
+                };
+                let [Node::TypeName(type_name), language] = array.elements.as_slice() else {
+                    return Err(DeparseError::invalid(
+                        "ObjectIdentity",
+                        "TRANSFORM identity must be a [TypeName, language] list",
+                    ));
+                };
+                Ok(format!(
+                    "FOR {} LANGUAGE {}",
+                    self.type_name(type_name)?,
+                    self.qualified_nodes(std::slice::from_ref(language))?
+                ))
+            }
+            ObjectType::Operator | ObjectType::Aggregate => match node {
+                Node::ObjectWithArgs(object) => self.object_with_args(object, object_type),
+                other => self.render(other),
+            },
+            _ => match node {
+                Node::AArrayExpr(array) => self.qualified_nodes(&array.elements),
+                Node::ObjectWithArgs(object) => self.object_with_args(object, object_type),
+                Node::TypeName(name) => self.type_name(name),
+                Node::RangeVar(range) => self.range_var(range),
+                other => self.render(other),
+            },
         }
     }
 
     fn object_with_args(
         &self,
         object: &ObjectWithArgs,
+        object_type: ObjectType,
     ) -> Result<std::string::String, DeparseError> {
-        let mut sql = self.qualified_nodes(&object.objname)?;
+        let mut sql = if object_type == ObjectType::Operator {
+            self.operator_identity_name(&object.objname)?
+        } else {
+            self.qualified_nodes(&object.objname)?
+        };
+        if object_type == ObjectType::Aggregate {
+            if object.agg_signature == AggregateSignature::Star {
+                sql.push_str("(*)");
+                return Ok(sql);
+            }
+            let args = object
+                .objfuncargs
+                .iter()
+                .map(|parameter| self.aggregate_parameter(parameter))
+                .collect::<Result<Vec<_>, _>>()?;
+            sql.push('(');
+            match object.agg_signature {
+                AggregateSignature::OrderedSet {
+                    direct_args,
+                    shared_variadic,
+                } => {
+                    let direct_args = direct_args as usize;
+                    let last_direct_is_variadic = direct_args
+                        .checked_sub(1)
+                        .and_then(|index| object.objfuncargs.get(index))
+                        .is_some_and(|parameter| {
+                            matches!(
+                                parameter,
+                                Node::FunctionParameter(parameter)
+                                    if parameter.mode == FunctionParameterMode::Variadic
+                            )
+                        });
+                    let consistent = if shared_variadic {
+                        // The shared VARIADIC parameter is both the final
+                        // direct argument and the single ordered argument.
+                        direct_args > 0 && direct_args == args.len() && last_direct_is_variadic
+                    } else {
+                        direct_args < args.len()
+                    };
+                    if !consistent {
+                        return Err(DeparseError::invalid(
+                            "ObjectWithArgs",
+                            "ordered-set aggregate signature is inconsistent with its arguments",
+                        ));
+                    }
+                    let ordered_start = if shared_variadic {
+                        direct_args - 1
+                    } else {
+                        direct_args
+                    };
+                    let direct = &args[..direct_args];
+                    let ordered = &args[ordered_start..];
+                    if !direct.is_empty() {
+                        sql.push_str(&direct.join(", "));
+                        sql.push(' ');
+                    }
+                    sql.push_str("ORDER BY ");
+                    sql.push_str(&ordered.join(", "));
+                }
+                _ => sql.push_str(&args.join(", ")),
+            }
+            sql.push(')');
+            return Ok(sql);
+        }
         if !object.args_unspecified {
             let args = object
                 .objargs
@@ -2140,6 +2722,58 @@ impl Deparser {
             sql.push_str(&args.join(", "));
             sql.push(')');
         }
+        Ok(sql)
+    }
+
+    fn aggregate_parameter(&self, node: &Node) -> Result<std::string::String, DeparseError> {
+        let Node::FunctionParameter(parameter) = node else {
+            return Err(DeparseError::invalid(
+                "ObjectWithArgs",
+                "aggregate arguments must be FunctionParameter nodes",
+            ));
+        };
+        let mut sql = if parameter.mode == FunctionParameterMode::Variadic {
+            "VARIADIC ".to_owned()
+        } else {
+            std::string::String::new()
+        };
+        sql.push_str(
+            &self.type_name(
+                parameter
+                    .arg_type
+                    .as_deref()
+                    .ok_or_else(|| DeparseError::missing("FunctionParameter", "arg_type"))?,
+            )?,
+        );
+        Ok(sql)
+    }
+
+    fn operator_identity_name(
+        &self,
+        objname: &[Node],
+    ) -> Result<std::string::String, DeparseError> {
+        let Some((operator, qualifiers)) = objname.split_last() else {
+            return Err(DeparseError::invalid(
+                "ObjectWithArgs",
+                "operator identity requires a name",
+            ));
+        };
+        let Node::String(operator) = operator else {
+            return Err(DeparseError::invalid(
+                "ObjectWithArgs",
+                "operator name must be a String node",
+            ));
+        };
+        let operator = operator
+            .sval
+            .as_deref()
+            .ok_or_else(|| DeparseError::missing("String", "sval"))?;
+        let mut sql = std::string::String::new();
+        if !qualifiers.is_empty() {
+            sql.push_str(&self.qualified_nodes(qualifiers)?);
+            sql.push('.');
+        }
+        sql.push_str(operator);
         Ok(sql)
     }
 
@@ -2157,19 +2791,22 @@ impl Deparser {
     }
 
     fn create_view(&self, statement: &ViewStmt) -> Result<std::string::String, DeparseError> {
+        let view = statement
+            .view
+            .as_deref()
+            .ok_or_else(|| DeparseError::missing("ViewStmt", "view"))?;
         let mut sql = if statement.replace {
-            "CREATE OR REPLACE VIEW ".to_owned()
+            "CREATE OR REPLACE ".to_owned()
         } else {
-            "CREATE VIEW ".to_owned()
+            "CREATE ".to_owned()
         };
-        sql.push_str(
-            &self.range_var(
-                statement
-                    .view
-                    .as_deref()
-                    .ok_or_else(|| DeparseError::missing("ViewStmt", "view"))?,
-            )?,
-        );
+        match view.relpersistence {
+            b't' => sql.push_str("TEMPORARY "),
+            b'u' => sql.push_str("UNLOGGED "),
+            _ => {}
+        }
+        sql.push_str("VIEW ");
+        sql.push_str(&self.range_var(view)?);
         if !statement.aliases.is_empty() {
             sql.push_str(" (");
             sql.push_str(&self.qualified_name_list(&statement.aliases, ", ")?);
@@ -2221,6 +2858,25 @@ impl Deparser {
             sql.push_str(" (");
             sql.push_str(&self.qualified_name_list(&into.col_names, ", ")?);
             sql.push(')');
+        }
+        if let Some(method) = into.access_method.as_deref() {
+            sql.push_str(" USING ");
+            sql.push_str(&quote_identifier(method));
+        }
+        if !into.options.is_empty() {
+            sql.push_str(" WITH (");
+            sql.push_str(&self.list(&into.options, ", ")?);
+            sql.push(')');
+        }
+        match into.on_commit {
+            OnCommitAction::Noop => {}
+            OnCommitAction::PreserveRows => sql.push_str(" ON COMMIT PRESERVE ROWS"),
+            OnCommitAction::DeleteRows => sql.push_str(" ON COMMIT DELETE ROWS"),
+            OnCommitAction::Drop => sql.push_str(" ON COMMIT DROP"),
+        }
+        if let Some(tablespace) = into.table_space_name.as_deref() {
+            sql.push_str(" TABLESPACE ");
+            sql.push_str(&quote_identifier(tablespace));
         }
         sql.push_str(" AS ");
         sql.push_str(&self.required_node(
@@ -2303,10 +2959,49 @@ impl Deparser {
             "FUNCTION "
         });
         sql.push_str(&self.qualified_nodes(&statement.funcname)?);
+        let (table_parameters, call_parameters): (Vec<&Node>, Vec<&Node>) =
+            statement.parameters.iter().partition(|parameter| {
+                matches!(
+                    parameter,
+                    Node::FunctionParameter(parameter)
+                        if parameter.mode == FunctionParameterMode::Table
+                )
+            });
         sql.push('(');
-        sql.push_str(&self.list(&statement.parameters, ", ")?);
+        sql.push_str(
+            &call_parameters
+                .iter()
+                .map(|parameter| self.render(parameter))
+                .collect::<Result<Vec<_>, _>>()?
+                .join(", "),
+        );
         sql.push(')');
-        if let Some(return_type) = statement.return_type.as_deref() {
+        if !table_parameters.is_empty() {
+            sql.push_str(" RETURNS TABLE (");
+            sql.push_str(
+                &table_parameters
+                    .iter()
+                    .map(|parameter| {
+                        let Node::FunctionParameter(parameter) = parameter else {
+                            unreachable!("table parameters were partitioned by mode");
+                        };
+                        let mut sql = std::string::String::new();
+                        if let Some(name) = parameter.name.as_deref() {
+                            sql.push_str(&quote_identifier(name));
+                            sql.push(' ');
+                        }
+                        sql.push_str(&self.type_name(
+                            parameter.arg_type.as_deref().ok_or_else(|| {
+                                DeparseError::missing("FunctionParameter", "arg_type")
+                            })?,
+                        )?);
+                        Ok(sql)
+                    })
+                    .collect::<Result<Vec<_>, DeparseError>>()?
+                    .join(", "),
+            );
+            sql.push(')');
+        } else if let Some(return_type) = statement.return_type.as_deref() {
             sql.push_str(" RETURNS ");
             sql.push_str(&self.type_name(return_type)?);
         }
@@ -2319,7 +3014,26 @@ impl Deparser {
         }
         if let Some(body) = statement.sql_body.as_deref() {
             sql.push(' ');
-            sql.push_str(&self.render(body)?);
+            match body {
+                Node::AArrayExpr(outer) => {
+                    let [Node::AArrayExpr(statements)] = outer.elements.as_slice() else {
+                        return Err(DeparseError::invalid(
+                            "CreateFunctionStmt",
+                            "BEGIN ATOMIC body must be a list of statement lists",
+                        ));
+                    };
+                    sql.push_str("BEGIN ATOMIC ");
+                    for (index, body_statement) in statements.elements.iter().enumerate() {
+                        if index > 0 {
+                            sql.push(' ');
+                        }
+                        sql.push_str(&self.render(body_statement)?);
+                        sql.push(';');
+                    }
+                    sql.push_str(" END");
+                }
+                other => sql.push_str(&self.render(other)?),
+            }
         }
         Ok(sql)
     }
@@ -2360,18 +3074,128 @@ impl Deparser {
             .defname
             .as_deref()
             .ok_or_else(|| DeparseError::missing("DefElem", "defname"))?;
-        let keyword = name.replace('_', " ").to_ascii_uppercase();
-        match option.arg.as_deref() {
-            Some(Node::String(value)) => Ok(format!(
-                "{keyword} {}",
-                if matches!(name, "as" | "transform") {
-                    quote_literal(value.sval.as_deref().unwrap_or_default())
-                } else {
-                    quote_identifier(value.sval.as_deref().unwrap_or_default())
-                }
+        let argument = option.arg.as_deref();
+        let string_argument = || match argument {
+            Some(Node::String(value)) => Ok(value.sval.clone().unwrap_or_default()),
+            _ => Err(DeparseError::invalid(
+                "DefElem",
+                "function option argument must be a string",
             )),
-            Some(argument) => Ok(format!("{keyword} {}", self.render(argument)?)),
-            None => Ok(keyword),
+        };
+        let boolean_argument = || match argument {
+            Some(Node::Boolean(value)) => Ok(value.boolval),
+            _ => Err(DeparseError::invalid(
+                "DefElem",
+                "function option argument must be a boolean",
+            )),
+        };
+        match name {
+            "as" => {
+                let Some(Node::AArrayExpr(bodies)) = argument else {
+                    return Err(DeparseError::invalid(
+                        "DefElem",
+                        "AS option must be a list of strings",
+                    ));
+                };
+                let rendered = bodies
+                    .elements
+                    .iter()
+                    .map(|body| match body {
+                        Node::String(value) => {
+                            Ok(quote_literal(value.sval.as_deref().unwrap_or_default()))
+                        }
+                        _ => Err(DeparseError::invalid(
+                            "DefElem",
+                            "AS option must be a list of strings",
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, DeparseError>>()?;
+                Ok(format!("AS {}", rendered.join(", ")))
+            }
+            "volatility" => Ok(string_argument()?.to_ascii_uppercase()),
+            "strict" => Ok(if boolean_argument()? {
+                "STRICT".to_owned()
+            } else {
+                "CALLED ON NULL INPUT".to_owned()
+            }),
+            "security" => Ok(if boolean_argument()? {
+                "SECURITY DEFINER".to_owned()
+            } else {
+                "SECURITY INVOKER".to_owned()
+            }),
+            "leakproof" => Ok(if boolean_argument()? {
+                "LEAKPROOF".to_owned()
+            } else {
+                "NOT LEAKPROOF".to_owned()
+            }),
+            "window" => Ok("WINDOW".to_owned()),
+            "parallel" => Ok(format!(
+                "PARALLEL {}",
+                string_argument()?.to_ascii_uppercase()
+            )),
+            "language" => Ok(format!(
+                "LANGUAGE {}",
+                quote_identifier(&string_argument()?)
+            )),
+            "support" => {
+                let Some(Node::AArrayExpr(names)) = argument else {
+                    return Err(DeparseError::invalid(
+                        "DefElem",
+                        "SUPPORT option must be a name list",
+                    ));
+                };
+                Ok(format!(
+                    "SUPPORT {}",
+                    self.qualified_nodes(&names.elements)?
+                ))
+            }
+            "transform" => {
+                let Some(Node::AArrayExpr(types)) = argument else {
+                    return Err(DeparseError::invalid(
+                        "DefElem",
+                        "TRANSFORM option must be a type list",
+                    ));
+                };
+                let transforms = types
+                    .elements
+                    .iter()
+                    .map(|node| match node {
+                        Node::TypeName(type_name) => {
+                            Ok(format!("FOR TYPE {}", self.type_name(type_name)?))
+                        }
+                        _ => Err(DeparseError::invalid(
+                            "DefElem",
+                            "TRANSFORM option must be a type list",
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, DeparseError>>()?;
+                Ok(format!("TRANSFORM {}", transforms.join(", ")))
+            }
+            "set" => {
+                let Some(Node::VariableSetStmt(setstmt)) = argument else {
+                    return Err(DeparseError::invalid(
+                        "DefElem",
+                        "SET option must be a VariableSetStmt",
+                    ));
+                };
+                self.variable_set(setstmt)
+            }
+            "cost" | "rows" => Ok(format!(
+                "{} {}",
+                name.to_ascii_uppercase(),
+                self.render(argument.ok_or_else(|| DeparseError::missing("DefElem", "arg"))?)?
+            )),
+            _ => {
+                let keyword = name.replace('_', " ").to_ascii_uppercase();
+                match argument {
+                    Some(Node::String(value)) => Ok(format!(
+                        "{keyword} {}",
+                        quote_literal(value.sval.as_deref().unwrap_or_default())
+                    )),
+                    Some(argument) => Ok(format!("{keyword} {}", self.render(argument)?)),
+                    None => Ok(keyword),
+                }
+            }
         }
     }
 
@@ -2388,6 +3212,9 @@ impl Deparser {
         statement: &VariableSetStmt,
     ) -> Result<std::string::String, DeparseError> {
         let name = statement.name.as_deref().unwrap_or("all");
+        if let Some(special) = self.special_variable_set(statement, name)? {
+            return Ok(special);
+        }
         match statement.kind {
             VariableSetKind::ResetAll => Ok("RESET ALL".to_owned()),
             VariableSetKind::Reset => Ok(format!("RESET {}", quote_identifier(name))),
@@ -2407,6 +3234,173 @@ impl Deparser {
                 quote_identifier(name),
                 self.list(&statement.args, ", ")?
             )),
+        }
+    }
+
+    fn special_variable_set(
+        &self,
+        statement: &VariableSetStmt,
+        name: &str,
+    ) -> Result<Option<std::string::String>, DeparseError> {
+        let scope = if statement.is_local { "LOCAL " } else { "" };
+        match name {
+            "TRANSACTION" if statement.kind == VariableSetKind::SetMulti => Ok(Some(format!(
+                "SET TRANSACTION {}",
+                self.transaction_options(&statement.args)?
+            ))),
+            "SESSION CHARACTERISTICS" if statement.kind == VariableSetKind::SetMulti => {
+                Ok(Some(format!(
+                    "SET SESSION CHARACTERISTICS AS TRANSACTION {}",
+                    self.transaction_options(&statement.args)?
+                )))
+            }
+            "TRANSACTION SNAPSHOT" if statement.kind == VariableSetKind::SetMulti => {
+                let Some(Node::AConst(AConst {
+                    val: ValUnion::String(value),
+                    ..
+                })) = statement.args.first()
+                else {
+                    return Err(DeparseError::invalid(
+                        "VariableSetStmt",
+                        "TRANSACTION SNAPSHOT requires a string snapshot id",
+                    ));
+                };
+                Ok(Some(format!(
+                    "SET TRANSACTION SNAPSHOT {}",
+                    quote_literal(value.sval.as_deref().unwrap_or_default())
+                )))
+            }
+            "timezone" => match statement.kind {
+                VariableSetKind::SetValue => {
+                    let Some(argument) = statement.args.first() else {
+                        return Err(DeparseError::invalid(
+                            "VariableSetStmt",
+                            "SET TIME ZONE requires a value",
+                        ));
+                    };
+                    Ok(Some(format!(
+                        "SET {scope}TIME ZONE {}",
+                        self.time_zone_value(argument)?
+                    )))
+                }
+                VariableSetKind::SetDefault => Ok(Some(format!("SET {scope}TIME ZONE DEFAULT"))),
+                _ => Ok(None),
+            },
+            "session_authorization" => match statement.kind {
+                VariableSetKind::SetValue => {
+                    let Some(Node::AConst(AConst {
+                        val: ValUnion::String(value),
+                        ..
+                    })) = statement.args.first()
+                    else {
+                        return Err(DeparseError::invalid(
+                            "VariableSetStmt",
+                            "SET SESSION AUTHORIZATION requires a role name",
+                        ));
+                    };
+                    Ok(Some(format!(
+                        "SET {scope}SESSION AUTHORIZATION {}",
+                        quote_literal(value.sval.as_deref().unwrap_or_default())
+                    )))
+                }
+                VariableSetKind::SetDefault => {
+                    Ok(Some(format!("SET {scope}SESSION AUTHORIZATION DEFAULT")))
+                }
+                _ => Ok(None),
+            },
+            "role" if statement.kind == VariableSetKind::SetValue => {
+                let Some(Node::AConst(AConst {
+                    val: ValUnion::String(value),
+                    ..
+                })) = statement.args.first()
+                else {
+                    return Err(DeparseError::invalid(
+                        "VariableSetStmt",
+                        "SET ROLE requires a role name",
+                    ));
+                };
+                Ok(Some(format!(
+                    "SET {scope}ROLE {}",
+                    quote_literal(value.sval.as_deref().unwrap_or_default())
+                )))
+            }
+            "xmloption" if statement.kind == VariableSetKind::SetValue => {
+                let Some(Node::AConst(AConst {
+                    val: ValUnion::String(value),
+                    ..
+                })) = statement.args.first()
+                else {
+                    return Err(DeparseError::invalid(
+                        "VariableSetStmt",
+                        "SET XML OPTION requires DOCUMENT or CONTENT",
+                    ));
+                };
+                Ok(Some(format!(
+                    "SET XML OPTION {}",
+                    value
+                        .sval
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_ascii_uppercase()
+                )))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    fn time_zone_value(&self, argument: &Node) -> Result<std::string::String, DeparseError> {
+        match argument {
+            Node::AConst(value) => Ok(render_constant(value)),
+            Node::TypeCast(cast) => {
+                let is_interval = matches!(
+                    cast.type_name.as_deref().and_then(|name| name.names.last()),
+                    Some(Node::String(name)) if name.sval.as_deref() == Some("interval")
+                );
+                if !is_interval {
+                    return Err(DeparseError::invalid(
+                        "VariableSetStmt",
+                        "SET TIME ZONE value must be a constant or interval",
+                    ));
+                }
+                let Some(Node::AConst(AConst {
+                    val: ValUnion::String(value),
+                    ..
+                })) = cast.arg.as_deref()
+                else {
+                    return Err(DeparseError::invalid(
+                        "VariableSetStmt",
+                        "SET TIME ZONE interval requires a string literal",
+                    ));
+                };
+                let typmods = &cast.type_name.as_deref().unwrap().typmods;
+                let qualifier = match typmods[..] {
+                    [] => "",
+                    [
+                        Node::AConst(AConst {
+                            val: ValUnion::Integer(Integer { ival: 1024 }),
+                            ..
+                        }),
+                    ] => " HOUR",
+                    [
+                        Node::AConst(AConst {
+                            val: ValUnion::Integer(Integer { ival: 3072 }),
+                            ..
+                        }),
+                    ] => " HOUR TO MINUTE",
+                    _ => {
+                        return Err(DeparseError::invalid(
+                            "VariableSetStmt",
+                            "unsupported SET TIME ZONE interval qualifier",
+                        ));
+                    }
+                };
+                Ok(format!(
+                    "INTERVAL {}{}",
+                    quote_literal(value.sval.as_deref().unwrap_or_default()),
+                    qualifier
+                ))
+            }
+            other => self.render(other),
         }
     }
 
@@ -2643,12 +3637,44 @@ impl Deparser {
         let mut sql = "EXPLAIN".to_owned();
         if !statement.options.is_empty() {
             sql.push_str(" (");
-            sql.push_str(&self.list(&statement.options, ", ")?);
+            let options = statement
+                .options
+                .iter()
+                .map(|option| self.explain_option(option))
+                .collect::<Result<Vec<_>, _>>()?;
+            sql.push_str(&options.join(", "));
             sql.push(')');
         }
         sql.push(' ');
         sql.push_str(&self.required_node(statement.query.as_deref(), "ExplainStmt", "query")?);
         Ok(sql)
+    }
+
+    fn explain_option(&self, option: &Node) -> Result<std::string::String, DeparseError> {
+        let Node::DefElem(element) = option else {
+            return self.render(option);
+        };
+        let name = element
+            .defname
+            .as_deref()
+            .ok_or_else(|| DeparseError::missing("DefElem", "defname"))?
+            .to_ascii_uppercase();
+        Ok(match element.arg.as_deref() {
+            None => name,
+            Some(Node::String(value)) => {
+                let value = value.sval.as_deref().unwrap_or_default();
+                let bare = !value.is_empty()
+                    && value
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+                if bare {
+                    format!("{name} {}", value.to_ascii_uppercase())
+                } else {
+                    format!("{name} {}", quote_literal(value))
+                }
+            }
+            Some(argument) => format!("{name} {}", self.render(argument)?),
+        })
     }
 
     fn refresh_materialized_view(
@@ -2681,7 +3707,8 @@ impl Deparser {
                 statement
                     .object
                     .as_deref()
-                    .ok_or_else(|| DeparseError::missing("CommentStmt", "object"))?
+                    .ok_or_else(|| DeparseError::missing("CommentStmt", "object"))?,
+                statement.objtype,
             )?,
             statement
                 .comment
@@ -2709,6 +3736,7 @@ impl Deparser {
                     .object
                     .as_deref()
                     .ok_or_else(|| DeparseError::missing("SecLabelStmt", "object"))?,
+                statement.objtype,
             )?,
         );
         sql.push_str(" IS ");

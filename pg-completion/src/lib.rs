@@ -60,13 +60,15 @@ impl CompletionContext {
             });
         }
         for phrase in &self.expectations.phrases {
+            let Some(first) = phrase.first() else {
+                continue;
+            };
             let labels = phrase
                 .iter()
                 .filter_map(|kind| keyword_spelling(*kind))
                 .collect::<Vec<_>>();
             if labels.len() != phrase.len()
-                || (self.prefix.raw.is_empty()
-                    && !self.expectations.eager_without_prefix(phrase[0]))
+                || (self.prefix.raw.is_empty() && !self.expectations.eager_without_prefix(*first))
             {
                 continue;
             }
@@ -75,7 +77,7 @@ impl CompletionContext {
                 insert_text: label.clone(),
                 label,
                 kind: SyntaxCompletionKind::Phrase,
-                is_follow: self.expectations.follow_tokens.contains(&phrase[0]),
+                is_follow: self.expectations.follow_tokens.contains(first),
             });
         }
         completions
@@ -262,12 +264,22 @@ pub enum CompletionDiagnosticKind {
     TokenizationRecovered,
     LexErrorBeforePoint,
     ScopeIncomplete,
+    SourceTooLarge,
 }
 
 /// Collect syntax and scope information for completion at a UTF-8 byte point.
 ///
 /// The requested point is clamped and normalized before any slicing occurs.
 pub fn collect(source: &str, point: TextSize) -> CompletionContext {
+    if TextSize::try_from(source.len()).is_err() {
+        return CompletionContext {
+            diagnostics: vec![CompletionDiagnostic {
+                kind: CompletionDiagnosticKind::SourceTooLarge,
+                range: TextRange::empty(TextSize::new(0)),
+            }],
+            ..CompletionContext::default()
+        };
+    }
     let normalized = prefix::normalize_point(source, point);
     let stmt_range = statement::range_at(source, normalized.point);
     let site = prefix::analyze(source, stmt_range, normalized.point);
@@ -409,7 +421,10 @@ fn filter_token_prefix(expectations: &mut ExpectationSet, prefix: &CompletionPre
         .follow_tokens
         .retain(|kind| expectations.tokens.contains(kind));
     expectations.phrases.retain(|phrase| {
-        token_spelling(phrase[0]).is_some_and(|head| head.starts_with(&prefix.normalized))
+        phrase
+            .first()
+            .and_then(|first| token_spelling(*first))
+            .is_some_and(|head| head.starts_with(&prefix.normalized))
     });
 }
 
