@@ -329,7 +329,7 @@ impl WireResponse {
 }
 
 /// Execute the playground interface without WebAssembly. Tests use the same
-/// JSON seam as the browser worker.
+/// JSON interface as the browser worker.
 pub fn complete_json(input: &str) -> String {
     let wire = match serde_json::from_str::<CompletionRequest>(input) {
         Ok(request) => match complete_request(request) {

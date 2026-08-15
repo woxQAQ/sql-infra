@@ -233,7 +233,7 @@ pub enum RelationKind {
 - `ON CONFLICT DO UPDATE` 的 `excluded` 以及 `RETURNING` 的 `old`/`new`（含显式别名）作为 `qualified_only` 关系映射回 DML 目标；adapter 只在限定引用中查询它们，避免重复未限定列候选。
 - 不支持的表表达式必须显式标记，不能为其虚构列。
 
-## 内部 seam
+## 内部接口
 
 ### 1. `pg-parser`：收集强类型语法期望
 

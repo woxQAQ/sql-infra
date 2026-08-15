@@ -47,7 +47,7 @@ struct CatalogObject {
     name: String,
 }
 
-/// The only seam a real caller needs to implement for its metadata source.
+/// The only interface a real caller needs to implement for its metadata source.
 trait Catalog {
     fn objects(&self, kinds: &[ObjectKind], qualifier: &[NamePart]) -> Vec<CatalogObject>;
 

@@ -1,6 +1,6 @@
 //! Shared object identities, object types, signatures, and DDL clauses.
 //!
-//! These helpers retain strict object-specific seams while centralizing balanced
+//! These helpers keep object-specific parsing separate while centralizing balanced
 //! token fragments, recurring `DefElem` shapes, and common object clauses such as
 //! `IF EXISTS` and drop behavior.
 

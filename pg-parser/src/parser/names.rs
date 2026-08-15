@@ -1,6 +1,6 @@
 //! PostgreSQL name categories, qualified identities, aliases, and role names.
 //!
-//! This module is the central seam for keyword-category-sensitive name parsing;
+//! This module centralizes keyword-category-sensitive name parsing;
 //! callers choose the required grammar instead of accepting arbitrary identifiers.
 
 use super::*;
