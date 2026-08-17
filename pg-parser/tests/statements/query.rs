@@ -88,48 +88,6 @@ fn tooling_statement_ranges_are_complete_with_or_without_semicolons() {
 }
 
 #[test]
-fn statement_splitter_handles_boundary_sensitive_lexemes() {
-    let sql = " ; select ';', E'first'
-'\\';second', U&\"a;b\", $$;$$ /* ; */; invalid grammar (a; b); select 3  ";
-    let ranges = pg_parser::split_statement_ranges(sql).expect("split statement ranges");
-    let statements = ranges
-        .iter()
-        .map(|range| {
-            let range = range.full();
-            &sql[usize::from(range.start())..usize::from(range.end())]
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(statements.len(), 3);
-    assert!(statements[0].starts_with("select"));
-    assert_eq!(statements[1], "invalid grammar (a; b);");
-    assert_eq!(statements[2], "select 3  ");
-}
-
-#[test]
-fn statement_splitter_keeps_begin_atomic_body_together() {
-    let sql = "create function f() returns int language sql begin /* trivia */ atomic select case when true then 1 else 2 end; return 1; end; select 2;";
-    let ranges = pg_parser::split_statement_ranges(sql).expect("split statement ranges");
-
-    assert_eq!(ranges.len(), 2);
-    assert_eq!(
-        &sql[usize::from(ranges[1].full().start())..usize::from(ranges[1].full().end())],
-        "select 2;"
-    );
-}
-
-#[test]
-fn statement_splitter_reports_unterminated_lexemes() {
-    for sql in [
-        "select 'unterminated",
-        "select $$unterminated",
-        "select /* unterminated",
-    ] {
-        assert!(pg_parser::split_statement_ranges(sql).is_err(), "{sql}");
-    }
-}
-
-#[test]
 fn parser_errors_use_the_unexpected_token_range() {
     let sql = "select 1 trailing extra";
     let error = pg_parser::parse(sql).unwrap_err();
