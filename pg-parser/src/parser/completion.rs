@@ -170,14 +170,14 @@ pub const fn object_type_slot(object_type: ObjectType) -> GrammarSlot {
 }
 
 /// A grammar-level reference to the Catalog object whose members are being
-/// completed. Name tokens retain their source ranges and quoting information
+/// completed. Name tokens retain their source locs and quoting information
 /// for the completion layer to project without reparsing statement syntax.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GrammarObjectReference {
     /// The syntactically possible object categories for the unresolved owner.
     pub object_types: Vec<ObjectType>,
     /// Name-component tokens in source order, with separating punctuation
-    /// omitted. Their source ranges preserve the original spelling and quoting.
+    /// omitted. Their source locs preserve the original spelling and quoting.
     pub name: Vec<Token>,
 }
 
@@ -324,9 +324,9 @@ enum CompletionPointTokenPolicy {
 impl CompletionPointTokenPolicy {
     fn should_remove_token(self, token: &Token, completion_point: TextSize) -> bool {
         let intersects_completion_point = token.kind != TokenKind::Eof
-            && token.range.start() <= completion_point
-            && (completion_point < token.range.end()
-                || (token.kind == TokenKind::Incomplete && completion_point == token.range.end()));
+            && token.loc.start() <= completion_point
+            && (completion_point < token.loc.end()
+                || (token.kind == TokenKind::Incomplete && completion_point == token.loc.end()));
         if !intersects_completion_point {
             return false;
         }
@@ -336,7 +336,7 @@ impl CompletionPointTokenPolicy {
             // Names and incomplete tokens remain editor prefixes during
             // recovery and therefore still get replaced.
             Self::MembershipRecovery => {
-                token.range.start() < completion_point
+                token.loc.start() < completion_point
                     || matches!(
                         &token.value,
                         Some(TokenValue::String(_) | TokenValue::Keyword(_))
@@ -507,7 +507,7 @@ fn tokens_with_completion_marker(
 
     let marker_index = tokens
         .iter()
-        .position(|token| token.range.start() >= completion_point)
+        .position(|token| token.loc.start() >= completion_point)
         .unwrap_or_else(|| tokens.len().saturating_sub(1));
     tokens.insert(
         marker_index,
@@ -524,7 +524,7 @@ fn run_completion_parse(tokens: Vec<Token>, collector: &SharedCollector) {
     };
     // Expectations collected before a syntax exit remain useful at the
     // editing point, so completion intentionally ignores the parse outcome.
-    let _parse_outcome = parser.parse_statements_with_ranges();
+    let _parse_outcome = parser.parse_statements_with_locs();
 }
 
 // ── Parser completion hooks ───────────────────────────────────────────────
@@ -701,9 +701,9 @@ impl Parser {
         if !hole_recovered {
             return None;
         }
-        let location = self.peek().location();
+        let offset = self.peek().offset();
         self.pos += 1;
-        Some(Token::completion_hole(location))
+        Some(Token::completion_hole(offset))
     }
 
     fn membership_owner_name_tokens(
@@ -755,7 +755,7 @@ impl Parser {
 ///
 /// A token intersecting the point is treated as the editor prefix and removed
 /// from the parser input before a synthetic completion marker is parsed.
-/// Callers normally pass the start of the editor's replacement range rather
+/// Callers normally pass the start of the editor's replacement loc rather
 /// than the visual caret position so a partially typed identifier or keyword
 /// does not affect the surrounding grammar.
 ///

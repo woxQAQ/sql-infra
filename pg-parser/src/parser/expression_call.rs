@@ -8,7 +8,7 @@ use super::*;
 
 impl ExprParser {
     pub(super) fn parse_name_or_func(&mut self) -> Option<Node> {
-        let location = self.location();
+        let offset = self.offset();
         let fields = self.parse_name_nodes()?;
         if fields.is_empty() {
             return None;
@@ -16,7 +16,7 @@ impl ExprParser {
         if self.consume(TokenKind::Char('(')) {
             let mut call = FuncCall {
                 funcname: fields,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..FuncCall::default()
             };
             self.record_completion_tokens(&[TokenKind::Char('*')]);
@@ -62,21 +62,21 @@ impl ExprParser {
         } else {
             Some(node!(ColumnRef {
                 fields,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             }))
         }
     }
 
     pub(super) fn parse_array_expr_body(
         &mut self,
-        location: usize,
-        list_start: usize,
+        offset: usize,
+        list_start_offset: usize,
     ) -> Option<Node> {
         let mut elements = Vec::new();
         if !self.at(TokenKind::Char(']')) {
             if self.at(TokenKind::Char('[')) {
                 loop {
-                    let nested_start = self.expect(TokenKind::Char('['))?.location();
+                    let nested_start = self.expect(TokenKind::Char('['))?.offset();
                     elements.push(self.parse_array_expr_body(nested_start, nested_start)?);
                     if !self.consume(TokenKind::Char(',')) {
                         break;
@@ -89,25 +89,25 @@ impl ExprParser {
                 elements = self.parse_expr_list_until(TokenKind::Char(']'))?;
             }
         }
-        let list_end = self.expect(TokenKind::Char(']'))?.location();
+        let list_end_offset = self.expect(TokenKind::Char(']'))?.offset();
         Some(node!(AArrayExpr {
             elements,
-            list_start: list_start as ParseLoc,
-            list_end: list_end as ParseLoc,
-            location: location as ParseLoc,
+            list_start_parse_loc: list_start_offset as ParseLoc,
+            list_end_parse_loc: list_end_offset as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }))
     }
 
     pub(super) fn parse_function_argument(&mut self) -> Option<Node> {
         if self.starts_named_function_argument() {
             let name_token = self.advance().clone();
-            let location = name_token.location();
+            let offset = name_token.offset();
             self.advance();
             return Some(node!(NamedArgExpr {
                 arg: Some(Box::new(self.parse_expr(0)?)),
                 name: token_name(&name_token),
                 argnumber: -1,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             }));
         }
         self.parse_expr(0)
@@ -146,7 +146,7 @@ impl ExprParser {
             ]);
             let mut sortby_dir = SortByDir::Default;
             let mut use_op = Vec::new();
-            let mut location = -1;
+            let mut parse_loc = -1;
             match self.peek_kind() {
                 TokenKind::Asc => {
                     self.advance();
@@ -161,7 +161,7 @@ impl ExprParser {
                     self.record_completion_tokens(&[TokenKind::Op, TokenKind::Operator]);
                     self.record_completion_slot(GrammarSlot::Operator);
                     sortby_dir = SortByDir::Using;
-                    location = self.location() as ParseLoc;
+                    parse_loc = self.offset() as ParseLoc;
                     if self.at(TokenKind::Operator) {
                         use_op = self.parse_explicit_operator_name()?;
                     } else {
@@ -207,7 +207,7 @@ impl ExprParser {
                 sortby_dir,
                 sortby_nulls,
                 use_op,
-                location,
+                parse_loc,
             }));
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -267,12 +267,12 @@ impl ExprParser {
             return Some(None);
         }
         if self.at(TokenKind::Char('(')) {
-            let location = self.advance().location();
+            let offset = self.advance().offset();
             let mut tokens = self.take_until_balanced(TokenKind::Char(')'));
             if self.at_completion() {
                 tokens.push(self.peek().clone());
             }
-            match parse_window_specification_tokens(tokens, location, self.completion.clone()) {
+            match parse_window_specification_tokens(tokens, offset, self.completion.clone()) {
                 Ok(window) => {
                     self.expect(TokenKind::Char(')'))?;
                     Some(Some(Box::new(window)))
@@ -280,7 +280,7 @@ impl ExprParser {
                 Err(error) => self.fail_with(error),
             }
         } else {
-            let name_location = self.location();
+            let name_offset = self.offset();
             let name = self
                 .consume_identifier_in_categories(&[
                     KeywordCategory::Unreserved,
@@ -290,7 +290,7 @@ impl ExprParser {
             Some(Some(Box::new(WindowDef {
                 name: Some(name),
                 frame_options: FRAMEOPTION_DEFAULTS,
-                location: name_location as ParseLoc,
+                parse_loc: name_offset as ParseLoc,
                 ..WindowDef::default()
             })))
         }
@@ -337,18 +337,18 @@ impl ExprParser {
 }
 pub(super) fn parse_window_specification_tokens(
     mut tokens: Vec<Token>,
-    location: usize,
+    offset: usize,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<WindowDef> {
-    let end_location = tokens.last().end_location_or(location);
-    tokens.push(Token::synthetic(TokenKind::Char(')'), end_location));
-    tokens.push(Token::synthetic(TokenKind::Eof, end_location));
+    let end_offset = tokens.last().end_offset_or(offset);
+    tokens.push(Token::synthetic(TokenKind::Char(')'), end_offset));
+    tokens.push(Token::synthetic(TokenKind::Eof, end_offset));
     let mut parser = Parser {
         tokens,
         pos: 0,
         completion,
     };
-    let window = parser.parse_window_specification_body(location)?;
+    let window = parser.parse_window_specification_body(offset)?;
     if !parser.at(TokenKind::Eof) {
         return Err(parser.error_here("unexpected token after window specification"));
     }

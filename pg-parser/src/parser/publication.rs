@@ -137,7 +137,7 @@ impl Parser {
     // ALTER SUBSCRIPTION name OWNER TO { new_owner | CURRENT_ROLE | CURRENT_USER | SESSION_USER }
     // ALTER SUBSCRIPTION name RENAME TO new_name
     pub(super) fn parse_alter_subscription(&mut self) -> PResult<Node> {
-        let alter_location = self.previous_location();
+        let alter_offset = self.previous_offset();
         self.expect(TokenKind::Subscription)?;
         self.record_completion_slot(GrammarSlot::Subscription);
         let subname = Some(
@@ -216,7 +216,7 @@ impl Parser {
                 stmt.options.push(make_def_elem(
                     "enabled",
                     Some(node!(Boolean::new(true))),
-                    alter_location,
+                    alter_offset,
                 ));
                 AlterSubscriptionType::Enabled
             }
@@ -225,7 +225,7 @@ impl Parser {
                 stmt.options.push(make_def_elem(
                     "enabled",
                     Some(node!(Boolean::new(false))),
-                    alter_location,
+                    alter_offset,
                 ));
                 AlterSubscriptionType::Enabled
             }
@@ -320,7 +320,7 @@ impl Parser {
         let mut continuation = None;
         loop {
             self.record_completion_tokens(&[TokenKind::All, TokenKind::Table, TokenKind::Tables]);
-            let location = self.location();
+            let offset = self.offset();
             match self.peek_kind() {
                 TokenKind::All => {
                     self.advance();
@@ -341,7 +341,7 @@ impl Parser {
                             let mut tables = Vec::new();
                             loop {
                                 self.consume(TokenKind::Table);
-                                let table_location = self.location();
+                                let table_offset = self.offset();
                                 let relation =
                                     self.parse_relation_expr_with_slot(GrammarSlot::Table)?;
                                 tables.push(node!(PublicationObjSpec {
@@ -351,7 +351,7 @@ impl Parser {
                                         except: true,
                                         ..PublicationTable::default()
                                     })),
-                                    location: table_location as ParseLoc,
+                                    parse_loc: table_offset as ParseLoc,
                                     ..PublicationObjSpec::default()
                                 }));
                                 if !self.consume(TokenKind::Char(',')) {
@@ -385,7 +385,7 @@ impl Parser {
                     self.expect(TokenKind::InP)?;
                     self.expect(TokenKind::Schema)?;
                     self.record_completion_slot(GrammarSlot::Schema);
-                    let location = self.location();
+                    let offset = self.offset();
                     let current = self.consume(TokenKind::CurrentSchema);
                     let name = if current {
                         None
@@ -403,7 +403,7 @@ impl Parser {
                             PublicationObjSpecType::TablesInSchema
                         },
                         name,
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                         ..PublicationObjSpec::default()
                     }));
                 }
@@ -437,7 +437,7 @@ impl Parser {
                                 PublicationObjSpecType::TablesInSchema
                             },
                             name,
-                            location: location as ParseLoc,
+                            parse_loc: offset as ParseLoc,
                             ..PublicationObjSpec::default()
                         }));
                         if !self.consume(TokenKind::Char(',')) {
@@ -461,10 +461,10 @@ impl Parser {
                             columns,
                             ..PublicationTable::default()
                         })),
-                        location: if explicit_table {
+                        parse_loc: if explicit_table {
                             0
                         } else {
-                            location as ParseLoc
+                            offset as ParseLoc
                         },
                         ..PublicationObjSpec::default()
                     }));

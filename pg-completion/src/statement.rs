@@ -3,7 +3,7 @@
 //! The scanner recognizes strings, identifiers, dollar quotes, and nested
 //! comments so contained semicolons do not split the active statement.
 
-use pg_parser::TextRange;
+use pg_parser::Loc;
 use pg_parser::TextSize;
 
 use crate::lexical;
@@ -11,7 +11,7 @@ use crate::lexical;
 /// Find the semicolon-delimited statement containing `point`, ignoring
 /// semicolons in quoted strings, quoted identifiers, dollar quotes, and
 /// comments.
-pub(super) fn range_at(source: &str, point: TextSize) -> TextRange {
+pub(super) fn loc_at(source: &str, point: TextSize) -> Loc {
     let point = usize::from(point);
     let (mut start, mut end) = statement_bounds(source, point);
 
@@ -22,7 +22,7 @@ pub(super) fn range_at(source: &str, point: TextSize) -> TextRange {
         end -= 1;
     }
 
-    TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end))
+    Loc::new(TextSize::from_usize(start), TextSize::from_usize(end))
 }
 
 fn statement_bounds(source: &str, point: usize) -> (usize, usize) {

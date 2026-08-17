@@ -42,7 +42,7 @@ impl Parser {
         let return_type = if has_return_clause {
             self.advance();
             if self.at(TokenKind::Table) {
-                let table_location = self.advance().location();
+                let table_offset = self.advance().offset();
                 for parameter in &parameters {
                     let Node::FunctionParameter(parameter) = parameter else {
                         continue;
@@ -54,7 +54,7 @@ impl Parser {
                             | FunctionParameterMode::Variadic
                     ) {
                         return Err(ParseError::syntax_exit(
-                            parameter.location as usize,
+                            parameter.parse_loc as usize,
                             "OUT and INOUT arguments aren't allowed in TABLE functions",
                         ));
                     }
@@ -75,11 +75,11 @@ impl Parser {
                         }
                     };
                 table_type.setof = true;
-                table_type.location = table_location as ParseLoc;
+                table_type.parse_loc = table_offset as ParseLoc;
                 parameters.extend(columns);
                 Some(Box::new(table_type))
             } else {
-                let location = self.location();
+                let offset = self.offset();
                 self.record_completion_slot(GrammarSlot::Type);
                 self.record_completion_qualified_name_slot(
                     GrammarSlot::Type,
@@ -93,8 +93,8 @@ impl Parser {
                 }
                 Some(Box::new(parse_func_type_tokens(tokens).map_err(
                     |mut error| {
-                        if error.location() == 0 {
-                            error.reanchor(location);
+                        if error.offset() == 0 {
+                            error.reanchor(offset);
                         }
                         error
                     },
@@ -107,7 +107,7 @@ impl Parser {
         let mut sql_body = None;
         while !self.at_statement_end() {
             self.record_completion_tokens(Self::create_function_option_starts());
-            let location = self.location();
+            let offset = self.offset();
             match self.peek_kind() {
                 TokenKind::Language => {
                     self.advance();
@@ -118,7 +118,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "language",
                         Some(make_string_node(language)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::As => {
@@ -136,7 +136,7 @@ impl Parser {
                             elements: bodies,
                             ..AArrayExpr::default()
                         })),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Immutable | TokenKind::Stable | TokenKind::Volatile => {
@@ -144,7 +144,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "volatility",
                         Some(make_string_node(value)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::StrictP => {
@@ -152,7 +152,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "strict",
                         Some(node!(Boolean::new(true))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Security => {
@@ -167,7 +167,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "security",
                         Some(node!(Boolean::new(value))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Parallel => {
@@ -178,13 +178,13 @@ impl Parser {
                     options.push(make_def_elem(
                         "parallel",
                         Some(make_string_node(value)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Cost | TokenKind::Rows => {
                     let name = token_text(self.advance());
                     let value = self.parse_numeric_only()?;
-                    options.push(make_def_elem(&name, Some(value), location));
+                    options.push(make_def_elem(&name, Some(value), offset));
                 }
                 TokenKind::Support => {
                     self.advance();
@@ -199,7 +199,7 @@ impl Parser {
                             elements: name,
                             ..AArrayExpr::default()
                         })),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Return => {
@@ -218,7 +218,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "strict",
                         Some(node!(Boolean::new(false))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Returns => {
@@ -230,7 +230,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "strict",
                         Some(node!(Boolean::new(true))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::External => {
@@ -246,7 +246,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "security",
                         Some(node!(Boolean::new(value))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Leakproof => {
@@ -254,7 +254,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "leakproof",
                         Some(node!(Boolean::new(true))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Not => {
@@ -263,7 +263,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "leakproof",
                         Some(node!(Boolean::new(false))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Transform => {
@@ -272,7 +272,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "transform",
                         Some(name_list_node(types)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Window => {
@@ -280,7 +280,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "window",
                         Some(node!(Boolean::new(true))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Set | TokenKind::Reset => {
@@ -290,7 +290,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "set",
                         Some(Node::VariableSetStmt(setstmt)),
-                        location,
+                        offset,
                     ));
                 }
                 other => {
@@ -335,7 +335,7 @@ impl Parser {
         let mut sql_body = None;
         while !self.at_statement_end() {
             self.record_completion_tokens(Self::create_procedure_option_starts());
-            let location = self.location();
+            let offset = self.offset();
             match self.peek_kind() {
                 TokenKind::Language => {
                     self.advance();
@@ -346,7 +346,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "language",
                         Some(make_string_node(language)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::As => {
@@ -364,7 +364,7 @@ impl Parser {
                             elements: bodies,
                             ..AArrayExpr::default()
                         })),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Security => {
@@ -379,7 +379,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "security",
                         Some(node!(Boolean::new(value))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::External => {
@@ -395,7 +395,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "security",
                         Some(node!(Boolean::new(value))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Transform => {
@@ -404,7 +404,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "transform",
                         Some(name_list_node(types)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Set | TokenKind::Reset => {
@@ -414,7 +414,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "set",
                         Some(Node::VariableSetStmt(setstmt)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::BeginP => {
@@ -469,7 +469,7 @@ impl Parser {
             let stops = [TokenKind::Char(','), TokenKind::Char(')')];
             let mut tokens = self.take_until_top_level(&stops);
             self.append_completion_marker(&mut tokens);
-            let location = tokens.first().location_or(self.location());
+            let offset = tokens.first().offset_or(self.offset());
             if let Some(completion_index) = tokens
                 .iter()
                 .position(|token| token.kind == TokenKind::Completion)
@@ -491,18 +491,18 @@ impl Parser {
                     )
                 })
                 .ok_or_else(|| {
-                    ParseError::syntax_exit(location, "expected a table function column name")
+                    ParseError::syntax_exit(offset, "expected a table function column name")
                 })?;
             let arg_type = parse_func_type_tokens(tokens[1..].to_vec())
                 .map(Box::new)
                 .map_err(|_| {
-                    ParseError::syntax_exit(location, "expected a table function column type")
+                    ParseError::syntax_exit(offset, "expected a table function column type")
                 })?;
             columns.push(node!(FunctionParameter {
                 name: Some(name),
                 arg_type: Some(arg_type),
                 mode: FunctionParameterMode::Table,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..FunctionParameter::default()
             }));
             if !self.consume(TokenKind::Char(',')) {

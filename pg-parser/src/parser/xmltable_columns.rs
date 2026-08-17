@@ -9,9 +9,9 @@ pub(super) fn xmltable_column_from_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<RangeTableFuncCol> {
-    let location = tokens.first().location_or(0);
-    let eof_location = tokens.last().end_location_or(location);
-    tokens.push(Token::synthetic(TokenKind::Eof, eof_location));
+    let offset = tokens.first().offset_or(0);
+    let eof_offset = tokens.last().end_offset_or(offset);
+    tokens.push(Token::synthetic(TokenKind::Eof, eof_offset));
     let mut parser = Parser {
         tokens,
         pos: 0,
@@ -26,7 +26,7 @@ pub(super) fn xmltable_column_from_tokens_with_completion(
 
 impl Parser {
     fn parse_xmltable_column_body(&mut self) -> PResult<RangeTableFuncCol> {
-        let location = self.location();
+        let offset = self.offset();
         self.record_completion_slot(GrammarSlot::AnyName);
         let colname = self
             .consume_col_id()
@@ -38,7 +38,7 @@ impl Parser {
             return Ok(RangeTableFuncCol {
                 colname: Some(colname),
                 for_ordinality: true,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..RangeTableFuncCol::default()
             });
         }
@@ -57,7 +57,7 @@ impl Parser {
         let mut column = RangeTableFuncCol {
             colname: Some(colname.clone()),
             type_name: Some(type_name),
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..RangeTableFuncCol::default()
         };
         let suffixes = [
@@ -76,8 +76,8 @@ impl Parser {
                     let token = self.advance().clone();
                     self.expect(TokenKind::NullP)?;
                     if nullability_seen {
-                        return Err(ParseError::ranged(
-                            token.range,
+                        return Err(ParseError::at_loc(
+                            token.loc,
                             format!(
                                 "conflicting or redundant NULL / NOT NULL declarations for column {colname:?}"
                             ),
@@ -89,8 +89,8 @@ impl Parser {
                 TokenKind::NullP => {
                     let token = self.advance().clone();
                     if nullability_seen {
-                        return Err(ParseError::ranged(
-                            token.range,
+                        return Err(ParseError::at_loc(
+                            token.loc,
                             format!(
                                 "conflicting or redundant NULL / NOT NULL declarations for column {colname:?}"
                             ),
@@ -101,7 +101,7 @@ impl Parser {
                 }
                 TokenKind::Path | TokenKind::Default => {
                     let is_path = self.peek_kind() == TokenKind::Path;
-                    let option_location = self.advance().location();
+                    let option_offset = self.advance().offset();
                     let start = self.pos;
                     let available_end = self.tokens[start..]
                         .iter()
@@ -117,7 +117,7 @@ impl Parser {
                     if is_path {
                         if column.colexpr.is_some() {
                             return Err(ParseError::syntax_exit(
-                                option_location,
+                                option_offset,
                                 "only one PATH value per column is allowed",
                             ));
                         }
@@ -125,7 +125,7 @@ impl Parser {
                     } else {
                         if column.coldefexpr.is_some() {
                             return Err(ParseError::syntax_exit(
-                                option_location,
+                                option_offset,
                                 "only one DEFAULT value is allowed",
                             ));
                         }
@@ -140,7 +140,7 @@ impl Parser {
                     } else {
                         format!("unrecognized column option {option:?}")
                     };
-                    return Err(ParseError::ranged(token.range, message));
+                    return Err(ParseError::at_loc(token.loc, message));
                 }
                 TokenKind::Eof => break,
                 _ => {

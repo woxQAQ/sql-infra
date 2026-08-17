@@ -17,7 +17,7 @@ use pg_completion::VisibleRelation;
 use pg_completion::collect;
 use pg_parser::KEYWORDS;
 use pg_parser::KeywordCategory;
-use pg_parser::TextRange;
+use pg_parser::Loc;
 use pg_parser::TextSize;
 #[cfg(test)]
 use pg_parser::TokenKind;
@@ -35,7 +35,7 @@ enum CompletionItemKind {
 struct CompletionItem {
     label: String,
     insert_text: String,
-    replacement_range: TextRange,
+    replacement_loc: Loc,
     kind: CompletionItemKind,
     detail: String,
 }
@@ -93,7 +93,7 @@ fn add_syntax_items(context: &CompletionContext, items: &mut Vec<CompletionItem>
         items.push(CompletionItem {
             label: syntax.label,
             insert_text: syntax.insert_text,
-            replacement_range: context.replacement_range,
+            replacement_loc: context.replacement_loc,
             kind,
             detail: "SQL phrase".to_owned(),
         });
@@ -109,7 +109,7 @@ fn add_privilege_items(context: &CompletionContext, items: &mut Vec<CompletionIt
             items.push(CompletionItem {
                 label: privilege.to_owned(),
                 insert_text: privilege.to_owned(),
-                replacement_range: context.replacement_range,
+                replacement_loc: context.replacement_loc,
                 kind: CompletionItemKind::Privilege,
                 detail: "PostgreSQL privilege".to_owned(),
             });
@@ -240,7 +240,7 @@ fn push_object(
     items.push(CompletionItem {
         label,
         insert_text,
-        replacement_range: context.replacement_range,
+        replacement_loc: context.replacement_loc,
         kind: CompletionItemKind::Object(object.kind),
         detail: detail.to_owned(),
     });

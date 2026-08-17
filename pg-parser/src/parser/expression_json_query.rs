@@ -48,7 +48,7 @@ impl ExprParser {
             on_error,
             wrapper,
             quotes,
-            location: token.location() as ParseLoc,
+            parse_loc: token.offset() as ParseLoc,
             ..JsonFuncExpr::default()
         }))
     }
@@ -169,7 +169,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_json_behavior(&mut self) -> Option<JsonBehavior> {
-        let location = self.location();
+        let offset = self.offset();
         let (btype, expr) = match self.peek_kind() {
             TokenKind::Default => {
                 self.advance();
@@ -218,12 +218,12 @@ impl ExprParser {
         Some(JsonBehavior {
             btype,
             expr,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..JsonBehavior::default()
         })
     }
 
-    pub(super) fn parse_json_object_agg(&mut self, location: usize) -> Option<Node> {
+    pub(super) fn parse_json_object_agg(&mut self, offset: usize) -> Option<Node> {
         let key = self.parse_expr(0)?;
         if !self.consume(TokenKind::ValueP) {
             self.expect(TokenKind::Char(':'))?;
@@ -235,7 +235,7 @@ impl ExprParser {
         self.expect(TokenKind::Char(')'))?;
         let mut constructor = JsonAggConstructor {
             output,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..JsonAggConstructor::default()
         };
         self.parse_json_aggregate_decorations(&mut constructor)?;
@@ -250,7 +250,7 @@ impl ExprParser {
         }))
     }
 
-    pub(super) fn parse_json_array_agg(&mut self, location: usize) -> Option<Node> {
+    pub(super) fn parse_json_array_agg(&mut self, offset: usize) -> Option<Node> {
         let value = self.parse_json_value_expr()?;
         let mut agg_order = Vec::new();
         if self.consume_phrase(&[TokenKind::Order, TokenKind::By])? {
@@ -311,7 +311,7 @@ impl ExprParser {
         let mut constructor = JsonAggConstructor {
             output,
             agg_order,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..JsonAggConstructor::default()
         };
         self.parse_json_aggregate_decorations(&mut constructor)?;
@@ -340,8 +340,8 @@ pub(super) fn parse_sort_list_tokens(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<NodeList> {
-    let location = tokens.last().end_location_or(0);
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
+    let offset = tokens.last().end_offset_or(0);
+    tokens.push(Token::synthetic(TokenKind::Eof, offset));
     let mut parser = Parser {
         tokens,
         pos: 0,

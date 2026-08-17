@@ -7,7 +7,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_partition_spec(&mut self) -> PResult<PartitionSpec> {
-        let location = self.expect(TokenKind::Partition)?.location();
+        let offset = self.expect(TokenKind::Partition)?.offset();
         self.expect(TokenKind::By)?;
         let strategy_name = self
             .consume_col_id()
@@ -21,7 +21,7 @@ impl Parser {
         self.expect(TokenKind::Char('('))?;
         let mut part_params = Vec::new();
         while !self.at(TokenKind::Char(')')) {
-            let elem_location = self.location();
+            let elem_offset = self.offset();
             let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
             if tokens_end_at_top_level(&tokens)
                 && parse_index_elem_tokens_with_completion(tokens.clone(), None).is_ok()
@@ -45,7 +45,7 @@ impl Parser {
                 && !is_windowless_function_expression_node(expression, starts_with_cast)
             {
                 return Err(ParseError::syntax_exit(
-                    elem_location,
+                    elem_offset,
                     "partition expressions must be parenthesized unless they are function calls",
                 ));
             }
@@ -54,7 +54,7 @@ impl Parser {
                 expr: parsed.expr,
                 collation: parsed.collation,
                 opclass: parsed.opclass,
-                location: elem_location as ParseLoc,
+                parse_loc: elem_offset as ParseLoc,
             };
             part_params.push(Node::PartitionElem(elem));
             if !self.consume(TokenKind::Char(',')) {
@@ -71,25 +71,25 @@ impl Parser {
         Ok(PartitionSpec {
             strategy,
             part_params,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         })
     }
 
     fn parse_partition_range_datums(&mut self, empty_error: &str) -> PResult<NodeList> {
         let mut datums = Vec::new();
         while self.at_completion() || !self.at(TokenKind::Char(')')) {
-            let location = self.location();
+            let offset = self.offset();
             if self.consume(TokenKind::Minvalue) {
                 datums.push(node!(PartitionRangeDatum {
                     kind: PartitionRangeDatumKind::Minvalue,
                     value: None,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                 }));
             } else if self.consume(TokenKind::Maxvalue) {
                 datums.push(node!(PartitionRangeDatum {
                     kind: PartitionRangeDatumKind::Maxvalue,
                     value: None,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                 }));
             } else {
                 let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
@@ -103,7 +103,7 @@ impl Parser {
                 datums.push(node!(PartitionRangeDatum {
                     kind: PartitionRangeDatumKind::Value,
                     value: Some(Box::new(value)),
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                 }));
             }
             if !self.consume(TokenKind::Char(',')) {
@@ -120,18 +120,18 @@ impl Parser {
     }
 
     pub(super) fn parse_partition_bound(&mut self) -> PResult<PartitionBoundSpec> {
-        let location = self.location();
+        let offset = self.offset();
         if self.consume(TokenKind::Default) {
             return Ok(PartitionBoundSpec {
                 is_default: true,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..PartitionBoundSpec::default()
             });
         }
         self.expect(TokenKind::For)?;
         self.expect(TokenKind::Values)?;
         if self.consume(TokenKind::InP) {
-            let location = self.previous_location();
+            let offset = self.previous_offset();
             self.expect(TokenKind::Char('('))?;
             let listdatums = self.parse_expr_list_strict_until(&[TokenKind::Char(')')])?;
             if listdatums.is_empty() {
@@ -141,12 +141,12 @@ impl Parser {
             return Ok(PartitionBoundSpec {
                 strategy: b'l',
                 listdatums,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..PartitionBoundSpec::default()
             });
         }
         if self.consume(TokenKind::From) {
-            let location = self.previous_location();
+            let offset = self.previous_offset();
             self.expect(TokenKind::Char('('))?;
             let lowerdatums =
                 self.parse_partition_range_datums("range partition lower bound cannot be empty")?;
@@ -160,11 +160,11 @@ impl Parser {
                 strategy: b'r',
                 lowerdatums,
                 upperdatums,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..PartitionBoundSpec::default()
             });
         }
-        let location = self.expect(TokenKind::With)?.location();
+        let offset = self.expect(TokenKind::With)?.offset();
         self.expect(TokenKind::Char('('))?;
         let mut modulus = None;
         let mut remainder = None;
@@ -198,7 +198,7 @@ impl Parser {
             strategy: b'h',
             modulus: modulus.ok_or_else(|| self.error_here("missing MODULUS"))?,
             remainder: remainder.ok_or_else(|| self.error_here("missing REMAINDER"))?,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..PartitionBoundSpec::default()
         })
     }

@@ -17,11 +17,11 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext;
 ```rust
 pub struct CompletionContext {
     /// 包含补全点的语句范围，不含语句终止符。
-    pub statement_range: TextRange,
+    pub statement_loc: Loc,
     /// 对齐到 UTF-8 字符边界后的有效补全点。
     pub point: TextSize,
     /// 接受候选时需要替换的文本范围。
-    pub replacement_range: TextRange,
+    pub replacement_loc: Loc,
     /// 补全点处标识符片段的原始形式和归一化形式。
     pub prefix: CompletionPrefix,
     /// 语法上合法的终结符和具名语法槽位。
@@ -42,7 +42,7 @@ pub struct CompletionPrefix {
 
 pub struct CompletionDiagnostic {
     pub kind: CompletionDiagnosticKind,
-    pub range: TextRange,
+    pub loc: Loc,
 }
 
 pub enum CompletionDiagnosticKind {
@@ -142,14 +142,16 @@ pub struct NamePart {
     pub text: String,
     pub normalized: String,
     pub quoted: bool,
-    pub range: TextRange,
+    pub loc: Loc,
 }
 ```
 
+所有公开 `Loc` 均使用完整 SQL 的绝对 UTF-8 字节偏移量。`pg-completion` 在活动语句切片上调用 parser 时使用语句内相对偏移量，并在构造 `CompletionContext` 前加回语句起点。调用方需要行列位置时，通过 `pg_parser::SourceText` 将 `Loc` 转换为 `PositionRange`；核心列号按 Unicode 标量计数，UTF-16 等协议坐标由 adapter 转换。
+
 这些模型按以下顺序协作：
 
-1. `statement_range` 和 `point` 确定本次补全处理哪条语句、在哪个 UTF-8 字节偏移量收集候选。
-2. `replacement_range` 和 `prefix` 描述当前正在输入的标识符片段。`raw` 用于保留用户输入，`normalized` 用于匹配，`quoting` 决定后续插入时采用哪种引用规则。
+1. `statement_loc` 和 `point` 确定本次补全处理哪条语句、在哪个 UTF-8 字节偏移量收集候选。
+2. `replacement_loc` 和 `prefix` 描述当前正在输入的标识符片段。`raw` 用于保留用户输入，`normalized` 用于匹配，`quoting` 决定后续插入时采用哪种引用规则。
 3. `expectations` 记录该位置语法上允许的 Token、固定短语和 `GrammarSlot`，不包含任何 Catalog 对象。Token 是单个终结符；`follow_tokens` 标出会结束当前表达式、进入外层产生式的 Token；短语把 `GROUP BY` 这类固定多词单元整体交给 adapter。adapter 因而无需扫描 SQL：当完整表达式后尚未输入下一个 token 时保持安静，用户开始输入前缀后再发布匹配的表达式延续或 clause transition。
 4. `intent` 将 `GrammarSlot` 转成 adapter 可查询的 `ObjectKind`，通过 `qualifier` 保留当前片段之前的限定名，并在成员候选中通过 `membership` 指明 owner 对象。
 5. `scope` 记录当前语法位置可见的关系、CTE、DML 目标和外部查询层级，供 adapter 解析列候选。
@@ -158,9 +160,9 @@ pub struct NamePart {
 例如，对 `SELECT u.na| FROM users AS u` 调用 `collect` 时，`|` 只表示补全点，不属于输入：
 
 ```text
-statement_range   = [0, 27)
+statement_loc   = [0, 27)
 point             = 11
-replacement_range = [9, 11)
+replacement_loc = [9, 11)
 prefix            = { raw: "na", normalized: "na", quoting: Unquoted }
 expectations      = { tokens: [], slots: [Column, Function] }
 intent            = { object_kinds: [Column, Function], qualifier: [u], membership: None }
@@ -205,8 +207,8 @@ pub struct VisibleRelation {
     pub explicit_columns: Vec<NamePart>,
     /// 仅能通过 alias 限定访问，不参与未限定列名查找。
     pub qualified_only: bool,
-    pub syntax_range: TextRange,
-    pub body_range: Option<TextRange>,
+    pub syntax_loc: Loc,
+    pub body_loc: Option<Loc>,
     pub lateral: bool,
     pub unsupported: Option<UnsupportedRelation>,
 }
@@ -257,7 +259,7 @@ pub struct ParserExpectations {
 }
 ```
 
-现有的 `parse`、`parse_one` 和 `parse_with_ranges` interface 保持严格且不变。
+现有的 `parse`、`parse_one` 和 `parse_with_locs` interface 保持严格且不变。
 
 收集模式只解析到位于替换范围起点的合成补全标记。必选匹配自动发布相应 Token；语法分支和具有语义的名称位置显式发布候选：
 

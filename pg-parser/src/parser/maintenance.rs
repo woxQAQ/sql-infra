@@ -58,7 +58,7 @@ impl Parser {
             options.push(make_def_elem(
                 "format",
                 Some(make_string_node("binary")),
-                self.previous_location(),
+                self.previous_offset(),
             ));
         }
 
@@ -128,14 +128,14 @@ impl Parser {
             self.record_completion_lookahead_tokens(&[TokenKind::Using, TokenKind::Delimiters]);
         }
         if query.is_none() && (self.at(TokenKind::Using) || self.at(TokenKind::Delimiters)) {
-            let location = self.location();
+            let offset = self.offset();
             self.consume(TokenKind::Using);
             self.expect(TokenKind::Delimiters)?;
             let delimiter = self.consume_required_string("DELIMITERS requires a string literal")?;
             options.push(make_def_elem(
                 "delimiter",
                 Some(make_string_node(delimiter)),
-                location,
+                offset,
             ));
         }
         options.extend(self.parse_copy_options()?);
@@ -215,12 +215,12 @@ impl Parser {
             }
             let mut options = Vec::new();
             loop {
-                let location = self.location();
+                let offset = self.offset();
                 let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                 self.append_completion_marker(&mut tokens);
                 options.push(Node::DefElem(parse_copy_generic_option(
                     tokens,
-                    location,
+                    offset,
                     self.completion.clone(),
                 )?));
                 if !self.consume(TokenKind::Char(',')) {
@@ -237,7 +237,7 @@ impl Parser {
         let mut options = Vec::new();
         while !self.at_statement_end() && !self.at(TokenKind::Where) {
             self.record_completion_lookahead_tokens(COPY_LEGACY_OPTION_STARTS);
-            let location = self.location();
+            let offset = self.offset();
             let (name, arg) = match self.peek_kind() {
                 TokenKind::Binary => {
                     self.advance();
@@ -319,7 +319,7 @@ impl Parser {
                         }
                         node!(AArrayExpr {
                             elements: columns,
-                            location: -1,
+                            parse_loc: -1,
                             ..AArrayExpr::default()
                         })
                     };
@@ -327,7 +327,7 @@ impl Parser {
                 }
                 _ => return Err(self.error_here("invalid COPY option")),
             };
-            options.push(make_def_elem(name, arg, location));
+            options.push(make_def_elem(name, arg, offset));
         }
         Ok(options)
     }
@@ -401,15 +401,15 @@ impl Parser {
                 (TokenKind::Verbose, "verbose"),
             ] {
                 if self.consume(kind) {
-                    options.push(make_def_elem(name, None, self.previous_location()));
+                    options.push(make_def_elem(name, None, self.previous_offset()));
                 }
             }
             if self.consume(TokenKind::Analyze) || self.consume(TokenKind::Analyse) {
-                options.push(make_def_elem("analyze", None, self.previous_location()));
+                options.push(make_def_elem("analyze", None, self.previous_offset()));
             }
         } else if options.is_empty() && self.at(TokenKind::Verbose) {
             let token = self.advance().clone();
-            options.push(make_def_elem("verbose", None, token.location()));
+            options.push(make_def_elem("verbose", None, token.offset()));
         }
         let rels = self.parse_vacuum_relation_list()?;
         Ok(node!(VacuumStmt {
@@ -684,11 +684,7 @@ impl Parser {
             _ => return Err(self.error_here("REINDEX requires an object type")),
         };
         if self.consume(TokenKind::Concurrently) {
-            params.push(make_def_elem(
-                "concurrently",
-                None,
-                self.previous_location(),
-            ));
+            params.push(make_def_elem("concurrently", None, self.previous_offset()));
         }
         let (relation, name) = match kind {
             ReindexObjectType::Index => (
@@ -794,7 +790,7 @@ impl Parser {
             Vec::new()
         };
         if !parenthesized && self.consume(TokenKind::Verbose) {
-            params.push(make_def_elem("verbose", None, self.previous_location()));
+            params.push(make_def_elem("verbose", None, self.previous_offset()));
         }
         if self.at_statement_end() {
             return Ok(node!(RepackStmt {
@@ -887,11 +883,11 @@ impl Parser {
 
 fn parse_copy_generic_option(
     mut tokens: Vec<Token>,
-    location: usize,
+    offset: usize,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<DefElem> {
-    let eof_location = tokens.last().end_location_or(location);
-    tokens.push(Token::synthetic(TokenKind::Eof, eof_location));
+    let eof_offset = tokens.last().end_offset_or(offset);
+    tokens.push(Token::synthetic(TokenKind::Eof, eof_offset));
     let mut parser = Parser {
         tokens,
         pos: 0,
@@ -953,7 +949,7 @@ fn parse_copy_generic_option(
         parser.expect(TokenKind::Char(')'))?;
         Some(node!(AArrayExpr {
             elements: values,
-            location: -1,
+            parse_loc: -1,
             ..AArrayExpr::default()
         }))
     } else if parser.consume(TokenKind::Char('*')) {
@@ -981,7 +977,7 @@ fn parse_copy_generic_option(
     Ok(DefElem {
         defname: Some(name),
         arg: arg.map(Box::new),
-        location: location as ParseLoc,
+        parse_loc: offset as ParseLoc,
         ..DefElem::default()
     })
 }

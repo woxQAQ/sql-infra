@@ -11,14 +11,14 @@ fn plpgsql_assignment_mode_builds_complete_raw_statement() {
     )
     .expect("parse PL/pgSQL assignment");
 
-    assert_eq!(raw.stmt_location, 0);
+    assert_eq!(raw.stmt_parse_loc, 0);
     assert_eq!(raw.stmt_len, 0);
     let Some(Node::PlAssignStmt(stmt)) = raw.stmt.as_deref() else {
         panic!("expected PlAssignStmt");
     };
     assert_eq!(stmt.name.as_deref(), Some("record"));
     assert_eq!(stmt.nnames, 2);
-    assert_eq!(stmt.location, 0);
+    assert_eq!(stmt.parse_loc, 0);
     assert_eq!(stmt.indirection.len(), 3);
     let select = stmt.val.as_deref().expect("assignment value SelectStmt");
     assert_eq!(select.distinct_clause.len(), 1);

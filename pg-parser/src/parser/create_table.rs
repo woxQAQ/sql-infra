@@ -202,14 +202,14 @@ impl Parser {
             }
             TokenKind::Of => {
                 self.advance();
-                let type_location = self.location();
+                let type_offset = self.offset();
                 let names = self.consume_name_parts();
                 if names.is_empty() {
                     return Err(self.error_here("CREATE TABLE OF requires a type name"));
                 }
                 of_typename = Some(Box::new(TypeName {
                     names: names.into_iter().map(make_string_node).collect(),
-                    location: type_location as ParseLoc,
+                    parse_loc: type_offset as ParseLoc,
                     ..TypeName::default()
                 }));
                 if self.consume(TokenKind::Char('(')) {
@@ -416,7 +416,7 @@ impl Parser {
         let mut tokens = self.tokens[self.pos..completion].to_vec();
         tokens.push(Token::synthetic(
             TokenKind::Eof,
-            self.tokens[completion].location(),
+            self.tokens[completion].offset(),
         ));
         let mut probe = Parser {
             tokens,

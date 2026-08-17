@@ -16,20 +16,20 @@ pub(crate) fn make_string_node(value: impl Into<std::string::String>) -> Node {
     Node::String(String::new(value))
 }
 
-pub(crate) fn make_def_elem(name: &str, arg: Option<Node>, location: usize) -> Node {
+pub(crate) fn make_def_elem(name: &str, arg: Option<Node>, offset: usize) -> Node {
     Node::DefElem(DefElem {
         defname: Some(name.to_owned()),
         arg: arg.map(Box::new),
-        location: location as ParseLoc,
+        parse_loc: offset as ParseLoc,
         ..DefElem::default()
     })
 }
 
-pub(crate) fn range_var_from_parts(parts: Vec<std::string::String>, location: usize) -> RangeVar {
+pub(crate) fn range_var_from_parts(parts: Vec<std::string::String>, offset: usize) -> RangeVar {
     let mut range = RangeVar {
         inh: true,
         relpersistence: b'p',
-        location: location as ParseLoc,
+        parse_loc: offset as ParseLoc,
         ..RangeVar::default()
     };
     match parts.as_slice() {

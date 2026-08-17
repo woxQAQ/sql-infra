@@ -1,7 +1,7 @@
 //! Window specifications, frame clauses, and row-locking clauses.
 //!
 //! Ordering, partitioning, frame bounds/exclusions, lock strength, targets, and
-//! wait policy are parsed with their query-level source locations.
+//! wait policy are parsed with their query-level `ParseLoc` values.
 
 use super::*;
 
@@ -14,8 +14,8 @@ impl Parser {
                     .ok_or_else(|| self.error_here("WINDOW requires a name"))?,
             );
             self.expect(TokenKind::As)?;
-            let location = self.expect(TokenKind::Char('('))?.location();
-            let mut window = self.parse_window_specification_body(location)?;
+            let offset = self.expect(TokenKind::Char('('))?.offset();
+            let mut window = self.parse_window_specification_body(offset)?;
             window.name = name;
             windows.push(Node::WindowDef(window));
             if !self.consume(TokenKind::Char(',')) {
@@ -31,10 +31,7 @@ impl Parser {
         Ok(windows)
     }
 
-    pub(super) fn parse_window_specification_body(
-        &mut self,
-        location: usize,
-    ) -> PResult<WindowDef> {
+    pub(super) fn parse_window_specification_body(&mut self, offset: usize) -> PResult<WindowDef> {
         self.record_completion_tokens(&[
             TokenKind::Partition,
             TokenKind::Order,
@@ -47,7 +44,7 @@ impl Parser {
         self.record_completion_phrase(&[TokenKind::Order, TokenKind::By]);
         self.record_completion_slot(GrammarSlot::AnyName);
         let mut window = WindowDef {
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             frame_options: FRAMEOPTION_DEFAULTS,
             ..WindowDef::default()
         };

@@ -65,7 +65,7 @@ fn grant_stmt_populates_privileges_target_grantees_option_and_grantor() {
 }
 
 #[test]
-fn grant_role_spec_locations_follow_each_role_token() {
+fn grant_role_spec_parse_locs_follow_each_role_token() {
     let sql = "grant select on table t to alice, current_role, current_user, session_user, public";
     let Node::GrantStmt(stmt) = parse_statement(sql) else {
         panic!("expected GrantStmt");
@@ -83,7 +83,7 @@ fn grant_role_spec_locations_follow_each_role_token() {
             panic!("expected RoleSpec");
         };
         assert_eq!(role.roletype, role_type);
-        assert_eq!(role.location as usize, sql.find(token).unwrap());
+        assert_eq!(role.parse_loc as usize, sql.find(token).unwrap());
     }
 }
 

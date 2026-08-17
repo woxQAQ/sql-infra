@@ -38,7 +38,7 @@ use pg_parser::XmlExprOp;
 use super::common::{parse_error, parse_statement};
 
 #[test]
-fn raw_select_statement_locations_follow_postgresql_semicolon_rules() {
+fn raw_select_statement_parse_locs_follow_postgresql_semicolon_rules() {
     let sql = "  select 1; \n select 2";
     let statements = pg_parser::parse(sql).expect("parse statements");
     assert_eq!(statements.len(), 2);
@@ -46,54 +46,81 @@ fn raw_select_statement_locations_follow_postgresql_semicolon_rules() {
     assert!(matches!(first.stmt.as_deref(), Some(Node::SelectStmt(_))));
     let first_start = sql.find("select 1").unwrap();
     let second_start = sql.find("select 2").unwrap();
-    assert_eq!(first.stmt_location as usize, first_start);
+    assert_eq!(first.stmt_parse_loc as usize, first_start);
     assert_eq!(
         first.stmt_len as usize,
         sql.find(';').unwrap() - first_start
     );
-    assert_eq!(statements[1].stmt_location as usize, second_start);
+    assert_eq!(statements[1].stmt_parse_loc as usize, second_start);
     assert_eq!(statements[1].stmt_len, 0);
 
     let terminated = pg_parser::parse("select 1;").expect("parse terminated statement");
-    assert_eq!(terminated[0].stmt_location, 0);
+    assert_eq!(terminated[0].stmt_parse_loc, 0);
     assert_eq!(terminated[0].stmt_len, 8);
 }
 
 #[test]
-fn tooling_statement_ranges_are_complete_with_or_without_semicolons() {
+fn tooling_statement_locs_are_complete_with_or_without_semicolons() {
     let sql = "  select 1; \n select 中文  ";
-    let statements = pg_parser::parse_with_ranges(sql).expect("parse statements with ranges");
+    let statements = pg_parser::parse_with_locs(sql).expect("parse statements with locs");
     assert_eq!(statements.len(), 2);
 
     let first_start = sql.find("select 1").unwrap();
     let semicolon = sql.find(';').unwrap();
-    assert_eq!(usize::from(statements[0].range.syntax.start()), first_start);
-    assert_eq!(usize::from(statements[0].range.syntax.end()), semicolon);
+    assert_eq!(usize::from(statements[0].loc.syntax.start()), first_start);
+    assert_eq!(usize::from(statements[0].loc.syntax.end()), semicolon);
     assert_eq!(
-        statements[0].range.terminator,
-        Some(pg_parser::TextRange::new(
+        statements[0].loc.terminator,
+        Some(pg_parser::Loc::new(
             pg_parser::TextSize::try_from(semicolon).unwrap(),
             pg_parser::TextSize::try_from(semicolon + 1).unwrap(),
         ))
     );
 
     let second_start = sql.find("select 中文").unwrap();
-    assert_eq!(
-        usize::from(statements[1].range.syntax.start()),
-        second_start
-    );
-    assert_eq!(usize::from(statements[1].range.syntax.end()), sql.len());
-    assert_eq!(statements[1].range.terminator, None);
+    assert_eq!(usize::from(statements[1].loc.syntax.start()), second_start);
+    assert_eq!(usize::from(statements[1].loc.syntax.end()), sql.len());
+    assert_eq!(statements[1].loc.terminator, None);
     assert_eq!(statements[1].raw.stmt_len, 0);
 }
 
 #[test]
-fn parser_errors_use_the_unexpected_token_range() {
+fn parsed_document_resolves_locs_to_positions() {
+    let sql = "select 1;\n  select 中文";
+    let document = pg_parser::parse_document(sql).expect("parse indexed document");
+    let second = &document.statements()[1];
+
+    assert_eq!(
+        document.position(second.loc.syntax.start()).unwrap(),
+        pg_parser::Position { line: 1, column: 2 }
+    );
+    assert_eq!(document.slice(second.loc.syntax).unwrap(), "select 中文");
+    assert_eq!(
+        document
+            .offset(pg_parser::Position {
+                line: 1,
+                column: 11,
+            })
+            .unwrap(),
+        second.loc.syntax.end()
+    );
+}
+
+#[test]
+fn parser_errors_use_the_unexpected_token_loc() {
     let sql = "select 1 trailing extra";
     let error = pg_parser::parse(sql).unwrap_err();
     let start = sql.find("trailing").unwrap();
-    assert_eq!(usize::from(error.range.start()), start);
-    assert_eq!(usize::from(error.range.end()), start + "trailing".len());
+    assert_eq!(usize::from(error.loc.start()), start);
+    assert_eq!(usize::from(error.loc.end()), start + "trailing".len());
+    let source = pg_parser::SourceText::new(sql).unwrap();
+    assert_eq!(
+        error.position(&source).unwrap(),
+        pg_parser::Position {
+            line: 0,
+            column: start as u32,
+        }
+    );
 }
 
 fn set_shape(stmt: &pg_parser::SelectStmt) -> String {
@@ -303,7 +330,7 @@ fn select_without_targets_is_allowed_only_by_the_plain_select_production() {
 }
 
 #[test]
-fn select_core_reference_and_target_locations_follow_the_expression_start() {
+fn select_core_reference_and_target_parse_locs_follow_the_expression_start() {
     let sql = "select app.f(t.value) as result, t.other label, * from t";
     let Node::SelectStmt(stmt) = parse_statement(sql) else {
         panic!("expected SelectStmt");
@@ -317,35 +344,35 @@ fn select_core_reference_and_target_locations_follow_the_expression_start() {
         panic!("expected three ResTarget nodes");
     };
     assert_eq!(
-        function_target.location as usize,
+        function_target.parse_loc as usize,
         sql.find("app.f").unwrap()
     );
     let Some(Node::FuncCall(function)) = function_target.val.as_deref() else {
         panic!("expected FuncCall");
     };
-    assert_eq!(function.location as usize, sql.find("app.f").unwrap());
+    assert_eq!(function.parse_loc as usize, sql.find("app.f").unwrap());
     let [Node::ColumnRef(argument)] = function.args.as_slice() else {
         panic!("expected ColumnRef argument");
     };
-    assert_eq!(argument.location as usize, sql.find("t.value").unwrap());
+    assert_eq!(argument.parse_loc as usize, sql.find("t.value").unwrap());
 
     assert_eq!(
-        column_target.location as usize,
+        column_target.parse_loc as usize,
         sql.find("t.other").unwrap()
     );
     let Some(Node::ColumnRef(column)) = column_target.val.as_deref() else {
         panic!("expected ColumnRef target");
     };
-    assert_eq!(column.location as usize, sql.find("t.other").unwrap());
-    assert_eq!(star_target.location as usize, sql.find('*').unwrap());
+    assert_eq!(column.parse_loc as usize, sql.find("t.other").unwrap());
+    assert_eq!(star_target.parse_loc as usize, sql.find('*').unwrap());
     let Some(Node::ColumnRef(star)) = star_target.val.as_deref() else {
         panic!("expected star ColumnRef");
     };
-    assert_eq!(star.location as usize, sql.find('*').unwrap());
+    assert_eq!(star.parse_loc as usize, sql.find('*').unwrap());
 }
 
 #[test]
-fn select_cast_collation_and_operator_locations_follow_grammar_tokens() {
+fn select_cast_collation_and_operator_parse_locs_follow_grammar_tokens() {
     let sql = "select value::setof app.kind collate app.c, cast(value as numeric(4, 2)), a + b";
     let Node::SelectStmt(stmt) = parse_statement(sql) else {
         panic!("expected SelectStmt");
@@ -360,31 +387,31 @@ fn select_cast_collation_and_operator_locations_follow_grammar_tokens() {
     let Node::CollateClause(collation) = target_value(0) else {
         panic!("expected CollateClause");
     };
-    assert_eq!(collation.location as usize, sql.find("collate").unwrap());
+    assert_eq!(collation.parse_loc as usize, sql.find("collate").unwrap());
     let Some(Node::TypeCast(postfix)) = collation.arg.as_deref() else {
         panic!("expected postfix TypeCast");
     };
-    assert_eq!(postfix.location as usize, sql.find("::").unwrap());
+    assert_eq!(postfix.parse_loc as usize, sql.find("::").unwrap());
     let postfix_type = postfix.type_name.as_deref().expect("postfix TypeName");
     assert!(postfix_type.setof);
     assert_eq!(
-        postfix_type.location as usize,
+        postfix_type.parse_loc as usize,
         sql.find("app.kind").unwrap()
     );
 
     let Node::TypeCast(cast) = target_value(1) else {
         panic!("expected CAST TypeCast");
     };
-    assert_eq!(cast.location as usize, sql.find("cast").unwrap());
+    assert_eq!(cast.parse_loc as usize, sql.find("cast").unwrap());
     assert_eq!(
-        cast.type_name.as_deref().expect("CAST TypeName").location as usize,
+        cast.type_name.as_deref().expect("CAST TypeName").parse_loc as usize,
         sql.find("numeric").unwrap()
     );
 
     let Node::AExpr(operator) = target_value(2) else {
         panic!("expected operator AExpr");
     };
-    assert_eq!(operator.location as usize, sql.rfind('+').unwrap());
+    assert_eq!(operator.parse_loc as usize, sql.rfind('+').unwrap());
 }
 
 #[test]
@@ -404,18 +431,18 @@ fn select_order_by_preserves_using_operator_direction_and_nulls() {
         using.use_op.as_slice(),
         [Node::String(value)] if value.sval.as_deref() == Some("<")
     ));
-    assert_eq!(using.location as usize, sql.find("< nulls").unwrap());
+    assert_eq!(using.parse_loc as usize, sql.find("< nulls").unwrap());
     let Node::SortBy(desc) = &stmt.sort_clause[1] else {
         panic!("expected SortBy");
     };
     assert_eq!(desc.sortby_dir, pg_parser::SortByDir::Desc);
     assert_eq!(desc.sortby_nulls, pg_parser::SortByNulls::Last);
-    assert_eq!(desc.location, -1);
+    assert_eq!(desc.parse_loc, -1);
     let Node::SortBy(function) = &stmt.sort_clause[2] else {
         panic!("expected SortBy");
     };
     assert_eq!(function.sortby_dir, pg_parser::SortByDir::Asc);
-    assert_eq!(function.location, -1);
+    assert_eq!(function.parse_loc, -1);
     assert!(matches!(function.node.as_deref(), Some(Node::FuncCall(_))));
 }
 
@@ -430,7 +457,7 @@ fn select_stmt_builds_grouping_sets_rollup_cube_and_group_by_all() {
         panic!("expected top-level GroupingSet");
     };
     assert_eq!(sets.kind, GroupingSetKind::Sets);
-    assert_eq!(sets.location as usize, sql.find("grouping sets").unwrap());
+    assert_eq!(sets.parse_loc as usize, sql.find("grouping sets").unwrap());
     assert_eq!(sets.content.len(), 4);
     assert!(matches!(
         sets.content[0],
@@ -441,19 +468,19 @@ fn select_stmt_builds_grouping_sets_rollup_cube_and_group_by_all() {
     };
     assert_eq!(rollup.kind, GroupingSetKind::Rollup);
     assert_eq!(rollup.content.len(), 2);
-    assert_eq!(rollup.location as usize, sql.find("rollup").unwrap());
+    assert_eq!(rollup.parse_loc as usize, sql.find("rollup").unwrap());
     let Node::GroupingSet(cube) = &sets.content[2] else {
         panic!("expected CUBE GroupingSet");
     };
     assert_eq!(cube.kind, GroupingSetKind::Cube);
     assert_eq!(cube.content.len(), 2);
-    assert_eq!(cube.location as usize, sql.find("cube").unwrap());
+    assert_eq!(cube.parse_loc as usize, sql.find("cube").unwrap());
     let Node::GroupingSet(empty) = &sets.content[3] else {
         panic!("expected empty GroupingSet");
     };
     assert_eq!(empty.kind, GroupingSetKind::Empty);
     assert!(empty.content.is_empty());
-    assert_eq!(empty.location as usize, sql.rfind("()").unwrap());
+    assert_eq!(empty.parse_loc as usize, sql.rfind("()").unwrap());
 
     let Node::SelectStmt(stmt) = parse_statement("select a, count(*) from t group by all a") else {
         panic!("expected SelectStmt");
@@ -536,12 +563,12 @@ fn select_stmt_parses_cte_aliases_and_materialization() {
     };
     let with: Box<WithClause> = stmt.with_clause.expect("WITH clause");
     assert!(with.recursive);
-    assert_eq!(with.location, sql.find("with").unwrap() as i32);
+    assert_eq!(with.parse_loc, sql.find("with").unwrap() as i32);
     let Node::CommonTableExpr(cte) = &with.ctes[0] else {
         panic!("expected CommonTableExpr");
     };
     assert_eq!(cte.ctename.as_deref(), Some("source"));
-    assert_eq!(cte.location, sql.find("source").unwrap() as i32);
+    assert_eq!(cte.parse_loc, sql.find("source").unwrap() as i32);
     assert_eq!(cte.aliascolnames.len(), 2);
     assert_eq!(cte.ctematerialized, CteMaterialize::Never);
     assert!(cte.ctequery.is_some());
@@ -586,12 +613,12 @@ fn select_stmt_populates_cte_search_and_cycle_clauses() {
     };
     let search: &CteSearchClause = cte.search_clause.as_deref().expect("SEARCH clause");
     assert!(search.search_breadth_first);
-    assert_eq!(search.location, sql.find("search").unwrap() as i32);
+    assert_eq!(search.parse_loc, sql.find("search").unwrap() as i32);
     assert_eq!(search.search_col_list.len(), 1);
     assert_eq!(search.search_seq_column.as_deref(), Some("visit_order"));
 
     let cycle: &CteCycleClause = cte.cycle_clause.as_deref().expect("CYCLE clause");
-    assert_eq!(cycle.location, sql.find("cycle").unwrap() as i32);
+    assert_eq!(cycle.parse_loc, sql.find("cycle").unwrap() as i32);
     assert_eq!(cycle.cycle_col_list.len(), 1);
     assert_eq!(cycle.cycle_mark_column.as_deref(), Some("is_cycle"));
     assert!(matches!(
@@ -648,7 +675,7 @@ fn select_stmt_parses_values_and_table_forms() {
         target.val.as_deref(),
         Some(Node::ColumnRef(column))
             if matches!(column.fields.as_slice(), [Node::AStar])
-                && column.location == -1
+                && column.parse_loc == -1
     ));
 
     let Node::SelectStmt(only) = parse_statement("table only (public.items)") else {
@@ -759,8 +786,8 @@ fn select_stmt_builds_named_args_grouping_and_sql_value_functions() {
     let [Node::NamedArgExpr(first), Node::NamedArgExpr(second)] = function.args.as_slice() else {
         panic!("expected NamedArgExpr arguments");
     };
-    assert_eq!(first.location as usize, sql.find("first").unwrap());
-    assert_eq!(second.location as usize, sql.find("second").unwrap());
+    assert_eq!(first.parse_loc as usize, sql.find("first").unwrap());
+    assert_eq!(second.parse_loc as usize, sql.find("second").unwrap());
 
     let Node::ResTarget(grouping_target) = &stmt.target_list[1] else {
         panic!("expected ResTarget");
@@ -794,7 +821,7 @@ fn select_stmt_builds_range_table_sample() {
     assert_eq!(sample.method.len(), 1);
     assert_eq!(sample.args.len(), 1);
     assert!(sample.repeatable.is_some());
-    assert_eq!(sample.location as usize, sql.find("system").unwrap());
+    assert_eq!(sample.parse_loc as usize, sql.find("system").unwrap());
 }
 
 #[test]
@@ -957,7 +984,7 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
         panic!("expected XML attribute ResTarget");
     };
     assert_eq!(
-        attribute.location as usize,
+        attribute.parse_loc as usize,
         sql.find("id as item_id").unwrap()
     );
     assert!(element.arg_names.is_empty());
@@ -975,9 +1002,9 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
     let [Node::ResTarget(id), Node::ResTarget(name)] = forest.named_args.as_slice() else {
         panic!("expected XMLFOREST ResTarget nodes");
     };
-    assert_eq!(id.location as usize, sql.rfind("id as item_id").unwrap());
+    assert_eq!(id.parse_loc as usize, sql.rfind("id as item_id").unwrap());
     assert_eq!(
-        name.location as usize,
+        name.parse_loc as usize,
         sql.find("name), xmlserialize").unwrap()
     );
     assert!(forest.arg_names.is_empty());
@@ -992,7 +1019,7 @@ fn select_stmt_builds_xml_expression_and_serialize_nodes() {
     assert!(matches!(serialize.expr.as_deref(), Some(Node::XmlExpr(_))));
     assert!(serialize.type_name.is_some());
     assert_eq!(
-        serialize.location as usize,
+        serialize.parse_loc as usize,
         sql.find("xmlserialize").unwrap()
     );
 
@@ -1032,7 +1059,7 @@ fn select_xmlroot_always_preserves_the_raw_standalone_argument() {
             let Node::AConst(value) = &expression.args[2] else {
                 panic!("expected standalone AConst");
             };
-            assert_eq!(value.location, -1);
+            assert_eq!(value.parse_loc, -1);
             let ValUnion::Integer(value) = &value.val else {
                 panic!("expected standalone integer");
             };
@@ -1054,7 +1081,7 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
     assert!(table.rowexpr.is_some());
     assert!(table.docexpr.is_some());
     assert!(!table.lateral);
-    assert_eq!(table.location, sql.find("xmltable").unwrap() as i32);
+    assert_eq!(table.parse_loc, sql.find("xmltable").unwrap() as i32);
     assert_eq!(table.namespaces.len(), 1);
     assert_eq!(table.columns.len(), 3);
     assert_eq!(
@@ -1071,7 +1098,7 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
     assert!(ordinality.for_ordinality);
     assert_eq!(ordinality.colname.as_deref(), Some("ord"));
     assert_eq!(
-        ordinality.location,
+        ordinality.parse_loc,
         sql.find("ord for ordinality").unwrap() as i32
     );
 
@@ -1081,14 +1108,14 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
     assert!(id.type_name.is_some());
     assert!(id.colexpr.is_some());
     assert!(id.is_not_null);
-    assert_eq!(id.location as usize, sql.find("id int path").unwrap());
+    assert_eq!(id.parse_loc as usize, sql.find("id int path").unwrap());
 
     let Node::RangeTableFuncCol(name) = &table.columns[2] else {
         panic!("expected RangeTableFuncCol");
     };
     assert!(name.coldefexpr.is_some());
     assert!(name.colexpr.is_some());
-    assert_eq!(name.location as usize, sql.find("name text").unwrap());
+    assert_eq!(name.parse_loc as usize, sql.find("name text").unwrap());
 
     for passing in [
         "passing doc",
@@ -1126,9 +1153,9 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
     let [Node::ResTarget(named), Node::ResTarget(default)] = table.namespaces.as_slice() else {
         panic!("expected namespace ResTarget nodes");
     };
-    assert_eq!(named.location as usize, sql.find("1 is distinct").unwrap());
+    assert_eq!(named.parse_loc as usize, sql.find("1 is distinct").unwrap());
     assert_eq!(
-        default.location as usize,
+        default.parse_loc as usize,
         sql.find("default (true").unwrap()
     );
     assert!(matches!(
@@ -1158,7 +1185,7 @@ fn select_stmt_builds_xmltable_range_and_column_nodes() {
         panic!("expected lateral RangeTableFunc");
     };
     assert!(table.lateral);
-    assert_eq!(table.location, sql.find("xmltable").unwrap() as i32);
+    assert_eq!(table.parse_loc, sql.find("xmltable").unwrap() as i32);
 }
 
 #[test]
@@ -1172,7 +1199,7 @@ fn select_stmt_builds_graph_table_pattern_and_elements() {
     };
     assert!(table.graph_name.is_some());
     assert_eq!(table.columns.len(), 2);
-    assert_eq!(table.location as usize, sql.find("graph_table").unwrap());
+    assert_eq!(table.parse_loc as usize, sql.find("graph_table").unwrap());
     assert_eq!(
         table
             .alias
@@ -1195,11 +1222,11 @@ fn select_stmt_builds_graph_table_pattern_and_elements() {
     let Node::GraphElementPattern(vertex) = &path.elements[0] else {
         panic!("expected vertex GraphElementPattern");
     };
-    assert_eq!(vertex.location as usize, sql.find("(person").unwrap());
+    assert_eq!(vertex.parse_loc as usize, sql.find("(person").unwrap());
     let Node::GraphElementPattern(edge) = &path.elements[1] else {
         panic!("expected edge GraphElementPattern");
     };
-    assert_eq!(edge.location as usize, sql.find("-[edge").unwrap());
+    assert_eq!(edge.parse_loc as usize, sql.find("-[edge").unwrap());
 
     let Node::SelectStmt(nested_stmt) = parse_statement(
         "select * from graph_table(social match ((person is person_label | employee)-[edge]->(friend)){1,2} columns (person.id as person_id))",
@@ -1269,7 +1296,7 @@ fn select_stmt_builds_graph_table_pattern_and_elements() {
                 if actual_lower.ival == lower && actual_upper.ival == upper
         ));
         assert_eq!(
-            edge.location as usize,
+            edge.parse_loc as usize,
             abbreviated_sql.find(needle).unwrap()
         );
     }
@@ -1371,7 +1398,7 @@ fn select_stmt_builds_sql_json_constructor_and_aggregate_nodes() {
     assert!(matches!(
         query_array.format.as_deref(),
         Some(format)
-            if format.format_type == JsonFormatType::Default && format.location == -1
+            if format.format_type == JsonFormatType::Default && format.parse_loc == -1
     ));
 
     let Node::ResTarget(object_agg_target) = &stmt.target_list[6] else {
@@ -1430,7 +1457,7 @@ fn select_legacy_json_object_builds_a_system_function_call() {
 }
 
 #[test]
-fn select_json_value_expr_default_format_uses_synthetic_location() {
+fn select_json_value_expr_default_format_uses_synthetic_parse_loc() {
     let Node::SelectStmt(stmt) = parse_statement("select json_array(value returning jsonb)") else {
         panic!("expected SelectStmt");
     };
@@ -1442,13 +1469,13 @@ fn select_json_value_expr_default_format_uses_synthetic_location() {
                     if matches!(value.format.as_deref(), Some(format)
                         if format.format_type == JsonFormatType::Default
                             && format.encoding == JsonEncoding::Default
-                            && format.location == -1))
+                            && format.parse_loc == -1))
                     && matches!(constructor.output.as_deref(), Some(output)
                         if matches!(output.returning.as_deref(), Some(returning)
                             if matches!(returning.format.as_deref(), Some(format)
                                 if format.format_type == JsonFormatType::Default
                                     && format.encoding == JsonEncoding::Default
-                                    && format.location == -1))))
+                                    && format.parse_loc == -1))))
     ));
 }
 
@@ -1466,7 +1493,7 @@ fn select_json_array_query_preserves_format_and_returning_clauses() {
                     && constructor.absent_on_null
                     && matches!(constructor.format.as_deref(), Some(format)
                         if format.format_type == JsonFormatType::Json
-                            && format.location as usize == sql.find("format json").unwrap())
+                            && format.parse_loc as usize == sql.find("format json").unwrap())
                     && matches!(constructor.output.as_deref(), Some(output)
                         if output.type_name.is_some()
                             && matches!(output.returning.as_deref(), Some(returning)
@@ -1491,7 +1518,7 @@ fn select_stmt_builds_sql_json_function_arguments_and_behaviors() {
     assert_eq!(query.op, JsonExprOp::QueryOp);
     assert!(query.context_item.is_some());
     assert!(matches!(query.pathspec.as_deref(), Some(Node::AConst(_))));
-    assert_eq!(query.location, 7);
+    assert_eq!(query.parse_loc, 7);
     assert_eq!(query.passing.len(), 1);
     assert!(matches!(
         query.passing[0],
@@ -1501,7 +1528,10 @@ fn select_stmt_builds_sql_json_function_arguments_and_behaviors() {
     assert_eq!(query.quotes, JsonQuotes::Keep);
     let on_empty: &JsonBehavior = query.on_empty.as_deref().expect("ON EMPTY behavior");
     assert_eq!(on_empty.btype, JsonBehaviorType::Null);
-    assert_eq!(on_empty.location, sql.find("null on empty").unwrap() as i32);
+    assert_eq!(
+        on_empty.parse_loc,
+        sql.find("null on empty").unwrap() as i32
+    );
     assert_eq!(
         query.on_empty.as_ref().map(|behavior| behavior.btype),
         Some(JsonBehaviorType::Null)
@@ -1566,7 +1596,7 @@ fn select_stmt_builds_json_table_and_all_column_kinds() {
             .and_then(|path| path.name.as_deref()),
         Some("root")
     );
-    assert_eq!(pathspec.name_location as usize, sql.find("root").unwrap());
+    assert_eq!(pathspec.name_parse_loc as usize, sql.find("root").unwrap());
     assert_eq!(
         table
             .alias
@@ -1682,7 +1712,7 @@ fn select_stmt_populates_window_frame_bounds_and_exclusion() {
     assert_ne!(window.frame_options & FRAMEOPTION_EXCLUDE_TIES, 0);
     assert!(window.start_offset.is_some());
     assert!(window.end_offset.is_none());
-    assert_eq!(window.location as usize, sql.find("(partition").unwrap());
+    assert_eq!(window.parse_loc as usize, sql.find("(partition").unwrap());
 
     let Node::SelectStmt(quoted) =
         parse_statement("select count(*) over \"select\" window \"select\" as ()")
@@ -1702,7 +1732,7 @@ fn select_stmt_populates_window_frame_bounds_and_exclusion() {
     };
     let over = call.over.as_deref().expect("OVER WindowDef");
     assert_eq!(
-        over.location as usize,
+        over.parse_loc as usize,
         "select count(*) over \"select\" window \"select\" as ()"
             .find("\"select\"")
             .unwrap()
@@ -1758,7 +1788,7 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
     ));
     assert!(matches!(
         values[1],
-        Node::ParamRef(param) if param.number == 1 && param.location == 10
+        Node::ParamRef(param) if param.number == 1 && param.parse_loc == 10
     ));
     assert!(matches!(values[2], Node::CoalesceExpr(expr) if expr.args.len() == 2));
     assert!(matches!(
@@ -1766,7 +1796,7 @@ fn select_exposes_core_raw_expression_and_range_node_shapes() {
         Node::MinMaxExpr(expr)
             if expr.op == MinMaxOp::Greatest
                 && expr.args.len() == 2
-                && expr.location == sql.find("greatest").unwrap() as i32
+                && expr.parse_loc == sql.find("greatest").unwrap() as i32
     ));
     assert!(matches!(values[4], Node::RowExpr(expr) if expr.args.len() == 2));
     assert!(matches!(
@@ -2075,7 +2105,7 @@ fn select_builds_xml_document_and_json_is_predicates() {
         Node::JsonIsPredicate(predicate)
             if predicate.item_type == JsonValueType::Any
                 && predicate.format.is_some()
-                && predicate.location as usize == sql.find("doc is json").expect("JSON predicate")
+                && predicate.parse_loc as usize == sql.find("doc is json").expect("JSON predicate")
     ));
     assert!(matches!(
         values[3],
@@ -2090,10 +2120,10 @@ fn select_builds_xml_document_and_json_is_predicates() {
         values[5],
         Node::BoolExpr(expr)
             if expr.boolop == pg_parser::BoolExprType::NotExpr
-                && expr.location as usize == sql.find("doc is not json").expect("negated JSON predicate")
+                && expr.parse_loc as usize == sql.find("doc is not json").expect("negated JSON predicate")
                 && matches!(expr.args.first(), Some(Node::JsonIsPredicate(predicate))
                     if predicate.item_type == JsonValueType::Scalar
-                        && predicate.location == expr.location)
+                        && predicate.parse_loc == expr.parse_loc)
     ));
 }
 
@@ -2131,8 +2161,8 @@ fn select_in_subqueries_build_sublinks_and_scalar_lists_build_aexpr() {
         Node::AExpr(expr)
             if expr.kind == pg_parser::AExprKind::In
                 && matches!(expr.name.as_slice(), [Node::String(value)] if value.sval.as_deref() == Some("="))
-                && expr.rexpr_list_start >= 0
-                && expr.rexpr_list_end >= expr.rexpr_list_start
+                && expr.rexpr_list_start_parse_loc >= 0
+                && expr.rexpr_list_end_parse_loc >= expr.rexpr_list_start_parse_loc
     ));
     assert!(matches!(
         values[3],
@@ -2235,7 +2265,7 @@ fn select_builds_at_time_zone_and_explicit_operator_precedence() {
         Node::FuncCall(call)
             if call.funcformat == pg_parser::CoercionForm::SqlSyntax
                 && call.args.len() == 1
-                && call.location == -1
+                && call.parse_loc == -1
     ));
     assert!(matches!(
         values[2],
@@ -2683,7 +2713,7 @@ fn select_split_generic_prefix_operators_and_nested_subqueries_match_postgresql(
     assert!(
         matches!(values[1], Node::SubLink(link) if link.sub_link_type == pg_parser::SubLinkType::AnySublink)
     );
-    assert!(matches!(values[2], Node::SubLink(link) if link.location == 48));
+    assert!(matches!(values[2], Node::SubLink(link) if link.parse_loc == 48));
 }
 
 #[test]
@@ -2864,7 +2894,7 @@ fn select_function_calls_populate_aggregate_filter_nulls_and_window_fields() {
 }
 
 #[test]
-fn select_function_order_by_using_preserves_qualified_operators_and_locations() {
+fn select_function_order_by_using_preserves_qualified_operators_and_parse_locs() {
     let sql = "select array_agg(value order by key using operator(pg_catalog.<) nulls first), percentile_cont(0.5) within group (order by score using ->)";
     let Node::SelectStmt(stmt) = parse_statement(sql) else {
         panic!("expected SelectStmt");
@@ -2884,7 +2914,7 @@ fn select_function_order_by_using_preserves_qualified_operators_and_locations() 
         panic!("expected qualified SortBy");
     };
     assert_eq!(qualified.sortby_dir, pg_parser::SortByDir::Using);
-    assert_eq!(qualified.location as usize, sql.find("operator").unwrap());
+    assert_eq!(qualified.parse_loc as usize, sql.find("operator").unwrap());
     assert!(matches!(
         qualified.use_op.as_slice(),
         [Node::String(schema), Node::String(operator)]
@@ -2896,7 +2926,7 @@ fn select_function_order_by_using_preserves_qualified_operators_and_locations() 
         panic!("expected arrow SortBy");
     };
     assert_eq!(arrow.sortby_dir, pg_parser::SortByDir::Using);
-    assert_eq!(arrow.location as usize, sql.rfind("->").unwrap());
+    assert_eq!(arrow.parse_loc as usize, sql.rfind("->").unwrap());
     assert!(matches!(
         arrow.use_op.as_slice(),
         [Node::String(operator)] if operator.sval.as_deref() == Some("->")
@@ -2964,12 +2994,12 @@ fn select_json_arrayagg_preserves_complete_sort_by_nodes() {
     };
     assert_eq!(descending.sortby_dir, pg_parser::SortByDir::Desc);
     assert_eq!(descending.sortby_nulls, pg_parser::SortByNulls::Last);
-    assert_eq!(descending.location, -1);
+    assert_eq!(descending.parse_loc, -1);
     let Node::SortBy(using) = &constructor.agg_order[1] else {
         panic!("expected SortBy");
     };
     assert_eq!(using.sortby_dir, pg_parser::SortByDir::Using);
-    assert_eq!(using.location as usize, sql.find("operator").unwrap());
+    assert_eq!(using.parse_loc as usize, sql.find("operator").unwrap());
     assert!(matches!(
         using.use_op.as_slice(),
         [Node::String(schema), Node::String(operator)]
@@ -3037,7 +3067,7 @@ fn select_overlaps_builds_sql_syntax_function_call() {
 }
 
 #[test]
-fn select_array_expressions_preserve_nested_shape_and_list_locations() {
+fn select_array_expressions_preserve_nested_shape_and_list_parse_locs() {
     let Node::SelectStmt(stmt) =
         parse_statement("select array[], array[1, 2], array[[1, 2], [3, 4]]")
     else {
@@ -3056,8 +3086,8 @@ fn select_array_expressions_preserve_nested_shape_and_list_locations() {
         .collect::<Vec<_>>();
     assert!(arrays[0].elements.is_empty());
     assert_eq!(arrays[1].elements.len(), 2);
-    assert!(arrays[1].list_start >= arrays[1].location);
-    assert!(arrays[1].list_end >= arrays[1].list_start);
+    assert!(arrays[1].list_start_parse_loc >= arrays[1].parse_loc);
+    assert!(arrays[1].list_end_parse_loc >= arrays[1].list_start_parse_loc);
     assert_eq!(arrays[2].elements.len(), 2);
     assert!(
         arrays[2]

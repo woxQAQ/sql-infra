@@ -479,15 +479,15 @@ impl Parser {
                     return Ok(cmd);
                 }
                 self.consume(TokenKind::Column);
-                let column_location = self.location();
+                let column_offset = self.offset();
                 if self.at(TokenKind::IConst) {
                     let token = self.advance().clone();
                     let Some(TokenValue::Integer(value)) = token.value else {
-                        return Err(ParseError::ranged(token.range, "expected a column number"));
+                        return Err(ParseError::at_loc(token.loc, "expected a column number"));
                     };
                     if value <= 0 || value > i32::from(i16::MAX) {
-                        return Err(ParseError::ranged(
-                            token.range,
+                        return Err(ParseError::at_loc(
+                            token.loc,
                             "column number must be in range from 1 to 32767",
                         ));
                     }
@@ -524,14 +524,14 @@ impl Parser {
                         .ok_or_else(|| self.error_here("ALTER COLUMN TYPE requires a type"))?;
                     let coll_clause = if self.consume(TokenKind::Collate) {
                         self.record_completion_slot(GrammarSlot::Collation);
-                        let location = self.previous_location();
+                        let offset = self.previous_offset();
                         let collname = self.parse_name_list();
                         if collname.is_empty() {
                             return Err(self.error_here("COLLATE requires a collation name"));
                         }
                         Some(Box::new(CollateClause {
                             collname,
-                            location: location as ParseLoc,
+                            parse_loc: offset as ParseLoc,
                             ..CollateClause::default()
                         }))
                     } else {
@@ -545,7 +545,7 @@ impl Parser {
                         type_name: Some(Box::new(type_name)),
                         coll_clause,
                         raw_default,
-                        location: column_location as ParseLoc,
+                        parse_loc: column_offset as ParseLoc,
                         ..ColumnDef::default()
                     })));
                 } else if saw_set {
@@ -679,7 +679,7 @@ impl Parser {
                                 elements: vec![make_def_elem(
                                     "generated",
                                     Some(node!(Integer::new(i32::from(generated_when)))),
-                                    self.previous_location(),
+                                    self.previous_offset(),
                                 )],
                                 ..AArrayExpr::default()
                             })));
@@ -725,7 +725,7 @@ impl Parser {
                                 ));
                             }
                             self.expect(TokenKind::Generated)?;
-                            let generated_location = self.previous_location();
+                            let generated_offset = self.previous_offset();
                             let generated_when = if self.consume(TokenKind::Always) {
                                 b'a'
                             } else if self.consume(TokenKind::By) {
@@ -748,7 +748,7 @@ impl Parser {
                                 contype: ConstrType::Identity,
                                 generated_when,
                                 options,
-                                location: generated_location as ParseLoc,
+                                parse_loc: generated_offset as ParseLoc,
                                 ..Constraint::default()
                             })));
                         }
@@ -948,7 +948,7 @@ impl Parser {
                 }
             }
             TokenKind::Of => {
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 self.record_completion_slot(GrammarSlot::Type);
                 let names = self.parse_name_list();
                 if names.is_empty() {
@@ -957,7 +957,7 @@ impl Parser {
                 cmd.subtype = AlterTableType::AddOf;
                 cmd.def = Some(Box::new(node!(TypeName {
                     names,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..TypeName::default()
                 })));
             }

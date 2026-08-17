@@ -74,7 +74,7 @@ impl Parser {
             && !self.at(TokenKind::Char(')'))
             && !self.at(TokenKind::Char(','))
         {
-            let location = self.location();
+            let offset = self.offset();
             self.record_completion_lookahead_tokens(&[
                 TokenKind::As,
                 TokenKind::Cache,
@@ -212,7 +212,7 @@ impl Parser {
                 }
                 _ => return Err(self.error_here("invalid sequence option")),
             };
-            options.push(make_def_elem(name, arg, location));
+            options.push(make_def_elem(name, arg, offset));
         }
         Ok(options)
     }
@@ -285,7 +285,7 @@ impl Parser {
             self.consume(TokenKind::Char('+'));
         }
         let token = self.advance().clone();
-        let location = token.location();
+        let offset = token.offset();
         match (token.kind, token.value) {
             (TokenKind::IConst, Some(TokenValue::Integer(value))) => {
                 Ok(node!(Integer::new(if negative { -value } else { value })))
@@ -297,10 +297,7 @@ impl Parser {
                     value
                 })))
             }
-            _ => Err(ParseError::syntax_exit(
-                location,
-                "expected a numeric value",
-            )),
+            _ => Err(ParseError::syntax_exit(offset, "expected a numeric value")),
         }
     }
 
@@ -311,7 +308,7 @@ impl Parser {
         }
         let token = self.expect(TokenKind::IConst)?;
         let Some(TokenValue::Integer(value)) = token.value else {
-            return Err(ParseError::ranged(token.range, "expected an integer"));
+            return Err(ParseError::at_loc(token.loc, "expected an integer"));
         };
         Ok(node!(Integer::new(if negative { -value } else { value })))
     }

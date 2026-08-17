@@ -3,7 +3,7 @@ use pg_completion::GrammarSlot;
 use pg_completion::IdentifierQuoting;
 use pg_completion::ObjectKind;
 use pg_completion::collect;
-use pg_parser::TextRange;
+use pg_parser::Loc;
 use pg_parser::TextSize;
 use pg_parser::TokenKind;
 
@@ -14,13 +14,13 @@ fn isolates_the_statement_and_extracts_the_prefix() {
     let context = collect(source, TextSize::from_usize(point));
 
     assert_eq!(
-        context.statement_range,
-        TextRange::new(TextSize::from_usize(16), TextSize::from_usize(source.len()))
+        context.statement_loc,
+        Loc::new(TextSize::from_usize(16), TextSize::from_usize(source.len()))
     );
     assert_eq!(context.point, TextSize::from_usize(point));
     assert_eq!(
-        context.replacement_range,
-        TextRange::new(TextSize::from_usize(point - 2), TextSize::from_usize(point))
+        context.replacement_loc,
+        Loc::new(TextSize::from_usize(point - 2), TextSize::from_usize(point))
     );
     assert_eq!(context.prefix.raw, "Na");
     assert_eq!(context.prefix.normalized, "na");
@@ -39,7 +39,7 @@ fn isolates_the_statement_and_extracts_the_prefix() {
 #[test]
 fn keeps_a_point_in_leading_statement_trivia() {
     let context = collect("   select 1", TextSize::ZERO);
-    assert_eq!(context.statement_range.start(), TextSize::ZERO);
+    assert_eq!(context.statement_loc.start(), TextSize::ZERO);
     assert_eq!(context.point, TextSize::ZERO);
 }
 
@@ -49,17 +49,17 @@ fn isolates_empty_and_lexically_contained_statement_boundaries() {
     let empty_terminator = source.find("; ;").unwrap() + 2;
     let context = collect(source, TextSize::from_usize(empty_terminator));
     assert_eq!(
-        context.statement_range,
-        TextRange::empty(TextSize::from_usize(empty_terminator))
+        context.statement_loc,
+        Loc::empty(TextSize::from_usize(empty_terminator))
     );
     assert!(context.expectations.tokens.contains(&TokenKind::Select));
 
     let source = "SELECT ';' /* ; */; SELECT 2";
     let point = source.find("/* ; */").unwrap() + 3;
     let context = collect(source, TextSize::from_usize(point));
-    assert_eq!(context.statement_range.start(), TextSize::ZERO);
+    assert_eq!(context.statement_loc.start(), TextSize::ZERO);
     assert_eq!(
-        context.statement_range.end(),
+        context.statement_loc.end(),
         TextSize::from_usize(source.find("; SELECT 2").unwrap())
     );
     assert!(context.expectations.tokens.is_empty());
@@ -360,6 +360,25 @@ fn exposes_membership_for_nested_object_candidates() {
 }
 
 #[test]
+fn grammar_membership_parse_locs_are_absolute() {
+    let source = "SELECT 1; ALTER TABLE app.accounts DROP COLUMN ";
+    let context = collect(source, TextSize::from_usize(source.len()));
+    let membership = context
+        .expectations
+        .membership
+        .expect("ALTER TABLE owner membership");
+    let indexed = pg_parser::SourceText::new(source).unwrap();
+    let names = membership
+        .owner
+        .name
+        .iter()
+        .map(|token| indexed.slice(token.loc).unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(names, ["app", "accounts"]);
+}
+
+#[test]
 fn finds_membership_on_either_side_of_the_completion_point() {
     let source = "COPY app.accounts () FROM STDIN";
     let point = source.find(')').unwrap();
@@ -558,8 +577,8 @@ fn replaces_the_whole_identifier_when_the_point_is_inside_it() {
     let context = collect(source, TextSize::from_usize(3));
     assert_eq!(context.prefix.raw, "SEL");
     assert_eq!(
-        context.replacement_range,
-        TextRange::new(TextSize::from_usize(0), TextSize::from_usize(6))
+        context.replacement_loc,
+        Loc::new(TextSize::from_usize(0), TextSize::from_usize(6))
     );
     assert_eq!(context.expectations.tokens, [TokenKind::Select]);
 
@@ -568,8 +587,8 @@ fn replaces_the_whole_identifier_when_the_point_is_inside_it() {
     let context = collect(source, TextSize::from_usize(point));
     assert_eq!(context.prefix.raw, "Mix");
     assert_eq!(
-        context.replacement_range,
-        TextRange::new(
+        context.replacement_loc,
+        Loc::new(
             TextSize::from_usize(source.find('"').unwrap()),
             TextSize::from_usize(source.find(" FROM").unwrap())
         )
@@ -587,8 +606,8 @@ fn handles_unicode_quoted_and_utf8_identifier_prefixes() {
     assert!(context.expectations.tokens.is_empty());
     assert_eq!(context.intent.qualifier[0].normalized, "Schema");
     assert_eq!(
-        context.replacement_range,
-        TextRange::new(
+        context.replacement_loc,
+        Loc::new(
             TextSize::from_usize(source.find("U&\"Mixed\"").unwrap()),
             TextSize::from_usize(source.find(" FROM").unwrap())
         )
@@ -599,8 +618,8 @@ fn handles_unicode_quoted_and_utf8_identifier_prefixes() {
     assert_eq!(context.prefix.raw, "Mixed");
     assert_eq!(context.prefix.quoting, IdentifierQuoting::Quoted);
     assert_eq!(
-        context.replacement_range,
-        TextRange::new(
+        context.replacement_loc,
+        Loc::new(
             TextSize::from_usize(7),
             TextSize::from_usize(complete.len())
         )
@@ -633,8 +652,8 @@ fn handles_unicode_quoted_and_utf8_identifier_prefixes() {
     let context = collect(utf8, TextSize::from_usize(point));
     assert_eq!(context.prefix.raw, "名");
     assert_eq!(
-        context.replacement_range,
-        TextRange::new(TextSize::from_usize(7), TextSize::from_usize(utf8.len()))
+        context.replacement_loc,
+        Loc::new(TextSize::from_usize(7), TextSize::from_usize(utf8.len()))
     );
 }
 
@@ -644,8 +663,8 @@ fn numeric_literals_are_not_identifier_prefixes() {
     let context = collect(source, TextSize::from_usize(source.len()));
     assert!(context.prefix.raw.is_empty());
     assert_eq!(
-        context.replacement_range,
-        TextRange::empty(TextSize::from_usize(source.len()))
+        context.replacement_loc,
+        Loc::empty(TextSize::from_usize(source.len()))
     );
     assert!(
         context.expectations.tokens.contains(&TokenKind::From),
@@ -889,7 +908,7 @@ fn cte_scope_tracks_recursion_nesting_and_shadowing() {
         ["shared", "inner_cte"]
     );
     assert_eq!(
-        usize::from(context.scope.ctes[0].syntax_range.start()),
+        usize::from(context.scope.ctes[0].syntax_loc.start()),
         nested.rfind("shared AS").unwrap()
     );
 
@@ -1320,7 +1339,7 @@ fn distinguishes_an_active_unterminated_token_from_an_earlier_lex_error() {
 }
 
 #[test]
-fn lexical_diagnostic_ranges_are_absolute_in_later_statements() {
+fn lexical_diagnostic_locs_are_absolute_in_later_statements() {
     let source = "SELECT 1; SELECT schema.\"Mi";
     let context = collect(source, TextSize::from_usize(source.len()));
     let diagnostic = context
@@ -1330,8 +1349,8 @@ fn lexical_diagnostic_ranges_are_absolute_in_later_statements() {
         .expect("unterminated identifier produces a recovery diagnostic");
 
     assert_eq!(
-        diagnostic.range,
-        TextRange::new(
+        diagnostic.loc,
+        Loc::new(
             TextSize::from_usize(source.find('"').unwrap()),
             TextSize::from_usize(source.len()),
         )

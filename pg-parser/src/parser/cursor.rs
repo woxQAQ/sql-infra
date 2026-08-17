@@ -139,7 +139,7 @@ impl Parser {
         if !ismove {
             self.expect(TokenKind::Fetch)?;
         }
-        let (direction, how_many, direction_keyword, location) = self.parse_fetch_direction()?;
+        let (direction, how_many, direction_keyword, parse_loc) = self.parse_fetch_direction()?;
         let _ = self.consume(TokenKind::From) || self.consume(TokenKind::InP);
         self.record_completion_slot(GrammarSlot::AnyName);
         let portalname = Some(
@@ -152,7 +152,7 @@ impl Parser {
             portalname,
             ismove,
             direction_keyword,
-            location: location as ParseLoc,
+            parse_loc,
         }))
     }
 
@@ -200,21 +200,21 @@ impl Parser {
             ));
         }
         if self.consume(TokenKind::AbsoluteP) {
-            let location = self.location() as ParseLoc;
+            let parse_loc = self.offset() as ParseLoc;
             return Ok((
                 FetchDirection::Absolute,
                 self.parse_signed_fetch_count()?,
                 FetchDirectionKeywords::Absolute,
-                location,
+                parse_loc,
             ));
         }
         if self.consume(TokenKind::RelativeP) {
-            let location = self.location() as ParseLoc;
+            let parse_loc = self.offset() as ParseLoc;
             return Ok((
                 FetchDirection::Relative,
                 self.parse_signed_fetch_count()?,
                 FetchDirectionKeywords::Relative,
-                location,
+                parse_loc,
             ));
         }
         if self.consume(TokenKind::All) {
@@ -234,13 +234,13 @@ impl Parser {
                     -1,
                 ));
             }
-            let (count, location) = if self.at(TokenKind::IConst)
+            let (count, parse_loc) = if self.at(TokenKind::IConst)
                 || matches!(
                     self.peek_kind(),
                     TokenKind::Char('+') | TokenKind::Char('-')
                 ) {
-                let location = self.location() as ParseLoc;
-                (self.parse_signed_fetch_count()?, location)
+                let parse_loc = self.offset() as ParseLoc;
+                (self.parse_signed_fetch_count()?, parse_loc)
             } else {
                 (1, -1)
             };
@@ -248,7 +248,7 @@ impl Parser {
                 FetchDirection::Forward,
                 count,
                 FetchDirectionKeywords::Forward,
-                location,
+                parse_loc,
             ));
         }
         if self.consume(TokenKind::Backward) {
@@ -260,13 +260,13 @@ impl Parser {
                     -1,
                 ));
             }
-            let (count, location) = if self.at(TokenKind::IConst)
+            let (count, parse_loc) = if self.at(TokenKind::IConst)
                 || matches!(
                     self.peek_kind(),
                     TokenKind::Char('+') | TokenKind::Char('-')
                 ) {
-                let location = self.location() as ParseLoc;
-                (self.parse_signed_fetch_count()?, location)
+                let parse_loc = self.offset() as ParseLoc;
+                (self.parse_signed_fetch_count()?, parse_loc)
             } else {
                 (1, -1)
             };
@@ -274,7 +274,7 @@ impl Parser {
                 FetchDirection::Backward,
                 count,
                 FetchDirectionKeywords::Backward,
-                location,
+                parse_loc,
             ));
         }
         if self.at(TokenKind::IConst)
@@ -283,12 +283,12 @@ impl Parser {
                 TokenKind::Char('+') | TokenKind::Char('-')
             )
         {
-            let location = self.location() as ParseLoc;
+            let parse_loc = self.offset() as ParseLoc;
             return Ok((
                 FetchDirection::Forward,
                 self.parse_signed_fetch_count()?,
                 FetchDirectionKeywords::None,
-                location,
+                parse_loc,
             ));
         }
         Ok((FetchDirection::Forward, 1, FetchDirectionKeywords::None, -1))
@@ -304,7 +304,7 @@ impl Parser {
         let token = self.expect(TokenKind::IConst)?;
         match token.value {
             Some(TokenValue::Integer(value)) => Ok(sign * i64::from(value)),
-            _ => Err(ParseError::ranged(token.range, "expected an integer count")),
+            _ => Err(ParseError::at_loc(token.loc, "expected an integer count")),
         }
     }
 }

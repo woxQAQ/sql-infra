@@ -42,7 +42,7 @@ impl Parser {
         self.record_completion_tokens(&[TokenKind::Char('*')]);
         let mut items = Vec::new();
         while !self.at_any(stops) {
-            let location = self.location();
+            let offset = self.offset();
             let tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
             if tokens.is_empty() && !self.at_completion() {
                 return Err(self.error_here("expected an expression"));
@@ -83,7 +83,7 @@ impl Parser {
             let target_value = if standalone_star {
                 node!(ColumnRef {
                     fields: vec![Node::AStar],
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                 })
             } else {
                 parse_expression_tokens_with_completion(expr_tokens, self.completion.clone())?
@@ -91,7 +91,7 @@ impl Parser {
             items.push(node!(ResTarget {
                 name,
                 val: Some(Box::new(target_value)),
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..ResTarget::default()
             }));
             if !self.consume(TokenKind::Char(',')) {
@@ -152,36 +152,36 @@ impl Parser {
 
     pub(super) fn parse_group_by_item(&mut self, stops: &[TokenKind]) -> PResult<Node> {
         if self.at(TokenKind::Char('(')) && self.peek_kind_n(1) == TokenKind::Char(')') {
-            let location = self.advance().location();
+            let offset = self.advance().offset();
             self.advance();
             return Ok(node!(GroupingSet {
                 kind: GroupingSetKind::Empty,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..GroupingSet::default()
             }));
         }
 
-        let (kind, location) = match self.peek_kind() {
+        let (kind, offset) = match self.peek_kind() {
             TokenKind::Rollup => {
-                let location = self.advance().location();
-                (Some(GroupingSetKind::Rollup), location)
+                let offset = self.advance().offset();
+                (Some(GroupingSetKind::Rollup), offset)
             }
             TokenKind::Cube => {
-                let location = self.advance().location();
-                (Some(GroupingSetKind::Cube), location)
+                let offset = self.advance().offset();
+                (Some(GroupingSetKind::Cube), offset)
             }
             TokenKind::Grouping if self.peek_kind_n(1) == TokenKind::Sets => {
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 self.advance();
-                (Some(GroupingSetKind::Sets), location)
+                (Some(GroupingSetKind::Sets), offset)
             }
             TokenKind::Grouping if self.peek_kind_n(1) == TokenKind::Completion => {
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 self.record_completion_tokens(&[TokenKind::Sets]);
                 self.pos = self.pos.saturating_sub(1);
-                (None, location)
+                (None, offset)
             }
-            _ => (None, self.location()),
+            _ => (None, self.offset()),
         };
 
         if let Some(kind) = kind {
@@ -198,7 +198,7 @@ impl Parser {
             return Ok(node!(GroupingSet {
                 kind,
                 content,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             }));
         }
 
@@ -284,7 +284,7 @@ impl Parser {
         while !self.at_any(stops) {
             let mut tokens = self.take_until_top_level(&extend_stops(stops, TokenKind::Char(',')));
             self.record_sort_item_expectations(&tokens, stops);
-            let mut location = -1;
+            let mut parse_loc = -1;
             let mut sortby_dir = SortByDir::Default;
             let mut sortby_nulls = SortByNulls::Default;
             let mut use_op = Vec::new();
@@ -293,8 +293,8 @@ impl Parser {
                     Some(TokenKind::FirstP) => SortByNulls::First,
                     Some(TokenKind::LastP) => SortByNulls::Last,
                     _ => {
-                        return Err(ParseError::ranged(
-                            tokens[tokens.len() - 2].range,
+                        return Err(ParseError::at_loc(
+                            tokens[tokens.len() - 2].loc,
                             "NULLS requires FIRST or LAST",
                         ));
                     }
@@ -314,26 +314,26 @@ impl Parser {
             if sortby_dir == SortByDir::Default
                 && let Some(using_index) = find_top_level_token(&tokens, TokenKind::Using)
             {
-                let missing_operator_location = tokens[using_index].end_location();
+                let missing_operator_offset = tokens[using_index].end_offset();
                 let mut operator_tokens = tokens.split_off(using_index + 1);
                 tokens.pop();
-                location = operator_tokens
+                parse_loc = operator_tokens
                     .first()
-                    .map_or(missing_operator_location as ParseLoc, |token| {
-                        token.location() as ParseLoc
+                    .map_or(missing_operator_offset as ParseLoc, |token| {
+                        token.offset() as ParseLoc
                     });
                 if operator_tokens.first().has_kind(TokenKind::Operator) {
                     if !operator_tokens.get(1).has_kind(TokenKind::Char('('))
                         || !operator_tokens.last().has_kind(TokenKind::Char(')'))
                     {
                         return Err(ParseError::syntax_exit(
-                            location as usize,
+                            parse_loc as usize,
                             "invalid OPERATOR decoration",
                         ));
                     }
                     operator_tokens = operator_tokens[2..operator_tokens.len() - 1].to_vec();
                 }
-                use_op = parse_operator_name_tokens(operator_tokens, location as usize)?;
+                use_op = parse_operator_name_tokens(operator_tokens, parse_loc as usize)?;
                 sortby_dir = SortByDir::Using;
             }
             let node = self.parse_expression_fragment_tokens(tokens)?;
@@ -342,7 +342,7 @@ impl Parser {
                 sortby_dir,
                 sortby_nulls,
                 use_op,
-                location,
+                parse_loc,
             }));
             if !self.consume(TokenKind::Char(',')) {
                 break;

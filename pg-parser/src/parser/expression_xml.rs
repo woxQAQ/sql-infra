@@ -20,7 +20,7 @@ impl ExprParser {
                 TokenKind::Xmlroot => XmlExprOp::Xmlroot,
                 _ => return None,
             },
-            location: token.location() as ParseLoc,
+            parse_loc: token.offset() as ParseLoc,
             ..XmlExpr::default()
         };
         match token.kind {
@@ -108,7 +108,7 @@ impl ExprParser {
             value,
             node!(AConst {
                 val: ValUnion::Boolean(Boolean::new(preserve_whitespace)),
-                location: -1,
+                parse_loc: -1,
                 ..AConst::default()
             }),
         ];
@@ -148,7 +148,7 @@ impl ExprParser {
     pub(super) fn parse_xml_labeled_expr_list(&mut self, stop: TokenKind) -> Option<NodeList> {
         let mut targets = Vec::new();
         while !self.at(stop) && !self.at(TokenKind::Eof) {
-            let location = self.location();
+            let offset = self.offset();
             let value = self.parse_expr(0)?;
             let name = if self.consume(TokenKind::As) {
                 Some(
@@ -161,7 +161,7 @@ impl ExprParser {
             targets.push(node!(ResTarget {
                 name,
                 val: Some(Box::new(value)),
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..ResTarget::default()
             }));
             if !self.consume(TokenKind::Char(',')) {
@@ -175,7 +175,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_xml_serialize(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::Xmlserialize)?.location();
+        let offset = self.expect(TokenKind::Xmlserialize)?.offset();
         self.expect(TokenKind::Char('('))?;
         let xmloption = if self.consume(TokenKind::DocumentP) {
             XmlOptionType::Document
@@ -228,17 +228,17 @@ impl ExprParser {
             expr: Some(Box::new(expr)),
             type_name: Some(type_name),
             indent,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }))
     }
 
     pub(super) fn parse_merge_support_func(&mut self) -> Option<Node> {
-        let location = self.expect(TokenKind::MergeAction)?.location();
+        let offset = self.expect(TokenKind::MergeAction)?.offset();
         self.expect(TokenKind::Char('('))?;
         self.expect(TokenKind::Char(')'))?;
         Some(node!(MergeSupportFunc {
             msftype: 25,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..MergeSupportFunc::default()
         }))
     }

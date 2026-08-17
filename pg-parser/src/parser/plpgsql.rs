@@ -14,12 +14,12 @@ pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<Raw
     }
 
     let mut parser = Parser::new(sql)?;
-    let location = parser.location();
+    let offset = parser.offset();
     let name = if parser.at(TokenKind::Param) {
         let token = parser.advance().clone();
         match token.value {
             Some(TokenValue::Integer(number)) => format!("${number}"),
-            _ => return Err(ParseError::ranged(token.range, "invalid parameter target")),
+            _ => return Err(ParseError::at_loc(token.loc, "invalid parameter target")),
         }
     } else {
         parser
@@ -39,28 +39,28 @@ pub(super) fn parse_assignment(sql: &str, target_name_count: i32) -> PResult<Raw
             indirection,
             nnames: target_name_count,
             val: assignment_value,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }))),
-        stmt_location: location as ParseLoc,
+        stmt_parse_loc: offset as ParseLoc,
         stmt_len: 0,
     })
 }
 
 pub(super) fn parse_expression(sql: &str) -> PResult<RawStmt> {
     let mut parser = Parser::new(sql)?;
-    let location = parser.location();
+    let offset = parser.offset();
     let select = parse_expression_select(&mut parser)?;
     Ok(RawStmt {
         stmt: Some(Box::new(Node::SelectStmt(select))),
-        stmt_location: location as ParseLoc,
+        stmt_parse_loc: offset as ParseLoc,
         stmt_len: 0,
     })
 }
 
 fn parse_expression_select(parser: &mut Parser) -> PResult<SelectStmt> {
     let mut tokens = parser.take_until_top_level(&[TokenKind::Eof]);
-    let location = tokens.first().location_or_else(|| parser.location());
-    tokens.insert(0, Token::synthetic(TokenKind::Select, location));
+    let offset = tokens.first().offset_or_else(|| parser.offset());
+    tokens.insert(0, Token::synthetic(TokenKind::Select, offset));
     match parse_statement_node_tokens(tokens)? {
         Node::SelectStmt(select) => Ok(select),
         _ => unreachable!("synthetic SELECT must produce SelectStmt"),

@@ -30,11 +30,11 @@ pub(super) fn parse_statement_node_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.last().end_location_or(0);
+    let offset = tokens.last().end_offset_or(0);
     if tokens.is_empty() {
-        return Err(ParseError::syntax_exit(location, "expected a statement"));
+        return Err(ParseError::syntax_exit(offset, "expected a statement"));
     }
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
+    tokens.push(Token::synthetic(TokenKind::Eof, offset));
     let mut parser = Parser {
         tokens,
         pos: 0,
@@ -55,13 +55,13 @@ pub(super) fn parse_select_statement_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     let node = parse_statement_node_tokens_with_completion(tokens, completion)?;
     if matches!(node, Node::SelectStmt(_)) {
         Ok(node)
     } else {
         Err(ParseError::syntax_exit(
-            location,
+            offset,
             "expected a SELECT statement",
         ))
     }
@@ -75,7 +75,7 @@ pub(super) fn parse_preparable_statement_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     let node = parse_statement_node_tokens_with_completion(tokens, completion)?;
     if matches!(
         node,
@@ -88,26 +88,23 @@ pub(super) fn parse_preparable_statement_tokens_with_completion(
         Ok(node)
     } else {
         Err(ParseError::syntax_exit(
-            location,
+            offset,
             "expected a preparable statement",
         ))
     }
 }
 
 pub(super) fn parse_type_node_list(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.last().has_kind(TokenKind::Char(',')) {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "type list cannot end with ','",
         ));
     }
     let chunks = split_top_level_commas(tokens);
     if chunks.is_empty() {
-        return Err(ParseError::syntax_exit(
-            location,
-            "type list cannot be empty",
-        ));
+        return Err(ParseError::syntax_exit(offset, "type list cannot be empty"));
     }
     chunks
         .into_iter()

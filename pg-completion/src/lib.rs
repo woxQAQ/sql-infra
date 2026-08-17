@@ -13,8 +13,8 @@ mod statement;
 
 pub use pg_parser::GrammarSlot;
 use pg_parser::KEYWORDS;
+use pg_parser::Loc;
 use pg_parser::ParserExpectations;
-use pg_parser::TextRange;
 use pg_parser::TextSize;
 use pg_parser::TokenKind;
 use pg_parser::collect_expectations;
@@ -25,9 +25,9 @@ pub use prefix::NamePart;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CompletionContext {
-    pub statement_range: TextRange,
+    pub statement_loc: Loc,
     pub point: TextSize,
-    pub replacement_range: TextRange,
+    pub replacement_loc: Loc,
     pub prefix: CompletionPrefix,
     pub expectations: ExpectationSet,
     pub intent: CompletionIntent,
@@ -120,6 +120,8 @@ pub struct ExpectationSet {
     /// continuation.
     pub phrases: Vec<&'static [TokenKind]>,
     pub slots: Vec<GrammarSlot>,
+    /// Grammar-level membership with owner token locs resolved against the
+    /// complete SQL source.
     pub membership: Option<pg_parser::GrammarMembership>,
 }
 
@@ -212,8 +214,8 @@ pub struct QueryScope {
 pub struct CteDefinition {
     pub name: NamePart,
     pub explicit_columns: Vec<NamePart>,
-    pub syntax_range: TextRange,
-    pub body_range: TextRange,
+    pub syntax_loc: Loc,
+    pub body_loc: Loc,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -225,8 +227,8 @@ pub struct VisibleRelation {
     /// The relation can only be referenced through its alias; its columns do
     /// not participate in unqualified column lookup.
     pub qualified_only: bool,
-    pub syntax_range: TextRange,
-    pub body_range: Option<TextRange>,
+    pub syntax_loc: Loc,
+    pub body_loc: Option<Loc>,
     pub lateral: bool,
     pub unsupported: Option<UnsupportedRelation>,
 }
@@ -243,7 +245,7 @@ pub enum RelationKind {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnsupportedRelation {
-    pub range: TextRange,
+    pub loc: Loc,
     pub reason: String,
 }
 
@@ -252,7 +254,7 @@ pub struct UnsupportedRelation {
 /// context from being returned.
 pub struct CompletionDiagnostic {
     pub kind: CompletionDiagnosticKind,
-    pub range: TextRange,
+    pub loc: Loc,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -275,49 +277,49 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
         return CompletionContext {
             diagnostics: vec![CompletionDiagnostic {
                 kind: CompletionDiagnosticKind::SourceTooLarge,
-                range: TextRange::empty(TextSize::new(0)),
+                loc: Loc::empty(TextSize::new(0)),
             }],
             ..CompletionContext::default()
         };
     }
     let normalized = prefix::normalize_point(source, point);
-    let stmt_range = statement::range_at(source, normalized.point);
-    let site = prefix::analyze(source, stmt_range, normalized.point);
+    let stmt_loc = statement::loc_at(source, normalized.point);
+    let site = prefix::analyze(source, stmt_loc, normalized.point);
     let mut diagnostics = normalized.diagnostics;
 
-    let statement_base = stmt_range.start();
+    let statement_base = stmt_loc.start();
     let statement_start = usize::from(statement_base);
-    let stmt_text = &source[statement_start..usize::from(stmt_range.end())];
-    let completion_start = site.replacement_range.start() - statement_base;
+    let stmt_text = &source[statement_start..usize::from(stmt_loc.end())];
+    let completion_start = site.replacement_loc.start() - statement_base;
     let tokenization_result = lex_for_completion(stmt_text, completion_start);
     match &tokenization_result {
         Ok(tokenization) => {
             if let Some(error) = tokenization.recovered_error() {
-                let range = error.range + statement_base;
+                let loc = error.loc + statement_base;
                 diagnostics.push(CompletionDiagnostic {
                     kind: CompletionDiagnosticKind::TokenizationRecovered,
-                    range,
+                    loc,
                 });
                 diagnostics.push(CompletionDiagnostic {
                     kind: CompletionDiagnosticKind::ScopeIncomplete,
-                    range,
+                    loc,
                 });
             }
-            if let Some(range) = scope::incomplete_range(statement_base, tokenization.tokens())
+            if let Some(loc) = scope::incomplete_loc(statement_base, tokenization.tokens())
                 && !diagnostics.iter().any(|diagnostic| {
                     diagnostic.kind == CompletionDiagnosticKind::ScopeIncomplete
-                        && diagnostic.range == range
+                        && diagnostic.loc == loc
                 })
             {
                 diagnostics.push(CompletionDiagnostic {
                     kind: CompletionDiagnosticKind::ScopeIncomplete,
-                    range,
+                    loc,
                 });
             }
         }
         Err(error) => diagnostics.push(CompletionDiagnostic {
             kind: CompletionDiagnosticKind::LexErrorBeforePoint,
-            range: error.range + statement_base,
+            loc: error.loc + statement_base,
         }),
     }
     let expectation_result = if site.supports_grammar_completion() {
@@ -352,16 +354,26 @@ pub fn collect(source: &str, point: TextSize) -> CompletionContext {
     };
     let mut intent = intent::from_expectations(&expectations, stmt_text, statement_base);
     intent.qualifier = site.qualifier;
+    absolutize_expectation_locs(&mut expectations, statement_base);
 
     CompletionContext {
-        statement_range: stmt_range,
+        statement_loc: stmt_loc,
         point: normalized.point,
-        replacement_range: site.replacement_range,
+        replacement_loc: site.replacement_loc,
         prefix: site.prefix,
         expectations,
         intent,
         scope,
         diagnostics,
+    }
+}
+
+fn absolutize_expectation_locs(expectations: &mut ExpectationSet, base: TextSize) {
+    let Some(membership) = &mut expectations.membership else {
+        return;
+    };
+    for token in &mut membership.owner.name {
+        token.loc = token.loc + base;
     }
 }
 

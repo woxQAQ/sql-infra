@@ -36,7 +36,7 @@ impl Parser {
         if self.consume(TokenKind::With) {
             self.expect(TokenKind::Char('('))?;
             loop {
-                let location = self.location();
+                let offset = self.offset();
                 let option = if self.consume(TokenKind::Old) {
                     ReturningOptionKind::Old
                 } else if self.consume(TokenKind::New) {
@@ -51,7 +51,7 @@ impl Parser {
                 options.push(node!(ReturningOption {
                     option,
                     value: Some(value),
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                 }));
                 if !self.consume(TokenKind::Char(',')) {
                     break;
@@ -76,23 +76,23 @@ impl Parser {
         self.advance();
         self.expect(TokenKind::Portion)?;
         self.expect(TokenKind::Of)?;
-        let location = self.location();
+        let offset = self.offset();
         let range_name = self
             .consume_col_id()
             .ok_or_else(|| self.error_here("expected a range name after FOR PORTION OF"))?;
         if self.consume(TokenKind::Char('(')) {
-            let target_location = self.location();
+            let target_offset = self.offset();
             let target = self.parse_expr_box_strict_until(&[TokenKind::Char(')')])?;
             self.expect(TokenKind::Char(')'))?;
             return Ok(Some(Box::new(ForPortionOfClause {
                 range_name: Some(range_name),
-                location: location as ParseLoc,
-                target_location: target_location as ParseLoc,
+                parse_loc: offset as ParseLoc,
+                target_parse_loc: target_offset as ParseLoc,
                 target: Some(target),
                 ..ForPortionOfClause::default()
             })));
         }
-        let target_location = self.expect(TokenKind::From)?.location();
+        let target_offset = self.expect(TokenKind::From)?.offset();
         let target_start = self.parse_expr_box_strict_until(&[TokenKind::To])?;
         self.expect(TokenKind::To)?;
         let target_end = self.parse_expr_box_strict_until(&[
@@ -106,8 +106,8 @@ impl Parser {
         ])?;
         Ok(Some(Box::new(ForPortionOfClause {
             range_name: Some(range_name),
-            location: location as ParseLoc,
-            target_location: target_location as ParseLoc,
+            parse_loc: offset as ParseLoc,
+            target_parse_loc: target_offset as ParseLoc,
             target_start: Some(target_start),
             target_end: Some(target_end),
             ..ForPortionOfClause::default()
@@ -118,10 +118,10 @@ impl Parser {
         if !self.consume(TokenKind::On) {
             return Ok(None);
         }
-        let location = self.previous_location();
+        let offset = self.previous_offset();
         self.expect(TokenKind::Conflict)?;
         let infer = if self.consume(TokenKind::Char('(')) {
-            let infer_location = self.previous_location();
+            let infer_offset = self.previous_offset();
             let mut index_elems = Vec::new();
             while !self.at(TokenKind::Char(')')) {
                 let mut tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
@@ -146,11 +146,11 @@ impl Parser {
             Some(Box::new(InferClause {
                 index_elems,
                 where_clause,
-                location: infer_location as ParseLoc,
+                parse_loc: infer_offset as ParseLoc,
                 ..InferClause::default()
             }))
         } else if self.consume(TokenKind::On) {
-            let infer_location = self.previous_location();
+            let infer_offset = self.previous_offset();
             self.expect(TokenKind::Constraint)?;
             self.record_completion_slot(GrammarSlot::Constraint);
             let conname = self
@@ -158,7 +158,7 @@ impl Parser {
                 .ok_or_else(|| self.error_here("expected a constraint name"))?;
             Some(Box::new(InferClause {
                 conname: Some(conname),
-                location: infer_location as ParseLoc,
+                parse_loc: infer_offset as ParseLoc,
                 ..InferClause::default()
             }))
         } else {
@@ -226,7 +226,7 @@ impl Parser {
             lock_strength,
             target_list,
             where_clause,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         })))
     }
 
@@ -238,12 +238,12 @@ impl Parser {
             if self.consume(TokenKind::Char('(')) {
                 let mut names = Vec::new();
                 loop {
-                    let location = self.location();
+                    let offset = self.offset();
                     let name = self
                         .consume_col_id()
                         .ok_or_else(|| self.error_here("expected an assignment target"))?;
                     let indirection = self.parse_assignment_indirection()?;
-                    names.push((name, indirection, location));
+                    names.push((name, indirection, offset));
                     if !self.consume(TokenKind::Char(',')) {
                         break;
                     }
@@ -253,7 +253,7 @@ impl Parser {
                 let source =
                     self.parse_expr_box_strict_until(&extend_stops(stops, TokenKind::Char(',')))?;
                 let ncolumns = names.len() as i32;
-                for (index, (name, indirection, location)) in names.into_iter().enumerate() {
+                for (index, (name, indirection, offset)) in names.into_iter().enumerate() {
                     targets.push(node!(ResTarget {
                         name: Some(name),
                         indirection,
@@ -262,11 +262,11 @@ impl Parser {
                             colno: index as i32 + 1,
                             ncolumns,
                         }))),
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                     }));
                 }
             } else {
-                let location = self.location();
+                let offset = self.offset();
                 let name = self
                     .consume_col_id()
                     .ok_or_else(|| self.error_here("expected an assignment target"))?;
@@ -278,7 +278,7 @@ impl Parser {
                     name: Some(name),
                     indirection,
                     val: Some(assignment_value),
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                 }));
             }
             if !self.consume(TokenKind::Char(',')) {

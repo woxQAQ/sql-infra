@@ -13,7 +13,7 @@ impl ExprParser {
         match token.kind {
             TokenKind::JsonObject => {
                 if self.json_object_uses_standard_syntax() {
-                    self.parse_json_object_constructor(token.location())
+                    self.parse_json_object_constructor(token.offset())
                 } else {
                     let first = self.parse_function_argument()?;
                     self.record_completion_expression_continuation_tokens(&[
@@ -25,12 +25,12 @@ impl ExprParser {
                     Some(node!(FuncCall {
                         funcname: system_type_names("json_object"),
                         args,
-                        location: token.location() as ParseLoc,
+                        parse_loc: token.offset() as ParseLoc,
                         ..FuncCall::default()
                     }))
                 }
             }
-            TokenKind::JsonArray => self.parse_json_array_constructor(token.location()),
+            TokenKind::JsonArray => self.parse_json_array_constructor(token.offset()),
             TokenKind::Json => {
                 let expr = self.parse_json_value_expr()?;
                 let unique_keys = self.parse_json_unique_keys()?;
@@ -38,7 +38,7 @@ impl ExprParser {
                 Some(node!(JsonParseExpr {
                     expr: Some(Box::new(expr)),
                     unique_keys,
-                    location: token.location() as ParseLoc,
+                    parse_loc: token.offset() as ParseLoc,
                     ..JsonParseExpr::default()
                 }))
             }
@@ -47,7 +47,7 @@ impl ExprParser {
                 self.expect(TokenKind::Char(')'))?;
                 Some(node!(JsonScalarExpr {
                     expr: Some(Box::new(expr)),
-                    location: token.location() as ParseLoc,
+                    parse_loc: token.offset() as ParseLoc,
                     ..JsonScalarExpr::default()
                 }))
             }
@@ -58,14 +58,14 @@ impl ExprParser {
                 Some(node!(JsonSerializeExpr {
                     expr: Some(Box::new(expr)),
                     output,
-                    location: token.location() as ParseLoc,
+                    parse_loc: token.offset() as ParseLoc,
                 }))
             }
             TokenKind::JsonQuery | TokenKind::JsonExists | TokenKind::JsonValue => {
                 self.parse_json_func(token)
             }
-            TokenKind::JsonObjectagg => self.parse_json_object_agg(token.location()),
-            TokenKind::JsonArrayagg => self.parse_json_array_agg(token.location()),
+            TokenKind::JsonObjectagg => self.parse_json_object_agg(token.offset()),
+            TokenKind::JsonArrayagg => self.parse_json_array_agg(token.offset()),
             _ => None,
         }
     }
@@ -108,7 +108,7 @@ impl ExprParser {
         if !self.consume(TokenKind::Format) {
             return Some(None);
         }
-        let location = self.previous_location();
+        let offset = self.previous_offset();
         self.expect(TokenKind::Json)?;
         let encoding = if self.consume(TokenKind::Encoding) {
             let name = self
@@ -129,7 +129,7 @@ impl ExprParser {
         Some(Some(JsonFormat {
             format_type: JsonFormatType::Json,
             encoding,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }))
     }
 
@@ -210,7 +210,7 @@ impl ExprParser {
         }
     }
 
-    pub(super) fn parse_json_object_constructor(&mut self, location: usize) -> Option<Node> {
+    pub(super) fn parse_json_object_constructor(&mut self, offset: usize) -> Option<Node> {
         let mut exprs = Vec::new();
         while !matches!(
             self.peek_kind(),
@@ -256,11 +256,11 @@ impl ExprParser {
             output,
             absent_on_null,
             unique,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }))
     }
 
-    pub(super) fn parse_json_array_constructor(&mut self, location: usize) -> Option<Node> {
+    pub(super) fn parse_json_array_constructor(&mut self, offset: usize) -> Option<Node> {
         self.record_completion_expression_start_tokens(completion::SUBQUERY_START_TOKENS);
         if self.starts_statement() {
             let tokens = self.take_until_balanced(TokenKind::Char(')'));
@@ -324,7 +324,7 @@ impl ExprParser {
                 output,
                 format,
                 absent_on_null: true,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             }));
         }
         let mut exprs = Vec::new();
@@ -358,7 +358,7 @@ impl ExprParser {
             exprs,
             output,
             absent_on_null,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }))
     }
 }
@@ -366,10 +366,10 @@ pub(super) fn parse_json_value_expr_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<JsonValueExpr> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "expected a JSON value expression",
         ));
     }
@@ -378,11 +378,11 @@ pub(super) fn parse_json_value_expr_tokens_with_completion(
         parser
             .error
             .take()
-            .unwrap_or_else(|| ParseError::syntax_exit(location, "invalid JSON value expression"))
+            .unwrap_or_else(|| ParseError::syntax_exit(offset, "invalid JSON value expression"))
     })?;
     if !parser.at(TokenKind::Eof) {
         return Err(ParseError::syntax_exit(
-            parser.location(),
+            parser.offset(),
             "unexpected token after JSON value expression",
         ));
     }
@@ -391,7 +391,7 @@ pub(super) fn parse_json_value_expr_tokens_with_completion(
 
 pub(super) fn default_json_format() -> JsonFormat {
     JsonFormat {
-        location: -1,
+        parse_loc: -1,
         ..JsonFormat::default()
     }
 }

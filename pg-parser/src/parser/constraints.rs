@@ -1,7 +1,7 @@
 //! Column, table, index, and foreign-key constraint grammar.
 //!
 //! Constraint attributes and actions are normalized into PostgreSQL raw
-//! constraint nodes while retaining their source locations.
+//! constraint nodes while retaining their `ParseLoc` values.
 
 use super::*;
 
@@ -57,12 +57,9 @@ impl Parser {
         }))
     }
 
-    pub(super) fn parse_column_constraint_element(
-        &mut self,
-        location: usize,
-    ) -> PResult<Constraint> {
+    pub(super) fn parse_column_constraint_element(&mut self, offset: usize) -> PResult<Constraint> {
         let mut constraint = Constraint {
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..Constraint::default()
         };
         self.record_completion_tokens(&[
@@ -232,11 +229,11 @@ impl Parser {
     }
 
     pub(super) fn parse_table_constraint(&mut self) -> PResult<Constraint> {
-        let location = self.location();
+        let offset = self.offset();
         let conname = self.parse_optional_constraint_name()?;
         let mut constraint = Constraint {
             conname,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..Constraint::default()
         };
         self.record_completion_tokens(&[
@@ -325,7 +322,7 @@ impl Parser {
                         self.record_completion_tokens(&[TokenKind::With]);
                     }
                     self.append_completion_marker(&mut expr_tokens);
-                    let expr_location = expr_tokens.first().location_or(self.location());
+                    let expr_offset = expr_tokens.first().offset_or(self.offset());
                     let starts_parenthesized = expr_tokens.first().has_kind(TokenKind::Char('('));
                     let starts_with_cast = expr_tokens.first().has_kind(TokenKind::Cast);
                     let index_elem = parse_index_elem_tokens_with_completion(
@@ -337,13 +334,13 @@ impl Parser {
                         && !is_windowless_function_expression_node(expression, starts_with_cast)
                     {
                         return Err(ParseError::syntax_exit(
-                            expr_location,
+                            expr_offset,
                             "exclusion expressions must be parenthesized unless they are function calls",
                         ));
                     }
                     self.expect(TokenKind::With)?;
                     self.record_completion_slot(GrammarSlot::Operator);
-                    let operator_location = self.location();
+                    let operator_offset = self.offset();
                     let operator_tokens = if self.consume(TokenKind::Operator) {
                         self.expect(TokenKind::Char('('))?;
                         self.record_completion_slot(GrammarSlot::Operator);
@@ -356,10 +353,10 @@ impl Parser {
                     if operator_tokens.is_empty() {
                         return Err(self.error_here("EXCLUDE element requires an operator"));
                     }
-                    validate_operator_name_tokens(&operator_tokens, operator_location)?;
+                    validate_operator_name_tokens(&operator_tokens, operator_offset)?;
                     let operator = name_list_node(parse_operator_name_tokens(
                         operator_tokens,
-                        operator_location,
+                        operator_offset,
                     )?);
                     constraint.exclusions.push(node!(AArrayExpr {
                         elements: vec![Node::IndexElem(index_elem), operator],

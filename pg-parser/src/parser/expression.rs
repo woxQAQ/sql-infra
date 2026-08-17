@@ -95,8 +95,8 @@ impl ExprParser {
         mut tokens: Vec<Token>,
         completion: Option<completion::SharedCollector>,
     ) -> Self {
-        let location = tokens.last().end_location_or(0);
-        tokens.push(Token::synthetic(TokenKind::Eof, location));
+        let offset = tokens.last().end_offset_or(0);
+        tokens.push(Token::synthetic(TokenKind::Eof, offset));
         Self {
             tokens,
             pos: 0,
@@ -114,11 +114,11 @@ impl ExprParser {
     }
 
     pub(super) fn parse_c(mut self) -> PResult<Node> {
-        let location = self.location();
+        let offset = self.offset();
         let node = self.parse_c_expr().ok_or_else(|| {
             self.error
                 .take()
-                .unwrap_or_else(|| ParseError::syntax_exit(location, "invalid common expression"))
+                .unwrap_or_else(|| ParseError::syntax_exit(offset, "invalid common expression"))
         })?;
         if !self.at(TokenKind::Eof) {
             return Err(self.error_here("unexpected token after common expression"));
@@ -127,10 +127,10 @@ impl ExprParser {
     }
 
     pub(super) fn parse_complete(mut self, restricted: bool) -> PResult<Node> {
-        let location = self.location();
+        let offset = self.offset();
         let node = self.parse_expr_mode(0, restricted).ok_or_else(|| {
             self.error.take().unwrap_or_else(|| {
-                ParseError::syntax_exit(location, "invalid or unsupported expression")
+                ParseError::syntax_exit(offset, "invalid or unsupported expression")
             })
         })?;
         if !self.at(TokenKind::Eof) {
@@ -179,7 +179,7 @@ impl ExprParser {
     }
 
     pub(super) fn parse_expr_mode(&mut self, min_bp: u8, restricted: bool) -> Option<Node> {
-        let expression_start = self.location();
+        let expression_start = self.offset();
         let prefix_kind = self.peek_kind();
         let prefix = self.parse_prefix(restricted)?;
         let mut lhs = prefix.node;
@@ -187,8 +187,8 @@ impl ExprParser {
         if !restricted && prefix.is_row_syntax {
             self.record_completion_expression_continuation_tokens(&[TokenKind::Overlaps]);
             if self.at(TokenKind::Overlaps) {
-                let location = self.advance().location();
-                lhs = self.parse_overlaps(lhs, location)?;
+                let offset = self.advance().offset();
+                lhs = self.parse_overlaps(lhs, offset)?;
                 parsed_overlaps = true;
             }
         }
@@ -241,13 +241,13 @@ impl ExprParser {
                         chain.saw_comparison = true;
                     }
                 }
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 lhs = self.parse_binary_operator_rhs(
                     lhs,
                     vec![make_string_node(operator.name)],
                     operator.binding_power + 1,
                     restricted,
-                    location,
+                    offset,
                 )?;
                 indirection_allowed = false;
                 continue;
@@ -288,26 +288,26 @@ impl ExprParser {
                     if TYPE_CAST_BINDING_POWER < min_bp {
                         break;
                     }
-                    let location = self.advance().location();
+                    let offset = self.advance().offset();
                     let type_name = Some(Box::new(self.parse_cast_type_name()?));
                     node!(TypeCast {
                         arg: Some(Box::new(lhs)),
                         type_name,
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                     })
                 }
                 TokenKind::Collate => {
                     if restricted || COLLATE_BINDING_POWER < min_bp {
                         break;
                     }
-                    let location = self.advance().location();
+                    let offset = self.advance().offset();
                     self.record_completion_slot(GrammarSlot::Collation);
                     let collname =
                         self.parse_name_nodes_with_slots(&[GrammarSlot::Collation], false)?;
                     node!(CollateClause {
                         arg: Some(Box::new(lhs)),
                         collname,
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                     })
                 }
                 kind @ (TokenKind::Isnull | TokenKind::Notnull) => {
@@ -317,7 +317,7 @@ impl ExprParser {
                     if chain.saw_binary_is_predicate {
                         return self.fail("cannot chain IS predicates");
                     }
-                    let location = self.advance().location();
+                    let offset = self.advance().offset();
                     node!(NullTest {
                         arg: Some(Box::new(lhs)),
                         nulltesttype: if kind == TokenKind::Isnull {
@@ -325,7 +325,7 @@ impl ExprParser {
                         } else {
                             NullTestType::NotNull
                         },
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                         ..NullTest::default()
                     })
                 }
@@ -333,12 +333,12 @@ impl ExprParser {
                     if restricted || AT_TIME_ZONE_BINDING_POWER < min_bp {
                         break;
                     }
-                    let location = self.advance().location();
-                    let (args, call_location) = if self.consume(TokenKind::Time) {
+                    let offset = self.advance().offset();
+                    let (args, call_parse_loc) = if self.consume(TokenKind::Time) {
                         self.expect(TokenKind::Zone)?;
                         let zone =
                             self.parse_expr_mode(AT_TIME_ZONE_BINDING_POWER + 1, restricted)?;
-                        (vec![zone, lhs], location as ParseLoc)
+                        (vec![zone, lhs], offset as ParseLoc)
                     } else {
                         self.expect(TokenKind::Local)?;
                         (vec![lhs], -1)
@@ -347,7 +347,7 @@ impl ExprParser {
                         funcname: system_type_names("timezone"),
                         args,
                         funcformat: CoercionForm::SqlSyntax,
-                        location: call_location,
+                        parse_loc: call_parse_loc,
                         ..FuncCall::default()
                     })
                 }
@@ -355,17 +355,17 @@ impl ExprParser {
                     if restricted || OR_BINDING_POWER < min_bp {
                         break;
                     }
-                    let location = self.advance().location();
+                    let offset = self.advance().offset();
                     let rhs = self.parse_expr_mode(OR_BINDING_POWER + 1, restricted)?;
-                    make_bool_expr(BoolExprType::OrExpr, lhs, rhs, location)
+                    make_bool_expr(BoolExprType::OrExpr, lhs, rhs, offset)
                 }
                 TokenKind::And => {
                     if restricted || AND_BINDING_POWER < min_bp {
                         break;
                     }
-                    let location = self.advance().location();
+                    let offset = self.advance().offset();
                     let rhs = self.parse_expr_mode(AND_BINDING_POWER + 1, restricted)?;
-                    make_bool_expr(BoolExprType::AndExpr, lhs, rhs, location)
+                    make_bool_expr(BoolExprType::AndExpr, lhs, rhs, offset)
                 }
                 TokenKind::Not if NEGATED_PREDICATE_TOKENS.contains(&self.peek_kind_n(1)) => {
                     let op = self.peek_kind_n(1);
@@ -383,9 +383,9 @@ impl ExprParser {
                     if !quantified && op != TokenKind::InP {
                         chain.saw_nonassociative_predicate = true;
                     }
-                    let location = self.advance().location();
+                    let offset = self.advance().offset();
                     let op = self.advance().kind;
-                    self.parse_special_infix(lhs, op, true, location)?
+                    self.parse_special_infix(lhs, op, true, offset)?
                 }
                 TokenKind::InP
                 | TokenKind::Like
@@ -408,7 +408,7 @@ impl ExprParser {
                         chain.saw_nonassociative_predicate = true;
                     }
                     let token = self.advance().clone();
-                    self.parse_special_infix(lhs, token.kind, false, token.location())?
+                    self.parse_special_infix(lhs, token.kind, false, token.offset())?
                 }
                 TokenKind::Is => {
                     if IS_BINDING_POWER < min_bp {
@@ -417,13 +417,13 @@ impl ExprParser {
                     if chain.saw_binary_is_predicate {
                         return self.fail("cannot chain IS predicates");
                     }
-                    let location = self.advance().location();
+                    let offset = self.advance().offset();
                     let binary = self.at(TokenKind::Distinct)
                         || (self.at(TokenKind::Not) && self.peek_kind_n(1) == TokenKind::Distinct);
                     if binary {
                         chain.saw_binary_is_predicate = true;
                     }
-                    self.parse_is_expr(lhs, location, expression_start, restricted)?
+                    self.parse_is_expr(lhs, offset, expression_start, restricted)?
                 }
                 TokenKind::RightArrow | TokenKind::Char('|') | TokenKind::Op => {
                     if GENERIC_OPERATOR_BINDING_POWER < min_bp {
@@ -436,21 +436,21 @@ impl ExprParser {
                         vec![make_string_node(operator)],
                         GENERIC_OPERATOR_BINDING_POWER + 1,
                         restricted,
-                        token.location(),
+                        token.offset(),
                     )?
                 }
                 TokenKind::Operator => {
                     if GENERIC_OPERATOR_BINDING_POWER < min_bp {
                         break;
                     }
-                    let location = self.location();
+                    let offset = self.offset();
                     let name = self.parse_explicit_operator_name()?;
                     self.parse_binary_operator_rhs(
                         lhs,
                         name,
                         GENERIC_OPERATOR_BINDING_POWER + 1,
                         restricted,
-                        location,
+                        offset,
                     )?
                 }
                 _ => break,
@@ -546,10 +546,10 @@ impl ExprParser {
         operator_name: NodeList,
         right_binding_power: u8,
         restricted: bool,
-        location: usize,
+        offset: usize,
     ) -> Option<Node> {
         if !restricted && self.quantified_sub_link_type().is_some() {
-            self.parse_quantified_comparison_with_name(lhs, operator_name, location)
+            self.parse_quantified_comparison_with_name(lhs, operator_name, offset)
         } else {
             let rhs = self.parse_expr_mode(right_binding_power, restricted)?;
             Some(make_aexpr_with_name(
@@ -557,7 +557,7 @@ impl ExprParser {
                 operator_name,
                 Some(lhs),
                 Some(rhs),
-                location,
+                offset,
             ))
         }
     }

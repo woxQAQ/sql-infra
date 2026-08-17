@@ -105,23 +105,23 @@ impl Parser {
         self.expect(TokenKind::Deallocate)?;
         self.consume(TokenKind::Prepare);
         let isall = self.consume(TokenKind::All);
-        let (name, location) = if isall {
+        let (name, parse_loc) = if isall {
             (None, -1)
         } else {
             self.record_completion_slot(GrammarSlot::AnyName);
-            let location = self.location() as ParseLoc;
+            let parse_loc = self.offset() as ParseLoc;
             (
                 Some(self.consume_col_id().ok_or_else(|| {
                     self.error_here("DEALLOCATE requires a statement name or ALL")
                 })?),
-                location,
+                parse_loc,
             )
         };
         self.expect_statement_end()?;
         Ok(node!(DeallocateStmt {
             name,
             isall,
-            location,
+            parse_loc,
         }))
     }
 
@@ -175,14 +175,14 @@ impl Parser {
         };
         if !parenthesized && matches!(self.peek_kind(), TokenKind::Analyze | TokenKind::Analyse) {
             let token = self.advance().clone();
-            options.push(make_def_elem("analyze", None, token.location()));
+            options.push(make_def_elem("analyze", None, token.offset()));
             if self.at(TokenKind::Verbose) {
                 let token = self.advance().clone();
-                options.push(make_def_elem("verbose", None, token.location()));
+                options.push(make_def_elem("verbose", None, token.offset()));
             }
         } else if !parenthesized && self.at(TokenKind::Verbose) {
             let token = self.advance().clone();
-            options.push(make_def_elem("verbose", None, token.location()));
+            options.push(make_def_elem("verbose", None, token.offset()));
         }
         if self.at_statement_end() {
             return Err(self.error_here("EXPLAIN requires a statement"));

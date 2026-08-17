@@ -171,12 +171,12 @@ impl ExprParser {
                 if restricted {
                     return self.fail("NOT is not allowed in a restricted expression");
                 }
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 let arg = self.parse_expr_mode(AND_BINDING_POWER + 1, restricted)?;
                 Some(node!(BoolExpr {
                     boolop: BoolExprType::NotExpr,
                     args: vec![arg],
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                 }))
             }
             TokenKind::Char('+') => {
@@ -187,13 +187,13 @@ impl ExprParser {
                     vec![token_text(&token)],
                     None,
                     Some(rhs),
-                    token.location(),
+                    token.offset(),
                 ))
             }
             TokenKind::Char('-') => {
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 let rhs = self.parse_expr_mode(UMINUS_BINDING_POWER, restricted)?;
-                Some(negate_node(rhs, location))
+                Some(negate_node(rhs, offset))
             }
             TokenKind::RightArrow | TokenKind::Char('|') | TokenKind::Op => {
                 let token = self.advance().clone();
@@ -203,11 +203,11 @@ impl ExprParser {
                     vec![token_name(&token).unwrap_or_else(|| token_text(&token))],
                     None,
                     Some(rhs),
-                    token.location(),
+                    token.offset(),
                 ))
             }
             TokenKind::Operator => {
-                let location = self.location();
+                let offset = self.offset();
                 let name = self.parse_explicit_operator_name()?;
                 let rhs = self.parse_expr_mode(41, restricted)?;
                 Some(make_aexpr_with_name(
@@ -215,31 +215,31 @@ impl ExprParser {
                     name,
                     None,
                     Some(rhs),
-                    location,
+                    offset,
                 ))
             }
             TokenKind::Exists => {
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 let subselect = self.parse_parenthesized_statement()?;
                 Some(node!(SubLink {
                     sub_link_type: SubLinkType::ExistsSublink,
                     subselect: Some(Box::new(subselect)),
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..SubLink::default()
                 }))
             }
             TokenKind::Unique => self.fail("UNIQUE predicate is not yet implemented"),
             TokenKind::Array => {
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 if self.consume(TokenKind::Char('[')) {
-                    let list_start = self.previous_location();
-                    self.parse_array_expr_body(location, list_start)
+                    let list_start_offset = self.previous_offset();
+                    self.parse_array_expr_body(offset, list_start_offset)
                 } else {
                     self.parse_parenthesized_statement().map(|subselect| {
                         node!(SubLink {
                             sub_link_type: SubLinkType::ArraySublink,
                             subselect: Some(Box::new(subselect)),
-                            location: location as ParseLoc,
+                            parse_loc: offset as ParseLoc,
                             ..SubLink::default()
                         })
                     })
@@ -250,20 +250,20 @@ impl ExprParser {
                 if restricted {
                     return self.fail("DEFAULT is not allowed in a restricted expression");
                 }
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 Some(node!(SetToDefault {
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..SetToDefault::default()
                 }))
             }
             TokenKind::Grouping => self.parse_grouping_func(),
             TokenKind::Collation if self.peek_kind_n(1) == TokenKind::For => {
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 self.advance();
                 self.expect(TokenKind::Char('('))?;
                 let arg = self.parse_expr(0)?;
                 self.expect(TokenKind::Char(')'))?;
-                Some(self.make_sql_syntax_call("pg_collation_for", vec![arg], location))
+                Some(self.make_sql_syntax_call("pg_collation_for", vec![arg], offset))
             }
             TokenKind::Cast | TokenKind::Treat => self.parse_cast_or_treat(),
             TokenKind::Extract => self.parse_extract_func(),
@@ -274,11 +274,11 @@ impl ExprParser {
             TokenKind::Trim => self.parse_trim_func(),
             TokenKind::Xmlexists => self.parse_xmlexists_func(),
             TokenKind::SystemUser => {
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 Some(node!(FuncCall {
                     funcname: system_type_names("system_user"),
                     funcformat: CoercionForm::SqlSyntax,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..FuncCall::default()
                 }))
             }
@@ -313,14 +313,14 @@ impl ExprParser {
             TokenKind::MergeAction => self.parse_merge_support_func(),
             TokenKind::Row => {
                 is_row_syntax = true;
-                let location = self.advance().location();
+                let offset = self.advance().offset();
                 self.expect(TokenKind::Char('('))?;
                 let args = self.parse_expr_list_until(TokenKind::Char(')'))?;
                 self.expect(TokenKind::Char(')'))?;
                 Some(node!(RowExpr {
                     args,
                     row_format: CoercionForm::ExplicitCall,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..RowExpr::default()
                 }))
             }

@@ -151,7 +151,7 @@ impl Parser {
                 TokenKind::Grant,
                 TokenKind::Revoke,
             ]);
-            let location = self.location();
+            let offset = self.offset();
             match self.peek_kind() {
                 TokenKind::For => {
                     self.advance();
@@ -177,7 +177,7 @@ impl Parser {
                             elements: roles,
                             ..AArrayExpr::default()
                         }))),
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                         ..DefElem::default()
                     }));
                 }
@@ -203,7 +203,7 @@ impl Parser {
                             elements: schemas,
                             ..AArrayExpr::default()
                         }))),
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                         ..DefElem::default()
                     }));
                 }
@@ -588,7 +588,7 @@ impl Parser {
             && self.peek_kind_n(1) == TokenKind::Option
             && matches!(self.peek_kind_n(2), TokenKind::For | TokenKind::Completion)
         {
-            let location = self.location();
+            let offset = self.offset();
             let name = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a role option name"))?;
@@ -597,7 +597,7 @@ impl Parser {
             role_options.push(make_def_elem(
                 &name,
                 Some(node!(Boolean::new(false))),
-                location,
+                offset,
             ));
         }
         let separator = kind.grantee_separator();
@@ -621,7 +621,7 @@ impl Parser {
         )?;
         if kind.is_grant() && self.consume(TokenKind::With) {
             loop {
-                let location = self.location();
+                let offset = self.offset();
                 let name = self
                     .consume_col_label()
                     .ok_or_else(|| self.error_here("expected a role option name"))?;
@@ -635,7 +635,7 @@ impl Parser {
                 role_options.push(make_def_elem(
                     &name,
                     Some(node!(Boolean::new(value))),
-                    location,
+                    offset,
                 ));
                 if !self.consume(TokenKind::Char(',')) {
                     break;

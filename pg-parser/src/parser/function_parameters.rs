@@ -51,10 +51,10 @@ pub(super) fn function_parameter_from_tokens_with_completion(
     completion: Option<completion::SharedCollector>,
 ) -> PResult<FunctionParameter> {
     record_type_name_completion(&tokens, completion.as_ref());
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "expected a function parameter",
         ));
     }
@@ -165,12 +165,12 @@ pub(super) fn function_parameter_from_tokens_with_completion(
 
     let arg_type = parse_func_type_tokens(tokens)
         .map(Box::new)
-        .map_err(|_| ParseError::syntax_exit(location, "expected a function parameter type"))?;
+        .map_err(|_| ParseError::syntax_exit(offset, "expected a function parameter type"))?;
     Ok(FunctionParameter {
         name,
         arg_type: Some(arg_type),
         mode,
         defexpr,
-        location: location as ParseLoc,
+        parse_loc: offset as ParseLoc,
     })
 }

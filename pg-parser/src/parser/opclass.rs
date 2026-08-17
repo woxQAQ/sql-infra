@@ -158,7 +158,7 @@ impl Parser {
         &mut self,
         stops: &[TokenKind],
     ) -> PResult<Box<Node>> {
-        let location = self.location();
+        let offset = self.offset();
         self.record_completion_slot(GrammarSlot::AnyName);
         let colname = Some(
             self.consume_col_id()
@@ -170,14 +170,14 @@ impl Parser {
         ));
         let coll_clause = if self.consume(TokenKind::Collate) {
             self.record_completion_slot(GrammarSlot::Collation);
-            let coll_location = self.previous_location();
+            let coll_offset = self.previous_offset();
             let collname = self.parse_name_list_until_keywords(stops);
             if collname.is_empty() {
                 return Err(self.error_here("COLLATE requires a collation name"));
             }
             Some(Box::new(CollateClause {
                 collname,
-                location: coll_location as ParseLoc,
+                parse_loc: coll_offset as ParseLoc,
                 ..CollateClause::default()
             }))
         } else {
@@ -188,7 +188,7 @@ impl Parser {
             type_name,
             is_local: true,
             coll_clause,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..ColumnDef::default()
         })))
     }
@@ -220,7 +220,7 @@ impl Parser {
                 let token = self.expect(TokenKind::IConst)?;
                 match token.value {
                     Some(TokenValue::Integer(value)) => value,
-                    _ => return Err(ParseError::ranged(token.range, "expected item number")),
+                    _ => return Err(ParseError::at_loc(token.loc, "expected item number")),
                 }
             } else {
                 0

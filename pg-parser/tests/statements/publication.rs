@@ -19,7 +19,7 @@ fn create_publication_stmt_populates_tables_columns_filters_and_schemas() {
         panic!("expected PublicationObjSpec");
     };
     assert_eq!(table_spec.pubobjtype, PublicationObjSpecType::Table);
-    assert_eq!(table_spec.location, 0);
+    assert_eq!(table_spec.parse_loc, 0);
     let table = table_spec.pubtable.as_ref().expect("PublicationTable");
     assert_eq!(table.columns.len(), 2);
     assert!(table.where_clause.is_some());
@@ -33,7 +33,7 @@ fn create_publication_stmt_populates_tables_columns_filters_and_schemas() {
     );
     assert_eq!(schema_spec.name.as_deref(), Some("public"));
     assert_eq!(
-        schema_spec.location as usize,
+        schema_spec.parse_loc as usize,
         sql.find("public with").unwrap()
     );
 
@@ -75,7 +75,7 @@ fn create_publication_stmt_populates_all_objects_and_exceptions() {
     };
     assert_eq!(exception.pubobjtype, PublicationObjSpecType::ExceptTable);
     assert_eq!(
-        exception.location as usize,
+        exception.parse_loc as usize,
         sql.find("only (audit.log)").unwrap()
     );
     assert!(
@@ -95,7 +95,7 @@ fn create_publication_stmt_populates_all_objects_and_exceptions() {
         panic!("expected PublicationObjSpec");
     };
     assert_eq!(
-        inherited_exception.location as usize,
+        inherited_exception.parse_loc as usize,
         sql.find("archive.items").unwrap()
     );
     assert!(matches!(
@@ -133,12 +133,12 @@ fn create_publication_stmt_populates_all_objects_and_exceptions() {
         panic!("expected three schema PublicationObjSpec nodes");
     };
     assert_eq!(
-        public.location as usize,
+        public.parse_loc as usize,
         schemas_sql.rfind("public").unwrap()
     );
-    assert_eq!(audit.location as usize, schemas_sql.find("audit").unwrap());
+    assert_eq!(audit.parse_loc as usize, schemas_sql.find("audit").unwrap());
     assert_eq!(
-        current.location as usize,
+        current.parse_loc as usize,
         schemas_sql.find("current_schema").unwrap()
     );
 }

@@ -94,9 +94,9 @@ impl Parser {
             }
         } else if kind == ObjectType::Operator {
             self.record_completion_qualified_name_slot(name_slot, &[TokenKind::Char('(')]);
-            let operator_location = self.location();
+            let operator_offset = self.offset();
             let tokens = self.take_until_top_level(&[TokenKind::Char('(')]);
-            let defnames = parse_operator_name_tokens(tokens, operator_location)?;
+            let defnames = parse_operator_name_tokens(tokens, operator_offset)?;
             (
                 defnames,
                 Vec::new(),
@@ -116,7 +116,7 @@ impl Parser {
                 return Err(self.error_here("CREATE COLLATION requires a name"));
             }
             let definition = if self.consume(TokenKind::From) {
-                let from_location = self.location();
+                let from_offset = self.offset();
                 self.record_completion_slot(GrammarSlot::Collation);
                 let from = self.parse_name_list();
                 if from.is_empty() {
@@ -125,7 +125,7 @@ impl Parser {
                 vec![make_def_elem(
                     "from",
                     Some(name_list_node(from)),
-                    from_location,
+                    from_offset,
                 )]
             } else {
                 self.parse_parenthesized_definition_for(Some(kind))?

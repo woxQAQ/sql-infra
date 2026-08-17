@@ -48,19 +48,19 @@ impl Parser {
             ]);
             if self.consume(TokenKind::Collate) {
                 self.record_completion_slot(GrammarSlot::Collation);
-                let location = self.previous_location();
+                let offset = self.previous_offset();
                 let collname = self.parse_name_list();
                 if collname.is_empty() {
                     return Err(self.error_here("COLLATE requires a collation name"));
                 }
                 coll_clause = Some(Box::new(CollateClause {
                     collname,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..CollateClause::default()
                 }));
                 continue;
             }
-            let location = self.location();
+            let offset = self.offset();
             let conname = self.parse_optional_constraint_name()?;
             let (contype, raw_expr) = match self.peek_kind() {
                 TokenKind::Default => {
@@ -97,7 +97,7 @@ impl Parser {
                 conname,
                 contype,
                 raw_expr,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 initially_valid: true,
                 is_enforced: true,
                 ..Constraint::default()
@@ -248,7 +248,7 @@ impl Parser {
     }
 
     fn parse_domain_constraint(&mut self) -> PResult<Constraint> {
-        let location = self.location();
+        let offset = self.offset();
         self.record_completion_tokens(&[TokenKind::Constraint, TokenKind::Check, TokenKind::Not]);
         let conname = self.parse_optional_constraint_name()?;
         self.record_completion_tokens(&[TokenKind::Check, TokenKind::Not]);
@@ -274,7 +274,7 @@ impl Parser {
             keys,
             is_enforced: true,
             initially_valid: true,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..Constraint::default()
         };
 

@@ -129,7 +129,7 @@ impl Parser {
             if !matches!(base, Node::RangeVar(_)) {
                 return Err(self.error_here("TABLESAMPLE requires a relation"));
             }
-            let location = self.location();
+            let offset = self.offset();
             self.record_completion_slot(GrammarSlot::Function);
             let method = self.parse_name_list();
             if method.is_empty() {
@@ -151,7 +151,7 @@ impl Parser {
                 method,
                 args,
                 repeatable,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             });
         }
         loop {
@@ -220,8 +220,8 @@ impl Parser {
                     self.completion.clone(),
                 )?;
             } else {
-                let end_location = inner_tokens.last().end_location_or(self.location());
-                inner_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
+                let end_offset = inner_tokens.last().end_offset_or(self.offset());
+                inner_tokens.push(Token::synthetic(TokenKind::Eof, end_offset));
                 let mut nested = Parser {
                     tokens: inner_tokens,
                     pos: 0,
@@ -242,9 +242,9 @@ impl Parser {
             }));
         }
 
-        let item_location = inner_tokens.first().location_or(self.location());
-        let end_location = inner_tokens.last().end_location_or(self.location());
-        inner_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
+        let item_offset = inner_tokens.first().offset_or(self.offset());
+        let end_offset = inner_tokens.last().end_offset_or(self.offset());
+        inner_tokens.push(Token::synthetic(TokenKind::Eof, end_offset));
         let mut nested = Parser {
             tokens: inner_tokens,
             pos: 0,
@@ -253,13 +253,13 @@ impl Parser {
         let mut item = nested.parse_from_item(&[TokenKind::Eof])?;
         if !nested.at(TokenKind::Eof) {
             return Err(ParseError::syntax_exit(
-                nested.location(),
+                nested.offset(),
                 "unexpected token in parenthesized FROM item",
             ));
         }
         if !matches!(item, Node::JoinExpr(_) | Node::RangeSubselect(_)) {
             return Err(ParseError::syntax_exit(
-                item_location,
+                item_offset,
                 "parenthesized FROM item must be a joined table or subquery",
             ));
         }

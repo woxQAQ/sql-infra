@@ -57,7 +57,7 @@ impl Parser {
     }
 
     fn parse_schema_statement(&mut self) -> PResult<Node> {
-        let location = self.location();
+        let offset = self.offset();
         if !self.at_any(&[TokenKind::Create, TokenKind::Grant]) {
             return Err(self.error_here("expected a CREATE SCHEMA element"));
         }
@@ -134,7 +134,7 @@ impl Parser {
             Ok(node)
         } else {
             Err(ParseError::syntax_exit(
-                location,
+                offset,
                 "statement type is not allowed in CREATE SCHEMA",
             ))
         }

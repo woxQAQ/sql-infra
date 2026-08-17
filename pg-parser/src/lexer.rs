@@ -1,4 +1,4 @@
-//! PostgreSQL-compatible tokenization with byte-accurate ranges.
+//! PostgreSQL-compatible tokenization with byte-accurate locs.
 //!
 //! Strict lexing reports malformed input immediately; completion lexing may
 //! replace an error at the editing point with an `Incomplete` token. The
@@ -7,7 +7,11 @@
 use crate::BareLabel;
 use crate::KEYWORDS;
 use crate::KeywordCategory;
-use crate::TextRange;
+use crate::Loc;
+use crate::Position;
+use crate::PositionRange;
+use crate::SourceError;
+use crate::SourceText;
 use crate::TextSize;
 use crate::TokenKind;
 
@@ -32,93 +36,101 @@ pub enum TokenValue {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Token {
     pub kind: TokenKind,
-    pub range: TextRange,
+    pub loc: Loc,
     pub value: Option<TokenValue>,
 }
 
 impl Token {
-    fn new(kind: TokenKind, location: usize) -> Self {
+    fn new(kind: TokenKind, offset: usize) -> Self {
         Self {
             kind,
-            range: TextRange::empty(TextSize::from_usize(location)),
+            loc: Loc::empty(TextSize::from_usize(offset)),
             value: None,
         }
     }
 
-    fn string(kind: TokenKind, location: usize, value: impl Into<std::string::String>) -> Self {
+    fn string(kind: TokenKind, offset: usize, value: impl Into<std::string::String>) -> Self {
         Self {
             kind,
-            range: TextRange::empty(TextSize::from_usize(location)),
+            loc: Loc::empty(TextSize::from_usize(offset)),
             value: Some(TokenValue::String(value.into())),
         }
     }
 
-    fn integer(kind: TokenKind, location: usize, value: i32) -> Self {
+    fn integer(kind: TokenKind, offset: usize, value: i32) -> Self {
         Self {
             kind,
-            range: TextRange::empty(TextSize::from_usize(location)),
+            loc: Loc::empty(TextSize::from_usize(offset)),
             value: Some(TokenValue::Integer(value)),
         }
     }
 
-    fn keyword(kind: TokenKind, location: usize, word: &'static str) -> Self {
+    fn keyword(kind: TokenKind, offset: usize, word: &'static str) -> Self {
         Self {
             kind,
-            range: TextRange::empty(TextSize::from_usize(location)),
+            loc: Loc::empty(TextSize::from_usize(offset)),
             value: Some(TokenValue::Keyword(word)),
         }
     }
 
-    pub(crate) fn synthetic(kind: TokenKind, location: usize) -> Self {
-        Self::new(kind, location)
+    pub(crate) fn synthetic(kind: TokenKind, offset: usize) -> Self {
+        Self::new(kind, offset)
     }
 
-    pub(crate) fn completion_hole(location: usize) -> Self {
-        Self::string(TokenKind::Ident, location, "__completion_hole__")
+    pub(crate) fn completion_hole(offset: usize) -> Self {
+        Self::string(TokenKind::Ident, offset, "__completion_hole__")
     }
 
-    pub fn location(&self) -> usize {
-        self.range.start().into()
+    pub fn offset(&self) -> usize {
+        self.loc.start().into()
     }
 
-    pub fn end_location(&self) -> usize {
-        self.range.end().into()
+    pub fn end_offset(&self) -> usize {
+        self.loc.end().into()
     }
 
     fn finish(&mut self, end: usize) {
-        self.range = TextRange::new(self.range.start(), TextSize::from_usize(end));
+        self.loc = Loc::new(self.loc.start(), TextSize::from_usize(end));
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LexError {
     pub message: std::string::String,
-    pub range: TextRange,
+    pub loc: Loc,
 }
 
 impl LexError {
-    fn new(location: usize, message: impl Into<std::string::String>) -> Self {
+    fn new(offset: usize, message: impl Into<std::string::String>) -> Self {
         Self {
-            range: TextRange::empty(TextSize::from_usize(location)),
+            loc: Loc::empty(TextSize::from_usize(offset)),
             message: message.into(),
         }
     }
 
-    fn ranged(start: usize, end: usize, message: impl Into<std::string::String>) -> Self {
+    fn between_offsets(start: usize, end: usize, message: impl Into<std::string::String>) -> Self {
         Self {
-            range: TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end)),
+            loc: Loc::new(TextSize::from_usize(start), TextSize::from_usize(end)),
             message: message.into(),
         }
     }
 
-    pub fn location(&self) -> usize {
-        self.range.start().into()
+    pub fn offset(&self) -> usize {
+        self.loc.start().into()
+    }
+
+    pub fn position(&self, source: &SourceText<'_>) -> Result<Position, SourceError> {
+        source.position(self.loc.start())
+    }
+
+    pub fn position_range(&self, source: &SourceText<'_>) -> Result<PositionRange, SourceError> {
+        source.position_range(self.loc)
     }
 }
 
 impl std::fmt::Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at byte {}", self.message, self.location())
+        write!(f, "{} at byte {}", self.message, self.offset())
     }
 }
 
@@ -173,7 +185,7 @@ impl CompletionTokenization {
 
 /// Tokenize editor input without weakening the strict [`lex`] interface.
 ///
-/// A lexical failure that starts at or after `point`, or whose invalid range
+/// A lexical failure that starts at or after `point`, or whose invalid loc
 /// reaches `point`, is represented by an `Incomplete` token. A failure wholly
 /// before `point` remains fatal because the parser cannot reliably infer the
 /// grammar state past it.
@@ -187,17 +199,17 @@ pub fn lex_for_completion(
             tokens,
             recovered_error: None,
         }),
-        Err(error) if usize::from(error.range.end()) >= completion_offset => {
-            let valid_prefix_end = usize::from(error.range.start()).min(input.len());
+        Err(error) if usize::from(error.loc.end()) >= completion_offset => {
+            let valid_prefix_end = usize::from(error.loc.start()).min(input.len());
             let mut tokens = lex(&input[..valid_prefix_end])?;
             debug_assert_eq!(tokens.last().map(|token| token.kind), Some(TokenKind::Eof));
             tokens.pop();
             tokens.push(Token {
                 kind: TokenKind::Incomplete,
-                range: error.range,
+                loc: error.loc,
                 value: None,
             });
-            tokens.push(Token::new(TokenKind::Eof, usize::from(error.range.end())));
+            tokens.push(Token::new(TokenKind::Eof, usize::from(error.loc.end())));
             Ok(CompletionTokenization {
                 tokens,
                 recovered_error: Some(error),
@@ -365,7 +377,7 @@ impl<'a> Lexer<'a> {
         range_start: usize,
         message: impl Into<std::string::String>,
     ) -> Result<T, LexError> {
-        Err(LexError::ranged(range_start, self.pos, message))
+        Err(LexError::between_offsets(range_start, self.pos, message))
     }
 
     fn skip_whitespace_and_comments(&mut self) -> Result<(), LexError> {
@@ -654,7 +666,7 @@ impl<'a> Lexer<'a> {
             }
             let digits = &self.input[digits_start..self.pos];
             let number = digits.parse::<i32>().map_err(|_| {
-                LexError::ranged(token_start, self.pos, "parameter number too large")
+                LexError::between_offsets(token_start, self.pos, "parameter number too large")
             })?;
             return Ok(Some(Token::integer(TokenKind::Param, token_start, number)));
         }
@@ -850,7 +862,7 @@ impl<'a> Lexer<'a> {
 
     fn reject_numeric_junk(&self, token_start: usize) -> Result<(), LexError> {
         if self.peek().is_some_and(is_ident_start) {
-            return Err(LexError::ranged(
+            return Err(LexError::between_offsets(
                 token_start,
                 self.pos,
                 "trailing junk after numeric literal",
@@ -1074,7 +1086,7 @@ fn push_codepoint(
     escape_end: usize,
 ) -> Result<(), LexError> {
     let Some(ch) = char::from_u32(codepoint) else {
-        return Err(LexError::ranged(
+        return Err(LexError::between_offsets(
             escape_start,
             escape_end,
             "invalid Unicode escape value",
@@ -1216,25 +1228,25 @@ mod tests {
     }
 
     #[test]
-    fn token_ranges_cover_complete_utf8_lexemes_and_skip_trivia() {
+    fn token_locs_cover_complete_utf8_lexemes_and_skip_trivia() {
         let sql = "  select /* comment */ 中文::text";
         let tokens = lex(sql).unwrap();
         let source = SourceText::new(sql).unwrap();
         let lexemes = tokens
             .iter()
-            .map(|token| source.slice(token.range).unwrap())
+            .map(|token| source.slice(token.loc).unwrap())
             .collect::<Vec<_>>();
         assert_eq!(lexemes, ["select", "中文", "::", "text", ""]);
-        assert_eq!(tokens[1].location(), sql.find("中文").unwrap());
-        assert_eq!(tokens[1].end_location(), sql.find("中文").unwrap() + 6);
+        assert_eq!(tokens[1].offset(), sql.find("中文").unwrap());
+        assert_eq!(tokens[1].end_offset(), sql.find("中文").unwrap() + 6);
     }
 
     #[test]
-    fn lexical_error_ranges_cover_the_invalid_construct() {
+    fn lexical_error_locs_cover_the_invalid_construct() {
         let sql = "select 'unterminated";
         let error = lex(sql).unwrap_err();
-        assert_eq!(error.location(), sql.find('\'').unwrap());
-        assert_eq!(usize::from(error.range.end()), sql.len());
+        assert_eq!(error.offset(), sql.find('\'').unwrap());
+        assert_eq!(usize::from(error.loc.end()), sql.len());
     }
 
     #[test]

@@ -34,7 +34,7 @@ impl Parser {
         let mut whenclause = Vec::new();
         if self.consume(TokenKind::When) {
             loop {
-                let location = self.location();
+                let offset = self.offset();
                 self.record_completion_slot(GrammarSlot::AnyName);
                 let name = self
                     .consume_col_id()
@@ -51,7 +51,7 @@ impl Parser {
                     }
                 }
                 self.expect(TokenKind::Char(')'))?;
-                whenclause.push(make_def_elem(&name, Some(name_list_node(values)), location));
+                whenclause.push(make_def_elem(&name, Some(name_list_node(values)), offset));
                 if !self.consume(TokenKind::And) {
                     break;
                 }
@@ -209,7 +209,7 @@ impl Parser {
         };
         let mut transition_rels = Vec::new();
         if !is_constraint && self.consume(TokenKind::Referencing) {
-            let transition_start = self.location();
+            let transition_start = self.offset();
             loop {
                 self.record_completion_lookahead_tokens(&[TokenKind::Old, TokenKind::New]);
                 if !matches!(self.peek_kind(), TokenKind::Old | TokenKind::New) {

@@ -4,7 +4,7 @@
 //! lateral/table-function visibility, set operations, CTE ordering, and DML
 //! targets without requiring a complete AST or catalog access.
 
-use pg_parser::TextRange;
+use pg_parser::Loc;
 use pg_parser::TextSize;
 use pg_parser::Token;
 use pg_parser::TokenKind;
@@ -93,10 +93,10 @@ pub(super) fn collect_tokens(
                 derived_table_container(&input, inner_select, outer_select)
             {
                 if is_lateral {
-                    let boundary = input.base + input.tokens[open_paren].range.start();
+                    let boundary = input.base + input.tokens[open_paren].loc.start();
                     outer
                         .relations
-                        .retain(|relation| relation.syntax_range.end() <= boundary);
+                        .retain(|relation| relation.syntax_loc.end() <= boundary);
                 } else {
                     outer.relations.clear();
                 }
@@ -118,18 +118,18 @@ pub(super) fn collect_tokens(
     snapshot
 }
 
-pub(super) fn incomplete_range(base: TextSize, tokens: &[Token]) -> Option<TextRange> {
+pub(super) fn incomplete_loc(base: TextSize, tokens: &[Token]) -> Option<Loc> {
     let mut unmatched_opens = Vec::new();
     for token in tokens {
         match token.kind {
-            TokenKind::Char('(') => unmatched_opens.push(token.range),
+            TokenKind::Char('(') => unmatched_opens.push(token.loc),
             TokenKind::Char(')') if unmatched_opens.pop().is_none() => {
-                return Some(token.range + base);
+                return Some(token.loc + base);
             }
             _ => {}
         }
     }
-    unmatched_opens.last().map(|range| *range + base)
+    unmatched_opens.last().map(|loc| *loc + base)
 }
 
 /// Clause keywords that end a `FROM` list when they appear at branch depth.
@@ -165,7 +165,7 @@ struct FromSegment {
     from_keyword: usize,
     /// First same-depth [`FROM_LIST_END`] keyword after the list, else the
     /// branch end.
-    list_end: usize,
+    list_end_index: usize,
     /// First same-depth set-operation keyword or depth drop after the SELECT.
     branch_end: usize,
 }
@@ -179,14 +179,14 @@ fn from_segment(tokens: &[Token], depths: &[usize], select: SelectLocation) -> O
         .unwrap_or(tokens.len());
     let from_keyword = (select.index + 1..branch_end)
         .find(|index| depths[*index] == select.depth && tokens[*index].kind == TokenKind::From)?;
-    let list_end = (from_keyword + 1..branch_end)
+    let list_end_index = (from_keyword + 1..branch_end)
         .find(|index| {
             depths[*index] == select.depth && FROM_LIST_END.contains(&tokens[*index].kind)
         })
         .unwrap_or(branch_end);
     Some(FromSegment {
         from_keyword,
-        list_end,
+        list_end_index,
         branch_end,
     })
 }
@@ -206,12 +206,12 @@ fn derived_table_container(
             input.tokens[*index].kind == TokenKind::Char('(')
                 && input.depths[*index] == outer_select.depth
                 && matching_close(input.tokens, input.depths, *index, input.tokens.len())
-                    .is_none_or(|close| input.tokens[close].range.start() >= input.point)
+                    .is_none_or(|close| input.tokens[close].loc.start() >= input.point)
         })?;
 
     // Must sit inside the outer FROM list, not the SELECT list / WHERE / …
     let segment = from_segment(input.tokens, input.depths, outer_select)?;
-    if !(segment.from_keyword < open && open < segment.list_end) {
+    if !(segment.from_keyword < open && open < segment.list_end_index) {
         return None;
     }
 
@@ -257,7 +257,7 @@ fn token_depths(tokens: &[Token]) -> Vec<usize> {
 fn depth_at_point(tokens: &[Token], point: TextSize) -> usize {
     let mut depth = 0usize;
     for token in tokens {
-        if token.range.start() >= point {
+        if token.loc.start() >= point {
             break;
         }
         match token.kind {
@@ -279,7 +279,7 @@ fn enclosing_selects(input: &ScopeInput<'_>, point_depth: usize) -> Vec<SelectLo
     let point = input.point;
     let mut selects_by_depth = Vec::<SelectLocation>::new();
     for (index, token) in tokens.iter().enumerate() {
-        if token.range.start() > point {
+        if token.loc.start() > point {
             break;
         }
         let depth = depths[index];
@@ -287,7 +287,7 @@ fn enclosing_selects(input: &ScopeInput<'_>, point_depth: usize) -> Vec<SelectLo
             // A close paren ends every group nested inside it. Depth alone
             // cannot tell sibling groups apart, so drop those candidates even
             // if the point later returns to the same depth.
-            TokenKind::Char(')') if token.range.start() < point => {
+            TokenKind::Char(')') if token.loc.start() < point => {
                 selects_by_depth.retain(|candidate| candidate.depth <= depth);
             }
             TokenKind::Select if depth <= point_depth => {
@@ -323,7 +323,7 @@ fn remove_completed_insert_source_selects(
 ) {
     for (insert, token) in input.tokens.iter().enumerate() {
         if token.kind != TokenKind::Insert
-            || token.range.start() > input.point
+            || token.loc.start() > input.point
             || input.tokens.get(insert + 1).map(|token| token.kind) != Some(TokenKind::Into)
         {
             continue;
@@ -336,8 +336,8 @@ fn remove_completed_insert_source_selects(
                         && input.tokens.get(*index + 1).map(|token| token.kind)
                             == Some(TokenKind::Conflict)))
         });
-        let Some(source_end_keyword) = source_end_keyword
-            .filter(|boundary| input.tokens[*boundary].range.start() < input.point)
+        let Some(source_end_keyword) =
+            source_end_keyword.filter(|boundary| input.tokens[*boundary].loc.start() < input.point)
         else {
             continue;
         };
@@ -355,7 +355,7 @@ fn point_is_in_set_operation_suffix(
     point_depth: usize,
 ) -> bool {
     let has_set_operation = input.tokens.iter().enumerate().any(|(index, token)| {
-        token.range.start() < input.point
+        token.loc.start() < input.point
             && input.depths[index] == select.depth
             && SET_OPERATION.contains(&token.kind)
     });
@@ -367,7 +367,7 @@ fn point_is_in_set_operation_suffix(
     let suffix_depth = select.depth.min(point_depth);
     (select.index + 1..input.tokens.len()).any(|index| {
         input.depths[index] == suffix_depth
-            && input.tokens[index].range.start() <= input.point
+            && input.tokens[index].loc.start() <= input.point
             && QUERY_SUFFIX.contains(&input.tokens[index].kind)
     })
 }
@@ -380,7 +380,7 @@ fn wrapped_query_select_before_suffix(input: &ScopeInput<'_>, point_depth: usize
         .enumerate()
         .rev()
         .find_map(|(index, token)| {
-            (token.range.start() <= input.point
+            (token.loc.start() <= input.point
                 && input.depths[index] == point_depth
                 && QUERY_SUFFIX.contains(&token.kind))
             .then_some(index)
@@ -411,7 +411,7 @@ fn query_scope(
         relations: parse_from_relations(
             input,
             segment.from_keyword + 1,
-            segment.list_end,
+            segment.list_end_index,
             select.depth,
             ctes,
         ),
@@ -428,12 +428,12 @@ fn apply_table_function_visibility(
     };
     // Stay inside the FROM list: a scalar call in WHERE/GROUP BY/… has the
     // same name-then-paren shape but must not trigger this rule.
-    let Some(open) = (segment.from_keyword + 1..segment.list_end).find(|index| {
+    let Some(open) = (segment.from_keyword + 1..segment.list_end_index).find(|index| {
         input.tokens[*index].kind == TokenKind::Char('(')
             && input.depths[*index] == select.depth
-            && input.tokens[*index].range.start() < input.point
-            && matching_close(input.tokens, input.depths, *index, segment.list_end)
-                .is_some_and(|close| input.tokens[close].range.end() >= input.point)
+            && input.tokens[*index].loc.start() < input.point
+            && matching_close(input.tokens, input.depths, *index, segment.list_end_index)
+                .is_some_and(|close| input.tokens[close].loc.end() >= input.point)
             && is_table_function_open(input.tokens, input.depths, *index, select.depth)
     }) else {
         return;
@@ -460,10 +460,10 @@ fn apply_table_function_visibility(
         return;
     }
 
-    let boundary = input.base + input.tokens[item_start].range.start();
+    let boundary = input.base + input.tokens[item_start].loc.start();
     scope
         .relations
-        .retain(|relation| relation.syntax_range.end() <= boundary);
+        .retain(|relation| relation.syntax_loc.end() <= boundary);
 }
 
 /// JOIN ON/USING may only reference relations introduced before that clause.
@@ -486,7 +486,7 @@ fn apply_join_condition_visibility(
     let boundary = input.base + condition_start;
     scope
         .relations
-        .retain(|relation| relation.syntax_range.end() <= boundary);
+        .retain(|relation| relation.syntax_loc.end() <= boundary);
 }
 
 fn is_table_function_open(tokens: &[Token], depths: &[usize], open: usize, depth: usize) -> bool {
@@ -516,8 +516,8 @@ fn is_table_function_open(tokens: &[Token], depths: &[usize], open: usize, depth
 /// stay visible while the cursor is inside the group.
 fn parse_from_relations(
     input: &ScopeInput<'_>,
-    list_start: usize,
-    list_end: usize,
+    list_start_index: usize,
+    list_end_index: usize,
     list_depth: usize,
     ctes: &[CteDefinition],
 ) -> Vec<VisibleRelation> {
@@ -529,9 +529,9 @@ fn parse_from_relations(
         depths,
     } = *input;
     let mut relations = Vec::new();
-    let mut index = list_start;
+    let mut index = list_start_index;
     let mut expecting_item = true;
-    while index < list_end {
+    while index < list_end_index {
         if depths[index] != list_depth {
             index += 1;
             continue;
@@ -570,13 +570,13 @@ fn parse_from_relations(
         // Parenthesized join group: either one aliased relation, or — when
         // unaliased / cursor-inside — the flattened inner FROM items.
         if kind == TokenKind::Char('(')
-            && let Some(group_close) = matching_close(tokens, depths, index, list_end)
+            && let Some(group_close) = matching_close(tokens, depths, index, list_end_index)
             && !parenthesized_body_is_query(tokens, depths, index, group_close)
         {
             let (alias, _, next_index) =
-                parse_alias(source, base, tokens, group_close + 1, list_end);
+                parse_alias(source, base, tokens, group_close + 1, list_end_index);
             let point_in_group =
-                tokens[index].range.end() <= point && point <= tokens[group_close].range.start();
+                tokens[index].loc.end() <= point && point <= tokens[group_close].loc.start();
             if alias.is_none() || point_in_group {
                 relations.extend(parse_from_relations(
                     input,
@@ -592,7 +592,7 @@ fn parse_from_relations(
         }
 
         if let Some((relation, next_index)) =
-            parse_from_item(input, index, list_end, list_depth, ctes)
+            parse_from_item(input, index, list_end_index, list_depth, ctes)
         {
             relations.push(relation);
             index = next_index;
@@ -607,7 +607,7 @@ fn parse_from_relations(
 fn parse_from_item(
     input: &ScopeInput<'_>,
     mut index: usize,
-    list_end: usize,
+    list_end_index: usize,
     item_depth: usize,
     ctes: &[CteDefinition],
 ) -> Option<(VisibleRelation, usize)> {
@@ -619,14 +619,14 @@ fn parse_from_item(
         depths,
     } = *input;
     let item_start = index;
-    let lateral = consume_kind(tokens, &mut index, list_end, TokenKind::LateralP);
-    let has_only = consume_kind(tokens, &mut index, list_end, TokenKind::Only);
-    if index >= list_end {
+    let lateral = consume_kind(tokens, &mut index, list_end_index, TokenKind::LateralP);
+    let has_only = consume_kind(tokens, &mut index, list_end_index, TokenKind::Only);
+    if index >= list_end_index {
         return None;
     }
 
     let only_parenthesis_close = if has_only && tokens[index].kind == TokenKind::Char('(') {
-        let close = matching_close(tokens, depths, index, list_end)?;
+        let close = matching_close(tokens, depths, index, list_end_index)?;
         index += 1;
         Some(close)
     } else {
@@ -636,7 +636,7 @@ fn parse_from_item(
     // ---- parenthesized item: (query) / (VALUES …) / (join tree) ------------
     if only_parenthesis_close.is_none() && tokens[index].kind == TokenKind::Char('(') {
         let body_open = index;
-        let body_close = matching_close(tokens, depths, index, list_end)?;
+        let body_close = matching_close(tokens, depths, index, list_end_index)?;
         let body_kind = first_parenthesized_body_kind(tokens, depths, body_open, body_close);
         let relation_kind = match body_kind {
             Some(TokenKind::Values) => RelationKind::Values,
@@ -647,15 +647,12 @@ fn parse_from_item(
         // Join trees are exposed only through their alias; flag them so callers
         // can fall back instead of inventing a relation name.
         let unsupported = (!is_query_body).then(|| UnsupportedRelation {
-            range: TextRange::new(
-                tokens[body_open].range.start(),
-                tokens[body_close].range.end(),
-            ) + base,
+            loc: Loc::new(tokens[body_open].loc.start(), tokens[body_close].loc.end()) + base,
             reason: "parenthesized table expression is not classified".to_owned(),
         });
         index = body_close + 1;
         let (alias, explicit_columns, next_index) =
-            parse_alias(source, base, tokens, index, list_end);
+            parse_alias(source, base, tokens, index, list_end_index);
         return Some((
             VisibleRelation {
                 kind: relation_kind,
@@ -663,15 +660,12 @@ fn parse_from_item(
                 alias,
                 explicit_columns,
                 qualified_only: false,
-                syntax_range: TextRange::new(
-                    tokens[item_start].range.start(),
-                    item_syntax_end(tokens, next_index, tokens[body_close].range.end()),
+                syntax_loc: Loc::new(
+                    tokens[item_start].loc.start(),
+                    item_syntax_end(tokens, next_index, tokens[body_close].loc.end()),
                 ) + base,
-                body_range: Some(
-                    TextRange::new(
-                        tokens[body_open].range.end(),
-                        tokens[body_close].range.start(),
-                    ) + base,
+                body_loc: Some(
+                    Loc::new(tokens[body_open].loc.end(), tokens[body_close].loc.start()) + base,
                 ),
                 lateral,
                 unsupported,
@@ -688,11 +682,11 @@ fn parse_from_item(
         // One table function; output columns come from the relation alias or,
         // failing that, from the individual function column definitions.
         let body_open = index + 2;
-        let body_close = matching_close(tokens, depths, body_open, list_end)?;
+        let body_close = matching_close(tokens, depths, body_open, list_end_index)?;
         index = body_close + 1;
-        consume_with_ordinality(tokens, &mut index, list_end);
+        consume_with_ordinality(tokens, &mut index, list_end_index);
         let (alias, mut explicit_columns, next_index) =
-            parse_function_alias(source, base, tokens, index, list_end);
+            parse_function_alias(source, base, tokens, index, list_end_index);
         if explicit_columns.is_empty() {
             explicit_columns =
                 parse_rows_from_columns(source, base, tokens, depths, body_open, body_close);
@@ -704,15 +698,12 @@ fn parse_from_item(
                 alias,
                 explicit_columns,
                 qualified_only: false,
-                syntax_range: TextRange::new(
-                    tokens[item_start].range.start(),
-                    item_syntax_end(tokens, next_index, tokens[body_close].range.end()),
+                syntax_loc: Loc::new(
+                    tokens[item_start].loc.start(),
+                    item_syntax_end(tokens, next_index, tokens[body_close].loc.end()),
                 ) + base,
-                body_range: Some(
-                    TextRange::new(
-                        tokens[body_open].range.end(),
-                        tokens[body_close].range.start(),
-                    ) + base,
+                body_loc: Some(
+                    Loc::new(tokens[body_open].loc.end(), tokens[body_close].loc.start()) + base,
                 ),
                 lateral,
                 unsupported: None,
@@ -723,7 +714,8 @@ fn parse_from_item(
 
     // ---- named relation / CTE / ordinary table-function call ---------------
     // All three share a qualified-name prefix; they diverge only after it.
-    let (name, after_name) = parse_qualified_name(source, base, tokens, index, list_end, point)?;
+    let (name, after_name) =
+        parse_qualified_name(source, base, tokens, index, list_end_index, point)?;
     index = if let Some(close) = only_parenthesis_close {
         if after_name != close {
             return None;
@@ -733,27 +725,22 @@ fn parse_from_item(
         after_name
     };
     let is_table_function = only_parenthesis_close.is_none()
-        && index < list_end
+        && index < list_end_index
         && depths[index] == item_depth
         && tokens[index].kind == TokenKind::Char('(');
-    let body_range = if is_table_function {
+    let body_loc = if is_table_function {
         let body_open = index;
-        let body_close = matching_close(tokens, depths, body_open, list_end)?;
+        let body_close = matching_close(tokens, depths, body_open, list_end_index)?;
         index = body_close + 1;
-        consume_with_ordinality(tokens, &mut index, list_end);
-        Some(
-            TextRange::new(
-                tokens[body_open].range.end(),
-                tokens[body_close].range.start(),
-            ) + base,
-        )
+        consume_with_ordinality(tokens, &mut index, list_end_index);
+        Some(Loc::new(tokens[body_open].loc.end(), tokens[body_close].loc.start()) + base)
     } else {
         None
     };
     let (alias, mut explicit_columns, next_index) = if is_table_function {
-        parse_function_alias(source, base, tokens, index, list_end)
+        parse_function_alias(source, base, tokens, index, list_end_index)
     } else {
-        parse_alias(source, base, tokens, index, list_end)
+        parse_alias(source, base, tokens, index, list_end_index)
     };
     let cte_definition = match name.as_slice() {
         [part] => ctes
@@ -780,11 +767,11 @@ fn parse_from_item(
             alias,
             explicit_columns,
             qualified_only: false,
-            syntax_range: TextRange::new(
-                tokens[item_start].range.start(),
-                item_syntax_end(tokens, next_index, tokens[after_name - 1].range.end()),
+            syntax_loc: Loc::new(
+                tokens[item_start].loc.start(),
+                item_syntax_end(tokens, next_index, tokens[after_name - 1].loc.end()),
             ) + base,
-            body_range,
+            body_loc,
             lateral,
             unsupported: None,
         },
@@ -792,13 +779,13 @@ fn parse_from_item(
     ))
 }
 
-/// End of a FROM item's syntax range: last consumed token, or `fallback` when
+/// End of a FROM item's syntax loc: last consumed token, or `fallback` when
 /// the parser stopped without advancing past the item head.
 fn item_syntax_end(tokens: &[Token], next_index: usize, fallback: TextSize) -> TextSize {
     next_index
         .checked_sub(1)
         .and_then(|last| tokens.get(last))
-        .map_or(fallback, |token| token.range.end())
+        .map_or(fallback, |token| token.loc.end())
 }
 
 fn parse_rows_from_columns(
@@ -1053,10 +1040,10 @@ fn parse_qualified_name(
     }
     if index < end
         && tokens[index].kind == TokenKind::Char('.')
-        && tokens[index].range.end() <= point
+        && tokens[index].loc.end() <= point
         && tokens
             .get(index + 1)
-            .is_none_or(|token| token.range.start() >= point)
+            .is_none_or(|token| token.loc.start() >= point)
     {
         return None;
     }
@@ -1115,8 +1102,8 @@ impl<'a> CteCursor<'a> {
         Some(CteDefinition {
             name,
             explicit_columns,
-            syntax_range: TextRange::new(syntax_start, body.syntax_end) + self.base,
-            body_range: TextRange::new(body.start, body.end) + self.base,
+            syntax_loc: Loc::new(syntax_start, body.syntax_end) + self.base,
+            body_loc: Loc::new(body.start, body.end) + self.base,
         })
     }
 
@@ -1166,15 +1153,15 @@ impl<'a> CteCursor<'a> {
             || {
                 self.tokens
                     .last()
-                    .map_or(self.tokens[open].range.end(), |token| token.range.end())
+                    .map_or(self.tokens[open].loc.end(), |token| token.loc.end())
             },
-            |close| self.tokens[close].range.start(),
+            |close| self.tokens[close].loc.start(),
         );
-        let syntax_end = close.map_or(end, |close| self.tokens[close].range.end());
+        let syntax_end = close.map_or(end, |close| self.tokens[close].loc.end());
         self.index = close.map_or(self.tokens.len(), |close| close + 1);
 
         Some(ParsedCteBody {
-            start: self.tokens[open].range.end(),
+            start: self.tokens[open].loc.end(),
             end,
             syntax_end,
         })
@@ -1201,7 +1188,7 @@ impl<'a> CteCursor<'a> {
     }
 
     fn current_start(&self) -> Option<TextSize> {
-        self.tokens.get(self.index).map(|token| token.range.start())
+        self.tokens.get(self.index).map(|token| token.loc.start())
     }
 
     fn container_end(&self) -> TextSize {
@@ -1211,9 +1198,9 @@ impl<'a> CteCursor<'a> {
                 || {
                     self.tokens
                         .last()
-                        .map_or(TextSize::ZERO, |token| token.range.end())
+                        .map_or(TextSize::ZERO, |token| token.loc.end())
                 },
-                |candidate| self.tokens[candidate].range.start(),
+                |candidate| self.tokens[candidate].loc.start(),
             )
     }
 }
@@ -1249,10 +1236,10 @@ fn parse_cte_group(input: &ScopeInput<'_>, with_index: usize) -> Option<CteGroup
 
     let main_query_start = cursor
         .current_start()
-        .unwrap_or_else(|| input.tokens[with_index].range.end());
+        .unwrap_or_else(|| input.tokens[with_index].loc.end());
     Some(CteGroup {
         depth: cursor.depth,
-        start: input.base + input.tokens[with_index].range.start(),
+        start: input.base + input.tokens[with_index].loc.start(),
         main_query_start: input.base + main_query_start,
         end: input.base + cursor.container_end(),
         recursive,
@@ -1296,7 +1283,7 @@ fn visible_cte_count(group: &CteGroup, absolute_point: TextSize) -> usize {
     // A non-recursive CTE cannot reference itself or later CTEs
     // while its own body is being parsed.
     if let Some(active_body_index) = group.ctes.iter().position(|cte| {
-        cte.body_range.start() <= absolute_point && absolute_point <= cte.body_range.end()
+        cte.body_loc.start() <= absolute_point && absolute_point <= cte.body_loc.end()
     }) {
         return active_body_index;
     }
@@ -1310,7 +1297,7 @@ fn visible_cte_count(group: &CteGroup, absolute_point: TextSize) -> usize {
     group
         .ctes
         .iter()
-        .take_while(|cte| cte.syntax_range.end() <= absolute_point)
+        .take_while(|cte| cte.syntax_loc.end() <= absolute_point)
         .count()
 }
 
@@ -1393,11 +1380,11 @@ fn collect_dml_scope(
         let on_keyword = (using_keyword + 1..statement_end).find(|index| {
             depths[*index] == statement_depth && tokens[*index].kind == TokenKind::On
         });
-        let source_range_end = on_keyword.map_or_else(
+        let source_end_offset = on_keyword.map_or_else(
             || token_boundary(tokens, statement_end),
-            |index| tokens[index].range.start(),
+            |index| tokens[index].loc.start(),
         );
-        if tokens[using_keyword].range.end() <= point && point <= source_range_end {
+        if tokens[using_keyword].loc.end() <= point && point <= source_end_offset {
             snapshot.dml_target = None;
             snapshot.merge_source = None;
         }
@@ -1424,7 +1411,7 @@ fn collect_dml_scope(
 
         // Completing inside the source list hides the DML target (the target
         // is not in scope for FROM/USING expressions).
-        let in_source_list = tokens[source_keyword].range.end() <= point
+        let in_source_list = tokens[source_keyword].loc.end() <= point
             && point <= token_boundary(tokens, source_list_end);
         if in_source_list {
             snapshot.dml_target = None;
@@ -1439,9 +1426,9 @@ fn collect_dml_scope(
         );
         let absolute_point = input.absolute_point();
         let active_body = relations.iter().position(|relation| {
-            relation.body_range.is_some_and(|range| {
-                range.start() <= absolute_point && absolute_point <= range.end()
-            })
+            relation
+                .body_loc
+                .is_some_and(|loc| loc.start() <= absolute_point && absolute_point <= loc.end())
         });
 
         if let Some(active) = active_body {
@@ -1451,8 +1438,8 @@ fn collect_dml_scope(
             let sees_preceding =
                 relations[active].lateral || relations[active].kind == RelationKind::TableFunction;
             if sees_preceding {
-                let boundary = relations[active].syntax_range.start();
-                relations.retain(|relation| relation.syntax_range.end() <= boundary);
+                let boundary = relations[active].syntax_loc.start();
+                relations.retain(|relation| relation.syntax_loc.end() <= boundary);
                 add_visible_relations(snapshot, relation_placement, relations);
             }
         } else {
@@ -1468,7 +1455,7 @@ fn collect_dml_scope(
                 statement_depth..=max_join_depth,
             ) {
                 let boundary = base + condition_start;
-                relations.retain(|relation| relation.syntax_range.end() <= boundary);
+                relations.retain(|relation| relation.syntax_loc.end() <= boundary);
             }
             add_visible_relations(snapshot, relation_placement, relations);
         }
@@ -1519,14 +1506,13 @@ fn insert_excluded_relation(
             && input.tokens[*index].kind == TokenKind::Do
             && input.tokens.get(*index + 1).map(|token| token.kind) == Some(TokenKind::Update)
     })? + 1;
-    if input.tokens[update_keyword].range.end() > input.point {
+    if input.tokens[update_keyword].loc.end() > input.point {
         return None;
     }
     let returning_keyword = (update_keyword + 1..statement_end).find(|index| {
         input.depths[*index] == statement_depth && input.tokens[*index].kind == TokenKind::Returning
     });
-    if returning_keyword
-        .is_some_and(|returning| input.tokens[returning].range.start() <= input.point)
+    if returning_keyword.is_some_and(|returning| input.tokens[returning].loc.start() <= input.point)
     {
         return None;
     }
@@ -1548,7 +1534,7 @@ fn returning_relations(
     }) else {
         return Vec::new();
     };
-    if input.tokens[returning_keyword].range.end() > input.point {
+    if input.tokens[returning_keyword].loc.end() > input.point {
         return Vec::new();
     }
 
@@ -1565,7 +1551,7 @@ fn returning_relations(
         let Some(close) = matching_close(input.tokens, input.depths, open, statement_end) else {
             return Vec::new();
         };
-        if input.tokens[close].range.end() > input.point {
+        if input.tokens[close].loc.end() > input.point {
             return Vec::new();
         }
         let mut index = open + 1;
@@ -1598,7 +1584,7 @@ fn returning_relations(
 
 fn qualified_target_relation(target: &VisibleRelation, alias: NamePart) -> VisibleRelation {
     let mut relation = target.clone();
-    relation.syntax_range = alias.range;
+    relation.syntax_loc = alias.loc;
     relation.alias = Some(alias);
     relation.qualified_only = true;
     relation
@@ -1609,7 +1595,7 @@ fn synthetic_name(base: TextSize, token: &Token, text: &str) -> NamePart {
         text: text.to_owned(),
         normalized: text.to_owned(),
         quoted: false,
-        range: token.range + base,
+        loc: token.loc + base,
     }
 }
 
@@ -1620,10 +1606,10 @@ fn synthetic_name(base: TextSize, token: &Token, text: &str) -> NamePart {
 fn active_dml_statement(input: &ScopeInput<'_>) -> Option<usize> {
     let mut statement_heads_by_depth = Vec::<usize>::new();
     for (index, token) in input.tokens.iter().enumerate() {
-        if token.range.start() > input.point {
+        if token.loc.start() > input.point {
             break;
         }
-        if token.kind == TokenKind::Char(')') && token.range.start() < input.point {
+        if token.kind == TokenKind::Char(')') && token.loc.start() < input.point {
             statement_heads_by_depth
                 .retain(|candidate| input.depths[*candidate] <= input.depths[index]);
         }
@@ -1685,15 +1671,15 @@ fn apply_merge_when_clause_visibility(
             TokenKind::Case => case_depth += 1,
             TokenKind::EndP if case_depth > 0 => case_depth -= 1,
             TokenKind::When if case_depth == 0 => {
-                if input.tokens[index].range.start() <= input.point {
+                if input.tokens[index].loc.start() <= input.point {
                     active_when_keyword = Some(index);
                 } else if active_when_keyword.is_some() {
-                    active_clause_end = Some(input.tokens[index].range.start());
+                    active_clause_end = Some(input.tokens[index].loc.start());
                     break;
                 }
             }
             TokenKind::Returning if case_depth == 0 && active_when_keyword.is_some() => {
-                active_clause_end = Some(input.tokens[index].range.start());
+                active_clause_end = Some(input.tokens[index].loc.start());
                 break;
             }
             _ => {}
@@ -1750,9 +1736,9 @@ fn point_is_in_insert_source(input: &ScopeInput<'_>, insert: usize, statement_en
         })
         .map_or_else(
             || token_boundary(input.tokens, statement_end),
-            |index| input.tokens[index].range.start(),
+            |index| input.tokens[index].loc.start(),
         );
-    input.tokens[source_start].range.start() <= input.point && input.point <= source_end
+    input.tokens[source_start].loc.start() <= input.point && input.point <= source_end
 }
 
 /// Start of `tokens[index]`, or the end of the token stream when `index == len`.
@@ -1761,9 +1747,9 @@ fn token_boundary(tokens: &[Token], index: usize) -> TextSize {
         || {
             tokens
                 .last()
-                .map_or(TextSize::ZERO, |token| token.range.end())
+                .map_or(TextSize::ZERO, |token| token.loc.end())
         },
-        |token| token.range.start(),
+        |token| token.loc.start(),
     )
 }
 
@@ -1779,11 +1765,10 @@ fn active_join_condition_start(
 ) -> Option<TextSize> {
     let search_end = search_range.end;
     search_range.rev().find_map(|index| {
-        if input.depths[index] != condition_depth || input.tokens[index].range.start() > input.point
-        {
+        if input.depths[index] != condition_depth || input.tokens[index].loc.start() > input.point {
             return None;
         }
-        let condition_start = input.tokens[index].range.start();
+        let condition_start = input.tokens[index].loc.start();
         let condition_end = match input.tokens[index].kind {
             TokenKind::On => {
                 // ON <expr> ends at the next join/list delimiter (or list end).
@@ -1797,7 +1782,7 @@ fn active_join_condition_start(
                 });
                 end.map_or_else(
                     || token_boundary(input.tokens, search_end),
-                    |candidate| input.tokens[candidate].range.start(),
+                    |candidate| input.tokens[candidate].loc.start(),
                 )
             }
             TokenKind::Using => {
@@ -1807,12 +1792,12 @@ fn active_join_condition_start(
                 if open >= search_end
                     || input.depths[open] != condition_depth
                     || input.tokens[open].kind != TokenKind::Char('(')
-                    || input.point < input.tokens[open].range.end()
+                    || input.point < input.tokens[open].loc.end()
                 {
                     return None;
                 }
                 match matching_close(input.tokens, input.depths, open, search_end) {
-                    Some(close) => input.tokens[close].range.start(),
+                    Some(close) => input.tokens[close].loc.start(),
                     None => return Some(condition_start),
                 }
             }
@@ -1876,11 +1861,11 @@ fn parse_dml_target(
             alias,
             explicit_columns,
             qualified_only: false,
-            syntax_range: TextRange::new(
-                tokens[target_start].range.start(),
-                item_syntax_end(tokens, next, tokens[after_name - 1].range.end()),
+            syntax_loc: Loc::new(
+                tokens[target_start].loc.start(),
+                item_syntax_end(tokens, next, tokens[after_name - 1].loc.end()),
             ) + base,
-            body_range: None,
+            body_loc: None,
             lateral: false,
             unsupported: None,
         },

@@ -9,23 +9,23 @@ fn parse_stats_params_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<NodeList> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "CREATE STATISTICS requires an ON item",
         ));
     }
     if tokens.last().has_kind(TokenKind::Char(',')) {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "statistics parameter list cannot end with ','",
         ));
     }
     split_top_level_commas(tokens)
         .into_iter()
         .map(|tokens| {
-            let item_location = tokens.first().location_or(location);
+            let item_offset = tokens.first().offset_or(offset);
             if tokens.len() == 1
                 && token_name_in_categories(
                     &tokens[0],
@@ -50,7 +50,7 @@ fn parse_stats_params_with_completion(
                     }
                     None => {
                         return Err(ParseError::syntax_exit(
-                            item_location,
+                            item_offset,
                             "unterminated statistics expression",
                         ));
                     }
@@ -68,8 +68,8 @@ fn parse_stats_params_with_completion(
                     });
                 }
                 if close + 1 != tokens.len() {
-                    return Err(ParseError::ranged(
-                        tokens[close + 1].range,
+                    return Err(ParseError::at_loc(
+                        tokens[close + 1].loc,
                         "unexpected token after statistics expression",
                     ));
                 }
@@ -83,7 +83,7 @@ fn parse_stats_params_with_completion(
                     parse_expression_tokens_with_completion(tokens, completion.clone())?;
                 if !is_windowless_function_expression_node(&expression, starts_with_cast) {
                     return Err(ParseError::syntax_exit(
-                        item_location,
+                        item_offset,
                         "statistics expressions must be parenthesized unless they are function calls",
                     ));
                 }

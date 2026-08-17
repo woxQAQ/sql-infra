@@ -143,7 +143,7 @@ impl Parser {
                 TokenKind::No,
                 TokenKind::Options,
             ]);
-            let location = self.location();
+            let offset = self.offset();
             let (name, arg) = match self.peek_kind() {
                 kind @ (TokenKind::Handler | TokenKind::Validator | TokenKind::Connection) => {
                     self.advance();
@@ -185,7 +185,7 @@ impl Parser {
                 }
                 _ => return Err(self.error_here("invalid FOREIGN DATA WRAPPER option")),
             };
-            func_options.push(make_def_elem(name, arg, location));
+            func_options.push(make_def_elem(name, arg, offset));
         }
         Ok(func_options)
     }
@@ -253,7 +253,7 @@ impl Parser {
         let user = if self.consume(TokenKind::User) {
             Some(Box::new(RoleSpec {
                 roletype: RoleSpecType::CurrentUser,
-                location: self.previous_location() as ParseLoc,
+                parse_loc: self.previous_offset() as ParseLoc,
                 ..RoleSpec::default()
             }))
         } else {

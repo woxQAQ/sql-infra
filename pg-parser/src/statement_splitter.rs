@@ -5,20 +5,20 @@
 //! decoding, numeric validation, and keyword-table lookup.
 
 use crate::LexError;
-use crate::TextRange;
+use crate::Loc;
 use crate::TextSize;
-use crate::parser::StatementRange;
+use crate::parser::StatementLoc;
 
-/// Split SQL into statement ranges without parsing its grammar.
+/// Split SQL into statement locs without parsing its grammar.
 ///
 /// Semicolons inside strings, quoted identifiers, dollar-quoted strings,
 /// comments, parentheses, brackets, and `BEGIN ATOMIC` routine bodies do not
-/// terminate a statement. Empty statements are omitted. The `syntax` range
+/// terminate a statement. Empty statements are omitted. The `syntax` loc
 /// excludes the terminating semicolon; `terminator` contains it when present.
 ///
 /// Unterminated strings, quoted identifiers, dollar-quoted strings, and block
 /// comments return a [`LexError`]. Other SQL grammar is not validated.
-pub fn split_statement_ranges(sql: &str) -> Result<Vec<StatementRange>, LexError> {
+pub fn split_statement_locs(sql: &str) -> Result<Vec<StatementLoc>, LexError> {
     Splitter::new(sql)?.split()
 }
 
@@ -31,14 +31,14 @@ struct Splitter<'a> {
     atomic_depth: usize,
     case_depth: usize,
     pending_begin: bool,
-    ranges: Vec<StatementRange>,
+    locs: Vec<StatementLoc>,
 }
 
 impl<'a> Splitter<'a> {
     fn new(sql: &'a str) -> Result<Self, LexError> {
         TextSize::try_from(sql.len()).map_err(|error| LexError {
             message: error.to_string(),
-            range: TextRange::empty(TextSize::ZERO),
+            loc: Loc::empty(TextSize::ZERO),
         })?;
         Ok(Self {
             sql,
@@ -49,11 +49,11 @@ impl<'a> Splitter<'a> {
             atomic_depth: 0,
             case_depth: 0,
             pending_begin: false,
-            ranges: Vec::new(),
+            locs: Vec::new(),
         })
     }
 
-    fn split(mut self) -> Result<Vec<StatementRange>, LexError> {
+    fn split(mut self) -> Result<Vec<StatementLoc>, LexError> {
         while self.pos < self.bytes.len() {
             self.skip_trivia()?;
             if self.pos == self.bytes.len() {
@@ -106,12 +106,12 @@ impl<'a> Splitter<'a> {
         }
 
         if let Some(start) = self.statement_start {
-            self.ranges.push(StatementRange {
-                syntax: self.range(start, self.sql.len()),
+            self.locs.push(StatementLoc {
+                syntax: self.loc(start, self.sql.len()),
                 terminator: None,
             });
         }
-        Ok(self.ranges)
+        Ok(self.locs)
     }
 
     fn skip_trivia(&mut self) -> Result<(), LexError> {
@@ -340,9 +340,9 @@ impl<'a> Splitter<'a> {
 
     fn finish_statement(&mut self, semicolon: usize) {
         if let Some(start) = self.statement_start.take() {
-            self.ranges.push(StatementRange {
-                syntax: self.range(start, semicolon),
-                terminator: Some(self.range(semicolon, semicolon + 1)),
+            self.locs.push(StatementLoc {
+                syntax: self.loc(start, semicolon),
+                terminator: Some(self.loc(semicolon, semicolon + 1)),
             });
         }
         self.delimiter_depth = 0;
@@ -363,14 +363,14 @@ impl<'a> Splitter<'a> {
         self.bytes.get(self.pos + offset).copied()
     }
 
-    fn range(&self, start: usize, end: usize) -> TextRange {
-        TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end))
+    fn loc(&self, start: usize, end: usize) -> Loc {
+        Loc::new(TextSize::from_usize(start), TextSize::from_usize(end))
     }
 
     fn error(&self, start: usize, message: impl Into<String>) -> LexError {
         LexError {
             message: message.into(),
-            range: self.range(start, self.pos),
+            loc: self.loc(start, self.pos),
         }
     }
 }

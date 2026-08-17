@@ -74,7 +74,7 @@ fn create_function_stmt_populates_parameters_return_type_and_options() {
     };
     assert_eq!(first.name.as_deref(), Some("a"));
     assert_eq!(first.mode, FunctionParameterMode::Default);
-    assert_eq!(first.location as usize, sql.find("a int").unwrap());
+    assert_eq!(first.parse_loc as usize, sql.find("a int").unwrap());
 
     let Node::FunctionParameter(with_default) = &stmt.parameters[1] else {
         panic!("expected FunctionParameter");
@@ -83,7 +83,7 @@ fn create_function_stmt_populates_parameters_return_type_and_options() {
     assert_eq!(with_default.mode, FunctionParameterMode::In);
     assert!(with_default.defexpr.is_some());
     assert_eq!(
-        with_default.location as usize,
+        with_default.parse_loc as usize,
         sql.find("in label").unwrap()
     );
 
@@ -92,7 +92,7 @@ fn create_function_stmt_populates_parameters_return_type_and_options() {
     };
     assert_eq!(output.name.as_deref(), Some("total"));
     assert_eq!(output.mode, FunctionParameterMode::Out);
-    assert_eq!(output.location as usize, sql.find("out total").unwrap());
+    assert_eq!(output.parse_loc as usize, sql.find("out total").unwrap());
 }
 
 #[test]
@@ -142,7 +142,7 @@ fn create_function_returns_table_merges_output_columns_and_builds_return_type() 
         assert_eq!(column.name.as_deref(), Some(expected_name));
         assert_eq!(column.mode, FunctionParameterMode::Table);
         assert!(column.arg_type.is_some());
-        assert_eq!(column.location as usize, sql.find(expected_name).unwrap());
+        assert_eq!(column.parse_loc as usize, sql.find(expected_name).unwrap());
     }
     let return_type = stmt.return_type.as_deref().expect("table return TypeName");
     assert!(return_type.setof);
@@ -314,7 +314,7 @@ fn create_function_preserves_in_out_variadic_defaults_and_percent_type() {
     assert!(return_type.setof);
     assert_eq!(return_type.names.len(), 3);
     assert_eq!(
-        return_type.location as usize,
+        return_type.parse_loc as usize,
         sql.rfind("app.source.value%type").unwrap()
     );
 
@@ -351,13 +351,13 @@ fn create_function_preserves_in_out_variadic_defaults_and_percent_type() {
         (3, "in integer"),
     ] {
         assert_eq!(
-            parameter(index).location as usize,
+            parameter(index).parse_loc as usize,
             alternatives_sql.find(needle).unwrap(),
             "parameter alternative {index}"
         );
     }
     assert_eq!(
-        parameter(4).location as usize,
+        parameter(4).parse_loc as usize,
         alternatives_sql.rfind("text").unwrap()
     );
 }
@@ -406,14 +406,14 @@ fn create_function_preserves_special_set_and_reset_options() {
     assert_eq!(settings[7].name.as_deref(), Some("timezone"));
     assert_eq!(settings[8].name.as_deref(), Some("transaction_isolation"));
     assert_eq!(settings[9].name.as_deref(), Some("session_authorization"));
-    assert_eq!(settings[0].location, -1);
-    assert_eq!(settings[1].location, sql.find("'app'").unwrap() as i32);
-    assert_eq!(settings[2].location, sql.find("'UTF8'").unwrap() as i32);
-    assert_eq!(settings[3].location, sql.find("app_user").unwrap() as i32);
-    assert_eq!(settings[4].location, -1);
-    assert_eq!(settings[5].location, -1);
+    assert_eq!(settings[0].parse_loc, -1);
+    assert_eq!(settings[1].parse_loc, sql.find("'app'").unwrap() as i32);
+    assert_eq!(settings[2].parse_loc, sql.find("'UTF8'").unwrap() as i32);
+    assert_eq!(settings[3].parse_loc, sql.find("app_user").unwrap() as i32);
+    assert_eq!(settings[4].parse_loc, -1);
+    assert_eq!(settings[5].parse_loc, -1);
     assert_eq!(
-        settings[6].location,
+        settings[6].parse_loc,
         sql.find("'00000003-0000001B-1'").unwrap() as i32
     );
     assert!(
@@ -421,7 +421,7 @@ fn create_function_preserves_special_set_and_reset_options() {
             .iter()
             .all(|setting| setting.kind == VariableSetKind::Reset)
     );
-    assert!(settings[7..].iter().all(|setting| setting.location == -1));
+    assert!(settings[7..].iter().all(|setting| setting.parse_loc == -1));
 }
 
 #[test]
@@ -495,7 +495,7 @@ fn create_table_stmt_populates_like_inheritance_partition_and_storage_clauses() 
     let partspec = stmt.partspec.expect("PartitionSpec");
     assert_eq!(partspec.strategy, PartitionStrategy::Range);
     assert_eq!(
-        partspec.location as usize,
+        partspec.parse_loc as usize,
         sql.find("partition by").unwrap()
     );
     assert_eq!(partspec.part_params.len(), 3);
@@ -505,17 +505,20 @@ fn create_table_stmt_populates_like_inheritance_partition_and_storage_clauses() 
     assert_eq!(partition.name.as_deref(), Some("created_at"));
     assert_eq!(partition.collation.len(), 2);
     assert_eq!(partition.opclass.len(), 2);
-    assert_eq!(partition.location as usize, sql.find("created_at").unwrap());
+    assert_eq!(
+        partition.parse_loc as usize,
+        sql.find("created_at").unwrap()
+    );
     let Node::PartitionElem(function) = &partspec.part_params[1] else {
         panic!("expected function PartitionElem");
     };
     assert!(matches!(function.expr.as_deref(), Some(Node::FuncCall(_))));
-    assert_eq!(function.location as usize, sql.find("lower(id)").unwrap());
+    assert_eq!(function.parse_loc as usize, sql.find("lower(id)").unwrap());
     let Node::PartitionElem(expression) = &partspec.part_params[2] else {
         panic!("expected expression PartitionElem");
     };
     assert!(matches!(expression.expr.as_deref(), Some(Node::AExpr(_))));
-    assert_eq!(expression.location as usize, sql.find("(id + 1)").unwrap());
+    assert_eq!(expression.parse_loc as usize, sql.find("(id + 1)").unwrap());
 }
 
 #[test]
@@ -564,7 +567,7 @@ fn create_typed_table_preserves_type_column_options_and_on_commit() {
         ["app", "item_type"]
     );
     assert_eq!(
-        type_name.location as usize,
+        type_name.parse_loc as usize,
         sql.find("app.item_type").unwrap()
     );
     assert_eq!(stmt.oncommit, pg_parser::OnCommitAction::PreserveRows);
@@ -1205,7 +1208,7 @@ fn type_names_preserve_setof_interval_and_default_modifiers() {
     assert!(return_type.setof);
     assert_eq!(return_type.array_bounds.len(), 1);
     assert_eq!(
-        return_type.location as usize,
+        return_type.parse_loc as usize,
         sql.find("app.item_type").unwrap()
     );
 }
@@ -1219,7 +1222,7 @@ fn create_partition_stmt_populates_range_and_hash_bounds() {
     let range_bound = range.partbound.expect("PartitionBoundSpec");
     assert_eq!(range_bound.strategy, b'r');
     assert_eq!(
-        range_bound.location as usize,
+        range_bound.parse_loc as usize,
         range_sql.find("from").unwrap()
     );
     assert_eq!(range_bound.modulus, 0);
@@ -1242,7 +1245,10 @@ fn create_partition_stmt_populates_range_and_hash_bounds() {
     };
     let hash_bound = hash.partbound.expect("PartitionBoundSpec");
     assert_eq!(hash_bound.strategy, b'h');
-    assert_eq!(hash_bound.location as usize, hash_sql.find("with").unwrap());
+    assert_eq!(
+        hash_bound.parse_loc as usize,
+        hash_sql.find("with").unwrap()
+    );
     assert_eq!(hash_bound.modulus, 4);
     assert_eq!(hash_bound.remainder, 1);
 
@@ -1253,7 +1259,10 @@ fn create_partition_stmt_populates_range_and_hash_bounds() {
     };
     let list_bound = list.partbound.expect("PartitionBoundSpec");
     assert_eq!(list_bound.strategy, b'l');
-    assert_eq!(list_bound.location as usize, list_sql.find("in (").unwrap());
+    assert_eq!(
+        list_bound.parse_loc as usize,
+        list_sql.find("in (").unwrap()
+    );
     assert_eq!(list_bound.listdatums.len(), 2);
     assert_eq!(list_bound.modulus, 0);
     assert_eq!(list_bound.remainder, 0);
@@ -1265,7 +1274,7 @@ fn create_partition_stmt_populates_range_and_hash_bounds() {
     let default_bound = default.partbound.expect("PartitionBoundSpec");
     assert!(default_bound.is_default);
     assert_eq!(
-        default_bound.location as usize,
+        default_bound.parse_loc as usize,
         default_sql.rfind("default").unwrap()
     );
     assert_eq!(default_bound.modulus, 0);
@@ -1405,7 +1414,7 @@ fn create_index_populates_all_index_element_options() {
     assert_eq!(name.opclassopts.len(), 1);
     assert_eq!(name.ordering, pg_parser::SortByDir::Desc);
     assert_eq!(name.nulls_ordering, pg_parser::SortByNulls::First);
-    assert_eq!(name.location as usize, sql.find("name collate").unwrap());
+    assert_eq!(name.parse_loc as usize, sql.find("name collate").unwrap());
 
     let Node::IndexElem(expression) = &index.index_params[1] else {
         panic!("expected expression IndexElem");
@@ -1418,7 +1427,7 @@ fn create_index_populates_all_index_element_options() {
     assert_eq!(expression.ordering, pg_parser::SortByDir::Asc);
     assert_eq!(expression.nulls_ordering, pg_parser::SortByNulls::Last);
     assert_eq!(
-        expression.location as usize,
+        expression.parse_loc as usize,
         sql.find("lower(code)").unwrap()
     );
 
@@ -1430,7 +1439,7 @@ fn create_index_populates_all_index_element_options() {
         Some(Node::AExpr(_))
     ));
     assert_eq!(
-        parenthesized.location as usize,
+        parenthesized.parse_loc as usize,
         sql.find("(id + 1)").unwrap()
     );
 
@@ -1439,7 +1448,10 @@ fn create_index_populates_all_index_element_options() {
     };
     assert_eq!(included.name.as_deref(), Some("id"));
     assert_eq!(included.opclass.len(), 1);
-    assert_eq!(included.location as usize, sql.find("id int4_ops").unwrap());
+    assert_eq!(
+        included.parse_loc as usize,
+        sql.find("id int4_ops").unwrap()
+    );
     assert!(index.exclude_op_names.is_empty());
     assert!(index.idxcomment.is_none());
     assert_eq!(index.index_oid, 0);
@@ -1926,7 +1938,10 @@ fn create_role_sequence_domain_and_type_forms_populate_options() {
         panic!("expected CompositeTypeStmt");
     };
     assert_eq!(
-        composite.typevar.as_deref().map(|typevar| typevar.location),
+        composite
+            .typevar
+            .as_deref()
+            .map(|typevar| typevar.parse_loc),
         Some(12)
     );
     let Node::ColumnDef(left) = &composite.coldeflist[0] else {
@@ -2541,7 +2556,7 @@ fn create_policy_trigger_constraint_trigger_and_event_trigger_are_complete() {
         [Node::RoleSpec(role)]
             if role.roletype == pg_parser::RoleSpecType::Public
                 && role.rolename.is_none()
-                && role.location == -1
+                && role.parse_loc == -1
     ));
 
     let Node::CreateTrigStmt(trigger) = parse_statement(
@@ -2710,9 +2725,13 @@ fn create_property_graph_populates_keys_references_labels_and_properties() {
     let Node::PropGraphLabelAndProperties(defaults) = &vertex.labels[0] else {
         panic!("expected PropGraphLabelAndProperties");
     };
-    assert_eq!(defaults.location, -1);
+    assert_eq!(defaults.parse_loc, -1);
     assert_eq!(
-        defaults.properties.as_deref().expect("properties").location,
+        defaults
+            .properties
+            .as_deref()
+            .expect("properties")
+            .parse_loc,
         -1
     );
 
@@ -2726,9 +2745,9 @@ fn create_property_graph_populates_keys_references_labels_and_properties() {
     let Node::PropGraphLabelAndProperties(label) = &vertex.labels[0] else {
         panic!("expected PropGraphLabelAndProperties");
     };
-    assert_eq!(label.location, sql.find("label").unwrap() as i32);
+    assert_eq!(label.parse_loc, sql.find("label").unwrap() as i32);
     assert_eq!(
-        label.properties.as_deref().expect("properties").location,
+        label.properties.as_deref().expect("properties").parse_loc,
         -1
     );
 

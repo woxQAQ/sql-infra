@@ -114,7 +114,7 @@ impl Parser {
                 self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
             }
             self.append_completion_marker(&mut tokens);
-            let location = tokens.first().location_or(self.location());
+            let offset = tokens.first().offset_or(self.offset());
             let starts_parenthesized = tokens.first().has_kind(TokenKind::Char('('));
             let starts_with_cast = tokens.first().has_kind(TokenKind::Cast);
             let element = parse_index_elem_tokens_with_completion(tokens, self.completion.clone())?;
@@ -123,7 +123,7 @@ impl Parser {
                 && !is_windowless_function_expression_node(expression, starts_with_cast)
             {
                 return Err(ParseError::syntax_exit(
-                    location,
+                    offset,
                     "index expressions must be parenthesized unless they are function calls",
                 ));
             }
@@ -142,14 +142,14 @@ pub(super) fn node_to_index_elem(node: Node) -> Node {
     match node {
         node!(ColumnRef {
             fields,
-            location,
+            parse_loc: offset,
             ..
         }) if fields.len() == 1 => node!(IndexElem {
             name: fields.first().and_then(|field| match field {
                 Node::String(value) => value.sval.clone(),
                 _ => None,
             }),
-            location,
+            parse_loc: offset,
             ..IndexElem::default()
         }),
         expr => node!(IndexElem {
@@ -163,18 +163,15 @@ pub(super) fn parse_index_elem_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<IndexElem> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.is_empty() {
-        return Err(ParseError::syntax_exit(
-            location,
-            "expected an index element",
-        ));
+        return Err(ParseError::syntax_exit(offset, "expected an index element"));
     }
     let collate_index = find_top_level_token(&tokens, TokenKind::Collate);
     let (expression, suffix_start) = if let Some(index) = collate_index {
         if index == 0 {
             return Err(ParseError::syntax_exit(
-                location,
+                offset,
                 "COLLATE requires an index expression",
             ));
         }
@@ -188,18 +185,18 @@ pub(super) fn parse_index_elem_tokens_with_completion(
             parser
                 .error
                 .take()
-                .unwrap_or_else(|| ParseError::syntax_exit(location, "invalid index expression"))
+                .unwrap_or_else(|| ParseError::syntax_exit(offset, "invalid index expression"))
         })?;
         (expression, parser.pos)
     };
     let Node::IndexElem(mut element) = node_to_index_elem(expression) else {
         unreachable!("node_to_index_elem always returns IndexElem");
     };
-    element.location = location as ParseLoc;
+    element.parse_loc = offset as ParseLoc;
 
     let mut suffix_tokens = tokens[suffix_start..].to_vec();
-    let end_location = suffix_tokens.last().end_location_or(location);
-    suffix_tokens.push(Token::synthetic(TokenKind::Eof, end_location));
+    let end_offset = suffix_tokens.last().end_offset_or(offset);
+    suffix_tokens.push(Token::synthetic(TokenKind::Eof, end_offset));
     let mut suffix = Parser {
         tokens: suffix_tokens,
         pos: 0,

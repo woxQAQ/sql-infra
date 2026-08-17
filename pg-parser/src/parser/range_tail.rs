@@ -7,7 +7,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_xmltable(&mut self, lateral: bool) -> PResult<RangeTableFunc> {
-        let location = self.expect(TokenKind::Xmltable)?.location();
+        let offset = self.expect(TokenKind::Xmltable)?.offset();
         self.expect(TokenKind::Char('('))?;
         let mut namespaces = Vec::new();
         if self.consume(TokenKind::Xmlnamespaces) {
@@ -16,12 +16,12 @@ impl Parser {
                 return Err(self.error_here("XMLNAMESPACES requires at least one namespace"));
             }
             while !self.at(TokenKind::Char(')')) {
-                let target_location = self.location();
+                let target_offset = self.offset();
                 if self.consume(TokenKind::Default) {
                     let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                     namespaces.push(node!(ResTarget {
                         val: Some(Box::new(self.parse_b_expression_fragment_tokens(tokens)?)),
-                        location: target_location as ParseLoc,
+                        parse_loc: target_offset as ParseLoc,
                         ..ResTarget::default()
                     }));
                 } else {
@@ -36,7 +36,7 @@ impl Parser {
                     namespaces.push(node!(ResTarget {
                         name: Some(name),
                         val: Some(Box::new(value)),
-                        location: target_location as ParseLoc,
+                        parse_loc: target_offset as ParseLoc,
                         ..ResTarget::default()
                     }));
                 }
@@ -117,7 +117,7 @@ impl Parser {
             namespaces,
             columns,
             alias,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         })
     }
 

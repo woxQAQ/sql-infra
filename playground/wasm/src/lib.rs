@@ -20,7 +20,7 @@ use pg_completion::VisibleRelation;
 use pg_completion::collect;
 use pg_parser::KEYWORDS;
 use pg_parser::KeywordCategory;
-use pg_parser::TextRange;
+use pg_parser::Loc;
 use pg_parser::TextSize;
 use pg_parser::TokenKind;
 use serde::Deserialize;
@@ -714,7 +714,7 @@ fn push_item(
         sort_text: format!("{rank:02}:{}", label.to_lowercase()),
         label,
         insert_text,
-        replacement_range: utf16_range(source, context.replacement_range),
+        replacement_range: utf16_range(source, context.replacement_loc),
         kind: kind.to_owned(),
         object_kind: object_kind.map(object_kind_name),
         detail,
@@ -903,8 +903,8 @@ impl ContextView {
                 utf8: u32::try_from(effective_byte).expect("TextSize fits u32"),
                 adjusted: mapped.adjusted || effective_byte != mapped.requested_byte,
             },
-            statement_range: source_range(source, context.statement_range),
-            replacement_range: source_range(source, context.replacement_range),
+            statement_range: source_range(source, context.statement_loc),
+            replacement_range: source_range(source, context.replacement_loc),
             prefix: PrefixView {
                 raw: context.prefix.raw.clone(),
                 normalized: context.prefix.normalized.clone(),
@@ -1036,8 +1036,8 @@ impl ContextView {
                             .iter()
                             .map(|part| NamePartView::new(source, part))
                             .collect(),
-                        syntax_range: source_range(source, cte.syntax_range),
-                        body_range: source_range(source, cte.body_range),
+                        syntax_range: source_range(source, cte.syntax_loc),
+                        body_range: source_range(source, cte.body_loc),
                     })
                     .collect(),
                 dml_target: context
@@ -1056,7 +1056,7 @@ impl ContextView {
                 .iter()
                 .map(|diagnostic| DiagnosticView {
                     kind: format!("{:?}", diagnostic.kind),
-                    range: source_range(source, diagnostic.range),
+                    range: source_range(source, diagnostic.loc),
                 })
                 .collect(),
         }
@@ -1131,7 +1131,7 @@ impl NamePartView {
             text: part.text.clone(),
             normalized: part.normalized.clone(),
             quoted: part.quoted,
-            range: source_range(source, part.range),
+            range: source_range(source, part.loc),
         }
     }
 }
@@ -1184,15 +1184,15 @@ impl RelationView {
                 .map(|part| NamePartView::new(source, part))
                 .collect(),
             qualified_only: relation.qualified_only,
-            syntax_range: source_range(source, relation.syntax_range),
-            body_range: relation.body_range.map(|range| source_range(source, range)),
+            syntax_range: source_range(source, relation.syntax_loc),
+            body_range: relation.body_loc.map(|loc| source_range(source, loc)),
             lateral: relation.lateral,
             unsupported: relation
                 .unsupported
                 .as_ref()
                 .map(|unsupported| UnsupportedView {
                     reason: unsupported.reason.clone(),
-                    range: source_range(source, unsupported.range),
+                    range: source_range(source, unsupported.loc),
                 }),
         }
     }
@@ -1265,20 +1265,20 @@ fn byte_to_utf16(source: &str, byte: usize) -> u32 {
         .expect("UTF-16 offset is no larger than the supported source size")
 }
 
-fn utf16_range(source: &str, range: TextRange) -> OffsetRangeView {
+fn utf16_range(source: &str, loc: Loc) -> OffsetRangeView {
     OffsetRangeView {
-        start: byte_to_utf16(source, usize::from(range.start())),
-        end: byte_to_utf16(source, usize::from(range.end())),
+        start: byte_to_utf16(source, usize::from(loc.start())),
+        end: byte_to_utf16(source, usize::from(loc.end())),
     }
 }
 
-fn source_range(source: &str, range: TextRange) -> SourceRangeView {
+fn source_range(source: &str, loc: Loc) -> SourceRangeView {
     SourceRangeView {
         utf8: OffsetRangeView {
-            start: range.start().get(),
-            end: range.end().get(),
+            start: loc.start().get(),
+            end: loc.end().get(),
         },
-        utf16: utf16_range(source, range),
+        utf16: utf16_range(source, loc),
     }
 }
 

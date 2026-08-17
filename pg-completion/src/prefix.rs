@@ -1,10 +1,10 @@
 //! Editing-point normalization, lexical context, and identifier-prefix analysis.
 //!
-//! The module computes replacement ranges, quoting mode, normalized name parts,
+//! The module computes replacement locs, quoting mode, normalized name parts,
 //! qualifiers, and whether parser grammar suggestions are meaningful at the
 //! point. It tolerates incomplete quoted and Unicode identifiers.
 
-use pg_parser::TextRange;
+use pg_parser::Loc;
 use pg_parser::TextSize;
 use pg_parser::Token;
 use pg_parser::TokenValue;
@@ -33,7 +33,7 @@ pub struct NamePart {
     pub text: String,
     pub normalized: String,
     pub quoted: bool,
-    pub range: TextRange,
+    pub loc: Loc,
 }
 
 pub(super) fn name_part_from_token(
@@ -46,8 +46,8 @@ pub(super) fn name_part_from_token(
         Some(TokenValue::Keyword(value)) => (*value).to_owned(),
         _ => return None,
     };
-    let start = usize::from(token.range.start());
-    let raw = source.get(start..usize::from(token.range.end()))?;
+    let start = usize::from(token.loc.start());
+    let raw = source.get(start..usize::from(token.loc.end()))?;
     let unicode_quoted = raw.to_ascii_lowercase().starts_with("u&\"");
     let quoted = raw.starts_with('"') || unicode_quoted;
     if unicode_quoted {
@@ -61,7 +61,7 @@ pub(super) fn name_part_from_token(
         },
         text,
         quoted,
-        range: token.range + base,
+        loc: token.loc + base,
     })
 }
 
@@ -72,7 +72,7 @@ pub(super) struct NormalizedPoint {
 
 pub(super) struct CompletionSite {
     pub prefix: CompletionPrefix,
-    pub replacement_range: TextRange,
+    pub replacement_loc: Loc,
     pub qualifier: Vec<NamePart>,
     lexical_context: LexicalContext,
 }
@@ -90,7 +90,7 @@ pub(super) fn normalize_point(source: &str, requested: TextSize) -> NormalizedPo
     if requested > source.len() {
         diagnostics.push(CompletionDiagnostic {
             kind: CompletionDiagnosticKind::PointClampedToEof,
-            range: TextRange::empty(TextSize::from_usize(source.len())),
+            loc: Loc::empty(TextSize::from_usize(source.len())),
         });
     }
     if !source.is_char_boundary(point) {
@@ -100,7 +100,7 @@ pub(super) fn normalize_point(source: &str, requested: TextSize) -> NormalizedPo
         }
         diagnostics.push(CompletionDiagnostic {
             kind: CompletionDiagnosticKind::PointMovedToCharBoundary,
-            range: TextRange::new(TextSize::from_usize(point), TextSize::from_usize(original)),
+            loc: Loc::new(TextSize::from_usize(point), TextSize::from_usize(original)),
         });
     }
     NormalizedPoint {
@@ -109,7 +109,7 @@ pub(super) fn normalize_point(source: &str, requested: TextSize) -> NormalizedPo
     }
 }
 
-pub(super) fn analyze(source: &str, statement: TextRange, point: TextSize) -> CompletionSite {
+pub(super) fn analyze(source: &str, statement: Loc, point: TextSize) -> CompletionSite {
     let point_usize = usize::from(point);
     let statement_start = usize::from(statement.start());
     let statement_end = usize::from(statement.end());
@@ -194,7 +194,7 @@ pub(super) fn analyze(source: &str, statement: TextRange, point: TextSize) -> Co
             normalized,
             quoting,
         },
-        replacement_range: TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end)),
+        replacement_loc: Loc::new(TextSize::from_usize(start), TextSize::from_usize(end)),
         qualifier,
         lexical_context,
     }
@@ -502,10 +502,7 @@ fn name_part_ending_at(source: &str, lower_bound: usize, end: usize) -> Option<(
                         normalized: text.clone(),
                         text,
                         quoted: true,
-                        range: TextRange::new(
-                            TextSize::from_usize(start),
-                            TextSize::from_usize(end),
-                        ),
+                        loc: Loc::new(TextSize::from_usize(start), TextSize::from_usize(end)),
                     },
                     start,
                 ));
@@ -523,7 +520,7 @@ fn name_part_ending_at(source: &str, lower_bound: usize, end: usize) -> Option<(
             normalized: text.to_ascii_lowercase(),
             text,
             quoted: false,
-            range: TextRange::new(TextSize::from_usize(start), TextSize::from_usize(end)),
+            loc: Loc::new(TextSize::from_usize(start), TextSize::from_usize(end)),
         },
         start,
     ))

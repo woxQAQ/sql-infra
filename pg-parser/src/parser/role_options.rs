@@ -85,7 +85,7 @@ impl Parser {
                 return Err(self.error_here("ALTER GROUP requires ADD or DROP USER"));
             };
             self.expect(TokenKind::User)?;
-            let members_location = self.location();
+            let members_offset = self.offset();
             let members = self.parse_role_specs_until(STATEMENT_END_TOKENS, false)?;
             if members.is_empty() {
                 return Err(self.error_here("ALTER GROUP requires at least one member"));
@@ -95,7 +95,7 @@ impl Parser {
                 options: vec![make_def_elem(
                     "rolemembers",
                     Some(name_list_node(members)),
-                    members_location,
+                    members_offset,
                 )],
                 action,
             }));
@@ -213,7 +213,7 @@ impl Parser {
     pub(super) fn parse_create_role_options(&mut self) -> PResult<NodeList> {
         let mut options = Vec::new();
         while !self.at_statement_end() {
-            let location = self.location();
+            let offset = self.offset();
             match self.peek_kind() {
                 TokenKind::Password => {
                     self.advance();
@@ -224,7 +224,7 @@ impl Parser {
                             "PASSWORD requires a string or NULL",
                         )?))
                     };
-                    options.push(make_def_elem("password", arg, location));
+                    options.push(make_def_elem("password", arg, offset));
                 }
                 TokenKind::Encrypted => {
                     self.advance();
@@ -234,7 +234,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "password",
                         Some(make_string_node(password)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Inherit => {
@@ -242,14 +242,14 @@ impl Parser {
                     options.push(make_def_elem(
                         "inherit",
                         Some(node!(Boolean::new(true))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Connection => {
                     self.advance();
                     self.expect(TokenKind::Limit)?;
                     let value = self.parse_signed_integer()?;
-                    options.push(make_def_elem("connectionlimit", Some(value), location));
+                    options.push(make_def_elem("connectionlimit", Some(value), offset));
                 }
                 TokenKind::Valid => {
                     self.advance();
@@ -258,19 +258,19 @@ impl Parser {
                     options.push(make_def_elem(
                         "validUntil",
                         Some(make_string_node(value)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Sysid => {
                     self.advance();
                     let token = self.expect(TokenKind::IConst)?;
                     let Some(TokenValue::Integer(value)) = token.value else {
-                        return Err(ParseError::ranged(token.range, "SYSID requires an integer"));
+                        return Err(ParseError::at_loc(token.loc, "SYSID requires an integer"));
                     };
                     options.push(make_def_elem(
                         "sysid",
                         Some(node!(Integer::new(value))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::InP | TokenKind::Role | TokenKind::Admin | TokenKind::User => {
@@ -299,7 +299,7 @@ impl Parser {
                             elements: roles,
                             ..AArrayExpr::default()
                         })),
-                        location,
+                        offset,
                     ));
                 }
                 _ => {
@@ -322,7 +322,7 @@ impl Parser {
                         "noinherit" => ("inherit", false),
                         _ => {
                             return Err(ParseError::syntax_exit(
-                                location,
+                                offset,
                                 "invalid CREATE ROLE option",
                             ));
                         }
@@ -330,7 +330,7 @@ impl Parser {
                     options.push(make_def_elem(
                         defname,
                         Some(node!(Boolean::new(value))),
-                        location,
+                        offset,
                     ));
                 }
             }
@@ -341,7 +341,7 @@ impl Parser {
     pub(super) fn parse_alter_role_options(&mut self) -> PResult<NodeList> {
         let mut options = Vec::new();
         while !self.at_statement_end() {
-            let location = self.location();
+            let offset = self.offset();
             match self.peek_kind() {
                 TokenKind::Password => {
                     self.advance();
@@ -352,7 +352,7 @@ impl Parser {
                             "PASSWORD requires a string or NULL",
                         )?))
                     };
-                    options.push(make_def_elem("password", arg, location));
+                    options.push(make_def_elem("password", arg, offset));
                 }
                 TokenKind::Encrypted => {
                     self.advance();
@@ -362,7 +362,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "password",
                         Some(make_string_node(password)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Inherit => {
@@ -370,14 +370,14 @@ impl Parser {
                     options.push(make_def_elem(
                         "inherit",
                         Some(node!(Boolean::new(true))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Connection => {
                     self.advance();
                     self.expect(TokenKind::Limit)?;
                     let value = self.parse_signed_integer()?;
-                    options.push(make_def_elem("connectionlimit", Some(value), location));
+                    options.push(make_def_elem("connectionlimit", Some(value), offset));
                 }
                 TokenKind::Valid => {
                     self.advance();
@@ -386,7 +386,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "validUntil",
                         Some(make_string_node(value)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::User => {
@@ -398,7 +398,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "rolemembers",
                         Some(name_list_node(members)),
-                        location,
+                        offset,
                     ));
                 }
                 _ => {
@@ -421,13 +421,13 @@ impl Parser {
                         "noinherit" => ("inherit", false),
                         "unencrypted" => {
                             return Err(ParseError::syntax_exit(
-                                location,
+                                offset,
                                 "UNENCRYPTED PASSWORD is not supported",
                             ));
                         }
                         _ => {
                             return Err(ParseError::syntax_exit(
-                                location,
+                                offset,
                                 "invalid ALTER ROLE option",
                             ));
                         }
@@ -435,7 +435,7 @@ impl Parser {
                     options.push(make_def_elem(
                         name,
                         Some(node!(Boolean::new(value))),
-                        location,
+                        offset,
                     ));
                 }
             }
@@ -460,7 +460,7 @@ impl Parser {
             return Ok(VariableSetStmt {
                 kind,
                 name,
-                location: -1,
+                parse_loc: -1,
                 ..VariableSetStmt::default()
             });
         }
@@ -473,28 +473,28 @@ impl Parser {
         if !self.consume(TokenKind::To) && !self.consume(TokenKind::Char('=')) {
             return Err(self.error_here("SET parameter requires TO or '='"));
         }
-        let value_location = self.location() as ParseLoc;
-        let (kind, args, location) = if self.consume(TokenKind::Default) {
+        let value_parse_loc = self.offset() as ParseLoc;
+        let (kind, args, parse_loc) = if self.consume(TokenKind::Default) {
             (VariableSetKind::SetDefault, Vec::new(), -1)
         } else if self.consume(TokenKind::NullP) {
             (
                 VariableSetKind::SetValue,
-                vec![node!(AConst::null(self.previous_location() as ParseLoc))],
-                value_location,
+                vec![node!(AConst::null(self.previous_offset() as ParseLoc))],
+                value_parse_loc,
             )
         } else {
             let args = self.parse_setting_value_list()?;
             if args.is_empty() {
                 return Err(self.error_here("SET parameter requires a value"));
             }
-            (VariableSetKind::SetValue, args, value_location)
+            (VariableSetKind::SetValue, args, value_parse_loc)
         };
         self.expect_statement_end()?;
         Ok(VariableSetStmt {
             kind,
             name,
             args,
-            location,
+            parse_loc,
             ..VariableSetStmt::default()
         })
     }

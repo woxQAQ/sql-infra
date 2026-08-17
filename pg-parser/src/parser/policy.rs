@@ -1,7 +1,7 @@
 //! Row-level security policy creation and alteration.
 //!
 //! Commands, roles, `USING`, and `WITH CHECK` expressions are kept with their
-//! policy-specific defaults and raw locations.
+//! policy-specific defaults and raw `ParseLoc` values.
 
 use super::*;
 
@@ -74,7 +74,7 @@ impl Parser {
             vec![node!(RoleSpec {
                 roletype: RoleSpecType::Public,
                 rolename: None,
-                location: -1,
+                parse_loc: -1,
             })]
         };
         let qual = if self.consume(TokenKind::Using) {

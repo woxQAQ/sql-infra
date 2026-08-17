@@ -41,7 +41,7 @@ impl Parser {
     fn parse_database_options(&mut self) -> PResult<NodeList> {
         let mut options = Vec::new();
         while !self.at_statement_end() {
-            let location = self.location();
+            let offset = self.offset();
             let name = if self.consume(TokenKind::Connection) {
                 self.expect(TokenKind::Limit)?;
                 "connection_limit".to_owned()
@@ -82,7 +82,7 @@ impl Parser {
             options.push(node!(DefElem {
                 defname: Some(name),
                 arg,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..DefElem::default()
             }));
         }
@@ -128,7 +128,7 @@ impl Parser {
             self.expect(TokenKind::Set)?;
             self.expect(TokenKind::Tablespace)?;
             self.record_completion_slot(GrammarSlot::Tablespace);
-            let location = self.location();
+            let offset = self.offset();
             let tablespace = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("SET TABLESPACE requires a tablespace name"))?;
@@ -137,7 +137,7 @@ impl Parser {
                 options: vec![make_def_elem(
                     "tablespace",
                     Some(make_string_node(tablespace)),
-                    location,
+                    offset,
                 )],
             }))
         } else if matches!(self.peek_kind(), TokenKind::Set | TokenKind::Reset) {
@@ -189,8 +189,8 @@ impl Parser {
             self.expect(TokenKind::Char('('))?;
             let mut options = Vec::new();
             loop {
-                let location = self.expect(TokenKind::Force)?.location();
-                options.push(make_def_elem("force", None, location));
+                let offset = self.expect(TokenKind::Force)?.offset();
+                options.push(make_def_elem("force", None, offset));
                 if !self.consume(TokenKind::Char(',')) {
                     break;
                 }

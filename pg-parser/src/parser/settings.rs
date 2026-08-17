@@ -91,7 +91,7 @@ impl Parser {
                 return Ok(VariableSetStmt {
                     kind,
                     name,
-                    location: -1,
+                    parse_loc: -1,
                     ..VariableSetStmt::default()
                 });
             }
@@ -125,7 +125,7 @@ impl Parser {
         let mut stmt = VariableSetStmt {
             kind: VariableSetKind::SetValue,
             is_local,
-            location: -1,
+            parse_loc: -1,
             ..VariableSetStmt::default()
         };
         if self.peek_kind() == TokenKind::Transaction
@@ -218,25 +218,25 @@ impl Parser {
                 stmt.name = Some("search_path".to_owned());
                 stmt.args = vec![node!(AConst::string(
                     self.consume_required_string("SET SCHEMA requires a string")?,
-                    self.previous_location() as ParseLoc,
+                    self.previous_offset() as ParseLoc,
                 ))];
-                stmt.location = self.previous_location() as ParseLoc;
+                stmt.parse_loc = self.previous_offset() as ParseLoc;
             }
             TokenKind::Names => {
                 self.advance();
                 stmt.name = Some("client_encoding".to_owned());
                 if self.consume(TokenKind::Default) {
                     stmt.kind = VariableSetKind::SetDefault;
-                    stmt.location = self.previous_location() as ParseLoc;
+                    stmt.parse_loc = self.previous_offset() as ParseLoc;
                 } else if self.at_statement_end() {
                     stmt.kind = VariableSetKind::SetDefault;
                 } else {
                     let value = self.consume_required_string("SET NAMES requires an encoding")?;
                     stmt.args = vec![node!(AConst::string(
                         value,
-                        self.previous_location() as ParseLoc,
+                        self.previous_offset() as ParseLoc,
                     ))];
-                    stmt.location = self.previous_location() as ParseLoc;
+                    stmt.parse_loc = self.previous_offset() as ParseLoc;
                 }
             }
             TokenKind::Role => {
@@ -248,9 +248,9 @@ impl Parser {
                     .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
                 stmt.args = vec![node!(AConst::string(
                     value,
-                    self.previous_location() as ParseLoc,
+                    self.previous_offset() as ParseLoc,
                 ))];
-                stmt.location = self.previous_location() as ParseLoc;
+                stmt.parse_loc = self.previous_offset() as ParseLoc;
             }
             TokenKind::Session => {
                 self.advance();
@@ -265,22 +265,22 @@ impl Parser {
                     })?;
                     stmt.args = vec![node!(AConst::string(
                         value,
-                        self.previous_location() as ParseLoc,
+                        self.previous_offset() as ParseLoc,
                     ))];
-                    stmt.location = self.previous_location() as ParseLoc;
+                    stmt.parse_loc = self.previous_offset() as ParseLoc;
                 }
             }
             TokenKind::XmlP => {
                 self.advance();
                 self.expect(TokenKind::Option)?;
                 self.record_completion_tokens(&[TokenKind::DocumentP, TokenKind::ContentP]);
-                let (value, value_location) = match self.peek_kind() {
-                    TokenKind::DocumentP => ("DOCUMENT", self.advance().location() as ParseLoc),
-                    TokenKind::ContentP => ("CONTENT", self.advance().location() as ParseLoc),
+                let (value, value_parse_loc) = match self.peek_kind() {
+                    TokenKind::DocumentP => ("DOCUMENT", self.advance().offset() as ParseLoc),
+                    TokenKind::ContentP => ("CONTENT", self.advance().offset() as ParseLoc),
                     _ => return Err(self.error_here("XML OPTION requires DOCUMENT or CONTENT")),
                 };
                 stmt.name = Some("xmloption".to_owned());
-                stmt.args = vec![node!(AConst::string(value, value_location))];
+                stmt.args = vec![node!(AConst::string(value, value_parse_loc))];
                 stmt.jumble_args = true;
             }
             TokenKind::Transaction => {
@@ -290,9 +290,9 @@ impl Parser {
                 stmt.name = Some("TRANSACTION SNAPSHOT".to_owned());
                 stmt.args = vec![node!(AConst::string(
                     self.consume_required_string("TRANSACTION SNAPSHOT requires a string")?,
-                    self.previous_location() as ParseLoc,
+                    self.previous_offset() as ParseLoc,
                 ))];
-                stmt.location = self.previous_location() as ParseLoc;
+                stmt.parse_loc = self.previous_offset() as ParseLoc;
             }
             _ => {
                 stmt.name = Some(
@@ -309,21 +309,21 @@ impl Parser {
                             self.error_here("SET parameter requires TO, '=', or FROM CURRENT")
                         );
                     }
-                    let value_location = self.location() as ParseLoc;
+                    let value_parse_loc = self.offset() as ParseLoc;
                     match self.peek_kind() {
                         TokenKind::Default => {
                             self.advance();
                             stmt.kind = VariableSetKind::SetDefault;
-                            stmt.location = -1;
+                            stmt.parse_loc = -1;
                         }
                         TokenKind::NullP => {
-                            let location = self.advance().location() as ParseLoc;
-                            stmt.args = vec![node!(AConst::null(location))];
-                            stmt.location = value_location;
+                            let parse_loc = self.advance().offset() as ParseLoc;
+                            stmt.args = vec![node!(AConst::null(parse_loc))];
+                            stmt.parse_loc = value_parse_loc;
                         }
                         _ => {
                             stmt.args = self.parse_setting_value_list()?;
-                            stmt.location = value_location;
+                            stmt.parse_loc = value_parse_loc;
                         }
                     }
                 }
@@ -464,7 +464,7 @@ impl Parser {
     pub(super) fn parse_transaction(&mut self) -> PResult<Node> {
         let first = self.advance().kind;
         let mut stmt = TransactionStmt {
-            location: -1,
+            parse_loc: -1,
             ..TransactionStmt::default()
         };
         match first {
@@ -481,10 +481,10 @@ impl Parser {
             TokenKind::Commit => {
                 if self.consume(TokenKind::Prepared) {
                     stmt.kind = TransactionStmtKind::CommitPrepared;
-                    let location = self.location();
+                    let offset = self.offset();
                     stmt.gid =
                         Some(self.consume_required_string("COMMIT PREPARED requires a string")?);
-                    stmt.location = location as ParseLoc;
+                    stmt.parse_loc = offset as ParseLoc;
                 } else {
                     stmt.kind = TransactionStmtKind::Commit;
                     self.consume_opt_transaction();
@@ -499,22 +499,22 @@ impl Parser {
             TokenKind::Rollback => {
                 if self.consume(TokenKind::Prepared) {
                     stmt.kind = TransactionStmtKind::RollbackPrepared;
-                    let location = self.location();
+                    let offset = self.offset();
                     stmt.gid =
                         Some(self.consume_required_string("ROLLBACK PREPARED requires a string")?);
-                    stmt.location = location as ParseLoc;
+                    stmt.parse_loc = offset as ParseLoc;
                 } else {
                     self.consume_opt_transaction();
                     if self.consume(TokenKind::To) {
                         stmt.kind = TransactionStmtKind::RollbackTo;
                         self.consume(TokenKind::Savepoint);
                         self.record_completion_slot(GrammarSlot::AnyName);
-                        let location = self.location();
+                        let offset = self.offset();
                         stmt.savepoint_name =
                             Some(self.consume_col_id().ok_or_else(|| {
                                 self.error_here("ROLLBACK TO requires a savepoint")
                             })?);
-                        stmt.location = location as ParseLoc;
+                        stmt.parse_loc = offset as ParseLoc;
                     } else {
                         stmt.kind = TransactionStmtKind::Rollback;
                         stmt.chain = self.parse_transaction_chain()?;
@@ -529,31 +529,31 @@ impl Parser {
             TokenKind::Savepoint => {
                 stmt.kind = TransactionStmtKind::Savepoint;
                 self.record_completion_slot(GrammarSlot::AnyName);
-                let location = self.location();
+                let offset = self.offset();
                 stmt.savepoint_name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("SAVEPOINT requires a name"))?,
                 );
-                stmt.location = location as ParseLoc;
+                stmt.parse_loc = offset as ParseLoc;
             }
             TokenKind::Release => {
                 stmt.kind = TransactionStmtKind::Release;
                 self.consume(TokenKind::Savepoint);
                 self.record_completion_slot(GrammarSlot::AnyName);
-                let location = self.location();
+                let offset = self.offset();
                 stmt.savepoint_name = Some(
                     self.consume_col_id()
                         .ok_or_else(|| self.error_here("RELEASE requires a savepoint"))?,
                 );
-                stmt.location = location as ParseLoc;
+                stmt.parse_loc = offset as ParseLoc;
             }
             TokenKind::Prepare => {
                 stmt.kind = TransactionStmtKind::Prepare;
                 self.expect(TokenKind::Transaction)?;
-                let location = self.location();
+                let offset = self.offset();
                 stmt.gid =
                     Some(self.consume_required_string("PREPARE TRANSACTION requires a string")?);
-                stmt.location = location as ParseLoc;
+                stmt.parse_loc = offset as ParseLoc;
             }
             _ => return Err(self.error_here("invalid transaction statement")),
         }
@@ -570,7 +570,7 @@ impl Parser {
                 TokenKind::Deferrable,
                 TokenKind::Not,
             ]);
-            let location = self.location();
+            let offset = self.offset();
             let option = match self.peek_kind() {
                 TokenKind::Isolation => {
                     self.advance();
@@ -580,7 +580,7 @@ impl Parser {
                         TokenKind::Repeatable,
                         TokenKind::Serializable,
                     ]);
-                    let value_location = self.location();
+                    let value_offset = self.offset();
                     let value = match self.peek_kind() {
                         TokenKind::Read => {
                             self.advance();
@@ -604,8 +604,8 @@ impl Parser {
                     };
                     make_def_elem(
                         "transaction_isolation",
-                        Some(node!(AConst::string(value, value_location as ParseLoc,))),
-                        location,
+                        Some(node!(AConst::string(value, value_offset as ParseLoc,))),
+                        offset,
                     )
                 }
                 TokenKind::Read => {
@@ -621,17 +621,17 @@ impl Parser {
                         "transaction_read_only",
                         Some(node!(AConst::integer(
                             i32::from(read_only),
-                            location as ParseLoc,
+                            offset as ParseLoc,
                         ))),
-                        location,
+                        offset,
                     )
                 }
                 TokenKind::Deferrable => {
                     self.advance();
                     make_def_elem(
                         "transaction_deferrable",
-                        Some(node!(AConst::integer(1, location as ParseLoc))),
-                        location,
+                        Some(node!(AConst::integer(1, offset as ParseLoc))),
+                        offset,
                     )
                 }
                 TokenKind::Not => {
@@ -639,8 +639,8 @@ impl Parser {
                     self.expect(TokenKind::Deferrable)?;
                     make_def_elem(
                         "transaction_deferrable",
-                        Some(node!(AConst::integer(0, location as ParseLoc))),
-                        location,
+                        Some(node!(AConst::integer(0, offset as ParseLoc))),
+                        offset,
                     )
                 }
                 _ => return Err(self.error_here("invalid transaction mode")),
@@ -669,9 +669,9 @@ impl Parser {
     }
 }
 pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.is_empty() {
-        return Err(ParseError::syntax_exit(location, "SET requires a value"));
+        return Err(ParseError::syntax_exit(offset, "SET requires a value"));
     }
     if tokens.len() == 1 {
         if matches!(tokens[0].kind, TokenKind::IConst | TokenKind::FConst) {
@@ -690,10 +690,9 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
         )
         .is_some();
         if is_setting_word && let Some(value) = token_name(&tokens[0]) {
-            return Ok(node!(AConst::string(
-                value,
-                tokens[0].location() as ParseLoc,
-            )));
+            return Ok(node!(
+                AConst::string(value, tokens[0].offset() as ParseLoc,)
+            ));
         }
     }
     if matches!(
@@ -711,11 +710,11 @@ pub(super) fn parse_setting_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
     ) {
         return parse_expression_tokens(tokens);
     }
-    Err(ParseError::syntax_exit(location, "invalid SET value"))
+    Err(ParseError::syntax_exit(offset, "invalid SET value"))
 }
 
 pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.len() == 1 {
         if matches!(
             tokens[0].kind,
@@ -727,17 +726,17 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
         ) {
             return parse_setting_value_tokens(tokens);
         }
-        return Err(ParseError::syntax_exit(location, "invalid time zone value"));
+        return Err(ParseError::syntax_exit(offset, "invalid time zone value"));
     }
     if !tokens.first().has_kind(TokenKind::Interval) {
-        return Err(ParseError::syntax_exit(location, "invalid time zone value"));
+        return Err(ParseError::syntax_exit(offset, "invalid time zone value"));
     }
     if !tokens.get(1).has_kind(TokenKind::Char('(')) {
         let string_index = tokens
             .iter()
             .position(|token| token.kind == TokenKind::SConst)
             .ok_or_else(|| {
-                ParseError::syntax_exit(location, "time zone interval requires a string")
+                ParseError::syntax_exit(offset, "time zone interval requires a string")
             })?;
         let qualifier = &tokens[string_index + 1..];
         if !matches!(
@@ -761,7 +760,7 @@ pub(super) fn parse_time_zone_value_tokens(tokens: Vec<Token>) -> PResult<Node> 
             ]
         ) {
             return Err(ParseError::syntax_exit(
-                qualifier.first().location_or(location),
+                qualifier.first().offset_or(offset),
                 "time zone interval must be HOUR or HOUR TO MINUTE",
             ));
         }

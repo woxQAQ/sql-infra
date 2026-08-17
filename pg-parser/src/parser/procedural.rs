@@ -73,7 +73,7 @@ impl Parser {
         let mut saw_body = false;
         let mut saw_language = false;
         while !self.at_statement_end() {
-            let location = self.location();
+            let offset = self.offset();
             if !saw_body {
                 self.record_completion_tokens(&[TokenKind::SConst]);
             }
@@ -82,7 +82,7 @@ impl Parser {
             }
             if self.at(TokenKind::SConst) {
                 let value = self.consume_string_like().unwrap_or_default();
-                args.push(make_def_elem("as", Some(make_string_node(value)), location));
+                args.push(make_def_elem("as", Some(make_string_node(value)), offset));
                 saw_body = true;
             } else if self.at(TokenKind::Language) {
                 self.advance();
@@ -93,7 +93,7 @@ impl Parser {
                 args.push(make_def_elem(
                     "language",
                     Some(make_string_node(language)),
-                    location,
+                    offset,
                 ));
                 saw_language = true;
             } else {

@@ -13,7 +13,7 @@ fn completion_collection_handles_every_smoke_statement_token_boundary() {
             .unwrap_or_else(|error| panic!("failed to lex smoke case {:?}: {error}", case.sql));
         let mut points = tokens
             .iter()
-            .flat_map(|token| [token.range.start(), token.range.end()])
+            .flat_map(|token| [token.loc.start(), token.loc.end()])
             .collect::<Vec<_>>();
         points.sort_unstable();
         points.dedup();
@@ -69,13 +69,13 @@ fn completion_publishes_every_reserved_keyword_in_smoke_statements() {
         let tokens = lex(case.sql)
             .unwrap_or_else(|error| panic!("failed to lex smoke case {:?}: {error}", case.sql));
         for token in tokens.iter().filter(|token| reserved.contains(&token.kind)) {
-            let expectations = collect_expectations(case.sql, token.range.start())
+            let expectations = collect_expectations(case.sql, token.loc.start())
                 .unwrap_or_else(|error| panic!("completion failed for {:?}: {error}", case.sql));
             if !expectations.tokens.contains(&token.kind) {
                 missing.push(format!(
                     "{:?} at byte {} in {:?}: {:?}",
                     token.kind,
-                    usize::from(token.range.start()),
+                    usize::from(token.loc.start()),
                     case.sql,
                     expectations
                 ));
@@ -100,7 +100,7 @@ fn completion_publishes_every_punctuation_token_in_smoke_statements() {
         for token in tokens.iter().filter(
             |token| matches!(token.kind, pg_parser::TokenKind::Char(character) if character != ';'),
         ) {
-            let expectations = collect_expectations(case.sql, token.range.start())
+            let expectations = collect_expectations(case.sql, token.loc.start())
                 .unwrap_or_else(|error| panic!("completion failed for {:?}: {error}", case.sql));
             let operator_name = expectations
                 .slots
@@ -131,7 +131,7 @@ fn completion_publishes_every_punctuation_token_in_smoke_statements() {
                 missing.push(format!(
                     "{:?} at byte {} in {:?}: {:?}",
                     token.kind,
-                    usize::from(token.range.start()),
+                    usize::from(token.loc.start()),
                     case.sql,
                     expectations
                 ));

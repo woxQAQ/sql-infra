@@ -108,7 +108,7 @@ impl Parser {
             if !actions.is_empty() {
                 self.record_completion_tokens(&[TokenKind::Restrict, TokenKind::Char(';')]);
             }
-            let location = self.location();
+            let offset = self.offset();
             let (name, arg) = match self.peek_kind() {
                 TokenKind::Called => {
                     self.advance();
@@ -194,7 +194,7 @@ impl Parser {
                 }
                 _ => return Err(self.error_here("invalid ALTER FUNCTION option")),
             };
-            actions.push(make_def_elem(name, arg, location));
+            actions.push(make_def_elem(name, arg, offset));
         }
         Ok(actions)
     }
@@ -257,14 +257,14 @@ impl Parser {
             return Ok(VariableSetStmt {
                 kind,
                 name,
-                location: -1,
+                parse_loc: -1,
                 ..VariableSetStmt::default()
             });
         }
         self.expect(TokenKind::Set)?;
         let mut stmt = VariableSetStmt {
             kind: VariableSetKind::SetValue,
-            location: -1,
+            parse_loc: -1,
             ..VariableSetStmt::default()
         };
         if self.consume(TokenKind::Time) {
@@ -288,16 +288,16 @@ impl Parser {
             let value = self.consume_required_string("SET SCHEMA requires a string")?;
             stmt.args = vec![node!(AConst::string(
                 value,
-                self.previous_location() as ParseLoc,
+                self.previous_offset() as ParseLoc,
             ))];
-            stmt.location = self.previous_location() as ParseLoc;
+            stmt.parse_loc = self.previous_offset() as ParseLoc;
             return Ok(stmt);
         }
         if self.consume(TokenKind::Names) {
             stmt.name = Some("client_encoding".to_owned());
             if self.consume(TokenKind::Default) {
                 stmt.kind = VariableSetKind::SetDefault;
-                stmt.location = self.previous_location() as ParseLoc;
+                stmt.parse_loc = self.previous_offset() as ParseLoc;
             } else if self.at_any(stops) {
                 stmt.kind = VariableSetKind::SetDefault;
             } else {
@@ -306,9 +306,9 @@ impl Parser {
                     .ok_or_else(|| self.error_here("SET NAMES requires an encoding"))?;
                 stmt.args = vec![node!(AConst::string(
                     value,
-                    self.previous_location() as ParseLoc,
+                    self.previous_offset() as ParseLoc,
                 ))];
-                stmt.location = self.previous_location() as ParseLoc;
+                stmt.parse_loc = self.previous_offset() as ParseLoc;
             }
             return Ok(stmt);
         }
@@ -320,9 +320,9 @@ impl Parser {
                 .ok_or_else(|| self.error_here("SET ROLE requires a role"))?;
             stmt.args = vec![node!(AConst::string(
                 value,
-                self.previous_location() as ParseLoc,
+                self.previous_offset() as ParseLoc,
             ))];
-            stmt.location = self.previous_location() as ParseLoc;
+            stmt.parse_loc = self.previous_offset() as ParseLoc;
             return Ok(stmt);
         }
         if self.consume(TokenKind::Session) {
@@ -336,22 +336,22 @@ impl Parser {
                     .ok_or_else(|| self.error_here("SET SESSION AUTHORIZATION requires a role"))?;
                 stmt.args = vec![node!(AConst::string(
                     value,
-                    self.previous_location() as ParseLoc,
+                    self.previous_offset() as ParseLoc,
                 ))];
-                stmt.location = self.previous_location() as ParseLoc;
+                stmt.parse_loc = self.previous_offset() as ParseLoc;
             }
             return Ok(stmt);
         }
         if self.consume(TokenKind::XmlP) {
             self.expect(TokenKind::Option)?;
-            let (value, value_location) = if self.consume(TokenKind::DocumentP) {
-                ("DOCUMENT", self.previous_location() as ParseLoc)
+            let (value, value_parse_loc) = if self.consume(TokenKind::DocumentP) {
+                ("DOCUMENT", self.previous_offset() as ParseLoc)
             } else {
                 self.expect(TokenKind::ContentP)?;
-                ("CONTENT", self.previous_location() as ParseLoc)
+                ("CONTENT", self.previous_offset() as ParseLoc)
             };
             stmt.name = Some("xmloption".to_owned());
-            stmt.args = vec![node!(AConst::string(value, value_location))];
+            stmt.args = vec![node!(AConst::string(value, value_parse_loc))];
             stmt.jumble_args = true;
             return Ok(stmt);
         }
@@ -362,9 +362,9 @@ impl Parser {
             let value = self.consume_required_string("TRANSACTION SNAPSHOT requires a string")?;
             stmt.args = vec![node!(AConst::string(
                 value,
-                self.previous_location() as ParseLoc,
+                self.previous_offset() as ParseLoc,
             ))];
-            stmt.location = self.previous_location() as ParseLoc;
+            stmt.parse_loc = self.previous_offset() as ParseLoc;
             return Ok(stmt);
         }
         let name = Some(
@@ -377,34 +377,34 @@ impl Parser {
             return Ok(VariableSetStmt {
                 kind: VariableSetKind::SetCurrent,
                 name,
-                location: -1,
+                parse_loc: -1,
                 ..VariableSetStmt::default()
             });
         }
         if !self.consume(TokenKind::To) && !self.consume(TokenKind::Char('=')) {
             return Err(self.error_here("SET parameter requires TO, '=', or FROM CURRENT"));
         }
-        let value_location = self.location() as ParseLoc;
-        let (kind, args, location) = if self.consume(TokenKind::Default) {
+        let value_parse_loc = self.offset() as ParseLoc;
+        let (kind, args, parse_loc) = if self.consume(TokenKind::Default) {
             (VariableSetKind::SetDefault, Vec::new(), -1)
         } else if self.consume(TokenKind::NullP) {
             (
                 VariableSetKind::SetValue,
-                vec![node!(AConst::null(self.previous_location() as ParseLoc))],
-                value_location,
+                vec![node!(AConst::null(self.previous_offset() as ParseLoc))],
+                value_parse_loc,
             )
         } else {
             let args = self.parse_function_setting_value_list()?;
             if args.is_empty() {
                 return Err(self.error_here("SET parameter requires a value"));
             }
-            (VariableSetKind::SetValue, args, value_location)
+            (VariableSetKind::SetValue, args, value_parse_loc)
         };
         Ok(VariableSetStmt {
             kind,
             name,
             args,
-            location,
+            parse_loc,
             ..VariableSetStmt::default()
         })
     }

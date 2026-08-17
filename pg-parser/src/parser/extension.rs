@@ -28,7 +28,7 @@ impl Parser {
                 TokenKind::VersionP,
                 TokenKind::Cascade,
             ]);
-            let location = self.location();
+            let offset = self.offset();
             match self.peek_kind() {
                 TokenKind::Schema => {
                     self.advance();
@@ -39,7 +39,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "schema",
                         Some(make_string_node(schema)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::VersionP => {
@@ -50,7 +50,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "new_version",
                         Some(make_string_node(version)),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::Cascade => {
@@ -58,7 +58,7 @@ impl Parser {
                     options.push(make_def_elem(
                         "cascade",
                         Some(node!(Boolean::new(true))),
-                        location,
+                        offset,
                     ));
                 }
                 TokenKind::From => {
@@ -150,14 +150,14 @@ impl Parser {
             self.expect(TokenKind::Update)?;
             let mut options = Vec::new();
             while self.consume(TokenKind::To) {
-                let location = self.previous_location();
+                let offset = self.previous_offset();
                 let version = self
                     .consume_non_reserved_word_or_sconst()
                     .ok_or_else(|| self.error_here("TO requires an extension version"))?;
                 options.push(make_def_elem(
                     "new_version",
                     Some(make_string_node(version)),
-                    location,
+                    offset,
                 ));
             }
             self.expect_statement_end()?;

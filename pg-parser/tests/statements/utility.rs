@@ -319,10 +319,10 @@ fn do_stmt_preserves_flexible_option_order() {
         panic!("expected repeated-option DoStmt");
     };
     assert_eq!(repeated.args.len(), 4);
-    assert_eq!(def(&repeated.args[0]).location, 3);
-    assert_eq!(def(&repeated.args[1]).location, 11);
-    assert_eq!(def(&repeated.args[2]).location, 24);
-    assert_eq!(def(&repeated.args[3]).location, 33);
+    assert_eq!(def(&repeated.args[0]).parse_loc, 3);
+    assert_eq!(def(&repeated.args[1]).parse_loc, 11);
+    assert_eq!(def(&repeated.args[2]).parse_loc, 24);
+    assert_eq!(def(&repeated.args[3]).parse_loc, 33);
 }
 
 #[test]
@@ -510,9 +510,9 @@ fn lock_notify_listen_unlisten_and_load_require_and_store_arguments() {
         default_nowait.relations.as_slice(),
         [Node::RangeVar(first), Node::RangeVar(second)]
             if !first.inh
-                && first.location == 17
+                && first.parse_loc == 17
                 && second.inh
-                && second.location == 29
+                && second.parse_loc == 29
     ));
 
     let Node::ListenStmt(listen) = parse_statement("listen item_changes") else {
@@ -1113,7 +1113,7 @@ fn cursor_statements_populate_options_direction_counts_and_names() {
     assert_eq!(fetch.how_many, i64::MAX);
     assert_eq!(fetch.direction_keyword, FetchDirectionKeywords::BackwardAll);
     assert!(!fetch.ismove);
-    assert_eq!(fetch.location, -1);
+    assert_eq!(fetch.parse_loc, -1);
 
     let Node::FetchStmt(movement) = parse_statement("move absolute -2 in item_cursor") else {
         panic!("expected FetchStmt");
@@ -1121,7 +1121,7 @@ fn cursor_statements_populate_options_direction_counts_and_names() {
     assert_eq!(movement.direction, FetchDirection::Absolute);
     assert_eq!(movement.how_many, -2);
     assert!(movement.ismove);
-    assert_eq!(movement.location, 14);
+    assert_eq!(movement.parse_loc, 14);
 
     let Node::ClosePortalStmt(close) = parse_statement("close all") else {
         panic!("expected ClosePortalStmt");
@@ -1164,7 +1164,7 @@ fn cursor_statements_populate_options_direction_counts_and_names() {
 }
 
 #[test]
-fn fetch_and_move_locations_follow_fetch_args_productions() {
+fn fetch_and_move_parse_locs_follow_fetch_args_productions() {
     let cases = [
         ("fetch item_cursor", FetchDirectionKeywords::None, 1, -1),
         (
@@ -1222,16 +1222,16 @@ fn fetch_and_move_locations_follow_fetch_args_productions() {
             -1,
         ),
     ];
-    for (sql, keyword, count, location) in cases {
+    for (sql, keyword, count, offset) in cases {
         let Node::FetchStmt(stmt) = parse_statement(sql) else {
             panic!("expected FetchStmt for {sql}");
         };
         assert_eq!(stmt.direction_keyword, keyword, "{sql}");
         assert_eq!(stmt.how_many, count, "{sql}");
-        assert_eq!(stmt.location, location, "{sql}");
+        assert_eq!(stmt.parse_loc, offset, "{sql}");
     }
 
-    for (sql, location) in [
+    for (sql, offset) in [
         ("fetch 3 from item_cursor", 6),
         ("fetch absolute -2 from item_cursor", 15),
         ("fetch relative +4 from item_cursor", 15),
@@ -1241,7 +1241,7 @@ fn fetch_and_move_locations_follow_fetch_args_productions() {
         let Node::FetchStmt(stmt) = parse_statement(sql) else {
             panic!("expected FetchStmt for {sql}");
         };
-        assert_eq!(stmt.location, location, "{sql}");
+        assert_eq!(stmt.parse_loc, offset, "{sql}");
     }
 
     for (sql, direction, count, keyword) in [
@@ -1308,12 +1308,12 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
     };
     assert_eq!(begin.kind, TransactionStmtKind::Begin);
     assert_eq!(begin.options.len(), 3);
-    assert_eq!(begin.location, -1);
+    assert_eq!(begin.parse_loc, -1);
     let Node::DefElem(isolation) = &begin.options[0] else {
         panic!("expected isolation DefElem");
     };
     assert_eq!(
-        isolation.location,
+        isolation.parse_loc,
         "begin transaction isolation level repeatable read, read only not deferrable"
             .find("isolation")
             .unwrap() as i32
@@ -1321,7 +1321,7 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
     assert!(matches!(
         isolation.arg.as_deref(),
         Some(Node::AConst(value))
-            if value.location
+            if value.parse_loc
                 == "begin transaction isolation level repeatable read, read only not deferrable"
                     .find("repeatable")
                     .unwrap() as i32
@@ -1332,7 +1332,7 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
     };
     assert_eq!(commit.kind, TransactionStmtKind::Commit);
     assert!(commit.chain);
-    assert_eq!(commit.location, -1);
+    assert_eq!(commit.parse_loc, -1);
 
     let rollback_sql = "rollback transaction to savepoint s1";
     let Node::TransactionStmt(rollback) = parse_statement(rollback_sql) else {
@@ -1340,14 +1340,14 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
     };
     assert_eq!(rollback.kind, TransactionStmtKind::RollbackTo);
     assert_eq!(rollback.savepoint_name.as_deref(), Some("s1"));
-    assert_eq!(rollback.location, rollback_sql.find("s1").unwrap() as i32);
+    assert_eq!(rollback.parse_loc, rollback_sql.find("s1").unwrap() as i32);
 
     let prepare_sql = "prepare transaction 'gid-1'";
     let Node::TransactionStmt(prepare) = parse_statement(prepare_sql) else {
         panic!("expected TransactionStmt");
     };
     assert_eq!(
-        prepare.location,
+        prepare.parse_loc,
         prepare_sql.find("'gid-1'").unwrap() as i32
     );
     assert_eq!(prepare.kind, TransactionStmtKind::Prepare);
@@ -1423,7 +1423,7 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
         };
         assert_eq!(stmt.kind, expected_kind, "{sql}");
         assert_eq!(stmt.chain, chain, "{sql}");
-        assert_eq!(stmt.location, -1, "{sql}");
+        assert_eq!(stmt.parse_loc, -1, "{sql}");
     }
 
     for (sql, expected_kind, name) in [
@@ -1449,7 +1449,7 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
         };
         assert_eq!(stmt.kind, expected_kind, "{sql}");
         assert_eq!(stmt.savepoint_name.as_deref(), Some(name), "{sql}");
-        assert_eq!(stmt.location, sql.find(name).unwrap() as i32, "{sql}");
+        assert_eq!(stmt.parse_loc, sql.find(name).unwrap() as i32, "{sql}");
     }
 
     let rollback_prepared_sql = "rollback prepared 'gid-2'";
@@ -1462,13 +1462,13 @@ fn show_and_transaction_statements_populate_special_names_modes_and_identifiers(
     );
     assert_eq!(rollback_prepared.gid.as_deref(), Some("gid-2"));
     assert_eq!(
-        rollback_prepared.location,
+        rollback_prepared.parse_loc,
         rollback_prepared_sql.find("'gid-2'").unwrap() as i32
     );
 }
 
 #[test]
-fn variable_set_locations_follow_postgres_set_rest_productions() {
+fn variable_set_parse_locs_follow_postgres_set_rest_productions() {
     let cases = [
         ("set transaction isolation level serializable", -1),
         ("set session characteristics as transaction read only", -1),
@@ -1492,11 +1492,11 @@ fn variable_set_locations_follow_postgres_set_rest_productions() {
         ("reset transaction isolation level", -1),
         ("reset session authorization", -1),
     ];
-    for (sql, location) in cases {
+    for (sql, offset) in cases {
         let Node::VariableSetStmt(stmt) = parse_statement(sql) else {
             panic!("expected VariableSetStmt for {sql}");
         };
-        assert_eq!(stmt.location, location, "{sql}");
+        assert_eq!(stmt.parse_loc, offset, "{sql}");
     }
 
     let Node::VariableSetStmt(xml) = parse_statement("set xml option document") else {
@@ -1504,7 +1504,7 @@ fn variable_set_locations_follow_postgres_set_rest_productions() {
     };
     assert!(matches!(
         xml.args.as_slice(),
-        [Node::AConst(value)] if value.location == 15
+        [Node::AConst(value)] if value.parse_loc == 15
     ));
 }
 
@@ -1616,26 +1616,26 @@ fn prepare_execute_and_deallocate_require_and_store_complete_payloads() {
     };
     assert_eq!(named.name.as_deref(), Some("find_order"));
     assert!(!named.isall);
-    assert_eq!(named.location, 19);
+    assert_eq!(named.parse_loc, 19);
 
     let Node::DeallocateStmt(all) = parse_statement("deallocate all") else {
         panic!("expected DeallocateStmt");
     };
     assert!(all.name.is_none());
     assert!(all.isall);
-    assert_eq!(all.location, -1);
+    assert_eq!(all.parse_loc, -1);
 
     let Node::DeallocateStmt(prepared_all) = parse_statement("deallocate prepare all") else {
         panic!("expected DeallocateStmt");
     };
     assert!(prepared_all.name.is_none());
     assert!(prepared_all.isall);
-    assert_eq!(prepared_all.location, -1);
+    assert_eq!(prepared_all.parse_loc, -1);
 
     let Node::DeallocateStmt(named) = parse_statement("deallocate find_order") else {
         panic!("expected DeallocateStmt");
     };
-    assert_eq!(named.location, 11);
+    assert_eq!(named.parse_loc, 11);
 
     for (sql, expected_query) in [
         ("prepare p as (select 1)", "SelectStmt"),

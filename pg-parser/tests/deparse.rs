@@ -16,7 +16,7 @@ fn assert_round_trip(sql: &str) {
 
 /// String stability alone cannot detect semantics lost by the first deparse
 /// (e.g. a dropped `IGNORE NULLS`). This gate compares the original parse tree
-/// against the tree of the deparsed SQL, ignoring source locations.
+/// against the tree of the deparsed SQL, ignoring `ParseLoc` fields.
 fn assert_semantics_preserved(sql: &str) {
     let first_tree = parse(sql).unwrap_or_else(|error| panic!("failed to parse {sql:?}: {error}"));
     let first_sql =
@@ -24,19 +24,23 @@ fn assert_semantics_preserved(sql: &str) {
     let second_tree = parse(&first_sql)
         .unwrap_or_else(|error| panic!("failed to parse deparsed SQL {first_sql:?}: {error}"));
     assert_eq!(
-        erase_locations(&format!("{first_tree:#?}")),
-        erase_locations(&format!("{second_tree:#?}")),
+        erase_parse_locs(&format!("{first_tree:#?}")),
+        erase_parse_locs(&format!("{second_tree:#?}")),
         "deparse changed the parse tree semantics for {sql:?}"
     );
 }
 
-fn erase_locations(debug: &str) -> std::string::String {
-    const FIELDS: [&str; 5] = [
-        "location",
-        "stmt_location",
+fn erase_parse_locs(debug: &str) -> std::string::String {
+    const FIELDS: [&str; 9] = [
+        "parse_loc",
+        "stmt_parse_loc",
         "stmt_len",
-        "list_start",
-        "list_end",
+        "target_parse_loc",
+        "name_parse_loc",
+        "list_start_parse_loc",
+        "list_end_parse_loc",
+        "rexpr_list_start_parse_loc",
+        "rexpr_list_end_parse_loc",
     ];
     let bytes = debug.as_bytes();
     let mut out = std::string::String::with_capacity(debug.len());

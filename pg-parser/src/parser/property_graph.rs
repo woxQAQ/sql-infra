@@ -151,7 +151,7 @@ impl Parser {
                 match self.peek_kind() {
                     TokenKind::AddP => {
                         while self.consume(TokenKind::AddP) {
-                            let location = self.previous_location();
+                            let offset = self.previous_offset();
                             self.expect(TokenKind::Label)?;
                             let label = Some(
                                 self.consume_col_id()
@@ -161,7 +161,7 @@ impl Parser {
                             stmt.add_labels.push(node!(PropGraphLabelAndProperties {
                                 label,
                                 properties,
-                                location: location as ParseLoc,
+                                parse_loc: offset as ParseLoc,
                             }));
                         }
                     }
@@ -221,7 +221,7 @@ impl Parser {
         }
         let mut vertices = Vec::new();
         loop {
-            let location = self.location();
+            let offset = self.offset();
             let mut vtable = self
                 .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("expected a vertex table name"))?;
@@ -240,7 +240,7 @@ impl Parser {
                 vtable: Some(Box::new(vtable)),
                 vkey,
                 labels,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             }));
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -260,7 +260,7 @@ impl Parser {
         }
         let mut edges = Vec::new();
         loop {
-            let location = self.location();
+            let offset = self.offset();
             let mut etable = self
                 .try_parse_qualified_range_var_with_slot(GrammarSlot::Table)
                 .ok_or_else(|| self.error_here("expected an edge table name"))?;
@@ -289,7 +289,7 @@ impl Parser {
                 edestvertex,
                 edestvertexcols,
                 labels,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             }));
             if !self.consume(TokenKind::Char(',')) {
                 break;
@@ -345,12 +345,12 @@ impl Parser {
     }
 
     pub(super) fn parse_prop_graph_properties(&mut self) -> PResult<PropGraphProperties> {
-        let location = self.location();
+        let offset = self.offset();
         self.record_completion_lookahead_tokens(&[TokenKind::Properties, TokenKind::No]);
         if self.consume(TokenKind::No) {
             self.expect(TokenKind::Properties)?;
             return Ok(PropGraphProperties {
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..PropGraphProperties::default()
             });
         }
@@ -359,7 +359,7 @@ impl Parser {
             self.expect(TokenKind::Columns)?;
             return Ok(PropGraphProperties {
                 all: true,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..PropGraphProperties::default()
             });
         }
@@ -371,13 +371,13 @@ impl Parser {
         self.expect(TokenKind::Char(')'))?;
         Ok(PropGraphProperties {
             properties,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..PropGraphProperties::default()
         })
     }
 
     pub(super) fn parse_prop_graph_add_properties(&mut self) -> PResult<PropGraphProperties> {
-        let location = self.previous_location();
+        let offset = self.previous_offset();
         self.expect(TokenKind::Properties)?;
         self.expect(TokenKind::Char('('))?;
         let properties = self.parse_res_target_list_strict_until(&[TokenKind::Char(')')])?;
@@ -387,7 +387,7 @@ impl Parser {
         self.expect(TokenKind::Char(')'))?;
         Ok(PropGraphProperties {
             properties,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..PropGraphProperties::default()
         })
     }
@@ -401,17 +401,17 @@ impl Parser {
             TokenKind::No,
         ]);
         if matches!(self.peek_kind(), TokenKind::Properties | TokenKind::No) {
-            let location = self.location();
+            let offset = self.offset();
             let properties = Some(Box::new(self.parse_prop_graph_properties()?));
             labels.push(node!(PropGraphLabelAndProperties {
                 properties,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..PropGraphLabelAndProperties::default()
             }));
             return Ok(labels);
         }
         while matches!(self.peek_kind(), TokenKind::Label | TokenKind::Default) {
-            let location = self.location();
+            let offset = self.offset();
             let label = if self.consume(TokenKind::Label) {
                 Some(
                     self.consume_col_id()
@@ -428,24 +428,24 @@ impl Parser {
             } else {
                 Some(Box::new(PropGraphProperties {
                     all: true,
-                    location: -1,
+                    parse_loc: -1,
                     ..PropGraphProperties::default()
                 }))
             };
             labels.push(node!(PropGraphLabelAndProperties {
                 label,
                 properties,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             }));
         }
         if labels.is_empty() {
             labels.push(node!(PropGraphLabelAndProperties {
                 properties: Some(Box::new(PropGraphProperties {
                     all: true,
-                    location: -1,
+                    parse_loc: -1,
                     ..PropGraphProperties::default()
                 })),
-                location: -1,
+                parse_loc: -1,
                 ..PropGraphLabelAndProperties::default()
             }));
         }

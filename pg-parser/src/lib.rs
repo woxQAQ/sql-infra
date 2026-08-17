@@ -1,6 +1,6 @@
 //! PostgreSQL-compatible SQL infrastructure built around a hand-written parser.
 //!
-//! The crate exposes raw PostgreSQL-shaped AST nodes, source ranges, strict and
+//! The crate exposes raw PostgreSQL-shaped AST nodes, source locs, strict and
 //! completion-aware lexing, and entry points for full statements and fragments.
 
 pub mod ast;
@@ -15,4 +15,4 @@ pub use deparse::*;
 pub use lexer::*;
 pub use parser::*;
 pub use source::*;
-pub use statement_splitter::split_statement_ranges;
+pub use statement_splitter::split_statement_locs;

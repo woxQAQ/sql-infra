@@ -227,11 +227,11 @@ fn every_token_in_complete_family_witnesses_is_reachable_through_completion() {
             .iter()
             .filter(|token| !matches!(token.kind, TokenKind::Eof | TokenKind::Char(';')))
         {
-            let original_point = token.range.start();
+            let original_point = token.loc.start();
             let original = collect(&source, original_point);
             assert_expectation_provenance(&source, &original);
 
-            let (prefix_source, point) = source_before_token(&source, token.range.start(), "");
+            let (prefix_source, point) = source_before_token(&source, token.loc.start(), "");
             let context = collect(&prefix_source, TextSize::try_from(point).unwrap());
             assert_expectation_provenance(&prefix_source, &context);
 
@@ -244,7 +244,7 @@ fn every_token_in_complete_family_witnesses_is_reachable_through_completion() {
                 missing.push(format!(
                     "missing raw token {:?} at byte {} in {:?}: {:?}",
                     token.kind,
-                    usize::from(token.range.start()),
+                    usize::from(token.loc.start()),
                     name,
                     context.expectations
                 ));
@@ -253,7 +253,7 @@ fn every_token_in_complete_family_witnesses_is_reachable_through_completion() {
             if token_is_name && context.expectations.slots.is_empty() {
                 missing.push(format!(
                     "identifier position has no GrammarSlot at byte {} in {:?}: {:?}",
-                    usize::from(token.range.start()),
+                    usize::from(token.loc.start()),
                     name,
                     context.expectations
                 ));
@@ -266,18 +266,14 @@ fn every_token_in_complete_family_witnesses_is_reachable_through_completion() {
             if !context.expectations.tokens.contains(&token.kind) {
                 continue;
             }
-            let token_text =
-                &source[usize::from(token.range.start())..usize::from(token.range.end())];
+            let token_text = &source[usize::from(token.loc.start())..usize::from(token.loc.end())];
             let label = keyword.word.to_ascii_uppercase();
             let recovered = token_text
                 .char_indices()
                 .map(|(index, character)| index + character.len_utf8())
                 .any(|prefix_len| {
-                    let (prefixed, point) = source_before_token(
-                        &source,
-                        token.range.start(),
-                        &token_text[..prefix_len],
-                    );
+                    let (prefixed, point) =
+                        source_before_token(&source, token.loc.start(), &token_text[..prefix_len]);
                     let prefixed = collect(&prefixed, TextSize::try_from(point).unwrap());
                     prefixed.expectations.tokens.contains(&token.kind)
                         && prefixed
@@ -288,7 +284,7 @@ fn every_token_in_complete_family_witnesses_is_reachable_through_completion() {
             if !recovered {
                 missing.push(format!(
                     "no typed keyword prefix recovers {label} at byte {} in {:?}",
-                    usize::from(token.range.start()),
+                    usize::from(token.loc.start()),
                     name
                 ));
             }
@@ -314,7 +310,7 @@ fn editor_projection_stays_quiet_across_every_witness_boundary() {
         let mut points = tokens
             .iter()
             .filter(|token| token.kind != TokenKind::Eof)
-            .flat_map(|token| [token.range.start(), token.range.end()])
+            .flat_map(|token| [token.loc.start(), token.loc.end()])
             .collect::<Vec<_>>();
         points.push(TextSize::try_from(source.len()).expect("witness length fits TextSize"));
         points.sort_unstable();

@@ -7,10 +7,10 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_json_table(&mut self, lateral: bool) -> PResult<JsonTable> {
-        let location = self.expect(TokenKind::JsonTable)?.location();
+        let offset = self.expect(TokenKind::JsonTable)?.offset();
         self.expect(TokenKind::Char('('))?;
 
-        let context_location = self.location();
+        let context_offset = self.offset();
         let context_tokens = self.take_until_top_level(&[TokenKind::Char(',')]);
         if self.at_completion()
             && parse_json_value_expr_tokens_with_completion(context_tokens.clone(), None).is_ok()
@@ -20,8 +20,8 @@ impl Parser {
         let context_item = self
             .parse_json_value_fragment_tokens(context_tokens)
             .map_err(|mut error| {
-                if error.location() == 0 {
-                    error.reanchor(context_location);
+                if error.offset() == 0 {
+                    error.reanchor(context_offset);
                 }
                 error
             })?;
@@ -49,7 +49,7 @@ impl Parser {
             on_error,
             alias,
             lateral,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         })
     }
 
@@ -60,7 +60,7 @@ impl Parser {
 
         let mut arguments = Vec::new();
         loop {
-            let location = self.location();
+            let offset = self.offset();
             let value_tokens = self.take_until_top_level(&[TokenKind::As]);
             if self.at_completion()
                 && parse_json_value_expr_tokens_with_completion(value_tokens.clone(), None).is_ok()
@@ -81,7 +81,7 @@ impl Parser {
             }
             if self.peek_kind() == TokenKind::Columns {
                 return Err(ParseError::syntax_exit(
-                    location,
+                    offset,
                     "expected a JSON PASSING argument after ','",
                 ));
             }
@@ -110,7 +110,7 @@ impl Parser {
     }
 
     pub(super) fn parse_json_table_column(&mut self) -> PResult<JsonTableColumn> {
-        let location = self.location();
+        let offset = self.offset();
         if self.consume(TokenKind::Nested) {
             self.consume(TokenKind::Path);
             let pathspec = self.parse_json_table_path_spec(false)?.ok_or_else(|| {
@@ -124,7 +124,7 @@ impl Parser {
                 coltype: JsonTableColumnType::Nested,
                 pathspec: Some(Box::new(pathspec)),
                 columns,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..JsonTableColumn::default()
             });
         }
@@ -137,7 +137,7 @@ impl Parser {
             return Ok(JsonTableColumn {
                 coltype: JsonTableColumnType::ForOrdinality,
                 name: Some(name),
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..JsonTableColumn::default()
             });
         }
@@ -184,7 +184,7 @@ impl Parser {
                 wrapper: JsonWrapper::None,
                 quotes: JsonQuotes::Unspec,
                 on_error,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..JsonTableColumn::default()
             });
         }
@@ -206,7 +206,7 @@ impl Parser {
             quotes,
             on_empty,
             on_error,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..JsonTableColumn::default()
         })
     }
@@ -226,24 +226,24 @@ impl Parser {
         }
         let token = self.advance().clone();
         let value = token_name(&token)
-            .ok_or_else(|| ParseError::ranged(token.range, "invalid JSON path string"))?;
-        let (name, name_location) = if self.consume(TokenKind::As) {
-            let name_location = self.location();
+            .ok_or_else(|| ParseError::at_loc(token.loc, "invalid JSON path string"))?;
+        let (name, name_parse_loc) = if self.consume(TokenKind::As) {
+            let name_offset = self.offset();
             let name = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("JSON path AS requires a name"))?;
-            (Some(name), name_location as ParseLoc)
+            (Some(name), name_offset as ParseLoc)
         } else {
             (None, -1)
         };
         Ok(Some(JsonTablePathSpec {
             string: Some(Box::new(node!(AConst::string(
                 value,
-                token.location() as ParseLoc,
+                token.offset() as ParseLoc,
             )))),
             name,
-            name_location,
-            location: token.location() as ParseLoc,
+            name_parse_loc,
+            parse_loc: token.offset() as ParseLoc,
         }))
     }
 
@@ -251,7 +251,7 @@ impl Parser {
         if !self.consume(TokenKind::Format) {
             return Ok(None);
         }
-        let location = self.previous_location();
+        let offset = self.previous_offset();
         self.expect(TokenKind::Json)?;
         let encoding = if self.consume(TokenKind::Encoding) {
             let token = self.peek().clone();
@@ -263,8 +263,8 @@ impl Parser {
                 "utf16" => JsonEncoding::Utf16,
                 "utf32" => JsonEncoding::Utf32,
                 _ => {
-                    return Err(ParseError::ranged(
-                        token.range,
+                    return Err(ParseError::at_loc(
+                        token.loc,
                         format!("unrecognized JSON encoding: {name}"),
                     ));
                 }
@@ -275,7 +275,7 @@ impl Parser {
         Ok(Some(JsonFormat {
             format_type: JsonFormatType::Json,
             encoding,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }))
     }
 
@@ -358,7 +358,7 @@ impl Parser {
     }
 
     pub(super) fn parse_json_table_behavior(&mut self) -> PResult<JsonBehavior> {
-        let location = self.location();
+        let offset = self.offset();
         let (btype, expr) = match self.peek_kind() {
             TokenKind::Default => {
                 self.advance();
@@ -407,7 +407,7 @@ impl Parser {
         Ok(JsonBehavior {
             btype,
             expr,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..JsonBehavior::default()
         })
     }

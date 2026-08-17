@@ -202,11 +202,11 @@ fn dedicated_drop_statements_require_and_store_all_names() {
             [Node::DefElem(option)]
                 if option.defname.as_deref() == Some("force") && option.arg.is_none()
         ));
-        let expected_location = sql.find("force").unwrap() as i32;
+        let expected_parse_loc = sql.find("force").unwrap() as i32;
         let Node::DefElem(option) = &database.options[0] else {
             unreachable!()
         };
-        assert_eq!(option.location, expected_location, "{sql}");
+        assert_eq!(option.parse_loc, expected_parse_loc, "{sql}");
     }
 
     let Node::DropRoleStmt(roles) = parse_statement("drop role if exists alice, current_user")

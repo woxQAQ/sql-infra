@@ -2,11 +2,15 @@
 //!
 //! [`Parser`] owns the token cursor and common grammar operations. Private
 //! submodules add concept-focused parsing methods, while public entry points
-//! preserve PostgreSQL raw-tree and source-location semantics.
+//! preserve PostgreSQL raw-tree and source-offset semantics.
 
 use crate::BareLabel;
 use crate::KeywordCategory;
-use crate::TextRange;
+use crate::Loc;
+use crate::Position;
+use crate::PositionRange;
+use crate::SourceError;
+use crate::SourceText;
 use crate::TextSize;
 use crate::TokenKind;
 use crate::ast::*;
@@ -138,72 +142,80 @@ use xmltable_columns::*;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParseError {
     pub message: std::string::String,
-    pub range: TextRange,
+    pub loc: Loc,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum ParserExit {
     Syntax(ParseError),
-    Completion(TextRange),
+    Completion(Loc),
 }
 
 impl ParseError {
-    fn syntax(location: usize, message: impl Into<std::string::String>) -> Self {
+    fn syntax(offset: usize, message: impl Into<std::string::String>) -> Self {
         ParseError {
-            range: TextRange::empty(
-                TextSize::try_from(location).expect("parser locations come from validated input"),
+            loc: Loc::empty(
+                TextSize::try_from(offset).expect("parser offsets come from validated input"),
             ),
             message: message.into(),
         }
     }
 
     pub(super) fn syntax_exit(
-        location: usize,
+        offset: usize,
         message: impl Into<std::string::String>,
     ) -> ParserExit {
-        ParserExit::Syntax(Self::syntax(location, message))
+        ParserExit::Syntax(Self::syntax(offset, message))
     }
 
-    pub(super) fn ranged(range: TextRange, message: impl Into<std::string::String>) -> ParserExit {
+    pub(super) fn at_loc(loc: Loc, message: impl Into<std::string::String>) -> ParserExit {
         ParserExit::Syntax(ParseError {
-            range,
+            loc,
             message: message.into(),
         })
     }
 
-    pub fn location(&self) -> usize {
-        self.range.start().into()
+    pub fn offset(&self) -> usize {
+        self.loc.start().into()
+    }
+
+    pub fn position(&self, source: &SourceText<'_>) -> Result<Position, SourceError> {
+        source.position(self.loc.start())
+    }
+
+    pub fn position_range(&self, source: &SourceText<'_>) -> Result<PositionRange, SourceError> {
+        source.position_range(self.loc)
     }
 }
 
 impl ParserExit {
-    fn completion(range: TextRange) -> Self {
-        Self::Completion(range)
+    fn completion(loc: Loc) -> Self {
+        Self::Completion(loc)
     }
 
-    fn location(&self) -> usize {
+    fn offset(&self) -> usize {
         match self {
-            Self::Syntax(error) => error.location(),
-            Self::Completion(range) => range.start().into(),
+            Self::Syntax(error) => error.offset(),
+            Self::Completion(loc) => loc.start().into(),
         }
     }
 
-    pub(super) fn reanchor(&mut self, location: usize) {
-        let range = TextRange::empty(
-            TextSize::try_from(location).expect("parser locations come from validated input"),
+    pub(super) fn reanchor(&mut self, offset: usize) {
+        let loc = Loc::empty(
+            TextSize::try_from(offset).expect("parser offsets come from validated input"),
         );
         match self {
-            Self::Syntax(error) => error.range = range,
-            Self::Completion(completion_range) => *completion_range = range,
+            Self::Syntax(error) => error.loc = loc,
+            Self::Completion(completion_loc) => *completion_loc = loc,
         }
     }
 
     fn into_parse_error(self) -> ParseError {
         match self {
             Self::Syntax(error) => error,
-            Self::Completion(range) => ParseError {
+            Self::Completion(loc) => ParseError {
                 message: "unexpected synthetic completion marker".to_owned(),
-                range,
+                loc,
             },
         }
     }
@@ -225,14 +237,14 @@ impl From<crate::lexer::LexError> for ParseError {
     fn from(value: crate::lexer::LexError) -> Self {
         Self {
             message: value.message,
-            range: value.range,
+            loc: value.loc,
         }
     }
 }
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} at byte {}", self.message, self.location())
+        write!(f, "{} at byte {}", self.message, self.offset())
     }
 }
 
@@ -247,23 +259,34 @@ pub fn parse(sql: &str) -> Result<Vec<RawStmt>, ParseError> {
     Parser::new(sql)?.parse()
 }
 
-/// Parse SQL while retaining complete source ranges for tooling.
+/// Parse SQL while retaining complete source locs for tooling.
 ///
 /// PostgreSQL-compatible `RawStmt::stmt_len` semantics remain unchanged;
-/// callers that need the real range of an unterminated final statement should
+/// callers that need the complete loc of an unterminated final statement should
 /// use this interface.
-pub fn parse_with_ranges(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
-    Parser::new(sql)?.parse_with_ranges()
+pub fn parse_with_locs(sql: &str) -> Result<Vec<ParsedStatement>, ParseError> {
+    Parser::new(sql)?.parse_with_locs()
+}
+
+/// Parse SQL and retain the source index used to resolve byte offsets into
+/// line/column positions.
+pub fn parse_document(sql: &str) -> Result<ParsedDocument<'_>, ParseError> {
+    let source = SourceText::new(sql).map_err(|error| ParseError {
+        message: error.to_string(),
+        loc: Loc::empty(TextSize::ZERO),
+    })?;
+    let statements = Parser::new(sql)?.parse_with_locs()?;
+    Ok(ParsedDocument { source, statements })
 }
 
 pub fn parse_one(sql: &str) -> Result<RawStmt, ParseError> {
     let mut statements = parse(sql)?;
     if statements.len() != 1 {
-        let unexpected_statement_location = statements
+        let unexpected_statement_offset = statements
             .get(1)
-            .map_or(0, |statement| statement.stmt_location as usize);
+            .map_or(0, |statement| statement.stmt_parse_loc as usize);
         return Err(ParseError::syntax(
-            unexpected_statement_location,
+            unexpected_statement_offset,
             format!("expected one statement, found {}", statements.len()),
         ));
     }
@@ -294,19 +317,19 @@ pub struct Parser {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct StatementRange {
+pub struct StatementLoc {
     /// From the first statement token to the terminator or EOF, excluding the
     /// terminating semicolon but retaining trivia within those bounds.
-    pub syntax: TextRange,
-    /// The semicolon range, when the statement was terminated.
-    pub terminator: Option<TextRange>,
+    pub syntax: Loc,
+    /// The semicolon loc, when the statement was terminated.
+    pub terminator: Option<Loc>,
 }
 
-impl StatementRange {
-    pub fn full(self) -> TextRange {
-        TextRange::new(
+impl StatementLoc {
+    pub fn full(self) -> Loc {
+        Loc::new(
             self.syntax.start(),
-            self.terminator.map_or(self.syntax.end(), TextRange::end),
+            self.terminator.map_or(self.syntax.end(), Loc::end),
         )
     }
 }
@@ -314,7 +337,44 @@ impl StatementRange {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParsedStatement {
     pub raw: RawStmt,
-    pub range: StatementRange,
+    pub loc: StatementLoc,
+}
+
+/// Parsed statements together with the indexed SQL source they refer to.
+#[derive(Clone, Debug)]
+pub struct ParsedDocument<'a> {
+    source: SourceText<'a>,
+    statements: Vec<ParsedStatement>,
+}
+
+impl<'a> ParsedDocument<'a> {
+    pub const fn source(&self) -> &SourceText<'a> {
+        &self.source
+    }
+
+    pub fn statements(&self) -> &[ParsedStatement] {
+        &self.statements
+    }
+
+    pub fn into_statements(self) -> Vec<ParsedStatement> {
+        self.statements
+    }
+
+    pub fn position(&self, offset: TextSize) -> Result<Position, SourceError> {
+        self.source.position(offset)
+    }
+
+    pub fn offset(&self, position: Position) -> Result<TextSize, SourceError> {
+        self.source.offset(position)
+    }
+
+    pub fn position_range(&self, loc: Loc) -> Result<PositionRange, SourceError> {
+        self.source.position_range(loc)
+    }
+
+    pub fn slice(&self, loc: Loc) -> Result<&'a str, SourceError> {
+        self.source.slice(loc)
+    }
 }
 
 impl Parser {
@@ -333,18 +393,18 @@ impl Parser {
 
     fn parse_raw_statements(&mut self) -> PResult<Vec<RawStmt>> {
         Ok(self
-            .parse_statements_with_ranges()?
+            .parse_statements_with_locs()?
             .into_iter()
             .map(|statement| statement.raw)
             .collect())
     }
 
-    pub fn parse_with_ranges(&mut self) -> Result<Vec<ParsedStatement>, ParseError> {
-        self.parse_statements_with_ranges()
+    pub fn parse_with_locs(&mut self) -> Result<Vec<ParsedStatement>, ParseError> {
+        self.parse_statements_with_locs()
             .map_err(ParserExit::into_parse_error)
     }
 
-    fn parse_statements_with_ranges(&mut self) -> PResult<Vec<ParsedStatement>> {
+    fn parse_statements_with_locs(&mut self) -> PResult<Vec<ParsedStatement>> {
         let mut statements = Vec::new();
         while !self.at(TokenKind::Eof) {
             while self.consume(TokenKind::Char(';')) {}
@@ -353,40 +413,40 @@ impl Parser {
             }
 
             self.clear_completion_membership_owners();
-            let statement_start = self.location();
+            let statement_start = self.offset();
             let statement = self.parse_statement(None)?;
-            let statement_end = self.location();
+            let statement_end = self.offset();
             if !self.at_statement_end() {
                 return Err(self.error_here(format!(
                     "expected ';' between statements, found {:?}",
                     self.peek_kind()
                 )));
             }
-            let terminator_range = if self.at(TokenKind::Char(';')) {
-                Some(self.advance().range)
+            let terminator_loc = if self.at(TokenKind::Char(';')) {
+                Some(self.advance().loc)
             } else {
                 None
             };
-            let syntax_range = TextRange::new(
+            let syntax_loc = Loc::new(
                 TextSize::try_from(statement_start).expect("validated parser offset"),
                 TextSize::try_from(statement_end).expect("validated parser offset"),
             );
             // PostgreSQL reports zero length for an unterminated final statement.
-            let raw_statement_length = if terminator_range.is_some() {
+            let raw_statement_length = if terminator_loc.is_some() {
                 statement_end.saturating_sub(statement_start) as ParseLoc
             } else {
                 0
             };
             let raw_statement = RawStmt {
                 stmt: Some(Box::new(statement)),
-                stmt_location: statement_start as ParseLoc,
+                stmt_parse_loc: statement_start as ParseLoc,
                 stmt_len: raw_statement_length,
             };
             statements.push(ParsedStatement {
                 raw: raw_statement,
-                range: StatementRange {
-                    syntax: syntax_range,
-                    terminator: terminator_range,
+                loc: StatementLoc {
+                    syntax: syntax_loc,
+                    terminator: terminator_loc,
                 },
             });
         }
@@ -624,26 +684,26 @@ impl Parser {
     }
 
     /// Byte offset of the current token in the source text.  Commonly used as
-    /// the `location` field on AST nodes.
-    pub(super) fn location(&self) -> usize {
-        self.peek().location()
+    /// the `offset` field on AST nodes.
+    pub(super) fn offset(&self) -> usize {
+        self.peek().offset()
     }
 
     /// Byte offset of the most recently consumed token.  Useful after
     /// `advance` when you still need the start position of the just-parsed
-    /// node. Falls back to [`Self::location`] when the cursor hasn't moved yet.
-    pub(super) fn previous_location(&self) -> usize {
+    /// node. Falls back to [`Self::offset`] when the cursor hasn't moved yet.
+    pub(super) fn previous_offset(&self) -> usize {
         self.tokens
             .get(self.pos.saturating_sub(1))
-            .location_or(self.location())
+            .offset_or(self.offset())
     }
 
     /// Construct parser control flow anchored at the current token position.
     pub(super) fn error_here(&self, message: impl Into<std::string::String>) -> ParserExit {
         if self.at_completion() && self.completion.is_some() {
-            ParserExit::completion(self.peek().range)
+            ParserExit::completion(self.peek().loc)
         } else {
-            ParseError::ranged(self.peek().range, message)
+            ParseError::at_loc(self.peek().loc, message)
         }
     }
 }

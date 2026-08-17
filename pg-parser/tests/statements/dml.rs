@@ -116,7 +116,7 @@ fn insert_stmt_preserves_column_field_and_subscript_indirection() {
         panic!("expected ResTarget");
     };
     assert!(matches!(field.indirection.as_slice(), [Node::String(_)]));
-    assert!(field.location >= 0);
+    assert!(field.parse_loc >= 0);
     let Node::ResTarget(index) = &stmt.cols[1] else {
         panic!("expected ResTarget");
     };
@@ -229,10 +229,13 @@ fn insert_stmt_populates_override_inference_update_and_returning_options() {
     assert_eq!(stmt.override_, OverridingKind::SystemValue);
     let conflict = stmt.on_conflict_clause.expect("OnConflictClause");
     assert_eq!(conflict.action, OnConflictAction::Update);
-    assert_eq!(conflict.location as usize, sql.find("on conflict").unwrap());
+    assert_eq!(
+        conflict.parse_loc as usize,
+        sql.find("on conflict").unwrap()
+    );
     let infer = conflict.infer.expect("InferClause");
     assert_eq!(infer.index_elems.len(), 1);
-    assert_eq!(infer.location as usize, sql.find("(id)").unwrap());
+    assert_eq!(infer.parse_loc as usize, sql.find("(id)").unwrap());
     assert!(infer.where_clause.is_some());
     assert_eq!(conflict.target_list.len(), 1);
     assert!(conflict.where_clause.is_some());
@@ -245,12 +248,12 @@ fn insert_stmt_populates_override_inference_update_and_returning_options() {
     };
     assert_eq!(old.option, ReturningOptionKind::Old);
     assert_eq!(old.value.as_deref(), Some("previous"));
-    assert_eq!(old.location as usize, sql.find("old as").unwrap());
+    assert_eq!(old.parse_loc as usize, sql.find("old as").unwrap());
     let Node::ReturningOption(new) = &returning.options[1] else {
         panic!("expected ReturningOption");
     };
     assert_eq!(new.option, ReturningOptionKind::New);
-    assert_eq!(new.location as usize, sql.find("new as").unwrap());
+    assert_eq!(new.parse_loc as usize, sql.find("new as").unwrap());
 
     let on_constraint_sql =
         "insert into items values (1) on conflict on constraint items_pkey do nothing";
@@ -264,7 +267,7 @@ fn insert_stmt_populates_override_inference_update_and_returning_options() {
         .expect("ON CONSTRAINT InferClause");
     assert_eq!(infer.conname.as_deref(), Some("items_pkey"));
     assert_eq!(
-        infer.location,
+        infer.parse_loc,
         on_constraint_sql.find("on constraint").unwrap() as i32
     );
 
@@ -295,7 +298,7 @@ fn insert_stmt_populates_override_inference_update_and_returning_options() {
     assert_eq!(name.ordering, pg_parser::SortByDir::Desc);
     assert_eq!(name.nulls_ordering, pg_parser::SortByNulls::First);
     assert_eq!(
-        name.location as usize,
+        name.parse_loc as usize,
         inference_sql.find("name collate").unwrap()
     );
     assert!(matches!(function.expr.as_deref(), Some(Node::FuncCall(_))));
@@ -303,12 +306,12 @@ fn insert_stmt_populates_override_inference_update_and_returning_options() {
     assert_eq!(function.ordering, pg_parser::SortByDir::Asc);
     assert_eq!(function.nulls_ordering, pg_parser::SortByNulls::Last);
     assert_eq!(
-        function.location as usize,
+        function.parse_loc as usize,
         inference_sql.find("lower(code)").unwrap()
     );
     assert!(matches!(expression.expr.as_deref(), Some(Node::AExpr(_))));
     assert_eq!(
-        expression.location as usize,
+        expression.parse_loc as usize,
         inference_sql.find("(id + 1)").unwrap()
     );
     assert!(infer.where_clause.is_some());
@@ -354,7 +357,7 @@ fn update_stmt_populates_assignments_from_filter_and_returning() {
     };
     assert_eq!(target.name.as_deref(), Some("name"));
     assert!(target.val.is_some());
-    assert_eq!(target.location as usize, sql.find("name =").unwrap());
+    assert_eq!(target.parse_loc as usize, sql.find("name =").unwrap());
 
     let Node::UpdateStmt(quoted) = parse_statement("update items set \"select\" = 1") else {
         panic!("expected UpdateStmt");
@@ -386,7 +389,7 @@ fn update_stmt_builds_multi_assign_refs() {
         assert_eq!(reference.ncolumns, 2);
         assert!(reference.source.is_some());
         let expected = if index == 0 { "name" } else { "status" };
-        assert_eq!(target.location as usize, sql.find(expected).unwrap());
+        assert_eq!(target.parse_loc as usize, sql.find(expected).unwrap());
     }
 }
 
@@ -478,11 +481,11 @@ fn update_and_delete_populate_for_portion_of_clause() {
     let portion = update.for_portion_of.expect("ForPortionOfClause");
     assert_eq!(portion.range_name.as_deref(), Some("valid_time"));
     assert_eq!(
-        portion.location as usize,
+        portion.parse_loc as usize,
         update_sql.find("valid_time").unwrap()
     );
     assert_eq!(
-        portion.target_location as usize,
+        portion.target_parse_loc as usize,
         update_sql.find("from").unwrap()
     );
     assert!(portion.target_start.is_some());
@@ -503,11 +506,11 @@ fn update_and_delete_populate_for_portion_of_clause() {
     let portion = delete.for_portion_of.expect("ForPortionOfClause");
     assert!(portion.target.is_some());
     assert_eq!(
-        portion.location as usize,
+        portion.parse_loc as usize,
         delete_sql.find("valid_time").unwrap()
     );
     assert_eq!(
-        portion.target_location as usize,
+        portion.target_parse_loc as usize,
         delete_sql.find("requested_period").unwrap()
     );
 }

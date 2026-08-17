@@ -34,24 +34,24 @@ fn assert_completion_boundaries(sql: &str) {
         .iter()
         .filter(|token| !matches!(token.kind, TokenKind::Eof | TokenKind::Char(';')))
     {
-        let before = collect_expectations(sql, token.range.start()).unwrap_or_else(|error| {
+        let before = collect_expectations(sql, token.loc.start()).unwrap_or_else(|error| {
             panic!(
                 "completion failed before {:?} at byte {} in {sql:?}: {error}",
                 token.kind,
-                usize::from(token.range.start())
+                usize::from(token.loc.start())
             )
         });
-        assert_expectation_provenance(sql, token.range.start(), &before);
+        assert_expectation_provenance(sql, token.loc.start(), &before);
         assert_token_position_is_reachable(sql, token, &before);
 
-        let after = collect_expectations(sql, token.range.end()).unwrap_or_else(|error| {
+        let after = collect_expectations(sql, token.loc.end()).unwrap_or_else(|error| {
             panic!(
                 "completion failed after {:?} at byte {} in {sql:?}: {error}",
                 token.kind,
-                usize::from(token.range.end())
+                usize::from(token.loc.end())
             )
         });
-        assert_expectation_provenance(sql, token.range.end(), &after);
+        assert_expectation_provenance(sql, token.loc.end(), &after);
     }
 }
 
@@ -84,7 +84,7 @@ fn assert_token_position_is_reachable(
         // slot rather than a keyword candidate: an editor should not suggest
         // every keyword as an alias merely because the spelling is legal.
         || expectations.slots.contains(&GrammarSlot::Alias);
-    let qualified_name_reachable = sql[..usize::from(token.range.start())]
+    let qualified_name_reachable = sql[..usize::from(token.loc.start())]
         .trim_end()
         .ends_with('.')
         && !expectations.slots.is_empty();
@@ -92,7 +92,7 @@ fn assert_token_position_is_reachable(
         panic!(
             "token {:?} at byte {} is not reachable through completion in {sql:?}: {expectations:?}",
             token.kind,
-            usize::from(token.range.start())
+            usize::from(token.loc.start())
         );
     }
 }

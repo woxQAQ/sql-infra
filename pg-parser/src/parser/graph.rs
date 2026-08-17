@@ -7,7 +7,7 @@ use super::*;
 
 impl Parser {
     pub(super) fn parse_graph_table(&mut self) -> PResult<RangeGraphTable> {
-        let location = self.expect(TokenKind::GraphTable)?.location();
+        let offset = self.expect(TokenKind::GraphTable)?.offset();
         self.expect(TokenKind::Char('('))?;
         let graph_name = Some(Box::new(
             self.try_parse_qualified_range_var_with_slot(GrammarSlot::PropertyGraph)
@@ -65,12 +65,12 @@ impl Parser {
             })),
             columns,
             alias,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         })
     }
 
     pub(super) fn parse_graph_element_pattern(&mut self) -> PResult<GraphElementPattern> {
-        let location = self.location();
+        let offset = self.offset();
         if self.at(TokenKind::Char('('))
             && matches!(
                 self.peek_kind_n(1),
@@ -99,7 +99,7 @@ impl Parser {
                 subexpr,
                 where_clause,
                 quantifier,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..GraphElementPattern::default()
             });
         }
@@ -124,7 +124,7 @@ impl Parser {
                     return Ok(GraphElementPattern {
                         kind: GraphElementPatternKind::EdgePatternLeft,
                         quantifier,
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                         ..GraphElementPattern::default()
                     });
                 }
@@ -135,7 +135,7 @@ impl Parser {
                 return Ok(GraphElementPattern {
                     kind: GraphElementPatternKind::EdgePatternRight,
                     quantifier,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..GraphElementPattern::default()
                 });
             }
@@ -151,7 +151,7 @@ impl Parser {
                     return Ok(GraphElementPattern {
                         kind: GraphElementPatternKind::EdgePatternRight,
                         quantifier,
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                         ..GraphElementPattern::default()
                     });
                 } else {
@@ -159,7 +159,7 @@ impl Parser {
                     return Ok(GraphElementPattern {
                         kind: GraphElementPatternKind::EdgePatternAny,
                         quantifier,
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                         ..GraphElementPattern::default()
                     });
                 }
@@ -200,32 +200,32 @@ impl Parser {
             labelexpr,
             where_clause,
             quantifier,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..GraphElementPattern::default()
         })
     }
 
     pub(super) fn parse_graph_label_expression(&mut self) -> PResult<Node> {
-        let make_term = |name: std::string::String, location: usize| {
+        let make_term = |name: std::string::String, offset: usize| {
             node!(ColumnRef {
                 fields: vec![make_string_node(name)],
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
             })
         };
-        let location = self.location();
+        let offset = self.offset();
         let first = self
             .consume_col_id()
             .ok_or_else(|| self.error_here("expected a graph label"))?;
-        let mut expression = make_term(first, location);
+        let mut expression = make_term(first, offset);
         while self.at(TokenKind::Char('|'))
             || (self.at(TokenKind::Op) && token_name(self.peek()).as_deref() == Some("|"))
         {
-            let operator_location = self.advance().location();
-            let term_location = self.location();
+            let operator_offset = self.advance().offset();
+            let term_offset = self.offset();
             let name = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a graph label after '|'"))?;
-            let term = make_term(name, term_location);
+            let term = make_term(name, term_offset);
             match expression {
                 node!(BoolExpr {
                     boolop: BoolExprType::OrExpr,
@@ -233,8 +233,7 @@ impl Parser {
                     ..
                 }) => args.push(term),
                 left => {
-                    expression =
-                        make_bool_expr(BoolExprType::OrExpr, left, term, operator_location);
+                    expression = make_bool_expr(BoolExprType::OrExpr, left, term, operator_offset);
                 }
             }
         }

@@ -1,6 +1,6 @@
 //! Canonical SQL serialization for PostgreSQL raw parse trees.
 //!
-//! The serializer deliberately ignores source locations. For supported raw
+//! The serializer deliberately ignores `ParseLoc` fields. For supported raw
 //! syntax nodes, its output can be parsed again by this crate.
 
 use std::error::Error;

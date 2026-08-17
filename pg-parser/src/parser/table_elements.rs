@@ -13,7 +13,7 @@ impl Parser {
             return Err(self.error_here("column list cannot be empty"));
         }
         while !self.at(TokenKind::Char(')')) {
-            let location = self.location();
+            let offset = self.offset();
             let name = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("expected a column name"))?;
@@ -21,7 +21,7 @@ impl Parser {
             cols.push(node!(ResTarget {
                 name: Some(name),
                 indirection,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..ResTarget::default()
             }));
             if !self.consume(TokenKind::Char(',')) {
@@ -96,15 +96,15 @@ impl Parser {
                     ..TableLikeClause::default()
                 }));
             } else {
-                let location = self.location();
+                let offset = self.offset();
                 let mut chunk = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
                 self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
                 self.append_completion_marker(&mut chunk);
                 elements.push(
                     parse_table_element_tokens_with_completion(chunk, self.completion.clone())
                         .map_err(|mut error| {
-                            if error.location() == 0 {
-                                error.reanchor(location);
+                            if error.offset() == 0 {
+                                error.reanchor(offset);
                             }
                             error
                         })?,
@@ -127,15 +127,15 @@ impl Parser {
             return Err(self.error_here("typed table element list cannot be empty"));
         }
         while !self.at(TokenKind::Char(')')) {
-            let location = self.location();
+            let offset = self.offset();
             let mut chunk = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
             self.record_completion_tokens(COMMA_OR_CLOSE_PAREN_TOKENS);
             self.append_completion_marker(&mut chunk);
             elements.push(
                 parse_typed_table_element_tokens_with_completion(chunk, self.completion.clone())
                     .map_err(|mut error| {
-                        if error.location() == 0 {
-                            error.reanchor(location);
+                        if error.offset() == 0 {
+                            error.reanchor(offset);
                         }
                         error
                     })?,
@@ -208,7 +208,7 @@ impl Parser {
     }
 
     pub(super) fn parse_column_definition(&mut self) -> PResult<ColumnDef> {
-        let location = self.location();
+        let offset = self.offset();
         let colname = Some(
             self.consume_col_id()
                 .ok_or_else(|| self.error_here("expected a column name"))?,
@@ -272,13 +272,13 @@ impl Parser {
             coll_clause,
             constraints,
             fdwoptions,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..ColumnDef::default()
         })
     }
 
     pub(super) fn parse_typed_column_options(&mut self) -> PResult<ColumnDef> {
-        let location = self.location();
+        let offset = self.offset();
         self.record_completion_slot(GrammarSlot::Column);
         let colname = Some(
             self.consume_col_id()
@@ -293,7 +293,7 @@ impl Parser {
             is_local: true,
             coll_clause,
             constraints,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..ColumnDef::default()
         })
     }
@@ -306,7 +306,7 @@ impl Parser {
         while !self.at(TokenKind::Eof) {
             if self.consume(TokenKind::Collate) {
                 self.record_completion_slot(GrammarSlot::Collation);
-                let coll_location = self.previous_location();
+                let coll_offset = self.previous_offset();
                 let collname = self.parse_name_list();
                 if collname.is_empty() {
                     return Err(self.error_here("COLLATE requires a collation name"));
@@ -316,14 +316,14 @@ impl Parser {
                 }
                 coll_clause = Some(Box::new(CollateClause {
                     collname,
-                    location: coll_location as ParseLoc,
+                    parse_loc: coll_offset as ParseLoc,
                     ..CollateClause::default()
                 }));
                 continue;
             }
-            let con_location = self.location();
+            let con_offset = self.offset();
             let conname = self.parse_optional_constraint_name()?;
-            let mut constraint = self.parse_column_constraint_element(con_location)?;
+            let mut constraint = self.parse_column_constraint_element(con_offset)?;
             if conname.is_some()
                 && matches!(
                     constraint.contype,
@@ -347,8 +347,8 @@ pub(super) fn parse_table_element_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.last().end_location_or(0);
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
+    let offset = tokens.last().end_offset_or(0);
+    tokens.push(Token::synthetic(TokenKind::Eof, offset));
     let mut parser = Parser {
         tokens,
         pos: 0,
@@ -360,8 +360,8 @@ pub(super) fn parse_typed_table_element_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.last().end_location_or(0);
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
+    let offset = tokens.last().end_offset_or(0);
+    tokens.push(Token::synthetic(TokenKind::Eof, offset));
     let mut parser = Parser {
         tokens,
         pos: 0,

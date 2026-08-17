@@ -49,7 +49,7 @@ impl Parser {
     pub(super) fn parse_create_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         self.record_completion_slot(GrammarSlot::Type);
-        let type_location = self.location();
+        let type_offset = self.offset();
         let type_name = self.parse_name_list();
         if type_name.is_empty() {
             return Err(self.error_here("CREATE TYPE requires a type name"));
@@ -111,7 +111,7 @@ impl Parser {
                 Ok(node!(CompositeTypeStmt {
                     typevar: Some(Box::new(range_var_from_parts(
                         list_to_names(&type_name),
-                        type_location,
+                        type_offset,
                     ))),
                     coldeflist,
                 }))
@@ -212,7 +212,7 @@ impl Parser {
                 self.expect(TokenKind::ValueP)?;
                 self.consume_required_string("DROP VALUE requires a string")?;
                 return Err(ParseError::syntax_exit(
-                    self.previous_location(),
+                    self.previous_offset(),
                     "dropping an enum value is not implemented",
                 ));
             }
@@ -237,7 +237,7 @@ impl Parser {
     pub(super) fn parse_alter_composite_type(&mut self) -> PResult<Node> {
         self.expect(TokenKind::TypeP)?;
         self.record_completion_slot(GrammarSlot::Type);
-        let type_location = self.location();
+        let type_offset = self.offset();
         let owner_start = self.pos;
         let names = self.parse_name_list_until_keywords_allow_initial_stop(&[
             TokenKind::AddP,
@@ -258,7 +258,7 @@ impl Parser {
         );
         let relation = Some(Box::new(range_var_from_parts(
             list_to_names(&names),
-            type_location,
+            type_offset,
         )));
         let mut cmds = Vec::new();
         loop {
@@ -314,7 +314,7 @@ impl Parser {
                 self.advance();
                 self.expect(TokenKind::Attribute)?;
                 cmd.subtype = AlterTableType::AlterColumnType;
-                let attribute_location = self.location();
+                let attribute_offset = self.offset();
                 self.record_completion_slot(GrammarSlot::Attribute);
                 cmd.name = Some(
                     self.consume_col_id()
@@ -337,7 +337,7 @@ impl Parser {
                 ));
                 let coll_clause = if self.consume(TokenKind::Collate) {
                     self.record_completion_slot(GrammarSlot::Collation);
-                    let location = self.previous_location();
+                    let offset = self.previous_offset();
                     let collname = self.parse_name_list_until_keywords(&[
                         TokenKind::Cascade,
                         TokenKind::Restrict,
@@ -350,7 +350,7 @@ impl Parser {
                     }
                     Some(Box::new(CollateClause {
                         collname,
-                        location: location as ParseLoc,
+                        parse_loc: offset as ParseLoc,
                         ..CollateClause::default()
                     }))
                 } else {
@@ -359,7 +359,7 @@ impl Parser {
                 cmd.def = Some(Box::new(node!(ColumnDef {
                     type_name,
                     coll_clause,
-                    location: attribute_location as ParseLoc,
+                    parse_loc: attribute_offset as ParseLoc,
                     ..ColumnDef::default()
                 })));
                 cmd.behavior = self.parse_drop_behavior();

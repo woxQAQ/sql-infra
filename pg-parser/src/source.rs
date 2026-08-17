@@ -1,7 +1,7 @@
-//! UTF-8 source offsets, half-open ranges, slicing, and line/column mapping.
+//! UTF-8 source offsets, half-open locs, slicing, and line/column mapping.
 //!
 //! Offsets are byte-based and limited to PostgreSQL's signed 32-bit parse
-//! locations. [`SourceText`] validates boundaries before exposing source slices.
+//! `ParseLoc` values. [`SourceText`] validates boundaries before exposing source slices.
 
 use std::fmt;
 use std::ops::Add;
@@ -10,7 +10,7 @@ use std::ops::Sub;
 /// A UTF-8 byte quantity used as a source offset, text length, or range shift.
 ///
 /// Values are deliberately limited to `i32::MAX` so that source offsets remain
-/// compatible with PostgreSQL's signed 32-bit parse locations. Inputs that do
+/// compatible with PostgreSQL's signed 32-bit `ParseLoc` values. Inputs that do
 /// not fit are rejected instead of being truncated.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TextSize(u32);
@@ -74,16 +74,20 @@ impl Sub for TextSize {
     }
 }
 
-/// A half-open UTF-8 byte range: `[start, end)`.
+/// A half-open offset in one SQL source: `[start, end)`.
+///
+/// Both endpoints are zero-based UTF-8 byte offsets. Construction validates
+/// their ordering; [`SourceText`] validates their source bounds and UTF-8
+/// character boundaries when the offset is resolved or sliced.
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
-pub struct TextRange {
+pub struct Loc {
     start: TextSize,
     end: TextSize,
 }
 
-impl TextRange {
+impl Loc {
     pub fn new(start: TextSize, end: TextSize) -> Self {
-        assert!(start <= end, "text range start must not exceed its end");
+        assert!(start <= end, "offset start must not exceed its end");
         Self { start, end }
     }
 
@@ -113,9 +117,14 @@ impl TextRange {
     pub fn contains(self, offset: TextSize) -> bool {
         self.start <= offset && offset < self.end
     }
+
+    /// Returns the smallest offset containing both inputs.
+    pub fn cover(left: Self, right: Self) -> Self {
+        Self::new(left.start.min(right.start), left.end.max(right.end))
+    }
 }
 
-impl Add<TextSize> for TextRange {
+impl Add<TextSize> for Loc {
     type Output = Self;
 
     fn add(self, offset: TextSize) -> Self {
@@ -123,7 +132,7 @@ impl Add<TextSize> for TextRange {
     }
 }
 
-impl Sub<TextSize> for TextRange {
+impl Sub<TextSize> for Loc {
     type Output = Self;
 
     fn sub(self, offset: TextSize) -> Self {
@@ -131,12 +140,23 @@ impl Sub<TextSize> for TextRange {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct LineColumn {
+/// A human-readable position in SQL source text.
+///
+/// Lines and columns are zero-based. Columns count Unicode scalar values;
+/// protocol-specific encodings such as UTF-16 are adapter concerns.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Position {
     /// Zero-based line number.
     pub line: u32,
     /// Zero-based Unicode scalar-value column.
     pub column: u32,
+}
+
+/// The start and end positions corresponding to a [`Loc`].
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct PositionRange {
+    pub start: Position,
+    pub end: Position,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -162,6 +182,8 @@ pub enum SourceError {
     TooLarge(SourceTooLarge),
     OutOfBounds { offset: TextSize, len: TextSize },
     NotCharBoundary { offset: TextSize },
+    LineOutOfBounds { position: Position, line_count: u32 },
+    ColumnOutOfBounds { position: Position, max_column: u32 },
 }
 
 impl fmt::Display for SourceError {
@@ -181,6 +203,22 @@ impl fmt::Display for SourceError {
                     offset.get()
                 )
             }
+            Self::LineOutOfBounds {
+                position,
+                line_count,
+            } => write!(
+                f,
+                "source line {} is beyond the line count {}",
+                position.line, line_count
+            ),
+            Self::ColumnOutOfBounds {
+                position,
+                max_column,
+            } => write!(
+                f,
+                "source column {} is beyond line {} length {}",
+                position.column, position.line, max_column
+            ),
         }
     }
 }
@@ -218,7 +256,7 @@ impl<'a> LineIndex<'a> {
         })
     }
 
-    pub fn line_column(&self, offset: TextSize) -> Result<LineColumn, SourceError> {
+    pub fn position(&self, offset: TextSize) -> Result<Position, SourceError> {
         if offset > self.len {
             return Err(SourceError::OutOfBounds {
                 offset,
@@ -232,11 +270,58 @@ impl<'a> LineIndex<'a> {
 
         let line = self.line_starts.partition_point(|start| *start <= offset) - 1;
         let line_start = usize::from(self.line_starts[line]);
-        let column = self.text[line_start..offset_usize].chars().count();
-        Ok(LineColumn {
+        let content_end = self.line_content_end(line);
+        let column = self.text[line_start..offset_usize.min(content_end)]
+            .chars()
+            .count();
+        Ok(Position {
             line: line as u32,
             column: column as u32,
         })
+    }
+
+    /// Converts a zero-based Unicode-scalar position to a UTF-8 byte offset.
+    pub fn offset(&self, position: Position) -> Result<TextSize, SourceError> {
+        let line = usize::try_from(position.line).expect("u32 line fits usize");
+        let Some(start) = self.line_starts.get(line).copied() else {
+            return Err(SourceError::LineOutOfBounds {
+                position,
+                line_count: self.line_starts.len() as u32,
+            });
+        };
+        let start = usize::from(start);
+        let content_end = self.line_content_end(line);
+        let content = &self.text[start..content_end];
+        let column = usize::try_from(position.column).expect("u32 column fits usize");
+        let offset = if column == content.chars().count() {
+            content_end
+        } else if let Some((relative, _)) = content.char_indices().nth(column) {
+            start + relative
+        } else {
+            return Err(SourceError::ColumnOutOfBounds {
+                position,
+                max_column: content.chars().count() as u32,
+            });
+        };
+        Ok(TextSize::from_usize(offset))
+    }
+
+    pub fn line_count(&self) -> u32 {
+        self.line_starts.len() as u32
+    }
+
+    fn line_content_end(&self, line: usize) -> usize {
+        let Some(next_start) = self.line_starts.get(line + 1).copied() else {
+            return usize::from(self.len);
+        };
+        let mut end = usize::from(next_start);
+        if self.text.as_bytes()[end - 1] == b'\n' {
+            end -= 1;
+            if end > 0 && self.text.as_bytes()[end - 1] == b'\r' {
+                end -= 1;
+            }
+        }
+        end
     }
 }
 
@@ -267,38 +352,41 @@ impl<'a> SourceText<'a> {
         self.len().get() == 0
     }
 
-    pub fn line_column(&self, offset: TextSize) -> Result<LineColumn, SourceError> {
-        self.line_index.line_column(offset)
+    pub fn position(&self, offset: TextSize) -> Result<Position, SourceError> {
+        self.line_index.position(offset)
     }
 
-    pub fn range_line_columns(
-        &self,
-        range: TextRange,
-    ) -> Result<(LineColumn, LineColumn), SourceError> {
-        Ok((
-            self.line_column(range.start())?,
-            self.line_column(range.end())?,
-        ))
+    pub fn offset(&self, position: Position) -> Result<TextSize, SourceError> {
+        self.line_index.offset(position)
     }
 
-    pub fn slice(&self, range: TextRange) -> Result<&'a str, SourceError> {
-        if range.end() > self.len() {
+    pub fn line_count(&self) -> u32 {
+        self.line_index.line_count()
+    }
+
+    pub fn position_range(&self, loc: Loc) -> Result<PositionRange, SourceError> {
+        Ok(PositionRange {
+            start: self.position(loc.start())?,
+            end: self.position(loc.end())?,
+        })
+    }
+
+    pub fn slice(&self, loc: Loc) -> Result<&'a str, SourceError> {
+        if loc.end() > self.len() {
             return Err(SourceError::OutOfBounds {
-                offset: range.end(),
+                offset: loc.end(),
                 len: self.len(),
             });
         }
-        let start = usize::from(range.start());
-        let end = usize::from(range.end());
+        let start = usize::from(loc.start());
+        let end = usize::from(loc.end());
         if !self.text.is_char_boundary(start) {
             return Err(SourceError::NotCharBoundary {
-                offset: range.start(),
+                offset: loc.start(),
             });
         }
         if !self.text.is_char_boundary(end) {
-            return Err(SourceError::NotCharBoundary {
-                offset: range.end(),
-            });
+            return Err(SourceError::NotCharBoundary { offset: loc.end() });
         }
         Ok(&self.text[start..end])
     }
@@ -312,29 +400,71 @@ mod tests {
     fn maps_utf8_and_crlf_positions() {
         let source = SourceText::new("中文\r\nfoo").unwrap();
         assert_eq!(
-            source.line_column(TextSize::new(6)).unwrap(),
-            LineColumn { line: 0, column: 2 }
+            source.position(TextSize::new(6)).unwrap(),
+            Position { line: 0, column: 2 }
         );
         assert_eq!(
-            source.line_column(TextSize::new(8)).unwrap(),
-            LineColumn { line: 1, column: 0 }
+            source.position(TextSize::new(7)).unwrap(),
+            Position { line: 0, column: 2 }
         );
+        assert_eq!(
+            source.position(TextSize::new(8)).unwrap(),
+            Position { line: 1, column: 0 }
+        );
+        assert_eq!(source.line_count(), 2);
+    }
+
+    #[test]
+    fn maps_positions_back_to_utf8_offsets() {
+        let source = SourceText::new("中文\r\nfoo\n").unwrap();
+        assert_eq!(
+            source.offset(Position { line: 0, column: 2 }).unwrap(),
+            TextSize::new(6)
+        );
+        assert_eq!(
+            source.offset(Position { line: 1, column: 3 }).unwrap(),
+            TextSize::new(11)
+        );
+        assert_eq!(
+            source.offset(Position { line: 2, column: 0 }).unwrap(),
+            TextSize::new(12)
+        );
+    }
+
+    #[test]
+    fn rejects_positions_outside_the_source() {
+        let source = SourceText::new("中").unwrap();
+        assert!(matches!(
+            source.offset(Position { line: 1, column: 0 }),
+            Err(SourceError::LineOutOfBounds { .. })
+        ));
+        assert!(matches!(
+            source.offset(Position { line: 0, column: 2 }),
+            Err(SourceError::ColumnOutOfBounds { .. })
+        ));
     }
 
     #[test]
     fn rejects_offsets_inside_utf8_code_points() {
         let source = SourceText::new("中").unwrap();
         assert!(matches!(
-            source.line_column(TextSize::new(1)),
+            source.position(TextSize::new(1)),
             Err(SourceError::NotCharBoundary { .. })
         ));
     }
 
     #[test]
-    fn slices_half_open_ranges() {
+    fn slices_half_open_locs() {
         let source = SourceText::new("select 中文").unwrap();
-        let range = TextRange::new(TextSize::new(7), TextSize::new(13));
-        assert_eq!(source.slice(range).unwrap(), "中文");
+        let loc = Loc::new(TextSize::new(7), TextSize::new(13));
+        assert_eq!(source.slice(loc).unwrap(), "中文");
+        assert_eq!(
+            source.position_range(loc).unwrap(),
+            PositionRange {
+                start: Position { line: 0, column: 7 },
+                end: Position { line: 0, column: 9 },
+            }
+        );
     }
 
     #[test]
@@ -343,7 +473,7 @@ mod tests {
         let right = TextSize::new(3);
         assert_eq!(left + right, TextSize::new(13));
         assert_eq!(left - right, TextSize::new(7));
-        assert_eq!(TextRange::new(right, left).len(), TextSize::new(7));
+        assert_eq!(Loc::new(right, left).len(), TextSize::new(7));
     }
 
     #[test]
@@ -362,13 +492,14 @@ mod tests {
     }
 
     #[test]
-    fn text_range_shifts_by_offset() {
-        let range = TextRange::new(TextSize::new(3), TextSize::new(10));
+    fn loc_shifts_by_offset() {
+        let loc = Loc::new(TextSize::new(3), TextSize::new(10));
         let base = TextSize::new(100);
+        assert_eq!(loc + base, Loc::new(TextSize::new(103), TextSize::new(110)));
+        assert_eq!((loc + base) - base, loc);
         assert_eq!(
-            range + base,
-            TextRange::new(TextSize::new(103), TextSize::new(110))
+            Loc::cover(Loc::new(TextSize::new(5), TextSize::new(8)), loc),
+            Loc::new(TextSize::new(3), TextSize::new(10))
         );
-        assert_eq!((range + base) - base, range);
     }
 }

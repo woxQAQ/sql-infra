@@ -44,7 +44,7 @@ pub(super) fn make_aexpr<I, S>(
     name: I,
     lexpr: Option<Node>,
     rexpr: Option<Node>,
-    location: usize,
+    offset: usize,
 ) -> Node
 where
     I: IntoIterator<Item = S>,
@@ -55,7 +55,7 @@ where
         name.into_iter().map(make_string_node).collect(),
         lexpr,
         rexpr,
-        location,
+        offset,
     )
 }
 
@@ -64,19 +64,19 @@ pub(super) fn make_aexpr_with_name(
     name: NodeList,
     lexpr: Option<Node>,
     rexpr: Option<Node>,
-    location: usize,
+    offset: usize,
 ) -> Node {
     node!(AExpr {
         kind,
         name,
         lexpr: lexpr.map(Box::new),
         rexpr: rexpr.map(Box::new),
-        location: location as ParseLoc,
+        parse_loc: offset as ParseLoc,
         ..AExpr::default()
     })
 }
 
-pub(super) fn make_bool_expr(kind: BoolExprType, lhs: Node, rhs: Node, location: usize) -> Node {
+pub(super) fn make_bool_expr(kind: BoolExprType, lhs: Node, rhs: Node, offset: usize) -> Node {
     match lhs {
         Node::BoolExpr(mut expression) if expression.boolop == kind => {
             expression.args.push(rhs);
@@ -85,23 +85,23 @@ pub(super) fn make_bool_expr(kind: BoolExprType, lhs: Node, rhs: Node, location:
         lhs => node!(BoolExpr {
             boolop: kind,
             args: vec![lhs, rhs],
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }),
     }
 }
 
-pub(super) fn make_not_expr(arg: Node, location: usize) -> Node {
+pub(super) fn make_not_expr(arg: Node, offset: usize) -> Node {
     node!(BoolExpr {
         boolop: BoolExprType::NotExpr,
         args: vec![arg],
-        location: location as ParseLoc,
+        parse_loc: offset as ParseLoc,
     })
 }
 
-pub(super) fn negate_node(node: Node, location: usize) -> Node {
+pub(super) fn negate_node(node: Node, offset: usize) -> Node {
     match node {
         Node::AConst(mut constant) => {
-            constant.location = location as ParseLoc;
+            constant.parse_loc = offset as ParseLoc;
             match &mut constant.val {
                 ValUnion::Integer(value) => {
                     value.ival = -value.ival;
@@ -124,11 +124,11 @@ pub(super) fn negate_node(node: Node, location: usize) -> Node {
                     vec!["-"],
                     None,
                     Some(Node::AConst(constant)),
-                    location,
+                    offset,
                 ),
             }
         }
-        node => make_aexpr(AExprKind::Op, vec!["-"], None, Some(node), location),
+        node => make_aexpr(AExprKind::Op, vec!["-"], None, Some(node), offset),
     }
 }
 
@@ -296,15 +296,15 @@ pub(super) fn parse_expression_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.is_empty() {
-        return Err(ParseError::syntax_exit(location, "expected an expression"));
+        return Err(ParseError::syntax_exit(offset, "expected an expression"));
     }
     ExprParser::with_completion(tokens, completion)
         .parse()
         .map_err(|mut error| {
-            if error.location() == 0 {
-                error.reanchor(location);
+            if error.offset() == 0 {
+                error.reanchor(offset);
             }
             error
         })
@@ -318,18 +318,18 @@ pub(super) fn parse_b_expression_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "expected a restricted expression",
         ));
     }
     ExprParser::with_completion(tokens, completion)
         .parse_b()
         .map_err(|mut error| {
-            if error.location() == 0 {
-                error.reanchor(location);
+            if error.offset() == 0 {
+                error.reanchor(offset);
             }
             error
         })
@@ -339,18 +339,18 @@ pub(super) fn parse_c_expression_tokens_with_completion(
     tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<Node> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "expected a common expression",
         ));
     }
     ExprParser::with_completion(tokens, completion)
         .parse_c()
         .map_err(|mut error| {
-            if error.location() == 0 {
-                error.reanchor(location);
+            if error.offset() == 0 {
+                error.reanchor(offset);
             }
             error
         })
@@ -384,7 +384,7 @@ pub(super) fn parse_select_fetch_first_value_tokens_with_completion(
 }
 
 pub(super) fn parse_aexpr_const_tokens(tokens: Vec<Token>) -> PResult<Node> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.len() == 1
         && let Some(node) = token_to_leaf(&tokens[0])
         && matches!(node, Node::AConst(_))
@@ -402,18 +402,18 @@ pub(super) fn parse_aexpr_const_tokens(tokens: Vec<Token>) -> PResult<Node> {
         let mut type_tokens = tokens[..*string_index].to_vec();
         type_tokens.extend_from_slice(&tokens[*string_index + 1..]);
         let type_name = parse_const_type_name_tokens(type_tokens)
-            .map_err(|_| ParseError::syntax_exit(location, "invalid typed constant"))?;
+            .map_err(|_| ParseError::syntax_exit(offset, "invalid typed constant"))?;
         let value = token_name(string_token)
-            .ok_or_else(|| ParseError::ranged(string_token.range, "invalid string constant"))?;
+            .ok_or_else(|| ParseError::at_loc(string_token.loc, "invalid string constant"))?;
         return Ok(node!(TypeCast {
             arg: Some(Box::new(node!(AConst::string(
                 value,
-                string_token.location() as ParseLoc,
+                string_token.offset() as ParseLoc,
             )))),
             type_name: Some(Box::new(type_name)),
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         }));
     }
 
-    Err(ParseError::syntax_exit(location, "expected a constant"))
+    Err(ParseError::syntax_exit(offset, "expected a constant"))
 }

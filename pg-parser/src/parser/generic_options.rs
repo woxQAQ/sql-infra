@@ -14,17 +14,13 @@ impl Parser {
         }
         let mut options = Vec::new();
         loop {
-            let location = self.location();
+            let offset = self.offset();
             self.record_completion_slot(GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
                 .ok_or_else(|| self.error_here("expected an option name"))?;
             let value = self.consume_required_string("option value must be a string literal")?;
-            options.push(make_def_elem(
-                &name,
-                Some(make_string_node(value)),
-                location,
-            ));
+            options.push(make_def_elem(&name, Some(make_string_node(value)), offset));
             if !self.consume(TokenKind::Char(',')) {
                 break;
             }
@@ -60,7 +56,7 @@ impl Parser {
                 }
                 _ => DefElemAction::Unspec,
             };
-            let location = self.location();
+            let offset = self.offset();
             self.record_completion_slot(GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
@@ -76,7 +72,7 @@ impl Parser {
                 defname: Some(name),
                 arg,
                 defaction: action,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..DefElem::default()
             }));
             if !self.consume(TokenKind::Char(',')) {

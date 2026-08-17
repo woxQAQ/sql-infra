@@ -6,7 +6,7 @@ struct SplitCase {
 }
 
 #[test]
-fn splits_statement_ranges() {
+fn splits_statement_locs() {
     let cases = [
         SplitCase {
             name: "empty input",
@@ -188,19 +188,19 @@ second;third';"#,
     ];
 
     for case in cases {
-        let ranges = pg_parser::split_statement_ranges(case.sql)
+        let locs = pg_parser::split_statement_locs(case.sql)
             .unwrap_or_else(|error| panic!("{}: {error:?}", case.name));
-        let syntax = ranges
+        let syntax = locs
             .iter()
-            .map(|range| slice(case.sql, range.syntax))
+            .map(|loc| slice(case.sql, loc.syntax))
             .collect::<Vec<_>>();
-        let full = ranges
+        let full = locs
             .iter()
-            .map(|range| slice(case.sql, range.full()))
+            .map(|loc| slice(case.sql, loc.full()))
             .collect::<Vec<_>>();
 
-        assert_eq!(syntax, case.syntax, "{}: syntax ranges", case.name);
-        assert_eq!(full, case.full, "{}: full ranges", case.name);
+        assert_eq!(syntax, case.syntax, "{}: syntax locs", case.name);
+        assert_eq!(full, case.full, "{}: full locs", case.name);
     }
 }
 
@@ -301,20 +301,20 @@ fn reports_lexical_errors() {
     ];
 
     for case in cases {
-        let error = match pg_parser::split_statement_ranges(case.sql) {
-            Ok(ranges) => panic!("{}: expected an error, got {ranges:?}", case.name),
+        let error = match pg_parser::split_statement_locs(case.sql) {
+            Ok(locs) => panic!("{}: expected an error, got {locs:?}", case.name),
             Err(error) => error,
         };
         assert_eq!(error.message, case.message, "{}: error message", case.name);
         assert_eq!(
-            slice(case.sql, error.range),
+            slice(case.sql, error.loc),
             case.range_text,
-            "{}: error range",
+            "{}: error loc",
             case.name
         );
     }
 }
 
-fn slice(sql: &str, range: pg_parser::TextRange) -> &str {
-    &sql[usize::from(range.start())..usize::from(range.end())]
+fn slice(sql: &str, loc: pg_parser::Loc) -> &str {
+    &sql[usize::from(loc.start())..usize::from(loc.end())]
 }

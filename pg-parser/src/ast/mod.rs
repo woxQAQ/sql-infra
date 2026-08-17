@@ -1232,7 +1232,7 @@ pub struct RangeVar {
     pub inh: bool,
     pub relpersistence: u8,
     pub alias: Option<Box<Alias>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableFunc {
@@ -1252,7 +1252,7 @@ pub struct TableFunc {
     pub notnulls: Option<Bitmapset>,
     pub plan: Option<Box<Node>>,
     pub ordinalitycol: i32,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct IntoClause {
@@ -1279,7 +1279,7 @@ pub struct Var {
     pub varreturningtype: VarReturningType,
     pub varnosyn: Index,
     pub varattnosyn: AttrNumber,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Const {
@@ -1290,7 +1290,7 @@ pub struct Const {
     pub constvalue: Datum,
     pub constisnull: bool,
     pub constbyval: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Param {
@@ -1299,7 +1299,7 @@ pub struct Param {
     pub paramtype: Oid,
     pub paramtypmod: i32,
     pub paramcollid: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Aggref {
@@ -1322,7 +1322,7 @@ pub struct Aggref {
     pub aggsplit: AggSplit,
     pub aggno: i32,
     pub aggtransno: i32,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GroupingFunc {
@@ -1330,7 +1330,7 @@ pub struct GroupingFunc {
     pub refs: NodeList,
     pub cols: NodeList,
     pub agglevelsup: Index,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowFunc {
@@ -1345,7 +1345,7 @@ pub struct WindowFunc {
     pub winstar: bool,
     pub winagg: bool,
     pub ignore_nulls: i32,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowFuncRunCondition {
@@ -1358,7 +1358,7 @@ pub struct WindowFuncRunCondition {
 pub struct MergeSupportFunc {
     pub msftype: Oid,
     pub msfcollid: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SubscriptingRef {
@@ -1382,14 +1382,14 @@ pub struct FuncExpr {
     pub funccollid: Oid,
     pub inputcollid: Oid,
     pub args: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NamedArgExpr {
     pub arg: Option<Box<Node>>,
     pub name: Option<std::string::String>,
     pub argnumber: i32,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OpExpr {
@@ -1400,7 +1400,7 @@ pub struct OpExpr {
     pub opcollid: Oid,
     pub inputcollid: Oid,
     pub args: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ScalarArrayOpExpr {
@@ -1411,13 +1411,13 @@ pub struct ScalarArrayOpExpr {
     pub use_or: bool,
     pub inputcollid: Oid,
     pub args: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BoolExpr {
     pub boolop: BoolExprType,
     pub args: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SubLink {
@@ -1426,7 +1426,7 @@ pub struct SubLink {
     pub testexpr: Option<Box<Node>>,
     pub oper_name: NodeList,
     pub subselect: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SubPlan {
@@ -1475,7 +1475,7 @@ pub struct RelabelType {
     pub resulttypmod: i32,
     pub resultcollid: Oid,
     pub relabelformat: CoercionForm,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoerceViaIo {
@@ -1483,7 +1483,7 @@ pub struct CoerceViaIo {
     pub resulttype: Oid,
     pub resultcollid: Oid,
     pub coerceformat: CoercionForm,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ArrayCoerceExpr {
@@ -1493,20 +1493,20 @@ pub struct ArrayCoerceExpr {
     pub resulttypmod: i32,
     pub resultcollid: Oid,
     pub coerceformat: CoercionForm,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConvertRowtypeExpr {
     pub arg: Option<Box<Expr>>,
     pub resulttype: Oid,
     pub convertformat: CoercionForm,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CollateExpr {
     pub arg: Option<Box<Expr>>,
     pub coll_oid: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CaseExpr {
@@ -1515,13 +1515,13 @@ pub struct CaseExpr {
     pub arg: Option<Box<Node>>,
     pub args: NodeList,
     pub defresult: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CaseWhen {
     pub expr: Option<Box<Node>>,
     pub result: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CaseTestExpr {
@@ -1536,9 +1536,9 @@ pub struct ArrayExpr {
     pub element_typeid: Oid,
     pub elements: NodeList,
     pub multidims: bool,
-    pub list_start: ParseLoc,
-    pub list_end: ParseLoc,
-    pub location: ParseLoc,
+    pub list_start_parse_loc: ParseLoc,
+    pub list_end_parse_loc: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RowExpr {
@@ -1546,7 +1546,7 @@ pub struct RowExpr {
     pub row_typeid: Oid,
     pub row_format: CoercionForm,
     pub colnames: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RowCompareExpr {
@@ -1562,7 +1562,7 @@ pub struct CoalesceExpr {
     pub coalescetype: Oid,
     pub coalescecollid: Oid,
     pub args: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MinMaxExpr {
@@ -1571,14 +1571,14 @@ pub struct MinMaxExpr {
     pub inputcollid: Oid,
     pub op: MinMaxOp,
     pub args: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SqlValueFunction {
     pub op: SqlValueFunctionOp,
     pub type_oid: Oid,
     pub typmod: i32,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct XmlExpr {
@@ -1591,13 +1591,13 @@ pub struct XmlExpr {
     pub indent: bool,
     pub type_oid: Oid,
     pub typmod: i32,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonFormat {
     pub format_type: JsonFormatType,
     pub encoding: JsonEncoding,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonReturning {
@@ -1621,7 +1621,7 @@ pub struct JsonConstructorExpr {
     pub orig_query: Option<Box<Node>>,
     pub absent_on_null: bool,
     pub unique: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonIsPredicate {
@@ -1630,14 +1630,14 @@ pub struct JsonIsPredicate {
     pub item_type: JsonValueType,
     pub unique_keys: bool,
     pub expr_base_type: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonBehavior {
     pub btype: JsonBehaviorType,
     pub expr: Option<Box<Node>>,
     pub coerce: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonExpr {
@@ -1656,7 +1656,7 @@ pub struct JsonExpr {
     pub wrapper: JsonWrapper,
     pub omit_quotes: bool,
     pub collation: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTablePath {
@@ -1685,13 +1685,13 @@ pub struct NullTest {
     pub arg: Option<Box<Node>>,
     pub nulltesttype: NullTestType,
     pub argisrow: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BooleanTest {
     pub arg: Option<Box<Node>>,
     pub booltesttype: BoolTestType,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MergeAction {
@@ -1709,21 +1709,21 @@ pub struct CoerceToDomain {
     pub resulttypmod: i32,
     pub resultcollid: Oid,
     pub coercionformat: CoercionForm,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoerceToDomainValue {
     pub type_id: Oid,
     pub type_mod: i32,
     pub collation: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SetToDefault {
     pub type_id: Oid,
     pub type_mod: i32,
     pub collation: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CurrentOfExpr {
@@ -1751,7 +1751,7 @@ pub struct ReturningExpr {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GraphLabelRef {
     pub labelid: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GraphPropertyRef {
@@ -1760,7 +1760,7 @@ pub struct GraphPropertyRef {
     pub type_id: Oid,
     pub typmod: i32,
     pub collation: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TargetEntry {
@@ -1817,8 +1817,8 @@ pub struct ForPortionOfExpr {
     pub overlaps_expr: Option<Box<Node>>,
     pub range_target_list: NodeList,
     pub without_portion_proc: Oid,
-    pub location: ParseLoc,
-    pub target_location: ParseLoc,
+    pub parse_loc: ParseLoc,
+    pub target_parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Query {
@@ -1867,7 +1867,7 @@ pub struct Query {
     pub set_operations: Option<Box<Node>>,
     pub constraint_deps: NodeList,
     pub with_check_options: NodeList,
-    pub stmt_location: ParseLoc,
+    pub stmt_parse_loc: ParseLoc,
     pub stmt_len: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1879,17 +1879,17 @@ pub struct TypeName {
     pub typmods: NodeList,
     pub typemod: i32,
     pub array_bounds: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ColumnRef {
     pub fields: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ParamRef {
     pub number: i32,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AExpr {
@@ -1897,33 +1897,33 @@ pub struct AExpr {
     pub name: NodeList,
     pub lexpr: Option<Box<Node>>,
     pub rexpr: Option<Box<Node>>,
-    pub rexpr_list_start: ParseLoc,
-    pub rexpr_list_end: ParseLoc,
-    pub location: ParseLoc,
+    pub rexpr_list_start_parse_loc: ParseLoc,
+    pub rexpr_list_end_parse_loc: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AConst {
     pub val: ValUnion,
     pub is_null: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TypeCast {
     pub arg: Option<Box<Node>>,
     pub type_name: Option<Box<TypeName>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CollateClause {
     pub arg: Option<Box<Node>>,
     pub collname: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RoleSpec {
     pub roletype: RoleSpecType,
     pub rolename: Option<std::string::String>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct FuncCall {
@@ -1938,7 +1938,7 @@ pub struct FuncCall {
     pub agg_distinct: bool,
     pub func_variadic: bool,
     pub funcformat: CoercionForm,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AIndices {
@@ -1954,16 +1954,16 @@ pub struct AIndirection {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AArrayExpr {
     pub elements: NodeList,
-    pub list_start: ParseLoc,
-    pub list_end: ParseLoc,
-    pub location: ParseLoc,
+    pub list_start_parse_loc: ParseLoc,
+    pub list_end_parse_loc: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ResTarget {
     pub name: Option<std::string::String>,
     pub indirection: NodeList,
     pub val: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MultiAssignRef {
@@ -1977,7 +1977,7 @@ pub struct SortBy {
     pub sortby_dir: SortByDir,
     pub sortby_nulls: SortByNulls,
     pub use_op: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowDef {
@@ -1988,7 +1988,7 @@ pub struct WindowDef {
     pub frame_options: i32,
     pub start_offset: Option<Box<Node>>,
     pub end_offset: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeSubselect {
@@ -2013,7 +2013,7 @@ pub struct RangeTableFunc {
     pub namespaces: NodeList,
     pub columns: NodeList,
     pub alias: Option<Box<Alias>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTableFuncCol {
@@ -2023,7 +2023,7 @@ pub struct RangeTableFuncCol {
     pub is_not_null: bool,
     pub colexpr: Option<Box<Node>>,
     pub coldefexpr: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeGraphTable {
@@ -2031,7 +2031,7 @@ pub struct RangeGraphTable {
     pub graph_pattern: Option<Box<GraphPattern>>,
     pub columns: NodeList,
     pub alias: Option<Box<Alias>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTableSample {
@@ -2039,7 +2039,7 @@ pub struct RangeTableSample {
     pub method: NodeList,
     pub args: NodeList,
     pub repeatable: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ColumnDef {
@@ -2061,7 +2061,7 @@ pub struct ColumnDef {
     pub coll_oid: Oid,
     pub constraints: NodeList,
     pub fdwoptions: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TableLikeClause {
@@ -2079,7 +2079,7 @@ pub struct IndexElem {
     pub opclassopts: NodeList,
     pub ordering: SortByDir,
     pub nulls_ordering: SortByNulls,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DefElem {
@@ -2087,7 +2087,7 @@ pub struct DefElem {
     pub defname: Option<std::string::String>,
     pub arg: Option<Box<Node>>,
     pub defaction: DefElemAction,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LockingClause {
@@ -2101,7 +2101,7 @@ pub struct XmlSerialize {
     pub expr: Option<Box<Node>>,
     pub type_name: Option<Box<TypeName>>,
     pub indent: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartitionElem {
@@ -2109,19 +2109,19 @@ pub struct PartitionElem {
     pub expr: Option<Box<Node>>,
     pub collation: NodeList,
     pub opclass: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartitionSpec {
     pub strategy: PartitionStrategy,
     pub part_params: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PartitionRangeDatum {
     pub kind: PartitionRangeDatumKind,
     pub value: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SinglePartitionSpec {
@@ -2148,7 +2148,7 @@ pub struct GraphElementPattern {
     pub subexpr: NodeList,
     pub where_clause: Option<Box<Node>>,
     pub quantifier: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RangeTblEntry {
@@ -2235,7 +2235,7 @@ pub struct SortGroupClause {
 pub struct GroupingSet {
     pub kind: GroupingSetKind,
     pub content: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct WindowClause {
@@ -2264,8 +2264,8 @@ pub struct RowMarkClause {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ForPortionOfClause {
     pub range_name: Option<std::string::String>,
-    pub location: ParseLoc,
-    pub target_location: ParseLoc,
+    pub parse_loc: ParseLoc,
+    pub target_parse_loc: ParseLoc,
     pub target: Option<Box<Node>>,
     pub target_start: Option<Box<Node>>,
     pub target_end: Option<Box<Node>>,
@@ -2274,14 +2274,14 @@ pub struct ForPortionOfClause {
 pub struct WithClause {
     pub ctes: NodeList,
     pub recursive: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct InferClause {
     pub index_elems: NodeList,
     pub where_clause: Option<Box<Node>>,
     pub conname: Option<std::string::String>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OnConflictClause {
@@ -2290,14 +2290,14 @@ pub struct OnConflictClause {
     pub lock_strength: LockClauseStrength,
     pub target_list: NodeList,
     pub where_clause: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CteSearchClause {
     pub search_col_list: NodeList,
     pub search_breadth_first: bool,
     pub search_seq_column: Option<std::string::String>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CteCycleClause {
@@ -2306,7 +2306,7 @@ pub struct CteCycleClause {
     pub cycle_mark_value: Option<Box<Node>>,
     pub cycle_mark_default: Option<Box<Node>>,
     pub cycle_path_column: Option<std::string::String>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
     pub cycle_mark_type: Oid,
     pub cycle_mark_typmod: i32,
     pub cycle_mark_collation: Oid,
@@ -2320,7 +2320,7 @@ pub struct CommonTableExpr {
     pub ctequery: Option<Box<Node>>,
     pub search_clause: Option<Box<CteSearchClause>>,
     pub cycle_clause: Option<Box<CteCycleClause>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
     pub cterecursive: bool,
     pub cterefcount: i32,
     pub ctecolnames: NodeList,
@@ -2341,7 +2341,7 @@ pub struct MergeWhenClause {
 pub struct ReturningOption {
     pub option: ReturningOptionKind,
     pub value: Option<std::string::String>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReturningClause {
@@ -2376,14 +2376,14 @@ pub struct JsonFuncExpr {
     pub on_error: Option<Box<JsonBehavior>>,
     pub wrapper: JsonWrapper,
     pub quotes: JsonQuotes,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTablePathSpec {
     pub string: Option<Box<Node>>,
     pub name: Option<std::string::String>,
-    pub name_location: ParseLoc,
-    pub location: ParseLoc,
+    pub name_parse_loc: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTable {
@@ -2394,7 +2394,7 @@ pub struct JsonTable {
     pub on_error: Option<Box<JsonBehavior>>,
     pub alias: Option<Box<Alias>>,
     pub lateral: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonTableColumn {
@@ -2408,7 +2408,7 @@ pub struct JsonTableColumn {
     pub columns: NodeList,
     pub on_empty: Option<Box<JsonBehavior>>,
     pub on_error: Option<Box<JsonBehavior>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonKeyValue {
@@ -2420,19 +2420,19 @@ pub struct JsonParseExpr {
     pub expr: Option<Box<JsonValueExpr>>,
     pub output: Option<Box<JsonOutput>>,
     pub unique_keys: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonScalarExpr {
     pub expr: Option<Box<Node>>,
     pub output: Option<Box<JsonOutput>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonSerializeExpr {
     pub expr: Option<Box<JsonValueExpr>>,
     pub output: Option<Box<JsonOutput>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonObjectConstructor {
@@ -2440,14 +2440,14 @@ pub struct JsonObjectConstructor {
     pub output: Option<Box<JsonOutput>>,
     pub absent_on_null: bool,
     pub unique: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonArrayConstructor {
     pub exprs: NodeList,
     pub output: Option<Box<JsonOutput>>,
     pub absent_on_null: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonArrayQueryConstructor {
@@ -2455,7 +2455,7 @@ pub struct JsonArrayQueryConstructor {
     pub output: Option<Box<JsonOutput>>,
     pub format: Option<Box<JsonFormat>>,
     pub absent_on_null: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonAggConstructor {
@@ -2463,7 +2463,7 @@ pub struct JsonAggConstructor {
     pub agg_filter: Option<Box<Node>>,
     pub agg_order: NodeList,
     pub over: Option<Box<WindowDef>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JsonObjectAgg {
@@ -2481,7 +2481,7 @@ pub struct JsonArrayAgg {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RawStmt {
     pub stmt: Option<Box<Node>>,
-    pub stmt_location: ParseLoc,
+    pub stmt_parse_loc: ParseLoc,
     pub stmt_len: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -2567,7 +2567,7 @@ pub struct PlAssignStmt {
     pub indirection: NodeList,
     pub nnames: i32,
     pub val: Option<Box<SelectStmt>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateSchemaStmt {
@@ -2697,7 +2697,7 @@ pub struct VariableSetStmt {
     pub args: NodeList,
     pub jumble_args: bool,
     pub is_local: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct VariableShowStmt {
@@ -2755,7 +2755,7 @@ pub struct Constraint {
     pub fk_del_set_cols: NodeList,
     pub old_conpfeqop: NodeList,
     pub old_pktable_oid: Oid,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreateTableSpaceStmt {
@@ -3055,7 +3055,7 @@ pub struct FetchStmt {
     pub portalname: Option<std::string::String>,
     pub ismove: bool,
     pub direction_keyword: FetchDirectionKeywords,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct IndexStmt {
@@ -3122,7 +3122,7 @@ pub struct FunctionParameter {
     pub arg_type: Option<Box<TypeName>>,
     pub mode: FunctionParameterMode,
     pub defexpr: Option<Box<Node>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterFunctionStmt {
@@ -3225,7 +3225,7 @@ pub struct TransactionStmt {
     pub savepoint_name: Option<std::string::String>,
     pub gid: Option<std::string::String>,
     pub chain: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompositeTypeStmt {
@@ -3385,7 +3385,7 @@ pub struct PropGraphVertex {
     pub vtable: Option<Box<RangeVar>>,
     pub vkey: NodeList,
     pub labels: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PropGraphEdge {
@@ -3398,19 +3398,19 @@ pub struct PropGraphEdge {
     pub edestvertex: Option<std::string::String>,
     pub edestvertexcols: NodeList,
     pub labels: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PropGraphLabelAndProperties {
     pub label: Option<std::string::String>,
     pub properties: Option<Box<PropGraphProperties>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PropGraphProperties {
     pub properties: NodeList,
     pub all: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct AlterPropGraphStmt {
@@ -3452,7 +3452,7 @@ pub struct ExecuteStmt {
 pub struct DeallocateStmt {
     pub name: Option<std::string::String>,
     pub isall: bool,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct DropOwnedStmt {
@@ -3491,13 +3491,13 @@ pub struct PublicationObjSpec {
     pub pubobjtype: PublicationObjSpecType,
     pub name: Option<std::string::String>,
     pub pubtable: Option<Box<PublicationTable>>,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PublicationAllObjSpec {
     pub pubobjtype: PublicationAllObjType,
     pub except_tables: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CreatePublicationStmt {
@@ -3553,7 +3553,7 @@ pub struct PartitionBoundSpec {
     pub listdatums: NodeList,
     pub lowerdatums: NodeList,
     pub upperdatums: NodeList,
-    pub location: ParseLoc,
+    pub parse_loc: ParseLoc,
 }
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Integer {
@@ -3615,27 +3615,27 @@ impl BitString {
 }
 
 impl AConst {
-    pub fn null(location: ParseLoc) -> Self {
+    pub fn null(parse_loc: ParseLoc) -> Self {
         Self {
             is_null: true,
-            location,
+            parse_loc,
             ..Self::default()
         }
     }
 
-    pub fn integer(ival: i32, location: ParseLoc) -> Self {
+    pub fn integer(ival: i32, parse_loc: ParseLoc) -> Self {
         Self {
             val: ValUnion::Integer(Integer::new(ival)),
             is_null: false,
-            location,
+            parse_loc,
         }
     }
 
-    pub fn string(sval: impl Into<std::string::String>, location: ParseLoc) -> Self {
+    pub fn string(sval: impl Into<std::string::String>, parse_loc: ParseLoc) -> Self {
         Self {
             val: ValUnion::String(String::new(sval)),
             is_null: false,
-            location,
+            parse_loc,
         }
     }
 }

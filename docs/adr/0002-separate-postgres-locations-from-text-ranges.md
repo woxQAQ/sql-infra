@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0004
+---
+
 # 分离 PostgreSQL 位置与文本范围
 
 为了保持原始解析树的保真度，PostgreSQL 原始节点的 `location` 字段继续表示语法语义锚点；工具链则使用由 Token、错误和已解析语句元数据携带的 UTF-8 半开区间 `TextRange`。我们不把每个原始 AST 的位置重新定义或扩展为节点范围，因为那会使 PostgreSQL 兼容树与诊断、补全需求耦合，混淆操作符锚点与源码覆盖范围，而且仍然无法提供无损的语法表示。

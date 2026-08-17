@@ -264,7 +264,7 @@ pub(super) fn make_recursive_view_select(
         ctename: Some(relname.clone()),
         aliascolnames: aliases.to_vec(),
         ctequery: Some(Box::new(query)),
-        location: -1,
+        parse_loc: -1,
         ..CommonTableExpr::default()
     });
     let target_list = aliases
@@ -279,22 +279,22 @@ pub(super) fn make_recursive_view_select(
             Ok(node!(ResTarget {
                 val: Some(Box::new(node!(ColumnRef {
                     fields: vec![make_string_node(alias)],
-                    location: -1,
+                    parse_loc: -1,
                 }))),
-                location: -1,
+                parse_loc: -1,
                 ..ResTarget::default()
             }))
         })
         .collect::<PResult<NodeList>>()?;
     let mut relation = range_var_from_parts(vec![relname], 0);
-    relation.location = -1;
+    relation.parse_loc = -1;
     Ok(node!(SelectStmt {
         target_list,
         from_clause: vec![Node::RangeVar(relation)],
         with_clause: Some(Box::new(WithClause {
             ctes: vec![cte],
             recursive: true,
-            location: -1,
+            parse_loc: -1,
         })),
         ..SelectStmt::default()
     }))
@@ -303,8 +303,8 @@ pub(super) fn parse_statement_list_tokens_with_completion(
     mut tokens: Vec<Token>,
     completion: Option<completion::SharedCollector>,
 ) -> PResult<NodeList> {
-    let location = tokens.last().end_location_or(0);
-    tokens.push(Token::synthetic(TokenKind::Eof, location));
+    let offset = tokens.last().end_offset_or(0);
+    tokens.push(Token::synthetic(TokenKind::Eof, offset));
     let mut parser = Parser {
         tokens,
         pos: 0,

@@ -157,7 +157,7 @@ fn alter_sequence_database_system_and_tablespace_populate_options() {
         Some("tablespace")
     );
     assert_eq!(
-        def(&database.options[0]).location as usize,
+        def(&database.options[0]).parse_loc as usize,
         tablespace_sql.find("fast_space").unwrap()
     );
 
@@ -176,7 +176,7 @@ fn alter_sequence_database_system_and_tablespace_populate_options() {
     let setstmt = database_set.setstmt.as_deref().expect("set statement");
     assert_eq!(setstmt.kind, VariableSetKind::Reset);
     assert_eq!(setstmt.name.as_deref(), Some("search_path"));
-    assert_eq!(setstmt.location, -1);
+    assert_eq!(setstmt.parse_loc, -1);
 
     let Node::AlterDatabaseSetStmt(database_set) =
         parse_statement("alter database analytics set time zone 'UTC'")
@@ -185,7 +185,7 @@ fn alter_sequence_database_system_and_tablespace_populate_options() {
     };
     let setstmt = database_set.setstmt.as_deref().expect("set statement");
     assert_eq!(setstmt.name.as_deref(), Some("timezone"));
-    assert_eq!(setstmt.location, -1);
+    assert_eq!(setstmt.parse_loc, -1);
 
     let Node::AlterRoleSetStmt(role_set) =
         parse_statement("alter role analyst set session authorization default")
@@ -195,7 +195,7 @@ fn alter_sequence_database_system_and_tablespace_populate_options() {
     let setstmt = role_set.setstmt.as_deref().expect("set statement");
     assert_eq!(setstmt.kind, VariableSetKind::SetDefault);
     assert_eq!(setstmt.name.as_deref(), Some("session_authorization"));
-    assert_eq!(setstmt.location, -1);
+    assert_eq!(setstmt.parse_loc, -1);
 
     let Node::AlterSystemStmt(system) = parse_statement("alter system set work_mem = '64MB'")
     else {
@@ -203,7 +203,7 @@ fn alter_sequence_database_system_and_tablespace_populate_options() {
     };
     let setstmt = system.setstmt.as_deref().expect("system set statement");
     assert_eq!(setstmt.kind, VariableSetKind::SetValue);
-    assert_eq!(setstmt.location, 28);
+    assert_eq!(setstmt.parse_loc, 28);
     assert_eq!(setstmt.name.as_deref(), Some("work_mem"));
     assert_eq!(setstmt.args.len(), 1);
 
@@ -244,7 +244,7 @@ fn alter_role_and_enum_preserve_actions_and_values() {
         def(&group.options[0]).defname.as_deref(),
         Some("rolemembers")
     );
-    assert_eq!(def(&group.options[0]).location, 33);
+    assert_eq!(def(&group.options[0]).parse_loc, 33);
 
     let Node::AlterRoleSetStmt(all_roles) =
         parse_statement("alter role all in database analytics set search_path to app, public")
@@ -597,11 +597,11 @@ fn alter_stats_event_trigger_fdw_and_server_are_field_complete() {
     assert_eq!(def(&fdw.options[0]).defaction, DefElemAction::Set);
     assert_eq!(def(&fdw.options[1]).defaction, DefElemAction::Drop);
     assert_eq!(
-        def(&fdw.options[0]).location,
+        def(&fdw.options[0]).parse_loc,
         fdw_sql.find("host").unwrap() as i32
     );
     assert_eq!(
-        def(&fdw.options[1]).location,
+        def(&fdw.options[1]).parse_loc,
         fdw_sql.find("port").unwrap() as i32
     );
 
@@ -693,7 +693,7 @@ fn alter_subscription_populates_each_action_payload() {
         panic!("expected AlterSubscriptionStmt");
     };
     assert_eq!(enable.kind, AlterSubscriptionType::Enabled);
-    assert_eq!(def(&enable.options[0]).location, 0);
+    assert_eq!(def(&enable.options[0]).parse_loc, 0);
 
     let Node::AlterSubscriptionStmt(enabled) = parse_statement("alter subscription sub disable")
     else {
@@ -702,7 +702,7 @@ fn alter_subscription_populates_each_action_payload() {
     assert_eq!(enabled.kind, AlterSubscriptionType::Enabled);
     let enabled_arg = def(&enabled.options[0]).arg.as_deref();
     assert!(matches!(enabled_arg, Some(Node::Boolean(value)) if !value.boolval));
-    assert_eq!(def(&enabled.options[0]).location, 0);
+    assert_eq!(def(&enabled.options[0]).parse_loc, 0);
 
     let Node::AlterSubscriptionStmt(skip) =
         parse_statement("alter subscription sub skip (lsn = '0/16B6C50')")
@@ -895,7 +895,7 @@ fn alter_property_graph_populates_table_label_and_property_actions() {
         .expect("ADD PROPERTIES payload");
     assert_eq!(properties.properties.len(), 1);
     assert_eq!(
-        properties.location,
+        properties.parse_loc,
         sql.find("add properties").unwrap() as i32
     );
 }
@@ -908,7 +908,7 @@ fn alter_composite_type_builds_complete_alter_table_commands() {
     };
     assert_eq!(stmt.objtype, ObjectType::Type);
     assert_eq!(stmt.cmds.len(), 3);
-    assert_eq!(stmt.relation.as_deref().expect("relation").location, 11);
+    assert_eq!(stmt.relation.as_deref().expect("relation").parse_loc, 11);
 
     let Node::AlterTableCmd(add) = &stmt.cmds[0] else {
         panic!("expected AlterTableCmd");
@@ -940,7 +940,7 @@ fn alter_composite_type_builds_complete_alter_table_commands() {
     assert!(column.colname.is_none());
     assert!(column.type_name.is_some());
     assert!(column.coll_clause.is_some());
-    assert_eq!(column.location, sql.find("city").unwrap() as i32);
+    assert_eq!(column.parse_loc, sql.find("city").unwrap() as i32);
 }
 
 #[test]
@@ -956,8 +956,8 @@ fn alter_extension_populates_update_and_member_objects() {
         Some("new_version")
     );
     assert_eq!(update.options.len(), 2);
-    assert_eq!(def(&update.options[0]).location, 30);
-    assert_eq!(def(&update.options[1]).location, 39);
+    assert_eq!(def(&update.options[0]).parse_loc, 30);
+    assert_eq!(def(&update.options[1]).parse_loc, 39);
 
     let Node::AlterExtensionContentsStmt(function) =
         parse_statement("alter extension toolkit add function app.normalize(text)")
@@ -1251,7 +1251,7 @@ fn rename_stmt_preserves_relation_object_and_subobject_identities() {
         attribute
             .relation
             .as_deref()
-            .map(|relation| relation.location),
+            .map(|relation| relation.parse_loc),
         Some(11)
     );
 

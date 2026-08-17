@@ -155,12 +155,12 @@ impl Parser {
         slot: GrammarSlot,
     ) -> PResult<Option<RangeVar>> {
         self.record_completion_slot(slot);
-        let location = self.location();
+        let offset = self.offset();
         let parts = self.consume_qualified_name_parts(slot);
         if parts.is_empty() {
             return Ok(None);
         }
-        let mut range = range_var_from_parts(parts, location);
+        let mut range = range_var_from_parts(parts, offset);
         range.alias = self.parse_optional_alias(allow_set_alias)?;
         Ok(Some(range))
     }
@@ -251,12 +251,12 @@ impl Parser {
         slot: GrammarSlot,
     ) -> Option<RangeVar> {
         self.record_completion_slot(slot);
-        let location = self.location();
+        let offset = self.offset();
         let parts = self.consume_qualified_name_parts(slot);
         if parts.is_empty() {
             None
         } else {
-            Some(range_var_from_parts(parts, location))
+            Some(range_var_from_parts(parts, offset))
         }
     }
 
@@ -415,7 +415,7 @@ impl Parser {
         if self.consume(TokenKind::User) {
             Some(RoleSpec {
                 roletype: RoleSpecType::CurrentUser,
-                location: self.previous_location() as ParseLoc,
+                parse_loc: self.previous_offset() as ParseLoc,
                 ..RoleSpec::default()
             })
         } else {
@@ -454,13 +454,13 @@ impl Parser {
         self.record_completion_slot(slot);
         self.record_completion_lookahead_tokens(suggested_specials);
         let role_start = self.pos;
-        let location = self.location();
+        let offset = self.offset();
         let roletype = match self.peek_kind() {
             TokenKind::CurrentRole => {
                 self.advance();
                 return Some(RoleSpec {
                     roletype: RoleSpecType::CurrentRole,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..RoleSpec::default()
                 });
             }
@@ -468,7 +468,7 @@ impl Parser {
                 self.advance();
                 return Some(RoleSpec {
                     roletype: RoleSpecType::CurrentUser,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..RoleSpec::default()
                 });
             }
@@ -476,7 +476,7 @@ impl Parser {
                 self.advance();
                 return Some(RoleSpec {
                     roletype: RoleSpecType::SessionUser,
-                    location: location as ParseLoc,
+                    parse_loc: offset as ParseLoc,
                     ..RoleSpec::default()
                 });
             }
@@ -495,7 +495,7 @@ impl Parser {
         Some(RoleSpec {
             roletype,
             rolename: (roletype == RoleSpecType::Cstring).then_some(rolename),
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         })
     }
 
@@ -511,7 +511,7 @@ impl Parser {
         &mut self,
         slot: GrammarSlot,
     ) -> PResult<Option<std::string::String>> {
-        let location = self.location();
+        let offset = self.offset();
         let Some(role) = self.consume_role_spec_with_slot_and_specials(slot, &[]) else {
             return Ok(None);
         };
@@ -527,7 +527,7 @@ impl Parser {
                     RoleSpecType::Cstring => unreachable!(),
                 });
             return Err(ParseError::syntax_exit(
-                location,
+                offset,
                 format!("{name} cannot be used as a role name here"),
             ));
         }

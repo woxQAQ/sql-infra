@@ -16,7 +16,7 @@ impl Parser {
         }
         let mut options = Vec::new();
         loop {
-            let location = self.location();
+            let offset = self.offset();
             self.record_completion_slot(GrammarSlot::AnyName);
             let name = self
                 .consume_col_label()
@@ -30,7 +30,7 @@ impl Parser {
                     None
                 } else {
                     let tokens = self.take_until_top_level(COMMA_OR_CLOSE_PAREN_TOKENS);
-                    Some(Box::new(parse_operator_def_arg(&name, tokens, location)?))
+                    Some(Box::new(parse_operator_def_arg(&name, tokens, offset)?))
                 }
             } else {
                 None
@@ -38,7 +38,7 @@ impl Parser {
             options.push(node!(DefElem {
                 defname: Some(name),
                 arg,
-                location: location as ParseLoc,
+                parse_loc: offset as ParseLoc,
                 ..DefElem::default()
             }));
             if !self.consume(TokenKind::Char(',')) {

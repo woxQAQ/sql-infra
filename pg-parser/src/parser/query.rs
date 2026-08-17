@@ -52,12 +52,12 @@ impl Parser {
     }
 
     fn parse_with_clause(&mut self) -> PResult<WithClause> {
-        let location = self.expect(TokenKind::With)?.location();
+        let offset = self.expect(TokenKind::With)?.offset();
         let recursive = self.consume(TokenKind::Recursive);
         let mut ctes = Vec::new();
 
         loop {
-            let cte_location = self.location();
+            let cte_offset = self.offset();
             let name = self
                 .consume_col_id()
                 .ok_or_else(|| self.error_here("WITH requires a common table expression name"))?;
@@ -97,7 +97,7 @@ impl Parser {
                 ctequery: Some(Box::new(ctequery)),
                 search_clause,
                 cycle_clause,
-                location: cte_location as ParseLoc,
+                parse_loc: cte_offset as ParseLoc,
                 ..CommonTableExpr::default()
             }));
             if !self.consume(TokenKind::Char(',')) {
@@ -108,7 +108,7 @@ impl Parser {
         Ok(WithClause {
             ctes,
             recursive,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         })
     }
 
@@ -116,7 +116,7 @@ impl Parser {
         if !self.consume(TokenKind::Search) {
             return Ok(None);
         }
-        let location = self.previous_location();
+        let offset = self.previous_offset();
         let search_breadth_first = if self.consume(TokenKind::Depth) {
             false
         } else {
@@ -136,7 +136,7 @@ impl Parser {
             search_col_list,
             search_breadth_first,
             search_seq_column,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
         })))
     }
 
@@ -144,7 +144,7 @@ impl Parser {
         if !self.consume(TokenKind::Cycle) {
             return Ok(None);
         }
-        let location = self.previous_location();
+        let offset = self.previous_offset();
         let cycle_col_list =
             self.parse_simple_name_list_until(&[TokenKind::Set], GrammarSlot::Column)?;
         self.expect(TokenKind::Set)?;
@@ -170,12 +170,12 @@ impl Parser {
             (
                 Some(Box::new(node!(AConst {
                     val: ValUnion::Boolean(Boolean::new(true)),
-                    location: -1,
+                    parse_loc: -1,
                     ..AConst::default()
                 }))),
                 Some(Box::new(node!(AConst {
                     val: ValUnion::Boolean(Boolean::new(false)),
-                    location: -1,
+                    parse_loc: -1,
                     ..AConst::default()
                 }))),
             )
@@ -191,7 +191,7 @@ impl Parser {
             cycle_mark_value,
             cycle_mark_default,
             cycle_path_column,
-            location: location as ParseLoc,
+            parse_loc: offset as ParseLoc,
             ..CteCycleClause::default()
         })))
     }
@@ -359,9 +359,9 @@ impl Parser {
                 stmt.target_list.push(node!(ResTarget {
                     val: Some(Box::new(node!(ColumnRef {
                         fields: vec![Node::AStar],
-                        location: -1,
+                        parse_loc: -1,
                     }))),
-                    location: -1,
+                    parse_loc: -1,
                     ..ResTarget::default()
                 }));
                 stmt.from_clause.push(Node::RangeVar(range));
@@ -649,7 +649,7 @@ impl Parser {
                 }
                 saw_limit = true;
                 stmt.limit_count = Some(if self.consume(TokenKind::All) {
-                    Box::new(node!(AConst::null(self.previous_location() as ParseLoc)))
+                    Box::new(node!(AConst::null(self.previous_offset() as ParseLoc)))
                 } else {
                     self.parse_expr_box_strict_until(&[
                         TokenKind::Char(','),

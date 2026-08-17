@@ -12,7 +12,7 @@ pub(super) struct AlterIdentity {
     object: Option<Box<Node>>,
     subname: Option<std::string::String>,
     missing_ok: bool,
-    location: usize,
+    offset: usize,
 }
 
 impl Parser {
@@ -252,7 +252,7 @@ impl Parser {
         let mut identity = AlterIdentity {
             object_type,
             missing_ok,
-            location: self.location(),
+            offset: self.offset(),
             ..AlterIdentity::default()
         };
         if relation_object_type(object_type) {
@@ -466,7 +466,7 @@ impl Parser {
                 };
                 identity.relation = Some(Box::new(range_var_from_parts(
                     list_to_names(&names.elements),
-                    identity.location,
+                    identity.offset,
                 )));
                 identity.object = None;
             }

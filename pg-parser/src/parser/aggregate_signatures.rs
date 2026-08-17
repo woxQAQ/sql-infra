@@ -6,50 +6,50 @@
 use super::*;
 
 pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.last().has_kind(TokenKind::Char(',')) {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "aggregate definition cannot end with ','",
         ));
     }
     let chunks = split_top_level_commas(tokens);
     if chunks.is_empty() {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "aggregate definition cannot be empty",
         ));
     }
     chunks
         .into_iter()
         .map(|tokens| {
-            let item_location = tokens.first().location_or(location);
+            let item_offset = tokens.first().offset_or(offset);
             let Some(name_token) = tokens.first() else {
                 return Err(ParseError::syntax_exit(
-                    item_location,
+                    item_offset,
                     "old-style aggregate definition requires name = value",
                 ));
             };
             if !matches!(name_token.kind, TokenKind::Ident | TokenKind::UIdent) {
-                return Err(ParseError::ranged(
-                    name_token.range,
+                return Err(ParseError::at_loc(
+                    name_token.loc,
                     "old-style aggregate option name must be an identifier",
                 ));
             }
             if !tokens.get(1).has_kind(TokenKind::Char('=')) {
                 return Err(ParseError::syntax_exit(
-                    item_location,
+                    item_offset,
                     "old-style aggregate definition requires name = value",
                 ));
             }
             let name = token_name(name_token).ok_or_else(|| {
-                ParseError::ranged(name_token.range, "invalid old-style aggregate option name")
+                ParseError::at_loc(name_token.loc, "invalid old-style aggregate option name")
             })?;
-            let arg = parse_operator_def_arg(&name, tokens[2..].to_vec(), item_location)?;
+            let arg = parse_operator_def_arg(&name, tokens[2..].to_vec(), item_offset)?;
             Ok(node!(DefElem {
                 defname: Some(name),
                 arg: Some(Box::new(arg)),
-                location: item_location as ParseLoc,
+                parse_loc: item_offset as ParseLoc,
                 ..DefElem::default()
             }))
         })
@@ -57,13 +57,13 @@ pub(super) fn parse_old_aggregate_definition(tokens: Vec<Token>) -> PResult<Node
 }
 
 pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     if tokens.len() == 1 && tokens[0].kind == TokenKind::Char('*') {
         return Ok(vec![name_list_node(Vec::new()), node!(Integer::new(-1))]);
     }
     if tokens.is_empty() {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "aggregate argument list cannot be empty",
         ));
     }
@@ -91,7 +91,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
     } else {
         if direct_tokens.last().has_kind(TokenKind::Char(',')) {
             return Err(ParseError::syntax_exit(
-                direct_tokens.last().location_or(location),
+                direct_tokens.last().offset_or(offset),
                 "aggregate argument list cannot end with ','",
             ));
         }
@@ -99,7 +99,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
     };
     if direct_chunks.iter().any(Vec::is_empty) {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "invalid aggregate argument list",
         ));
     }
@@ -115,14 +115,14 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
     if order_index.is_some() {
         if ordered_tokens.last().has_kind(TokenKind::Char(',')) {
             return Err(ParseError::syntax_exit(
-                ordered_tokens.last().location_or(location),
+                ordered_tokens.last().offset_or(offset),
                 "ordered aggregate argument list cannot end with ','",
             ));
         }
         let ordered_chunks = split_top_level_commas(ordered_tokens);
         if ordered_chunks.is_empty() || ordered_chunks.iter().any(Vec::is_empty) {
             return Err(ParseError::syntax_exit(
-                location,
+                offset,
                 "ORDER BY requires aggregate arguments",
             ));
         }
@@ -145,12 +145,12 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
                         .arg_type
                         .as_deref()
                         .zip(direct_variadic.arg_type.as_deref())
-                        .is_some_and(|(ordered, direct)| type_names_equal_ignoring_locations(ordered, direct)));
+                        .is_some_and(|(ordered, direct)| type_names_equal_ignoring_parse_locs(ordered, direct)));
             if !compatible {
                 return Err(ParseError::syntax_exit(
                     ordered
                         .first()
-                        .map_or(location, |parameter| parameter.location as usize),
+                        .map_or(offset, |parameter| parameter.parse_loc as usize),
                     "an ordered-set aggregate with a VARIADIC direct argument requires one matching VARIADIC ordered argument",
                 ));
             }
@@ -164,7 +164,7 @@ pub(super) fn parse_aggregate_args(tokens: Vec<Token>) -> PResult<NodeList> {
     ])
 }
 
-fn type_names_equal_ignoring_locations(left: &TypeName, right: &TypeName) -> bool {
+fn type_names_equal_ignoring_parse_locs(left: &TypeName, right: &TypeName) -> bool {
     left.names == right.names
         && left.type_oid == right.type_oid
         && left.setof == right.setof
@@ -185,7 +185,7 @@ fn type_names_equal_ignoring_locations(left: &TypeName, right: &TypeName) -> boo
 }
 
 fn parse_aggregate_parameter(tokens: Vec<Token>) -> PResult<FunctionParameter> {
-    let location = tokens.first().location_or(0);
+    let offset = tokens.first().offset_or(0);
     let parameter = function_parameter_from_tokens(tokens)?;
     if !matches!(
         parameter.mode,
@@ -194,13 +194,13 @@ fn parse_aggregate_parameter(tokens: Vec<Token>) -> PResult<FunctionParameter> {
             | FunctionParameterMode::Variadic
     ) {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "aggregates cannot have output arguments",
         ));
     }
     if parameter.defexpr.is_some() {
         return Err(ParseError::syntax_exit(
-            location,
+            offset,
             "aggregate arguments cannot have default values",
         ));
     }
