@@ -4,10 +4,10 @@
 //! semicolons. It deliberately avoids full token construction, literal
 //! decoding, numeric validation, and keyword-table lookup.
 
-use super::StatementRange;
 use crate::LexError;
 use crate::TextRange;
 use crate::TextSize;
+use crate::parser::StatementRange;
 
 /// Split SQL into statement ranges without parsing its grammar.
 ///
