@@ -33,19 +33,52 @@ fn splits_statement_ranges() {
             full: &["select 'a;''b', N'n;''value';", "select 2;"],
         },
         SplitCase {
-            name: "escape strings",
-            sql: r#"select E'quote:\'; slash:\\; newline:\n', e'hex:\x3b;'; select 2;"#,
+            name: "empty escape string and doubled quote",
+            sql: "select E'', E'one'';two'; select 2;",
+            syntax: &["select E'', E'one'';two'", "select 2"],
+            full: &["select E'', E'one'';two';", "select 2;"],
+        },
+        SplitCase {
+            name: "escape string with escaped quote",
+            sql: r#"select E'before \'; after'; select 2;"#,
+            syntax: &[r#"select E'before \'; after'"#, "select 2"],
+            full: &[r#"select E'before \'; after';"#, "select 2;"],
+        },
+        SplitCase {
+            name: "lowercase escape string with escaped backslash",
+            sql: r#"select e'before \\; after'; select 2;"#,
+            syntax: &[r#"select e'before \\; after'"#, "select 2"],
+            full: &[r#"select e'before \\; after';"#, "select 2;"],
+        },
+        SplitCase {
+            name: "escape string with C-style control escapes",
+            sql: r#"select E'\a\b\f\n\r\t\v;'; select 2;"#,
+            syntax: &[r#"select E'\a\b\f\n\r\t\v;'"#, "select 2"],
+            full: &[r#"select E'\a\b\f\n\r\t\v;';"#, "select 2;"],
+        },
+        SplitCase {
+            name: "escape string with numeric and Unicode escapes",
+            sql: r#"select E'\101\x41\u0041\U00000041;'; select 2;"#,
+            syntax: &[r#"select E'\101\x41\u0041\U00000041;'"#, "select 2"],
+            full: &[r#"select E'\101\x41\u0041\U00000041;';"#, "select 2;"],
+        },
+        SplitCase {
+            name: "escape string with escaped physical newline",
+            sql: r#"select E'first\
+second;third'; select 2;"#,
             syntax: &[
-                r#"select E'quote:\'; slash:\\; newline:\n', e'hex:\x3b;'"#,
+                r#"select E'first\
+second;third'"#,
                 "select 2",
             ],
             full: &[
-                r#"select E'quote:\'; slash:\\; newline:\n', e'hex:\x3b;';"#,
+                r#"select E'first\
+second;third';"#,
                 "select 2;",
             ],
         },
         SplitCase {
-            name: "continued strings",
+            name: "escape string continued across adjacent literals",
             sql: "select E'first'\n'\\';second', 'third' -- continuation\n';fourth'; select 2;",
             syntax: &[
                 "select E'first'\n'\\';second', 'third' -- continuation\n';fourth'",
@@ -188,10 +221,16 @@ fn reports_lexical_errors() {
             range_text: "'unterminated",
         },
         ErrorCase {
-            name: "unterminated escape string",
+            name: "unterminated escape string after dangling backslash",
             sql: "select E'unterminated\\",
             message: "unterminated quoted string",
             range_text: "E'unterminated\\",
+        },
+        ErrorCase {
+            name: "unterminated escape string after escaped quote",
+            sql: r#"select E'unterminated\'"#,
+            message: "unterminated quoted string",
+            range_text: r#"E'unterminated\'"#,
         },
         ErrorCase {
             name: "unterminated national string",
